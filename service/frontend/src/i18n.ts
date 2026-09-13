@@ -1,6 +1,6 @@
 // i18n translations for AI-Trader
 
-export type Language = 'zh' | 'en'
+export type Language = 'zh' | 'en' | 'he'
 
 export interface Translations {
   // Navigation
@@ -208,6 +208,103 @@ export const translations: Record<Language, Translations> = {
       operationFailed: '操作失败'
     }
   },
+  he: {
+    nav: {
+      signals: 'שוק המסחר',
+      strategies: 'אסטרטגיות',
+      discussions: 'דיונים',
+      positions: 'פוזיציות',
+      trade: 'מסחר',
+      exchange: 'המרה',
+      create: 'יצירה'
+    },
+    common: {
+      login: 'התחברות',
+      logout: 'התנתקות',
+      connected: 'מחובר',
+      balance: 'יתרה',
+      claw: 'CLAW',
+      points: 'נקודות',
+      loading: 'טוען...',
+      cancel: 'ביטול',
+      confirm: 'אישור',
+      submit: 'שליחה',
+      close: 'סגירה',
+      back: 'חזרה',
+      next: 'הבא',
+      refresh: 'רענון'
+    },
+    signals: {
+      operations: 'אותות מסחר',
+      noSignals: 'אין עדיין אותות',
+      publish: 'פרסום'
+    },
+    strategies: {
+      title: 'אסטרטגיות',
+      market: 'שוק',
+      noStrategies: 'אין עדיין אסטרטגיות',
+      publish: 'פרסום אסטרטגיה',
+      publishSuccess: 'האסטרטגיה פורסמה!',
+      submit: 'פרסום',
+      content: 'תוכן האסטרטגיה',
+      symbols: 'נכסים קשורים',
+      tags: 'תגיות'
+    },
+    discussions: {
+      title: 'דיונים',
+      market: 'שוק',
+      noDiscussions: 'אין עדיין דיונים',
+      post: 'פתיחת דיון',
+      postSuccess: 'הדיון פורסם!',
+      submit: 'פרסום',
+      content: 'תוכן הדיון',
+      tags: 'תגיות'
+    },
+    positions: {
+      title: 'הפוזיציות שלי',
+      noPositions: 'אין עדיין פוזיציות'
+    },
+    trade: {
+      title: 'הזנת הוראה',
+      market: 'שוק',
+      action: 'פעולה',
+      symbol: 'סימול',
+      price: 'מחיר',
+      quantity: 'כמות',
+      content: 'הערה',
+      executedAt: 'זמן ביצוע',
+      submit: 'שליחת הוראה',
+      success: 'ההוראה בוצעה בהצלחה!',
+      buy: 'קנייה',
+      sell: 'מכירה',
+      short: 'שורט',
+      cover: 'סגירת שורט'
+    },
+    exchange: {
+      title: 'המרת נקודות',
+      currentPoints: 'נקודות נוכחיות',
+      currentCash: 'מזומן נוכחי',
+      exchangeRate: 'שער: נקודה אחת = 1,000 דולר',
+      amount: 'מספר נקודות להמרה',
+      submit: 'המרה עכשיו',
+      success: 'ההמרה הצליחה!',
+      insufficientPoints: 'אין מספיק נקודות',
+      enterAmount: 'נא להזין מספר נקודות'
+    },
+    login: {
+      title: 'הרשמה / התחברות',
+      name: 'שם',
+      email: 'דוא״ל',
+      register: 'הרשמה',
+      registering: 'נרשם...',
+      success: 'ההתחברות הצליחה!',
+      failed: 'ההתחברות נכשלה'
+    },
+    errors: {
+      pleaseLogin: 'נא להתחבר תחילה',
+      operationFailed: 'הפעולה נכשלה'
+    }
+  },
   en: {
     nav: {
       signals: 'Marketplace',
@@ -327,5 +424,13 @@ export const categoryTranslations: Record<Language, Record<string, string>> = {
     'analysis': 'Analysis',
     'tool': 'Tool',
     'all': 'All Categories'
+  },
+  he: {
+    'trading-signal': 'אות מסחר',
+    'data-feed': 'מקור נתונים',
+    'model-access': 'גישה למודל',
+    'analysis': 'ניתוח',
+    'tool': 'כלי',
+    'all': 'כל הקטגוריות'
   }
 }

@@ -60,7 +60,10 @@ const EXPERIMENT_NOTIFICATION_TYPES = new Set([
 
 
 function App() {
-  const [language, setLanguage] = useState<Language>('zh')
+  const [language, setLanguage] = useState<Language>(() => {
+    const savedLanguage = localStorage.getItem('ai_trader_language')
+    return savedLanguage === 'he' ? 'he' : 'en'
+  })
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const savedTheme = localStorage.getItem('ai_trader_theme')
     return savedTheme === 'light' ? 'light' : 'dark'
@@ -91,6 +94,12 @@ function App() {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('ai_trader_theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    document.documentElement.lang = language === 'he' ? 'he' : 'en'
+    document.documentElement.dir = language === 'he' ? 'rtl' : 'ltr'
+    localStorage.setItem('ai_trader_language', language)
+  }, [language])
 
   const fetchAgentInfo = async () => {
     if (!token) return

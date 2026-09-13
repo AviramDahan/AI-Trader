@@ -340,6 +340,18 @@ a {
   max-width: calc(100% - 260px);
 }
 
+:root[dir='rtl'] .sidebar,
+:root[dir='rtl'] .main-content {
+  direction: rtl;
+  text-align: right;
+}
+
+:root[dir='rtl'] input,
+:root[dir='rtl'] textarea,
+:root[dir='rtl'] select {
+  text-align: right;
+}
+
 /* Header */
 .header {
   display: flex;

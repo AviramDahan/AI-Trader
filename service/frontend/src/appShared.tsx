@@ -116,10 +116,10 @@ function parseRecordedAt(recordedAt: string) {
 }
 
 export function formatIntelTimestamp(timestamp: string | null | undefined, language: Language) {
-  if (!timestamp) return language === 'zh' ? '暂无快照' : 'No snapshot yet'
+  if (!timestamp) return language === 'he' ? 'אין עדיין תמונת מצב' : language === 'zh' ? '暂无快照' : 'No snapshot yet'
   const parsed = parseRecordedAt(timestamp)
-  if (!parsed) return language === 'zh' ? '时间未知' : 'Unknown time'
-  const formatted = parsed.toLocaleString(language === 'zh' ? 'zh-CN' : 'en-US', {
+  if (!parsed) return language === 'he' ? 'זמן לא ידוע' : language === 'zh' ? '时间未知' : 'Unknown time'
+  const formatted = parsed.toLocaleString(language === 'he' ? 'he-IL' : language === 'zh' ? 'zh-CN' : 'en-US', {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -139,14 +139,14 @@ export function formatIntelNumber(value: number | null | undefined, digits = 2) 
 
 function formatLeaderboardLabel(date: Date, chartRange: LeaderboardChartRange, language: Language) {
   if (chartRange === '24h') {
-    return date.toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en-US', {
+    return date.toLocaleTimeString(language === 'he' ? 'he-IL' : language === 'zh' ? 'zh-CN' : 'en-US', {
       hour: '2-digit',
       minute: '2-digit',
       hour12: false
     })
   }
 
-  return date.toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-US', {
+  return date.toLocaleDateString(language === 'he' ? 'he-IL' : language === 'zh' ? 'zh-CN' : 'en-US', {
     month: 'short',
     day: 'numeric'
   })
