@@ -1287,14 +1287,14 @@ export function SignalsFeed({ token }: { token?: string | null }) {
   const totalPages = Math.max(1, Math.ceil(totalAgents / SIGNALS_FEED_PAGE_SIZE))
 
   // Convert action/side to display text (e.g., "long" -> "买入", "short" -> "做空")
-  const getActionLabel = (action: string | undefined | null, isZh: boolean) => {
+  const getActionLabel = (action: string | undefined | null) => {
     if (!action) return ''
     const actionLower = action.toLowerCase()
-    if (actionLower === 'buy') return isZh ? '买入' : 'Buy'
-    if (actionLower === 'sell') return isZh ? '卖出' : 'Sell'
-    if (actionLower === 'short') return isZh ? '做空' : 'Short'
-    if (actionLower === 'cover') return isZh ? '平空' : 'Cover'
-    if (actionLower === 'long') return isZh ? '做多' : 'Long'
+    if (actionLower === 'buy') return language === 'he' ? 'קנייה' : language === 'zh' ? '买入' : 'Buy'
+    if (actionLower === 'sell') return language === 'he' ? 'מכירה' : language === 'zh' ? '卖出' : 'Sell'
+    if (actionLower === 'short') return language === 'he' ? 'שורט' : language === 'zh' ? '做空' : 'Short'
+    if (actionLower === 'cover') return language === 'he' ? 'סגירת שורט' : language === 'zh' ? '平空' : 'Cover'
+    if (actionLower === 'long') return language === 'he' ? 'לונג' : language === 'zh' ? '做多' : 'Long'
     return action.toUpperCase()
   }
 
@@ -1303,7 +1303,7 @@ export function SignalsFeed({ token }: { token?: string | null }) {
     if (!timeStr) return null
     try {
       const date = new Date(timeStr)
-      return date.toLocaleString('zh-CN', {
+      return date.toLocaleString(language === 'he' ? 'he-IL' : language === 'zh' ? 'zh-CN' : 'en-US', {
         month: '2-digit',
         day: '2-digit',
         hour: '2-digit',
@@ -1319,17 +1319,19 @@ export function SignalsFeed({ token }: { token?: string | null }) {
       <div className="header">
         <div>
           <h1 className="header-title">{t.signals.operations}</h1>
-          <p className="header-subtitle">{language === 'zh' ? '浏览交易操作信号' : 'Browse trading operation signals'}</p>
+          <p className="header-subtitle">{language === 'he' ? 'צפייה באותות מסחר ובפעולות' : language === 'zh' ? '浏览交易操作信号' : 'Browse trading operation signals'}</p>
         </div>
       </div>
 
       {!token && (
         <div className="card" style={{ marginBottom: '20px', padding: '16px' }}>
           <div style={{ fontWeight: 600, marginBottom: '6px' }}>
-            {language === 'zh' ? '游客浏览已开启' : 'Guest Browsing Enabled'}
+            {language === 'he' ? 'צפייה כאורח פעילה' : language === 'zh' ? '游客浏览已开启' : 'Guest Browsing Enabled'}
           </div>
           <div style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: 1.6 }}>
-            {language === 'zh'
+            {language === 'he'
+              ? 'אפשר לצפות באותות שוק, בפוזיציות ובפרופילי סוחרים. יש להתחבר כדי לסחור, להעתיק סוחרים ולהשתתף.'
+              : language === 'zh'
               ? '你现在可以查看市场信号、持仓和交易员资料。登录后可下单、跟单并参与互动。'
               : 'You can now browse market signals, positions, and trader profiles. Login to trade, copy traders, and interact.'}
           </div>
@@ -1344,7 +1346,7 @@ export function SignalsFeed({ token }: { token?: string | null }) {
             onClick={() => m.supported && setMarket(m.value)}
             disabled={!m.supported}
           >
-            {language === 'zh' ? m.labelZh : m.label}
+            {language === 'he' ? m.labelHe : language === 'zh' ? m.labelZh : m.label}
           </button>
         ))}
       </div>
@@ -1355,7 +1357,7 @@ export function SignalsFeed({ token }: { token?: string | null }) {
         // Second level: Show signals from selected agent
         <div>
           <button className="back-button" onClick={handleBack}>
-            ← {language === 'zh' ? '返回' : 'Back'} | <AgentName name={selectedAgent.agent_name} verified={isVerifiedAgent(selectedAgent, 'agent')} />
+            ← {language === 'he' ? 'חזרה' : language === 'zh' ? '返回' : 'Back'} | <AgentName name={selectedAgent.agent_name} verified={isVerifiedAgent(selectedAgent, 'agent')} />
           </button>
 
           {/* Signal type tabs */}
@@ -1364,25 +1366,25 @@ export function SignalsFeed({ token }: { token?: string | null }) {
               className={`market-tab ${signalType === 'positions' ? 'active' : ''}`}
               onClick={() => setSignalType('positions')}
             >
-              {language === 'zh' ? '持仓' : 'Positions'}
+              {language === 'he' ? 'פוזיציות' : language === 'zh' ? '持仓' : 'Positions'}
             </button>
             <button
               className={`market-tab ${signalType === 'operation' ? 'active' : ''}`}
               onClick={() => setSignalType('operation')}
             >
-              {language === 'zh' ? '交易信号' : 'Trading Signals'}
+              {language === 'he' ? 'אותות מסחר' : language === 'zh' ? '交易信号' : 'Trading Signals'}
             </button>
             <button
               className={`market-tab ${signalType === 'strategy' ? 'active' : ''}`}
               onClick={() => setSignalType('strategy')}
             >
-              {language === 'zh' ? '策略' : 'Strategies'}
+              {language === 'he' ? 'אסטרטגיות' : language === 'zh' ? '策略' : 'Strategies'}
             </button>
             <button
               className={`market-tab ${signalType === 'discussion' ? 'active' : ''}`}
               onClick={() => setSignalType('discussion')}
             >
-              {language === 'zh' ? '讨论' : 'Discussions'}
+              {language === 'he' ? 'דיונים' : language === 'zh' ? '讨论' : 'Discussions'}
             </button>
           </div>
 
@@ -1396,7 +1398,7 @@ export function SignalsFeed({ token }: { token?: string | null }) {
                 {agentCash > 0 && (
                   <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '8px' }}>
                     <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      {language === 'zh' ? '可用现金' : 'Available Cash'}
+                      {language === 'he' ? 'מזומן זמין' : language === 'zh' ? '可用现金' : 'Available Cash'}
                     </div>
                     <div style={{ fontSize: '20px', fontWeight: 600, color: 'var(--accent-primary)' }}>
                       ${agentCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1406,7 +1408,7 @@ export function SignalsFeed({ token }: { token?: string | null }) {
                 {agentPositions.length === 0 ? (
                   <div className="empty-state">
                     <div className="empty-icon">📋</div>
-                    <div className="empty-title">{language === 'zh' ? '暂无持仓' : 'No positions'}</div>
+                    <div className="empty-title">{language === 'he' ? 'אין פוזיציות' : language === 'zh' ? '暂无持仓' : 'No positions'}</div>
                   </div>
                 ) : (
                   <div className="card">
@@ -1414,12 +1416,12 @@ export function SignalsFeed({ token }: { token?: string | null }) {
                       <table className="table">
                         <thead>
                           <tr>
-                            <th>{language === 'zh' ? '标的' : 'Symbol'}</th>
-                            <th>{language === 'zh' ? '方向' : 'Side'}</th>
-                            <th>{language === 'zh' ? '数量' : 'Qty'}</th>
-                            <th>{language === 'zh' ? '买入价' : 'Entry'}</th>
-                            <th>{language === 'zh' ? '当前价' : 'Current'}</th>
-                            <th>{language === 'zh' ? '盈亏' : 'PnL'}</th>
+                            <th>{language === 'he' ? 'סימול' : language === 'zh' ? '标的' : 'Symbol'}</th>
+                            <th>{language === 'he' ? 'כיוון' : language === 'zh' ? '方向' : 'Side'}</th>
+                            <th>{language === 'he' ? 'כמות' : language === 'zh' ? '数量' : 'Qty'}</th>
+                            <th>{language === 'he' ? 'כניסה' : language === 'zh' ? '买入价' : 'Entry'}</th>
+                            <th>{language === 'he' ? 'נוכחי' : language === 'zh' ? '当前价' : 'Current'}</th>
+                            <th>{language === 'he' ? 'רווח/הפסד' : language === 'zh' ? '盈亏' : 'PnL'}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1428,7 +1430,9 @@ export function SignalsFeed({ token }: { token?: string | null }) {
                               <td style={{ fontWeight: 600 }}>{getInstrumentLabel(pos)}</td>
                               <td>
                                 <span className={`tag ${pos.side === 'long' ? 'signal-side long' : 'signal-side short'}`}>
-                                  {pos.side === 'long' ? (language === 'zh' ? '做多' : 'Long') : (language === 'zh' ? '做空' : 'Short')}
+                                  {pos.side === 'long'
+                                    ? (language === 'he' ? 'לונג' : language === 'zh' ? '做多' : 'Long')
+                                    : (language === 'he' ? 'שורט' : language === 'zh' ? '做空' : 'Short')}
                                 </span>
                               </td>
                               <td>{Math.abs(pos.quantity)}</td>
@@ -1439,7 +1443,7 @@ export function SignalsFeed({ token }: { token?: string | null }) {
                               </td>
                               <td>
                                 <span className="tag" style={{ background: 'var(--bg-tertiary)' }}>
-                                  {language === 'zh' ? '交易信号' : 'Signal'}
+                                  {language === 'he' ? 'אות' : language === 'zh' ? '交易信号' : 'Signal'}
                                 </span>
                               </td>
                             </tr>
@@ -1468,15 +1472,15 @@ export function SignalsFeed({ token }: { token?: string | null }) {
                       <div className="signal-header">
                         <span className="signal-symbol">{getInstrumentLabel(signal)}</span>
                         <span className={`signal-side ${signal.action || signal.side}`}>
-                          {getActionLabel(signal.action || signal.side, language === 'zh')}
+                          {getActionLabel(signal.action || signal.side)}
                         </span>
                       </div>
                       <div className="signal-meta">
                         {signal.market === 'polymarket' && signal.outcome && (
                           <span className="signal-meta-item">🎯 {language === 'zh' ? 'Outcome' : 'Outcome'}: {signal.outcome}</span>
                         )}
-                        <span className="signal-meta-item">💰 {language === 'zh' ? '价格' : 'Price'}: ${(signal.price || signal.entry_price)?.toLocaleString()}</span>
-                        <span className="signal-meta-item">📦 {language === 'zh' ? '数量' : 'Qty'}: {signal.quantity}</span>
+                        <span className="signal-meta-item">💰 {language === 'he' ? 'מחיר' : language === 'zh' ? '价格' : 'Price'}: ${(signal.price || signal.entry_price)?.toLocaleString()}</span>
+                        <span className="signal-meta-item">📦 {language === 'he' ? 'כמות' : language === 'zh' ? '数量' : 'Qty'}: {signal.quantity}</span>
                         <span className="signal-meta-item">🏷️ {getMarketLabel(signal.market)}</span>
                         {/* Show executed time */}
                         {signal.executed_at && (
@@ -1543,11 +1547,11 @@ export function SignalsFeed({ token }: { token?: string | null }) {
                 </div>
                 <div className="agent-stats">
                   <div className="agent-stat">
-                    <span className="stat-label">{language === 'zh' ? '持仓数' : 'Positions'}</span>
+                    <span className="stat-label">{language === 'he' ? 'פוזיציות' : language === 'zh' ? '持仓数' : 'Positions'}</span>
                     <span className="stat-value">{agent.position_count || 0}</span>
                   </div>
                   <div className="agent-stat">
-                    <span className="stat-label">{language === 'zh' ? '持仓盈亏(浮动)' : 'Position PnL (Unrealized)'}</span>
+                    <span className="stat-label">{language === 'he' ? 'רווח/הפסד לא ממומש' : language === 'zh' ? '持仓盈亏(浮动)' : 'Position PnL (Unrealized)'}</span>
                     <span className={`stat-value ${(agent.position_pnl || 0) >= 0 ? 'positive' : 'negative'}`}>
                       {(agent.position_pnl || 0) >= 0 ? '+' : ''}{agent.position_pnl?.toFixed(2) || '0.00'}
                     </span>
@@ -1555,7 +1559,7 @@ export function SignalsFeed({ token }: { token?: string | null }) {
                 </div>
                 <div className="agent-meta">
                   <span className="agent-last-signal">
-                    {language === 'zh' ? '持仓: ' : 'Positions: '}
+                    {language === 'he' ? 'פוזיציות: ' : language === 'zh' ? '持仓: ' : 'Positions: '}
                     {(agent.positions || []).map((p: any) => getInstrumentLabel(p)).join(', ') || '-'}
                   </span>
                 </div>
@@ -1570,10 +1574,12 @@ export function SignalsFeed({ token }: { token?: string | null }) {
                 disabled={page <= 1}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
               >
-                {language === 'zh' ? '上一页' : 'Previous'}
+                {language === 'he' ? 'הקודם' : language === 'zh' ? '上一页' : 'Previous'}
               </button>
               <div style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
-                {language === 'zh'
+                {language === 'he'
+                  ? `עמוד ${page} מתוך ${totalPages}, סה״כ ${totalAgents} סוחרים`
+                  : language === 'zh'
                   ? `第 ${page} / ${totalPages} 页，共 ${totalAgents} 位交易员`
                   : `Page ${page} / ${totalPages}, ${totalAgents} traders total`}
               </div>
@@ -1582,7 +1588,7 @@ export function SignalsFeed({ token }: { token?: string | null }) {
                 disabled={page >= totalPages}
                 onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
               >
-                {language === 'zh' ? '下一页' : 'Next'}
+                {language === 'he' ? 'הבא' : language === 'zh' ? '下一页' : 'Next'}
               </button>
             </div>
           )}
@@ -2971,8 +2977,8 @@ export function TrendingSidebar() {
   }
 
   const getMarketLabel = (market: string) => {
-    if (market === 'us-stock') return language === 'zh' ? '美股' : 'US'
-    if (market === 'crypto') return language === 'zh' ? '加密' : 'Crypto'
+    if (market === 'us-stock') return language === 'he' ? 'ארה״ב' : language === 'zh' ? '美股' : 'US'
+    if (market === 'crypto') return language === 'he' ? 'קריפטו' : language === 'zh' ? '加密' : 'Crypto'
     return market
   }
 
@@ -2988,7 +2994,7 @@ export function TrendingSidebar() {
       <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            {language === 'zh' ? '在线交易员' : 'Online Traders'}
+            {language === 'he' ? 'סוחרים מקוונים' : language === 'zh' ? '在线交易员' : 'Online Traders'}
           </span>
           <span style={{ fontSize: '20px', fontWeight: 700, color: 'var(--accent-primary)' }}>
             {agentCount}
@@ -2998,12 +3004,12 @@ export function TrendingSidebar() {
 
       <div className="card" style={{ padding: '16px' }}>
         <h3 style={{ fontSize: '14px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          🔥 {language === 'zh' ? '热门标的' : 'Trending'}
+          🔥 {language === 'he' ? 'נכסים פופולריים' : language === 'zh' ? '热门标的' : 'Trending'}
         </h3>
 
         {trending.length === 0 ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>
-            {language === 'zh' ? '暂无数据' : 'No data'}
+            {language === 'he' ? 'אין נתונים' : language === 'zh' ? '暂无数据' : 'No data'}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
