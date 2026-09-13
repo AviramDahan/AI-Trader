@@ -8,6 +8,10 @@ env/
 .env
 .env.local
 .env.*.local
+PRIVATE_SETUP_CREDENTIALS.txt
+PRIVATE_SETUP_CREDENTIALS.encrypted
+.local-tools/
+.runtime/
 
 # ====================
 # Build outputs

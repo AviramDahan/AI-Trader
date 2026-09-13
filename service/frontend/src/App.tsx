@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 
 import {
   API_BASE,
+  API_ORIGIN,
   type AgentInfo,
   ExchangePage,
   FinancialEventsPage,
@@ -166,9 +167,10 @@ function App() {
 
   useEffect(() => {
     if (!agentInfo?.id) return
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const apiOrigin = new URL(API_ORIGIN)
+    const protocol = apiOrigin.protocol === 'https:' ? 'wss:' : 'ws:'
     if (!token) return
-    const wsUrl = `${protocol}//${window.location.host}/ws/notify/${agentInfo.id}?token=${encodeURIComponent(token)}`
+    const wsUrl = `${protocol}//${apiOrigin.host}/ws/notify/${agentInfo.id}?token=${encodeURIComponent(token)}`
     const ws = new WebSocket(wsUrl)
 
     ws.onmessage = (event) => {
@@ -197,7 +199,7 @@ function App() {
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
       <LanguageContext.Provider value={{ language, setLanguage, t }}>
-        <BrowserRouter>
+        <BrowserRouter basename={import.meta.env.BASE_URL}>
           <AppRouter
             token={token}
             agentInfo={agentInfo}
