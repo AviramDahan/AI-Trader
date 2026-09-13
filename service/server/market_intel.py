@@ -35,6 +35,9 @@ from database import get_db_connection
 ALPHA_VANTAGE_BASE_URL = os.getenv("ALPHA_VANTAGE_BASE_URL", "https://www.alphavantage.co/query").strip()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "").strip()
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip().rstrip("/")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "").strip()
+OLLAMA_TIMEOUT_SECONDS = max(5, int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120")))
 MARKET_NEWS_LOOKBACK_HOURS = int(os.getenv("MARKET_NEWS_LOOKBACK_HOURS", "48"))
 MARKET_NEWS_CATEGORY_LIMIT = int(os.getenv("MARKET_NEWS_CATEGORY_LIMIT", "12"))
 MARKET_NEWS_HISTORY_PER_CATEGORY = int(os.getenv("MARKET_NEWS_HISTORY_PER_CATEGORY", "96"))
@@ -582,9 +585,6 @@ def _build_stock_analysis_fallback_summary(analysis: dict[str, Any]) -> str:
 
 def _generate_stock_analysis_summary(analysis: dict[str, Any]) -> str:
     fallback_summary = _build_stock_analysis_fallback_summary(analysis)
-    if not OPENROUTER_API_KEY or not OPENROUTER_MODEL or OpenRouter is None:
-        return fallback_summary
-
     prompt = (
         "Write one concise market snapshot paragraph in English for a trading dashboard.\n"
         "Rules:\n"
@@ -607,16 +607,39 @@ def _generate_stock_analysis_summary(analysis: dict[str, Any]) -> str:
         f"Risk factors: {json.dumps(analysis.get('risk_factors') or [], ensure_ascii=True)}\n"
     )
 
-    try:
-        with OpenRouter(api_key=OPENROUTER_API_KEY) as client:
-            response = client.chat.send(
-                model=OPENROUTER_MODEL,
-                messages=[{"role": "user", "content": prompt}],
+    if OPENROUTER_API_KEY and OPENROUTER_MODEL and OpenRouter is not None:
+        try:
+            with OpenRouter(api_key=OPENROUTER_API_KEY) as client:
+                response = client.chat.send(
+                    model=OPENROUTER_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            content = _extract_openrouter_text(response)
+            if content:
+                return content[:500].strip()
+        except Exception:
+            pass
+
+    if OLLAMA_BASE_URL and OLLAMA_MODEL:
+        try:
+            response = requests.post(
+                f"{OLLAMA_BASE_URL}/api/chat",
+                json={
+                    "model": OLLAMA_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": False,
+                    "options": {"temperature": 0.2},
+                },
+                timeout=OLLAMA_TIMEOUT_SECONDS,
             )
-        content = _extract_openrouter_text(response)
-        return content[:500].strip() if content else fallback_summary
-    except Exception:
-        return fallback_summary
+            response.raise_for_status()
+            content = str((response.json().get("message") or {}).get("content") or "").strip()
+            if content:
+                return content[:500]
+        except (requests.RequestException, AttributeError, TypeError, ValueError):
+            pass
+
+    return fallback_summary
 
 
 def _dedupe_news_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

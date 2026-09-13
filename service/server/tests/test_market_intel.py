@@ -39,6 +39,51 @@ def _snapshot_payload(symbol: str = "HD") -> dict:
     }
 
 
+def _summary_analysis() -> dict:
+    return {
+        "symbol": "AAPL",
+        "signal": "hold",
+        "trend_status": "constructive",
+        "signal_score": 1.5,
+        "current_price": 210.0,
+        "return_5d_pct": 1.2,
+        "return_20d_pct": -0.4,
+        "moving_averages": {"sma_20": 208.0},
+        "support_levels": [205.0],
+        "resistance_levels": [215.0],
+        "bullish_factors": ["Price is above the 20-day average."],
+        "risk_factors": ["Resistance is nearby."],
+    }
+
+
+class MarketIntelAiSummaryTests(unittest.TestCase):
+    @patch("market_intel.OPENROUTER_API_KEY", "")
+    @patch("market_intel.OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    @patch("market_intel.OLLAMA_MODEL", "qwen-test")
+    @patch("market_intel.requests.post")
+    def test_ollama_generates_summary(self, mock_post) -> None:
+        mock_post.return_value.json.return_value = {
+            "message": {"content": "AAPL has trend support, while nearby resistance remains the main risk."}
+        }
+
+        summary = market_intel._generate_stock_analysis_summary(_summary_analysis())
+
+        self.assertIn("trend support", summary)
+        mock_post.assert_called_once()
+        self.assertEqual(mock_post.call_args.kwargs["json"]["model"], "qwen-test")
+
+    @patch("market_intel.OPENROUTER_API_KEY", "")
+    @patch("market_intel.OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    @patch("market_intel.OLLAMA_MODEL", "qwen-test")
+    @patch("market_intel.requests.post", side_effect=market_intel.requests.ConnectionError)
+    def test_ollama_failure_uses_existing_fallback(self, _mock_post) -> None:
+        analysis = _summary_analysis()
+
+        summary = market_intel._generate_stock_analysis_summary(analysis)
+
+        self.assertEqual(summary, market_intel._build_stock_analysis_fallback_summary(analysis))
+
+
 class MarketIntelLatestPayloadTests(unittest.TestCase):
     @patch("market_intel.set_json")
     @patch("market_intel.get_json", return_value=None)
