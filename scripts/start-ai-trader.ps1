@@ -44,22 +44,16 @@ if (-not $healthy) {
     throw "Backend did not become healthy. See $backendErr"
 }
 
-$cloudflaredExe = Join-Path $projectRoot '.local-tools\cloudflared.exe'
-if (-not (Test-Path $cloudflaredExe)) {
-    $cloudflaredCommand = Get-Command cloudflared.exe -ErrorAction SilentlyContinue
-    if (-not $cloudflaredCommand) {
-        throw 'cloudflared is missing. Install it with: winget install --id Cloudflare.cloudflared'
-    }
-    $cloudflaredExe = $cloudflaredCommand.Source
-}
-
-$tunnel = Start-Process -FilePath $cloudflaredExe `
+$sshExe = (Get-Command ssh.exe -ErrorAction Stop).Source
+$tunnel = Start-Process -FilePath $sshExe `
     -ArgumentList @(
-        'tunnel',
-        '--url', 'http://127.0.0.1:8000',
-        '--protocol', 'http2',
-        '--edge-ip-version', '4',
-        '--no-autoupdate'
+        '-T',
+        '-o', 'StrictHostKeyChecking=accept-new',
+        '-o', 'ServerAliveInterval=30',
+        '-o', 'ServerAliveCountMax=3',
+        '-o', 'ExitOnForwardFailure=yes',
+        '-R', '80:127.0.0.1:8000',
+        'serveo.net'
     ) `
     -WorkingDirectory $projectRoot `
     -RedirectStandardOutput $tunnelOut -RedirectStandardError $tunnelErr `
@@ -71,12 +65,12 @@ for ($attempt = 0; $attempt -lt 45; $attempt++) {
     $combinedLog = ''
     if (Test-Path $tunnelOut) { $combinedLog += Get-Content -Raw $tunnelOut }
     if (Test-Path $tunnelErr) { $combinedLog += Get-Content -Raw $tunnelErr }
-    $match = [regex]::Match($combinedLog, 'https://[a-z0-9-]+\.trycloudflare\.com')
+    $match = [regex]::Match($combinedLog, 'https://[a-z0-9-]+\.serveousercontent\.com')
     if ($match.Success) { $backendUrl = $match.Value; break }
     Start-Sleep -Seconds 1
 }
 if (-not $backendUrl) {
-    throw "The Cloudflare HTTPS tunnel did not produce a public URL. See $tunnelErr"
+    throw "The Serveo HTTPS tunnel did not produce a public URL. See $tunnelErr"
 }
 
 $publicHealthy = $false
