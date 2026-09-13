@@ -7,16 +7,12 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $runtimeDir = Join-Path $projectRoot '.runtime'
 $pythonExe = Join-Path $projectRoot '.venv\Scripts\python.exe'
-$cloudflaredExe = Join-Path $projectRoot '.local-tools\cloudflared.exe'
 $bootstrapScript = Join-Path $PSScriptRoot 'bootstrap_private_setup.py'
 
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
 
 if (-not (Test-Path $pythonExe)) {
     throw 'Python environment is missing. Run: python -m venv .venv; .\.venv\Scripts\python.exe -m pip install -r service\requirements.txt'
-}
-if (-not (Test-Path $cloudflaredExe)) {
-    throw 'cloudflared is missing from .local-tools\cloudflared.exe'
 }
 if (-not (Test-Path (Join-Path $projectRoot 'PRIVATE_SETUP_CREDENTIALS.txt'))) {
     & $pythonExe $bootstrapScript
@@ -48,8 +44,16 @@ if (-not $healthy) {
     throw "Backend did not become healthy. See $backendErr"
 }
 
-$tunnel = Start-Process -FilePath $cloudflaredExe `
-    -ArgumentList @('tunnel', '--url', 'http://127.0.0.1:8000') `
+$sshExe = (Get-Command ssh.exe -ErrorAction Stop).Source
+$tunnel = Start-Process -FilePath $sshExe `
+    -ArgumentList @(
+        '-T',
+        '-o', 'StrictHostKeyChecking=accept-new',
+        '-o', 'ServerAliveInterval=30',
+        '-o', 'ExitOnForwardFailure=yes',
+        '-R', '80:127.0.0.1:8000',
+        'nokey@localhost.run'
+    ) `
     -WorkingDirectory $projectRoot `
     -RedirectStandardOutput $tunnelOut -RedirectStandardError $tunnelErr `
     -WindowStyle Hidden -PassThru
@@ -60,12 +64,12 @@ for ($attempt = 0; $attempt -lt 45; $attempt++) {
     $combinedLog = ''
     if (Test-Path $tunnelOut) { $combinedLog += Get-Content -Raw $tunnelOut }
     if (Test-Path $tunnelErr) { $combinedLog += Get-Content -Raw $tunnelErr }
-    $match = [regex]::Match($combinedLog, 'https://[a-z0-9-]+\.trycloudflare\.com')
+    $match = [regex]::Match($combinedLog, 'https://[a-z0-9-]+\.lhr\.life')
     if ($match.Success) { $backendUrl = $match.Value; break }
     Start-Sleep -Seconds 1
 }
 if (-not $backendUrl) {
-    throw "Cloudflare Tunnel did not produce a public URL. See $tunnelErr"
+    throw "The localhost.run HTTPS tunnel did not produce a public URL. See $tunnelErr"
 }
 
 $publicHealthy = $false

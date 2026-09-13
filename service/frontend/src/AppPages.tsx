@@ -2977,7 +2977,7 @@ export function TrendingSidebar() {
   }
 
   return (
-    <div style={{
+    <div className="trending-sidebar" style={{
       width: '280px',
       flexShrink: 0,
       position: 'sticky',

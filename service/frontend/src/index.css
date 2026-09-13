@@ -3310,6 +3310,10 @@ a {
 
 /* Responsive */
 @media (max-width: 768px) {
+  .app-container {
+    flex-direction: column;
+  }
+
   .landing-shell,
   .auth-shell {
     padding: 16px;
@@ -3332,12 +3336,21 @@ a {
     width: 100%;
     position: relative;
     height: auto;
+    box-sizing: border-box;
   }
 
   .main-content {
+    width: 100%;
     margin-left: 0;
     max-width: 100%;
     padding: 16px;
+    box-sizing: border-box;
+    flex-direction: column;
+  }
+
+  .trending-sidebar {
+    width: 100% !important;
+    position: static !important;
   }
 
   .stats-grid {
