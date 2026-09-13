@@ -121,6 +121,7 @@ export function Sidebar({
   const location = useLocation()
   const { t, language } = useLanguage()
   const [showToken, setShowToken] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const canUseExperiments = hasPermission(agentInfo, 'experiment_admin')
   const canUseResearchExports = hasPermission(agentInfo, 'research_exports')
@@ -150,11 +151,26 @@ export function Sidebar({
     }
   }, [location.pathname, notificationCounts.discussion, notificationCounts.strategy, notificationCounts.experiment])
 
+  useEffect(() => {
+    setMobileMenuOpen(false)
+  }, [location.pathname])
+
   return (
-    <div className="sidebar">
-      <div className="logo">
-        <div className="logo-icon">CT</div>
-        <span className="logo-text">AI-Trader</span>
+    <div className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
+      <div className="sidebar-header">
+        <div className="logo">
+          <div className="logo-icon">CT</div>
+          <span className="logo-text">AI-Trader</span>
+        </div>
+        <button
+          type="button"
+          className="mobile-nav-toggle"
+          aria-expanded={mobileMenuOpen}
+          aria-label={language === 'he' ? 'פתיחת תפריט' : 'Open navigation'}
+          onClick={() => setMobileMenuOpen((current) => !current)}
+        >
+          {mobileMenuOpen ? '×' : '☰'}
+        </button>
       </div>
 
       <nav className="nav-section">
@@ -204,7 +220,7 @@ export function Sidebar({
         ))}
       </nav>
 
-      <div style={{ marginTop: 'auto' }}>
+      <div className="sidebar-account" style={{ marginTop: 'auto' }}>
         {token && agentInfo ? (
           <div style={{ padding: '16px', background: 'var(--bg-tertiary)', borderRadius: '12px' }}>
             <div className="user-info">
