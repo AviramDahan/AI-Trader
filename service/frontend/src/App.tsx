@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import {
   API_BASE,
   API_ORIGIN,
+  BackendStatusBanner,
   type AgentInfo,
   ExchangePage,
   FinancialEventsPage,
@@ -284,6 +285,8 @@ function AppRouter({
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
             <TopbarControls />
           </div>
+
+          <BackendStatusBanner />
 
           <Routes>
             <Route path="/market" element={<SignalsFeed token={token} />} />

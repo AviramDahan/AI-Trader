@@ -373,6 +373,27 @@ a {
   margin-top: 4px;
 }
 
+.backend-status-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--error) 55%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--error) 12%, var(--bg-secondary));
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .backend-status-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .header-actions {
   display: flex;
   align-items: center;

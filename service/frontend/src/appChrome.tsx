@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { Link, useLocation } from 'react-router-dom'
 
-import { AgentName, type AgentInfo, hasPermission, isVerifiedAgent, useLanguage, useTheme } from './appShared'
+import { API_ORIGIN, AgentName, type AgentInfo, hasPermission, isVerifiedAgent, useLanguage, useTheme } from './appShared'
 
 export function Toast({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) {
   useEffect(() => {
@@ -64,6 +64,43 @@ export function TopbarControls() {
     <div className="topbar-controls">
       <ThemeSwitcher />
       <LanguageSwitcher />
+    </div>
+  )
+}
+
+export function BackendStatusBanner() {
+  const { language } = useLanguage()
+  const [offline, setOffline] = useState(false)
+
+  const checkBackend = async () => {
+    try {
+      const response = await fetch(`${API_ORIGIN}/health`, { cache: 'no-store' })
+      setOffline(!response.ok)
+    } catch {
+      setOffline(true)
+    }
+  }
+
+  useEffect(() => {
+    void checkBackend()
+    const interval = window.setInterval(() => void checkBackend(), 30000)
+    return () => window.clearInterval(interval)
+  }, [])
+
+  if (!offline) return null
+
+  return (
+    <div className="backend-status-banner" role="alert">
+      <span>
+        {language === 'he'
+          ? 'אין כרגע חיבור לשרת הנתונים. המידע יחזור אוטומטית כשהחיבור יתחדש.'
+          : language === 'zh'
+            ? '当前无法连接数据服务器。连接恢复后数据会自动返回。'
+            : 'The data server is currently unavailable. Information will return automatically when the connection recovers.'}
+      </span>
+      <button type="button" className="btn btn-secondary" onClick={() => void checkBackend()}>
+        {language === 'he' ? 'בדיקה מחדש' : language === 'zh' ? '重试' : 'Retry'}
+      </button>
     </div>
   )
 }
