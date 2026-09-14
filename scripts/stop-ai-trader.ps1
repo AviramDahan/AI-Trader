@@ -16,8 +16,13 @@ foreach ($name in @('tunnel', 'backend')) {
     if (-not (Test-Path $pidFile)) { continue }
     $processId = [int](Get-Content -Raw $pidFile)
     $process = Get-CimInstance Win32_Process -Filter "ProcessId = $processId"
-    $expected = if ($name -eq 'backend') { '*uvicorn main:app*' } else { '*80:127.0.0.1:8000*serveo.net*' }
-    if ($process -and $process.CommandLine -like $expected) { Stop-Process -Id $processId -ErrorAction SilentlyContinue }
+    $owned = if ($name -eq 'backend') {
+        $process -and $process.CommandLine -like '*uvicorn main:app*'
+    } else {
+        $process -and (($process.CommandLine -like '*80:127.0.0.1:8000*serveo.net*') -or
+            ($process.CommandLine -like '*cloudflared*tunnel*--url*127.0.0.1:8000*'))
+    }
+    if ($owned) { Stop-Process -Id $processId -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $pidFile -ErrorAction SilentlyContinue
 }
 if (-not $Quiet) { Write-Output 'AI-Trader stopped. The watchdog respects this stop until scripts/start-ai-trader.ps1 is run manually.' }
