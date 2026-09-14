@@ -68,10 +68,11 @@ def main() -> None:
         require(session.get(f"{backend_url}/api/claw/agents/count", timeout=20), "agents")
         require(session.get(f"{backend_url}/api/signals/feed", timeout=20), "signals")
         require(session.get(f"{backend_url}/api/trending", timeout=20), "dashboard trending")
-        require(
-            session.get(f"{backend_url}/api/market-intel/overview", timeout=30),
-            "market data and dashboard overview",
-        )
+        overview = session.get(f"{backend_url}/api/market-intel/overview", timeout=30)
+        require(overview, "market-intel endpoint connectivity")
+        overview_available = overview.json().get("available", False)
+        if not overview_available:
+            print("GAP Financial Events: no market-intelligence snapshot is available")
         require(
             session.get(
                 f"{backend_url}/api/price",
@@ -92,6 +93,8 @@ def main() -> None:
 
         if not args.paper_trade:
             print("PASS read-only API verification; paper trade not requested")
+            if not overview_available:
+                raise RuntimeError("Incomplete E2E: Financial Events has no snapshot")
             return
 
         paper_trade = session.post(
@@ -116,6 +119,8 @@ def main() -> None:
             raise RuntimeError("Paper trade did not create a position")
         print("PASS end-to-end paper position persisted")
 
+    if not overview_available:
+        raise RuntimeError("Incomplete E2E: trading checks passed but Financial Events has no snapshot")
     print("End-to-end API verification completed successfully.")
 
 
