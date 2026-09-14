@@ -178,6 +178,41 @@ class StockScannerTests(unittest.TestCase):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}, clear=False):
             self.assertEqual(stock_scanner.send_telegram("test", cfg), "missing_credentials")
 
+    def test_telegram_new_signal_and_entry_alert_paths(self):
+        cfg = config() | {"telegram_enabled": True, "telegram_entry_alerts": True}
+        signal = {"ticker": "AAPL", "company": "Apple", "action": "BUY", "entry": 100,
+                  "take_profit": 106, "stop_loss": 97, "risk_reward": 2, "confidence": .9,
+                  "time_horizon": "1-4 weeks", "reason": "Aligned", "relevant_news": [],
+                  "timestamp": "2026-01-01T00:00:00Z"}
+        messages = []
+        with patch.object(stock_scanner, "send_telegram",
+                          side_effect=lambda message, _cfg: messages.append(message) or "sent"):
+            state = {}
+            stock_scanner._track_signal(state, signal, cfg)
+        self.assertEqual(state["tracked_signals"][0]["signal_alert"], "sent")
+        self.assertEqual(state["tracked_signals"][0]["entry_alert"], "sent")
+        self.assertIn("NEW STRONG SIGNAL", messages[0])
+        self.assertIn("ENTRY REACHED", messages[1])
+
+    def test_telegram_tp_and_sl_alert_paths(self):
+        base = {"ticker": "AAPL", "company": "Apple", "action": "BUY", "entry": 100,
+                "take_profit": 106, "stop_loss": 97, "risk_reward": 2, "confidence": .9,
+                "time_horizon": "1-4 weeks", "reason": "Aligned", "relevant_news": [],
+                "timestamp": "2026-01-01T00:00:00Z", "status": "OPEN"}
+        cfg = config() | {"telegram_enabled": True, "telegram_level_alerts": True}
+        for price, expected in ((106.5, "TP REACHED"), (96.5, "SL REACHED")):
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as directory:
+                messages = []
+                with patch.object(stock_scanner, "STATE_FILE", Path(directory) / "state.json"), \
+                     patch.object(stock_scanner, "settings", return_value=cfg), \
+                     patch.object(stock_scanner, "current_intraday_quote", return_value=(price, "2026-01-02T00:00:00Z")), \
+                     patch.object(stock_scanner, "send_telegram",
+                                  side_effect=lambda message, _cfg: messages.append(message) or "sent"):
+                    stock_scanner.save_state({"tracked_signals": [dict(base)], "events": []})
+                    result = stock_scanner.monitor_tracked_signals()
+                self.assertEqual(result["hits"][0]["level"], expected[:2])
+                self.assertIn(expected, messages[0])
+
     def test_tp_sl_monitor_records_win_without_submitting_order(self):
         with tempfile.TemporaryDirectory() as directory:
             state_file = Path(directory) / "state.json"
