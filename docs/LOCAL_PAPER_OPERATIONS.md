@@ -95,9 +95,12 @@ the public runtime endpoint or bundled into GitHub Pages. Only public `BACKEND_U
 ```
 
 The per-user `AI-Trader-Paper` Windows task starts at login and checks once per minute. An explicit stop marker
-is respected until manual start clears it. The local supervisor recovers the backend, Ollama, and anonymous
-Serveo HTTPS tunnel; a rotating public endpoint triggers a Pages manifest deployment. The computer must stay
-awake, logged in, and online. GitHub Pages remains visible during a backend outage but live data cannot.
+is respected until manual start clears it. The local supervisor recovers the backend, Ollama, and HTTPS
+tunnel. It prefers the locally installed Cloudflare Quick Tunnel connector and retains anonymous Serveo as a
+fallback. When the public endpoint rotates, the supervisor redeploys the Pages runtime manifest and keeps
+retrying until the live Pages manifest confirms the new URL. The browser checks that manifest in the
+background, tolerates one transient health-check failure, and switches endpoints automatically. The computer
+must stay awake, logged in, and online. GitHub Pages remains visible during a backend outage but live data cannot.
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip check
@@ -115,7 +118,7 @@ runs `stock_scanner.run_scan()` against the real constituent/data/news/Ollama pr
 published signals when filters or closed-market freshness rules reject every candidate. Never weaken filters
 or inject a fake signal merely to make the UI non-empty.
 
-Known limits: Yahoo Finance and anonymous Serveo are free, unofficial/no-SLA services; universe scraping can
+Known limits: Yahoo Finance and anonymous Cloudflare Quick Tunnels/Serveo are free, no-SLA services; universe scraping can
 change; headlines are not full-text articles; AI confidence is not calibrated; daily adjusted data does not
 capture all intraday regime changes; US holiday detection relies on availability of a fresh intraday quote;
 the headline sentiment used for pre-ranking is a lightweight deterministic lexicon; a five-minute monitor can

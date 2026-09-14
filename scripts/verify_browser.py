@@ -49,6 +49,22 @@ def main():
                 expect(page.locator("html")).to_have_attribute("lang", lang)
                 expect(page.locator("html")).to_have_attribute("dir", direction)
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "horizontal overflow"
+            page.get_by_role("button", name="עברית", exact=True).click()
+            page.goto(SITE + "/discussions", wait_until="networkidle")
+            for text in ("דיון חופשי בנושאים פיננסיים", "החדשים ביותר", "הפעילים ביותר", "במעקב"):
+                expect(page.get_by_text(text, exact=True)).to_be_visible()
+            for untranslated in ("Free discussion on financial topics", "Newest", "Most Active", "Following"):
+                assert page.get_by_text(untranslated, exact=True).count() == 0
+            assert page.evaluate("document.documentElement.dir === 'rtl'")
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Hebrew discussions overflow"
+            assert page.evaluate("""[...document.querySelectorAll('button')].filter(button => {
+                const style = getComputedStyle(button); return style.display !== 'none' && style.visibility !== 'hidden'
+              }).every(button => { const box = button.getBoundingClientRect(); return box.left >= -1 && box.right <= innerWidth + 1 })"""), "button overflow"
+            page.get_by_role("button", name="EN", exact=True).click()
+            expect(page.get_by_text("Free discussion on financial topics", exact=True)).to_be_visible()
+            expect(page.get_by_text("Newest", exact=True)).to_be_visible()
+            assert page.evaluate("document.documentElement.dir === 'ltr'")
+            assert page.locator(".backend-status-banner").count() == 0
             if width == 390:
                 toggle = page.locator(".mobile-nav-toggle")
                 toggle.click()
@@ -56,8 +72,8 @@ def main():
                 toggle.click()
                 expect(toggle).to_have_attribute("aria-expanded", "false")
             assert not failures, f"Failed requests: {failures}"
-            page.screenshot(path=str(ROOT / ".runtime" / f"qa-market-{width}.png"), full_page=True)
-            print(f"PASS browser {width}px: visible agent, data, HTTPS/CORS, languages, layout")
+            page.screenshot(path=str(ROOT / ".runtime" / f"qa-discussions-{width}.png"), full_page=True)
+            print(f"PASS browser {width}px: public data, Hebrew/English discussions, RTL/LTR, menu and no overflow")
             context.close()
         browser.close()
 

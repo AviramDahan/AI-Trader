@@ -14,21 +14,40 @@ def main():
     with sync_playwright() as p:
         candidates = sorted((Path(os.environ['LOCALAPPDATA']) / 'ms-playwright').glob('chromium-*/chrome-win64/chrome.exe'))
         browser = p.chromium.launch(executable_path=str(candidates[-1]) if candidates else None)
-        page = browser.new_page(viewport={'width': 390, 'height': 844})
+        context = browser.new_context(viewport={'width': 390, 'height': 844})
+        context.add_init_script("localStorage.setItem('ai_trader_language', 'he')")
+        page = context.new_page()
         calls = []
         def manifest(route):
             calls.append(1)
-            # Initial discover + initial status check are offline; next poll recovers.
-            route.fulfill(json={'backend_url': OLD if len(calls) <= 2 else current})
+            # Initial discover + two health cycles stay stale, then the manifest rotates.
+            route.fulfill(json={'backend_url': OLD if len(calls) <= 3 else current})
         page.route('**/runtime-config.json?*', manifest)
         page.route(OLD + '/**', lambda route: route.abort('connectionfailed'))
         page.goto('https://aviramdahan.github.io/AI-Trader/market', wait_until='domcontentloaded')
-        expect(page.locator('.backend-status-banner')).to_be_visible(timeout=15000)
-        expect(page.get_by_text('ai-trader-admin', exact=True)).to_be_visible(timeout=70000)
+        expect(page.locator('.backend-status-banner')).to_be_visible(timeout=25000)
+        expect(page.get_by_role('button', name='בדיקה מחדש', exact=True)).to_be_visible()
+        expect(page.get_by_text('ai-trader-admin', exact=True)).to_be_visible(timeout=45000)
         expect(page.locator('.backend-status-banner')).to_have_count(0)
         expect(page.get_by_test_id('paper-activity')).to_be_visible()
-        assert len(calls) >= 3
-        print('PASS mobile browser recovered from an offline endpoint using the new manifest without manual refresh')
+        assert len(calls) >= 4
+
+        # A temporary health failure on the current URL must recover without a page reload.
+        health_offline = {'value': False}
+        def health(route):
+            if health_offline['value']:
+                route.abort('connectionfailed')
+            else:
+                route.continue_()
+        page.route(current + '/health', health)
+        health_offline['value'] = True
+        expect(page.locator('.backend-status-banner')).to_be_visible(timeout=25000)
+        health_offline['value'] = False
+        page.get_by_role('button', name='בדיקה מחדש', exact=True).click()
+        expect(page.locator('.backend-status-banner')).to_have_count(0, timeout=10000)
+        assert page.evaluate("Number(localStorage.getItem('ai_trader_backend_last_success')) > 0")
+        print('PASS mobile browser handled offline, Retry, recovery and tunnel URL rotation without manual reload')
+        context.close()
         browser.close()
 
 

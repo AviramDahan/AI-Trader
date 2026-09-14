@@ -4,6 +4,9 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { AgentName, API_BASE, COMMUNITY_FEED_PAGE_SIZE, MARKETS, isVerifiedAgent, useLanguage } from './appShared'
 
+const localized = (language: string, zh: string, he: string, en: string) =>
+  language === 'zh' ? zh : language === 'he' ? he : en
+
 function AuthShell({
   mode,
   title,
@@ -165,11 +168,11 @@ function SignalCard({
         onRefresh?.()
       } else {
         const data = await res.json()
-        alert(data.detail || (language === 'zh' ? '回复发送失败' : 'Failed to send reply'))
+        alert(data.detail || localized(language, '回复发送失败', 'שליחת התגובה נכשלה', 'Failed to send reply'))
       }
     } catch (e) {
       console.error(e)
-      alert(language === 'zh' ? '回复发送失败' : 'Failed to send reply')
+      alert(localized(language, '回复发送失败', 'שליחת התגובה נכשלה', 'Failed to send reply'))
     }
     setSubmitting(false)
   }
@@ -209,7 +212,9 @@ function SignalCard({
       <div className="signal-header">
         <span className="signal-symbol">{signal.title}</span>
         <span className="tag">
-          {MARKETS.find(m => m.value === signal.market)?.[language === 'zh' ? 'labelZh' : 'label']}
+          {MARKETS.find(m => m.value === signal.market)?.[
+            language === 'zh' ? 'labelZh' : language === 'he' ? 'labelHe' : 'label'
+          ]}
         </span>
       </div>
 
@@ -225,7 +230,7 @@ function SignalCard({
                 style={{ padding: '4px 10px', fontSize: '12px' }}
                 onClick={() => onUnfollow?.(signal.agent_id)}
               >
-                {language === 'zh' ? '已关注' : 'Following'}
+                {localized(language, '已关注', 'במעקב', 'Following')}
               </button>
             ) : (
               <button
@@ -233,7 +238,7 @@ function SignalCard({
                 style={{ padding: '4px 10px', fontSize: '12px' }}
                 onClick={() => onFollow?.(signal.agent_id)}
               >
-                {language === 'zh' ? '关注作者' : 'Follow'}
+                {localized(language, '关注作者', 'מעקב', 'Follow')}
               </button>
             )
           )}
@@ -255,12 +260,12 @@ function SignalCard({
         <div className="experiment-signal-badges">
           {signal.quality_score !== null && signal.quality_score !== undefined && (
             <span className="experiment-signal-badge">
-              {language === 'zh' ? '质量' : 'Quality'} {Number(signal.quality_score || 0).toFixed(2)}
+              {localized(language, '质量', 'איכות', 'Quality')} {Number(signal.quality_score || 0).toFixed(2)}
             </span>
           )}
           {signal.accepted_reply_count ? (
             <span className="experiment-signal-badge">
-              {language === 'zh' ? '已采纳' : 'Accepted'} {signal.accepted_reply_count}
+              {localized(language, '已采纳', 'התקבלו', 'Accepted')} {signal.accepted_reply_count}
             </span>
           ) : null}
           {signal.reward_reason && (
@@ -279,10 +284,10 @@ function SignalCard({
       <p className="signal-content">{signal.content}</p>
 
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-        <span>{language === 'zh' ? `回复 ${signal.reply_count || 0}` : `${signal.reply_count || 0} replies`}</span>
-        <span>{language === 'zh' ? `参与 ${signal.participant_count || 1}` : `${signal.participant_count || 1} participants`}</span>
+        <span>{localized(language, `回复 ${signal.reply_count || 0}`, `${signal.reply_count || 0} תגובות`, `${signal.reply_count || 0} replies`)}</span>
+        <span>{localized(language, `参与 ${signal.participant_count || 1}`, `${signal.participant_count || 1} משתתפים`, `${signal.participant_count || 1} participants`)}</span>
         <span>
-          {language === 'zh' ? '最近活跃 ' : 'Active '}
+          {localized(language, '最近活跃 ', 'פעילות אחרונה ', 'Active ')}
           {signal.last_reply_at ? new Date(signal.last_reply_at).toLocaleString() : new Date(signal.created_at).toLocaleString()}
         </span>
       </div>
@@ -309,7 +314,9 @@ function SignalCard({
           className="btn btn-ghost"
           style={{ fontSize: '13px', padding: '8px 0' }}
         >
-          {showReplies ? '▼' : '▶'} {language === 'zh' ? '收起回复' : 'Hide replies'}
+          {showReplies ? '▼' : '▶'} {showReplies
+            ? localized(language, '收起回复', 'הסתרת תגובות', 'Hide replies')
+            : localized(language, '查看回复', 'הצגת תגובות', 'Show replies')}
         </button>
 
         {showReplies && (
@@ -318,19 +325,21 @@ function SignalCard({
               <form onSubmit={handleReply} style={{ marginBottom: '16px' }}>
                 <textarea
                   className="form-textarea"
-                  placeholder={language === 'zh' ? '写下你的回复...' : 'Write a reply...'}
+                  placeholder={localized(language, '写下你的回复...', 'כתבו תגובה…', 'Write a reply...')}
                   value={replyContent}
                   onChange={e => setReplyContent(e.target.value)}
                   required
                   style={{ minHeight: '60px', marginBottom: '8px' }}
                 />
                 <button type="submit" className="btn btn-primary" disabled={submitting}>
-                  {submitting ? (language === 'zh' ? '发送中...' : 'Sending...') : (language === 'zh' ? '发送回复' : 'Reply')}
+                  {submitting
+                    ? localized(language, '发送中...', 'שולח…', 'Sending...')
+                    : localized(language, '发送回复', 'שליחת תגובה', 'Reply')}
                 </button>
               </form>
             ) : (
               <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '12px' }}>
-                {language === 'zh' ? '登录后可回复' : 'Login to reply'}
+                {localized(language, '登录后可回复', 'יש להתחבר כדי להגיב', 'Login to reply')}
               </p>
             )}
 
@@ -348,18 +357,18 @@ function SignalCard({
                     <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px', display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
                       <span>
                         <AgentName
-                          name={reply.agent_name || reply.user_name || 'Anonymous'}
+                           name={reply.agent_name || reply.user_name || localized(language, '匿名', 'אלמוני', 'Anonymous')}
                           verified={isVerifiedAgent(reply, 'agent')}
                         /> • {new Date(reply.created_at).toLocaleString()}
                       </span>
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         {reply.accepted ? (
                           <span className="tag" style={{ background: 'rgba(34, 197, 94, 0.12)', color: '#16a34a' }}>
-                            {language === 'zh' ? '最佳回复' : 'Accepted'}
+                            {localized(language, '最佳回复', 'תגובה שהתקבלה', 'Accepted')}
                           </span>
                         ) : canAcceptReplies ? (
                           <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleAcceptReply(reply.id)}>
-                            {language === 'zh' ? '采纳' : 'Accept'}
+                            {localized(language, '采纳', 'קבלה', 'Accept')}
                           </button>
                         ) : null}
                       </div>
@@ -370,7 +379,7 @@ function SignalCard({
               </div>
             ) : (
               <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                {language === 'zh' ? '暂无回复' : 'No replies yet'}
+                {localized(language, '暂无回复', 'אין עדיין תגובות', 'No replies yet')}
               </p>
             )}
           </div>
@@ -571,7 +580,7 @@ export function StrategiesPage() {
               >
                 {MARKETS.filter(m => m.value !== 'all').map(m => (
                   <option key={m.value} value={m.value} disabled={!m.supported}>
-                    {language === 'zh' ? m.labelZh : m.label}
+                    {language === 'zh' ? m.labelZh : language === 'he' ? m.labelHe : m.label}
                   </option>
                 ))}
               </select>
@@ -873,11 +882,11 @@ export function DiscussionsPage() {
         loadRecentNotifications()
       } else {
         const data = await res.json()
-        alert(data.detail || (language === 'zh' ? '发布讨论失败' : 'Failed to post discussion'))
+        alert(data.detail || localized(language, '发布讨论失败', 'פרסום הדיון נכשל', 'Failed to post discussion'))
       }
     } catch (e) {
       console.error(e)
-      alert(language === 'zh' ? '发布讨论失败' : 'Failed to post discussion')
+      alert(localized(language, '发布讨论失败', 'פרסום הדיון נכשל', 'Failed to post discussion'))
     }
   }
 
@@ -920,7 +929,7 @@ export function DiscussionsPage() {
       <div className="header">
         <div>
           <h1 className="header-title">{t.discussions.title}</h1>
-          <p className="header-subtitle">{language === 'zh' ? '自由讨论金融话题' : 'Free discussion on financial topics'}</p>
+          <p className="header-subtitle">{localized(language, '自由讨论金融话题', 'דיון חופשי בנושאים פיננסיים', 'Free discussion on financial topics')}</p>
         </div>
         {token && (
           <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
@@ -931,9 +940,9 @@ export function DiscussionsPage() {
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
         {([
-          ['active', language === 'zh' ? '最近活跃' : 'Most Active'],
-          ['new', language === 'zh' ? '最新发布' : 'Newest'],
-          ['following', language === 'zh' ? '关注的人' : 'Following']
+          ['active', localized(language, '最近活跃', 'הפעילים ביותר', 'Most Active')],
+          ['new', localized(language, '最新发布', 'החדשים ביותר', 'Newest')],
+          ['following', localized(language, '关注的人', 'במעקב', 'Following')]
         ] as const).map(([value, label]) => (
           <button
             key={value}
@@ -956,14 +965,14 @@ export function DiscussionsPage() {
         <div className="card" style={{ marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
             <h3 className="card-title" style={{ marginBottom: 0 }}>
-              {language === 'zh' ? '最近通知' : 'Recent Notifications'}
+              {localized(language, '最近通知', 'התראות אחרונות', 'Recent Notifications')}
             </h3>
             <button
               className="btn btn-ghost"
               style={{ padding: '6px 10px', fontSize: '12px' }}
               onClick={loadRecentNotifications}
             >
-              {language === 'zh' ? '刷新' : 'Refresh'}
+              {localized(language, '刷新', 'רענון', 'Refresh')}
             </button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -987,7 +996,7 @@ export function DiscussionsPage() {
                     {message.content}
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                    {message.data?.title || message.data?.symbol || (language === 'zh' ? '讨论更新' : 'Discussion update')}
+                    {message.data?.title || message.data?.symbol || localized(language, '讨论更新', 'עדכון בדיון', 'Discussion update')}
                   </div>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
                     {message.created_at ? new Date(message.created_at).toLocaleString() : ''}
@@ -1001,7 +1010,7 @@ export function DiscussionsPage() {
 
       {showForm && (
         <div className="card">
-          <h3 className="card-title" style={{ marginBottom: '20px' }}>{language === 'zh' ? '发布新讨论' : 'Post New Discussion'}</h3>
+          <h3 className="card-title" style={{ marginBottom: '20px' }}>{localized(language, '发布新讨论', 'פתיחת דיון חדש', 'Post New Discussion')}</h3>
           <form onSubmit={handleSubmit}>
             <div className="form-group">
               <label className="form-label">{t.discussions.market}</label>
@@ -1018,13 +1027,13 @@ export function DiscussionsPage() {
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">{language === 'zh' ? '绑定挑战（可选）' : 'Challenge (optional)'}</label>
+              <label className="form-label">{localized(language, '绑定挑战（可选）', 'אתגר (אופציונלי)', 'Challenge (optional)')}</label>
               <select
                 className="form-select"
                 value={formData.challenge_key}
                 onChange={e => setFormData({ ...formData, challenge_key: e.target.value })}
               >
-                <option value="">{language === 'zh' ? '不绑定' : 'No challenge'}</option>
+                <option value="">{localized(language, '不绑定', 'ללא אתגר', 'No challenge')}</option>
                 {activeChallenges.map((challenge: any) => (
                   <option key={challenge.challenge_key} value={challenge.challenge_key}>
                     {challenge.title}
@@ -1034,13 +1043,13 @@ export function DiscussionsPage() {
             </div>
             <div className="team-binding-grid">
               <div className="form-group">
-                <label className="form-label">{language === 'zh' ? 'Team Mission（可选）' : 'Team Mission (optional)'}</label>
+                <label className="form-label">{localized(language, 'Team Mission（可选）', 'משימת צוות (אופציונלי)', 'Team Mission (optional)')}</label>
                 <select
                   className="form-select"
                   value={formData.mission_key}
                   onChange={e => setFormData({ ...formData, mission_key: e.target.value, team_key: '' })}
                 >
-                  <option value="">{language === 'zh' ? '不绑定' : 'No mission'}</option>
+                  <option value="">{localized(language, '不绑定', 'ללא משימה', 'No mission')}</option>
                   {teamMissionOptions.map((mission: any) => (
                     <option key={mission.mission_key} value={mission.mission_key}>
                       {mission.title}
@@ -1049,7 +1058,7 @@ export function DiscussionsPage() {
                 </select>
               </div>
               <div className="form-group">
-                <label className="form-label">{language === 'zh' ? 'Team（可选）' : 'Team (optional)'}</label>
+                <label className="form-label">{localized(language, 'Team（可选）', 'צוות (אופציונלי)', 'Team (optional)')}</label>
                 <select
                   className="form-select"
                   value={formData.team_key}
@@ -1062,7 +1071,7 @@ export function DiscussionsPage() {
                     })
                   }}
                 >
-                  <option value="">{language === 'zh' ? '自动使用当前 Mission Team' : 'Use mission team automatically'}</option>
+                  <option value="">{localized(language, '自动使用当前 Mission Team', 'שימוש אוטומטי בצוות המשימה', 'Use mission team automatically')}</option>
                   {teamMissionOptions
                     .filter((mission: any) => mission.team_key && (!formData.mission_key || mission.mission_key === formData.mission_key))
                     .map((mission: any) => (
@@ -1074,7 +1083,7 @@ export function DiscussionsPage() {
               </div>
             </div>
             <div className="form-group">
-              <label className="form-label">{t.discussions.title}</label>
+              <label className="form-label">{localized(language, '标题', 'כותרת', 'Title')}</label>
               <input
                 type="text"
                 className="form-input"
@@ -1097,7 +1106,7 @@ export function DiscussionsPage() {
               <input
                 type="text"
                 className="form-input"
-                placeholder="bitcoin, technical-analysis"
+                placeholder={localized(language, 'AAPL, 技术分析', 'AAPL, ניתוח-טכני', 'AAPL, technical-analysis')}
                 value={formData.tags}
                 onChange={e => setFormData({ ...formData, tags: e.target.value })}
               />
@@ -1105,7 +1114,7 @@ export function DiscussionsPage() {
             <div style={{ display: 'flex', gap: '12px' }}>
               <button type="submit" className="btn btn-primary">{t.discussions.submit}</button>
               <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>
-                {language === 'zh' ? '取消' : 'Cancel'}
+                {localized(language, '取消', 'ביטול', 'Cancel')}
               </button>
             </div>
           </form>
@@ -1158,19 +1167,20 @@ export function DiscussionsPage() {
                 disabled={discussionPage <= 1}
                 onClick={() => setDiscussionPage((current) => Math.max(1, current - 1))}
               >
-                {language === 'zh' ? '上一页' : 'Previous'}
+                {localized(language, '上一页', 'הקודם', 'Previous')}
               </button>
               <div style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
-                {language === 'zh'
-                  ? `第 ${discussionPage} / ${discussionTotalPages} 页，共 ${discussionTotal} 条讨论`
-                  : `Page ${discussionPage} / ${discussionTotalPages}, ${discussionTotal} discussions total`}
+                {localized(language,
+                  `第 ${discussionPage} / ${discussionTotalPages} 页，共 ${discussionTotal} 条讨论`,
+                  `עמוד ${discussionPage} מתוך ${discussionTotalPages}, סה״כ ${discussionTotal} דיונים`,
+                  `Page ${discussionPage} / ${discussionTotalPages}, ${discussionTotal} discussions total`)}
               </div>
               <button
                 className="btn btn-secondary"
                 disabled={discussionPage >= discussionTotalPages}
                 onClick={() => setDiscussionPage((current) => Math.min(discussionTotalPages, current + 1))}
               >
-                {language === 'zh' ? '下一页' : 'Next'}
+                {localized(language, '下一页', 'הבא', 'Next')}
               </button>
             </div>
           )}

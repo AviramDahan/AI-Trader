@@ -76,6 +76,7 @@ body {
   color: var(--text-primary);
   line-height: 1.6;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 .agent-name-with-badge {
@@ -406,10 +407,25 @@ a {
   font-size: 14px;
 }
 
+.backend-status-banner > div {
+  min-width: 0;
+}
+
+.backend-last-success {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-secondary);
+}
+
 @media (max-width: 640px) {
   .backend-status-banner {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .backend-status-banner .btn {
+    justify-content: center;
+    width: 100%;
   }
 }
 
@@ -3428,6 +3444,38 @@ a {
     padding: 16px;
     box-sizing: border-box;
     flex-direction: column;
+  }
+
+  .header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+
+  .header > div {
+    min-width: 0;
+  }
+
+  .header-title,
+  .header-subtitle,
+  .signal-symbol,
+  .signal-content {
+    overflow-wrap: anywhere;
+  }
+
+  .header-title {
+    font-size: 26px;
+  }
+
+  .signal-card {
+    min-width: 0;
+    padding: 16px;
+  }
+
+  .signal-header {
+    gap: 10px;
+    flex-wrap: wrap;
   }
 
   .trending-sidebar {

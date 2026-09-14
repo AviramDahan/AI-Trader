@@ -11,7 +11,8 @@ export async function discoverBackend(): Promise<boolean> {
     if (!response.ok) return false
     const value = await response.json()
     const url = new URL(value.backend_url)
-    if (url.protocol !== 'https:' || !/^[a-z0-9-]+\.serveousercontent\.com$/.test(url.hostname)
+    const allowedTunnel = /^(?:[a-z0-9-]+\.trycloudflare\.com|[a-z0-9-]+\.serveousercontent\.com)$/
+    if (url.protocol !== 'https:' || !allowedTunnel.test(url.hostname)
       || url.username || url.password || url.pathname !== '/') return false
     const changed = !!backendOrigin && url.origin !== backendOrigin
     backendOrigin = url.origin

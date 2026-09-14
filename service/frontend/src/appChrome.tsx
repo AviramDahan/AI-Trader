@@ -72,44 +72,83 @@ export function TopbarControls() {
 export function BackendStatusBanner() {
   const { language } = useLanguage()
   const [offline, setOffline] = useState(false)
-  const previouslyOffline = useRef(false)
+  const [checking, setChecking] = useState(false)
+  const [lastSuccessfulAt, setLastSuccessfulAt] = useState<number | null>(() => {
+    const value = Number(localStorage.getItem('ai_trader_backend_last_success') || 0)
+    return value > 0 ? value : null
+  })
+  const consecutiveFailures = useRef(0)
+  const confirmedOffline = useRef(false)
+  const requestInFlight = useRef(false)
 
   const checkBackend = async () => {
-    await discoverBackend()
-    if (runtimeOrigin() && runtimeOrigin() !== API_ORIGIN) {
-      window.location.reload()
-      return
-    }
+    if (requestInFlight.current) return
+    requestInFlight.current = true
+    setChecking(true)
     try {
-      const response = await fetch(`${API_ORIGIN}/health`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+      await discoverBackend()
+      if (runtimeOrigin() && runtimeOrigin() !== API_ORIGIN) {
+        window.location.reload()
+        return
+      }
+      const response = await fetch(`${API_ORIGIN}/health`, {
+        cache: 'no-store',
+        headers: { 'serveo-skip-browser-warning': 'true' },
+        signal: AbortSignal.timeout(8000)
+      })
       if (!response.ok || (await response.json()).status !== 'ok') throw new Error('Unhealthy backend')
+      consecutiveFailures.current = 0
+      const successfulAt = Date.now()
+      localStorage.setItem('ai_trader_backend_last_success', String(successfulAt))
+      setLastSuccessfulAt(successfulAt)
+      const reloadData = confirmedOffline.current
+      confirmedOffline.current = false
       setOffline(false)
-      if (previouslyOffline.current) window.location.reload()
+      if (reloadData) window.setTimeout(() => window.location.reload(), 100)
     } catch {
-      previouslyOffline.current = true
-      setOffline(true)
+      consecutiveFailures.current += 1
+      if (consecutiveFailures.current >= 2) {
+        confirmedOffline.current = true
+        setOffline(true)
+      }
+    } finally {
+      requestInFlight.current = false
+      setChecking(false)
     }
   }
 
   useEffect(() => {
     void checkBackend()
-    const interval = window.setInterval(() => void checkBackend(), 30000)
-    return () => window.clearInterval(interval)
+    const interval = window.setInterval(() => void checkBackend(), 10000)
+    const retryWhenVisible = () => { if (document.visibilityState === 'visible') void checkBackend() }
+    window.addEventListener('online', retryWhenVisible)
+    document.addEventListener('visibilitychange', retryWhenVisible)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('online', retryWhenVisible)
+      document.removeEventListener('visibilitychange', retryWhenVisible)
+    }
   }, [])
 
   if (!offline) return <PaperActivityPanel />
 
   return (
     <div className="backend-status-banner" role="alert">
-      <span>
-        {language === 'he'
+      <div>
+        <div>{language === 'he'
           ? 'אין כרגע חיבור לשרת הנתונים. המידע יחזור אוטומטית כשהחיבור יתחדש.'
           : language === 'zh'
             ? '当前无法连接数据服务器。连接恢复后数据会自动返回。'
-            : 'The data server is currently unavailable. Information will return automatically when the connection recovers.'}
-      </span>
-      <button type="button" className="btn btn-secondary" onClick={() => void checkBackend()}>
-        {language === 'he' ? 'בדיקה מחדש' : language === 'zh' ? '重试' : 'Retry'}
+            : 'The data server is currently unavailable. Information will return automatically when the connection recovers.'}</div>
+        {lastSuccessfulAt && <small className="backend-last-success">
+          {language === 'he' ? 'חיבור תקין אחרון' : language === 'zh' ? '最近成功连接' : 'Last successful connection'}: {' '}
+          {new Date(lastSuccessfulAt).toLocaleString(language === 'he' ? 'he-IL' : language === 'zh' ? 'zh-CN' : 'en-GB')}
+        </small>}
+      </div>
+      <button type="button" className="btn btn-secondary" disabled={checking} onClick={() => void checkBackend()}>
+        {checking
+          ? (language === 'he' ? 'בודק…' : language === 'zh' ? '检查中…' : 'Checking…')
+          : (language === 'he' ? 'בדיקה מחדש' : language === 'zh' ? '重试' : 'Retry')}
       </button>
     </div>
   )
