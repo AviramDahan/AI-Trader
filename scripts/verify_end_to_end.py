@@ -108,7 +108,12 @@ def main() -> None:
         if not scanner:
             raise RuntimeError("Scanner identity is missing")
         scanner_headers = {"Authorization": f"Bearer {scanner[1]}"}
-        signals = session.get(f"{backend_url}/api/signals/{scanner[0]}?message_type=operation&limit=50", timeout=30).json().get("signals", [])
+        signals = []
+        for message_type in ("operation", "strategy"):
+            signals.extend(session.get(
+                f"{backend_url}/api/signals/{scanner[0]}?message_type={message_type}&limit=50", timeout=30
+            ).json().get("signals", []))
+        signals.sort(key=lambda item: int(item.get("timestamp") or 0), reverse=True)
         signal = next((item for item in signals if item.get("market") == "us-stock" and
                        str(item.get("content") or "").startswith("US STOCK SCANNER | PAPER TRADING ONLY")), None)
         if not signal:
@@ -119,9 +124,19 @@ def main() -> None:
                 raise RuntimeError(f"Stock signal is missing {field}")
         positions = session.get(f"{backend_url}/api/positions", headers=scanner_headers, timeout=30)
         require(positions, "scanner paper positions")
-        if not any(item.get("symbol") == signal.get("symbol") for item in positions.json().get("positions", [])):
-            raise RuntimeError("Live scanner signal is not represented in paper positions")
-        print("PASS live stock signal format, UI feed record and paper position")
+        action = next((line.split(":", 1)[1].strip() for line in signal["content"].splitlines()
+                       if line.startswith("Action:")), "")
+        symbol = signal.get("symbol") or signal.get("symbols")
+        paper_positions = positions.json().get("positions", [])
+        if action == "BUY" and not any(item.get("symbol") == symbol for item in paper_positions):
+            raise RuntimeError("BUY signal is not represented in paper positions")
+        if action == "SELL" and signal.get("message_type") == "strategy" and any(
+                item.get("symbol") == symbol and item.get("side") == "short" for item in paper_positions):
+            raise RuntimeError("Signal-only SELL unexpectedly created a short position")
+        tracked = activity_data.get("tracked_signals") or []
+        if not any(item.get("signal_id") == signal.get("signal_id") for item in tracked):
+            raise RuntimeError("Published stock signal is missing from TP/SL tracking")
+        print("PASS live stock signal format, UI feed record, SELL safety and paper level tracking")
 
     if not overview_available:
         raise RuntimeError("Incomplete E2E: trading checks passed but Financial Events has no snapshot")

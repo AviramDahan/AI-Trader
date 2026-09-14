@@ -96,6 +96,105 @@ class StockScannerTests(unittest.TestCase):
             items = stock_scanner.fetch_recent_news("AAPL", "Apple", 72)
         self.assertEqual([item["title"] for item in items], ["Relevant"])
 
+    def test_history_cache_avoids_repeat_full_universe_download(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache_file = Path(directory) / "history.json.gz"
+            histories = {"AAPL": history(), "SPY": history(), "QQQ": history()}
+            cfg = config() | {"history_cache_ttl": 72000, "history_stale_after": 345600}
+            with patch.object(stock_scanner, "HISTORY_CACHE_FILE", cache_file), \
+                 patch.object(stock_scanner, "_download_history", return_value=histories) as download:
+                first, first_info = stock_scanner.load_historical_data(list(histories), cfg)
+                second, second_info = stock_scanner.load_historical_data(list(histories), cfg)
+            self.assertEqual(set(first), set(histories))
+            self.assertEqual(set(second), set(histories))
+            self.assertEqual(first_info["status"], "refreshed")
+            self.assertEqual(second_info["status"], "cache_hit")
+            download.assert_called_once()
+
+    def test_incomplete_history_refresh_fails_closed_without_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cfg = config() | {"history_cache_ttl": 72000, "history_stale_after": 345600}
+            symbols = [f"S{i}" for i in range(20)]
+            with patch.object(stock_scanner, "HISTORY_CACHE_FILE", Path(directory) / "history.json.gz"), \
+                 patch.object(stock_scanner, "_download_history", return_value={symbols[0]: history()}):
+                with self.assertRaisesRegex(RuntimeError, "stopped safely"):
+                    stock_scanner.load_historical_data(symbols, cfg)
+
+    def test_news_enrichment_covers_broad_shortlist_before_ai_ranking(self):
+        candidates = []
+        for ticker in ("AAA", "BBB", "CCC"):
+            candidates.append({"ticker": ticker, "company": ticker, "technical_direction": "BUY",
+                               "technical_score": 6, "average_dollar_volume": 1e9})
+        cfg = config() | {"shortlist_limit": 25, "news_cache_ttl": 900, "news_max_age_hours": 72}
+        context = {"SPY": {"above_ema20": True, "ema20_above_ema50": True, "return_20d_pct": 3},
+                   "QQQ": {"above_ema20": True, "ema20_above_ema50": True, "return_20d_pct": 2}}
+        seen = []
+        def news(ticker, company, max_age):
+            seen.append(ticker)
+            title = "Record profit growth" if ticker == "CCC" else "Company update"
+            return [{"title": title, "relevance": .9, "published_at": "2026-01-01T00:00:00Z"}]
+        with patch.object(stock_scanner, "_read_news_cache", return_value={}), \
+             patch.object(stock_scanner, "_write_news_cache"), \
+             patch.object(stock_scanner, "fetch_recent_news", side_effect=news):
+            ranked, rejected = stock_scanner.enrich_and_rank_candidates(candidates, context, cfg)
+        self.assertEqual(set(seen), {"AAA", "BBB", "CCC"})
+        self.assertEqual(ranked[0]["ticker"], "CCC")
+        self.assertFalse(rejected)
+
+    def test_sell_without_long_is_signal_only_and_never_short(self):
+        calls = []
+        def api(method, path, **kwargs):
+            calls.append((path, kwargs["json"]))
+            return {"signal_id": 7}
+        candidate = {"ticker": "MSFT", "company": "Microsoft", "atr": 2, "atr_pct": 2,
+                     "average_dollar_volume": 1e9}
+        decision = {"action": "SELL", "confidence": .9, "time_horizon": "1-4 weeks", "reason": "Weak trend",
+                    "news_sentiment": -.4, "news_relevance": .9}
+        signal = stock_scanner._paper_order(candidate, decision, [], (100, "now"),
+                                            {"positions": [], "cash": 100000}, config(), api)
+        self.assertEqual(calls[0][0], "/signals/strategy")
+        self.assertNotIn("short", json.dumps(calls).lower())
+        self.assertEqual(signal["paper_execution"], "signal_only")
+        self.assertEqual(signal["paper_quantity"], 0)
+
+    def test_sell_closes_existing_long_paper_position(self):
+        calls = []
+        def api(method, path, **kwargs):
+            calls.append((path, kwargs["json"]))
+            return {"signal_id": 8, "price": 100}
+        candidate = {"ticker": "MSFT", "company": "Microsoft", "atr": 2, "atr_pct": 2,
+                     "average_dollar_volume": 1e9}
+        decision = {"action": "SELL", "confidence": .9, "time_horizon": "1-4 weeks", "reason": "Weak trend",
+                    "news_sentiment": -.4, "news_relevance": .9}
+        portfolio = {"positions": [{"market": "us-stock", "symbol": "MSFT", "side": "long",
+                                    "quantity": 1, "entry_price": 110, "current_price": 100}], "cash": 100000}
+        signal = stock_scanner._paper_order(candidate, decision, [], (100, "now"), portfolio, config(), api)
+        self.assertEqual(calls[0][0], "/signals/realtime")
+        self.assertEqual(calls[0][1]["action"], "sell")
+        self.assertEqual(signal["paper_execution"], "long_closed")
+
+    def test_telegram_is_safely_disabled_without_credentials(self):
+        cfg = config() | {"telegram_enabled": True}
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}, clear=False):
+            self.assertEqual(stock_scanner.send_telegram("test", cfg), "missing_credentials")
+
+    def test_tp_sl_monitor_records_win_without_submitting_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "state.json"
+            signal = {"ticker": "AAPL", "company": "Apple", "action": "BUY", "entry": 100,
+                      "take_profit": 106, "stop_loss": 97, "risk_reward": 2, "confidence": .9,
+                      "time_horizon": "1-4 weeks", "reason": "Aligned", "relevant_news": [],
+                      "timestamp": "2026-01-01T00:00:00Z", "status": "OPEN"}
+            with patch.object(stock_scanner, "STATE_FILE", state_file), \
+                 patch.object(stock_scanner, "current_intraday_quote", return_value=(106.5, "2026-01-02T00:00:00Z")), \
+                 patch.dict(os.environ, {"STOCK_SCANNER_TELEGRAM_ENABLED": "false"}, clear=False):
+                stock_scanner.save_state({"tracked_signals": [signal], "events": []})
+                result = stock_scanner.monitor_tracked_signals()
+                state = stock_scanner.read_state()
+            self.assertEqual(result["hits"][0]["level"], "TP")
+            self.assertEqual(state["tracked_signals"][0]["status"], "TP_HIT")
+            self.assertEqual(state["tracked_signals"][0]["outcome"], "WIN")
+
     def test_full_pipeline_publishes_original_paper_operation(self):
         with tempfile.TemporaryDirectory() as directory:
             state_file = Path(directory) / "state.json"
@@ -116,14 +215,17 @@ class StockScannerTests(unittest.TestCase):
             decision = {"action": "BUY", "confidence": .91, "news_sentiment": .4, "news_relevance": .9,
                         "time_horizon": "1-4 weeks", "reason": "Trend, momentum and relevant news align."}
             histories = {"AAPL": history(), "SPY": history(), "QQQ": history()}
-            environment = {"STOCK_SCANNER_TOKEN": "test-only", "STOCK_SCANNER_CANDIDATE_LIMIT": "1",
+            environment = {"STOCK_SCANNER_TOKEN": "test-only", "STOCK_SCANNER_SHORTLIST_LIMIT": "20",
+                           "STOCK_SCANNER_AI_CANDIDATE_LIMIT": "1",
                            "STOCK_SCANNER_MIN_DOLLAR_VOLUME": "1000000", "STOCK_SCANNER_MIN_ATR_PCT": "0.1",
                            "STOCK_SCANNER_MIN_TECHNICAL_SCORE": "5"}
             with patch.object(stock_scanner, "STATE_FILE", state_file), \
                  patch.dict(os.environ, environment), \
                  patch.object(stock_scanner, "load_universe", return_value={"AAPL": {"company": "Apple", "indexes": ["S&P 500"], "market_cap": 1e12}}), \
-                 patch.object(stock_scanner, "_download_history", return_value=histories), \
+                 patch.object(stock_scanner, "load_historical_data", return_value=(histories, {"status": "cache_hit", "age_seconds": 1, "refreshed_symbols": 0})), \
                  patch.object(stock_scanner, "fetch_recent_news", return_value=news), \
+                 patch.object(stock_scanner, "_read_news_cache", return_value={}), \
+                 patch.object(stock_scanner, "_write_news_cache"), \
                  patch.object(stock_scanner, "ai_review", return_value=decision), \
                  patch.object(stock_scanner, "current_intraday_quote", return_value=(140, "2026-01-01T00:00:00+00:00")), \
                  patch.object(stock_scanner.requests, "Session", return_value=api_session):

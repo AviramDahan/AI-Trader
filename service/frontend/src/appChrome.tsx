@@ -118,9 +118,13 @@ export function BackendStatusBanner() {
 type ScannerActivity = {
   enabled: boolean; stale: boolean; status: string; model: string; next_scan_at?: number;
   last_scan_at?: number; universe_count?: number; data_count?: number; candidates_count?: number;
+  technical_candidates_count?: number; shortlist_count?: number; ai_candidates_count?: number;
   signals_published?: number; last_signal?: { ticker: string; action: string; confidence: number };
   ai_reviews?: { ticker: string; action: string; confidence: number }[];
   events?: { at: number; action: string; reason: string }[];
+  history_cache?: { status: string; age_seconds: number; refreshed_symbols: number };
+  last_level_monitor_at?: number;
+  tracked_signals?: { ticker: string; action: string; entry: number; take_profit: number; stop_loss: number; status: string; outcome?: string; hit_price?: number }[];
 }
 
 function PaperActivityPanel() {
@@ -152,11 +156,18 @@ function PaperActivityPanel() {
   return <details className="paper-activity-panel" data-testid="paper-activity">
     <summary>{he ? 'סורק מניות · מסחר מדומה בלבד' : 'US STOCK SCANNER · PAPER ONLY'} · {state}</summary>
     <p>{he ? 'סריקה אחרונה' : 'Last scan'}: {time(activity?.last_scan_at)} | {he ? 'סריקה הבאה' : 'Next scan'}: {time(activity?.next_scan_at)}</p>
-    <p>{he ? 'יקום מניות' : 'Universe'}: {activity?.universe_count || 0} | {he ? 'נתונים תקינים' : 'Fresh datasets'}: {activity?.data_count || 0} | {he ? 'מועמדים' : 'Candidates'}: {activity?.candidates_count || 0}</p>
+    <p>{he ? 'יקום מניות' : 'Universe'}: {activity?.universe_count || 0} | {he ? 'נתונים תקינים' : 'Fresh datasets'}: {activity?.data_count || 0} | {he ? 'רשימה לחדשות' : 'News shortlist'}: {activity?.shortlist_count || 0} | {he ? 'לבדיקת AI' : 'AI review'}: {activity?.ai_candidates_count ?? activity?.candidates_count ?? 0}</p>
+    {activity?.history_cache && <p>{he ? 'מטמון יומי' : 'Daily cache'}: {activity.history_cache.status} · {Math.round((activity.history_cache.age_seconds || 0) / 3600)}h · {he ? 'רועננו' : 'refreshed'} {activity.history_cache.refreshed_symbols}</p>}
     <p>{he ? 'אותות חזקים בסריקה האחרונה' : 'Strong signals in last scan'}: {activity?.signals_published || 0}</p>
     {activity?.last_signal && <p>{he ? 'אות אחרון' : 'Last signal'}: {activity.last_signal.ticker} {activity.last_signal.action} ({Math.round(activity.last_signal.confidence * 100)}%)</p>}
     {!!activity?.ai_reviews?.length && <p>{he ? 'בדיקות AI אחרונות' : 'Recent AI reviews'}: {activity.ai_reviews.map(item => `${item.ticker} ${item.action} ${Math.round(item.confidence * 100)}%`).join(' · ')}</p>}
-    <p>{he ? 'אות מתפרסם רק עם מחיר תוך־יומי וחדשות עדכניים, ובשעות המסחר. HOLD ודחיות מוצגים בסטטוס אך אינם יוצרים פוזיציה.' : 'A signal is published only with a fresh intraday quote and recent relevant news during market hours. HOLD/rejections remain status events and do not create positions.'}</p>
+    {!!activity?.tracked_signals?.length && <div>
+      <strong>{he ? 'מעקב TP/SL' : 'TP/SL tracking'}</strong> · {he ? 'בדיקה אחרונה' : 'Last check'}: {time(activity.last_level_monitor_at)}
+      <ul>{activity.tracked_signals.slice(0, 6).map((item, index) => <li key={`${item.ticker}-${index}`}>
+        {item.ticker} {item.action} · {item.status}{item.outcome ? ` (${item.outcome})` : ''} · Entry ${item.entry.toFixed(2)} / TP ${item.take_profit.toFixed(2)} / SL ${item.stop_loss.toFixed(2)}{item.hit_price ? ` · Hit ${item.hit_price.toFixed(2)}` : ''}
+      </li>)}</ul>
+    </div>}
+    <p>{he ? 'אות מתפרסם רק עם מחיר תוך־יומי וחדשות עדכניים, ובשעות המסחר. BUY נשמר ב־paper; SELL סוגר long קיים, ואחרת מתפרסם כאות בלבד. אין מסחר בכסף אמיתי.' : 'A signal is published only with a fresh intraday quote and recent relevant news during market hours. BUY remains paper tracked; SELL closes an existing long or is published as signal-only. Real-money trading is disabled.'}</p>
     <ol>{activity?.events?.slice(0, 8).map((item, index) => <li key={`${item.at}-${index}`}>
       <time>{time(item.at)}</time> · {item.action}: {item.reason}
     </li>)}</ol>

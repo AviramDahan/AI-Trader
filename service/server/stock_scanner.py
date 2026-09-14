@@ -6,10 +6,12 @@ deterministic data-freshness/risk filters. No brokerage integration exists here.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import math
 import os
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from io import StringIO
@@ -25,6 +27,8 @@ import config  # loads the ignored project-root .env
 ROOT = Path(__file__).resolve().parents[2]
 STATE_FILE = ROOT / ".runtime" / "stock-scanner.json"
 UNIVERSE_FILE = ROOT / ".runtime" / "stock-universe.json"
+HISTORY_CACHE_FILE = ROOT / ".runtime" / "stock-history-cache.json.gz"
+NEWS_CACHE_FILE = ROOT / ".runtime" / "stock-news-cache.json"
 API = "http://127.0.0.1:8000/api"  # fixed to the original local paper API
 ET = ZoneInfo("America/New_York")
 USER_AGENT = "AI-Trader-Paper-Stock-Scanner/1.0"
@@ -32,6 +36,14 @@ SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 NASDAQ100_URL = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
 YAHOO_SEARCH_URL = "https://query1.finance.yahoo.com/v1/finance/search"
 ALLOWED_HORIZONS = {"1-5 trading days", "1-4 weeks", "1-3 months"}
+STATE_LOCK = threading.RLock()
+
+
+def _state_synchronized(function):
+    def wrapper(*args, **kwargs):
+        with STATE_LOCK:
+            return function(*args, **kwargs)
+    return wrapper
 
 
 def _float_env(name: str, default: float, low: float, high: float) -> float:
@@ -53,7 +65,8 @@ def settings() -> dict[str, Any]:
         "universe": [value.strip().lower() for value in os.getenv(
             "STOCK_SCANNER_UNIVERSE", "sp500,nasdaq100").split(",") if value.strip()],
         "interval": _int_env("STOCK_SCANNER_SCAN_INTERVAL", 1800, 900, 86400),
-        "candidate_limit": _int_env("STOCK_SCANNER_CANDIDATE_LIMIT", 8, 1, 30),
+        "shortlist_limit": _int_env("STOCK_SCANNER_SHORTLIST_LIMIT", 25, 20, 30),
+        "ai_candidate_limit": _int_env("STOCK_SCANNER_AI_CANDIDATE_LIMIT", 6, 1, 12),
         "max_signals": _int_env("STOCK_SCANNER_MAX_SIGNALS_PER_SCAN", 3, 1, 10),
         "min_dollar_volume": _float_env("STOCK_SCANNER_MIN_DOLLAR_VOLUME", 50_000_000, 1_000_000, 10_000_000_000),
         "min_atr_pct": _float_env("STOCK_SCANNER_MIN_ATR_PCT", 1.0, .1, 20),
@@ -66,6 +79,14 @@ def settings() -> dict[str, Any]:
         "max_symbol_exposure": _float_env("STOCK_SCANNER_MAX_SYMBOL_EXPOSURE", 250, 25, 5000),
         "max_total_exposure": _float_env("STOCK_SCANNER_MAX_TOTAL_EXPOSURE", 1000, 100, 25000),
         "min_technical_score": _int_env("STOCK_SCANNER_MIN_TECHNICAL_SCORE", 5, 3, 7),
+        "universe_cache_ttl": _int_env("STOCK_SCANNER_UNIVERSE_CACHE_TTL_SECONDS", 86400, 3600, 604800),
+        "history_cache_ttl": _int_env("STOCK_SCANNER_HISTORY_CACHE_TTL_SECONDS", 72000, 3600, 172800),
+        "history_stale_after": _int_env("STOCK_SCANNER_HISTORY_STALE_AFTER_SECONDS", 345600, 86400, 604800),
+        "news_cache_ttl": _int_env("STOCK_SCANNER_NEWS_CACHE_TTL_SECONDS", 900, 60, 21600),
+        "level_monitor_interval": _int_env("STOCK_SCANNER_LEVEL_MONITOR_INTERVAL", 300, 60, 3600),
+        "telegram_enabled": os.getenv("STOCK_SCANNER_TELEGRAM_ENABLED", "false").lower() == "true",
+        "telegram_entry_alerts": os.getenv("STOCK_SCANNER_TELEGRAM_ENTRY_ALERTS", "false").lower() == "true",
+        "telegram_level_alerts": os.getenv("STOCK_SCANNER_TELEGRAM_LEVEL_ALERTS", "true").lower() == "true",
     }
 
 
@@ -139,6 +160,13 @@ def _fetch_universe() -> dict[str, dict[str, Any]]:
 
 def load_universe() -> dict[str, dict[str, Any]]:
     try:
+        cached = json.loads(UNIVERSE_FILE.read_text(encoding="utf-8"))
+        if (time.time() - float(cached["fetched_at"]) <= settings()["universe_cache_ttl"]
+                and len(cached["members"]) >= 90):
+            return cached["members"]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    try:
         return _fetch_universe()
     except Exception:
         try:
@@ -167,6 +195,71 @@ def _download_history(symbols: list[str]) -> dict[str, pd.DataFrame]:
             except (KeyError, TypeError):
                 continue
     return histories
+
+
+def _read_history_cache() -> tuple[dict[str, pd.DataFrame], float]:
+    try:
+        with gzip.open(HISTORY_CACHE_FILE, "rt", encoding="utf-8") as stream:
+            payload = json.load(stream)
+        if payload.get("schema") != 1 or not isinstance(payload.get("histories"), dict):
+            raise ValueError("unsupported history cache")
+        histories = {}
+        for symbol, encoded in payload["histories"].items():
+            frame = pd.read_json(StringIO(encoded), orient="split")
+            frame.index = pd.to_datetime(frame.index)
+            if len(frame) >= 65:
+                histories[symbol] = frame
+        return histories, float(payload["fetched_at"])
+    except (OSError, ValueError, KeyError, TypeError, EOFError):
+        return {}, 0.0
+
+
+def _write_history_cache(histories: dict[str, pd.DataFrame], fetched_at: float) -> None:
+    HISTORY_CACHE_FILE.parent.mkdir(exist_ok=True)
+    payload = {"schema": 1, "fetched_at": fetched_at, "histories": {
+        symbol: frame[["Open", "High", "Low", "Close", "Volume"]].to_json(
+            orient="split", date_format="iso", double_precision=10)
+        for symbol, frame in histories.items() if len(frame) >= 65
+    }}
+    temporary = HISTORY_CACHE_FILE.with_suffix(".tmp.gz")
+    with gzip.open(temporary, "wt", encoding="utf-8") as stream:
+        json.dump(payload, stream, ensure_ascii=True)
+    temporary.replace(HISTORY_CACHE_FILE)
+
+
+def load_historical_data(symbols: list[str], cfg: dict[str, Any]) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
+    """Use a once-daily local OHLCV cache and fail closed on unusable refreshes."""
+    cached, fetched_at = _read_history_cache()
+    now = time.time()
+    cache_age = max(0.0, now - fetched_at) if fetched_at else None
+    requested = set(symbols)
+    cached_coverage = len(requested.intersection(cached)) / max(len(requested), 1)
+    full_refresh = not fetched_at or cache_age is None or cache_age >= cfg["history_cache_ttl"]
+    refresh_symbols = symbols if full_refresh else sorted(requested.difference(cached))
+    if not full_refresh and cached_coverage >= .95:
+        return {symbol: cached[symbol] for symbol in symbols if symbol in cached}, {
+            "status": "cache_hit", "age_seconds": round(cache_age or 0), "refreshed_symbols": 0,
+        }
+    try:
+        downloaded = _download_history(refresh_symbols)
+        required_coverage = .85 if len(refresh_symbols) >= 20 else 1.0
+        if len(downloaded) / max(len(refresh_symbols), 1) < required_coverage:
+            raise RuntimeError("Yahoo history refresh was incomplete")
+        merged = dict(cached)
+        merged.update(downloaded)
+        refreshed_at = now if full_refresh else (fetched_at or now)
+        _write_history_cache(merged, refreshed_at)
+        return {symbol: merged[symbol] for symbol in symbols if symbol in merged}, {
+            "status": "refreshed" if full_refresh else "incremental_refresh",
+            "age_seconds": 0 if full_refresh else round(cache_age or 0),
+            "refreshed_symbols": len(downloaded),
+        }
+    except Exception:
+        if fetched_at and cache_age is not None and cache_age <= cfg["history_stale_after"] and cached_coverage >= .95:
+            return {symbol: cached[symbol] for symbol in symbols if symbol in cached}, {
+                "status": "stale_fallback", "age_seconds": round(cache_age), "refreshed_symbols": 0,
+            }
+        raise RuntimeError("Historical data unavailable; scan stopped safely")
 
 
 def _rsi(close: pd.Series, period: int = 14) -> float:
@@ -258,11 +351,95 @@ def fetch_recent_news(ticker: str, company: str, max_age_hours: float) -> list[d
         age_hours = (now - published) / 3600
         if age_hours < -.1 or age_hours > max_age_hours:
             continue
+        company_words = {word.lower() for word in re.findall(r"[A-Za-z]{3,}", company)}
+        title_words = set(re.findall(r"[a-z]{3,}", title.lower()))
+        company_match = bool(company_words.intersection(title_words))
+        relevance = min(1.0, .65 + (.2 if company_match else 0) + .15 * max(0, 1 - age_hours / max_age_hours))
         items.append({"title": title[:300], "publisher": str(row.get("publisher") or "Yahoo Finance")[:100],
                       "url": link, "published_at": datetime.fromtimestamp(published, timezone.utc).isoformat(),
-                      "age_hours": round(age_hours, 2), "relevance": 1.0})
+                      "age_hours": round(age_hours, 2), "relevance": round(relevance, 3)})
     items.sort(key=lambda item: item["published_at"], reverse=True)
     return items[:5]
+
+
+BULLISH_NEWS_WORDS = {
+    "beat", "beats", "growth", "upgrade", "upgraded", "surge", "record", "profit", "profits",
+    "approval", "approved", "launch", "partnership", "buyback", "raises", "raised", "strong",
+}
+BEARISH_NEWS_WORDS = {
+    "miss", "misses", "downgrade", "downgraded", "fall", "falls", "drop", "drops", "loss", "losses",
+    "lawsuit", "probe", "investigation", "recall", "cuts", "cut", "weak", "warning", "layoffs",
+}
+
+
+def _headline_sentiment(title: str) -> float:
+    words = set(re.findall(r"[a-z]+", title.lower()))
+    positive = len(words.intersection(BULLISH_NEWS_WORDS))
+    negative = len(words.intersection(BEARISH_NEWS_WORDS))
+    return max(-1.0, min(1.0, (positive - negative) / max(positive + negative, 2)))
+
+
+def _read_news_cache() -> dict[str, Any]:
+    try:
+        value = json.loads(NEWS_CACHE_FILE.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_news_cache(value: dict[str, Any]) -> None:
+    NEWS_CACHE_FILE.parent.mkdir(exist_ok=True)
+    temporary = NEWS_CACHE_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value, ensure_ascii=True), encoding="utf-8")
+    temporary.replace(NEWS_CACHE_FILE)
+
+
+def _market_alignment(direction: str, market_context: dict[str, Any]) -> float:
+    values = []
+    for context in market_context.values():
+        bullish = sum((bool(context.get("above_ema20")), bool(context.get("ema20_above_ema50")),
+                       float(context.get("return_20d_pct") or 0) > 0)) / 3
+        values.append(bullish if direction == "BUY" else 1 - bullish)
+    return sum(values) / len(values) if values else 0.0
+
+
+def enrich_and_rank_candidates(candidates: list[dict[str, Any]], market_context: dict[str, Any],
+                               cfg: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Fetch news for the broad shortlist and rank it before expensive AI review."""
+    cache = _read_news_cache()
+    now = time.time()
+    enriched, rejected = [], []
+    for candidate in candidates[:cfg["shortlist_limit"]]:
+        ticker = candidate["ticker"]
+        cached = cache.get(ticker) if isinstance(cache.get(ticker), dict) else {}
+        try:
+            if now - float(cached.get("fetched_at", 0)) <= cfg["news_cache_ttl"]:
+                news = cached.get("items") or []
+            else:
+                news = fetch_recent_news(ticker, candidate["company"], cfg["news_max_age_hours"])
+                cache[ticker] = {"fetched_at": now, "items": news}
+        except Exception:
+            rejected.append({"ticker": ticker, "reason": "news_provider_unavailable_fail_closed"})
+            continue
+        if not news:
+            rejected.append({"ticker": ticker, "reason": "insufficient_current_news"})
+            continue
+        weights = [max(.05, float(row.get("relevance") or 0)) for row in news]
+        sentiment = sum(_headline_sentiment(row["title"]) * weight for row, weight in zip(news, weights)) / sum(weights)
+        relevance = sum(float(row.get("relevance") or 0) for row in news) / len(news)
+        alignment = _market_alignment(candidate["technical_direction"], market_context)
+        sentiment_alignment = (1 + sentiment) / 2 if candidate["technical_direction"] == "BUY" else (1 - sentiment) / 2
+        combined = (.50 * candidate["technical_score"] / 7 + .20 * relevance
+                    + .15 * sentiment_alignment + .15 * alignment)
+        row = dict(candidate)
+        row.update(news=news, deterministic_news_sentiment=round(sentiment, 3),
+                   deterministic_news_relevance=round(relevance, 3), market_alignment=round(alignment, 3),
+                   combined_rank_score=round(combined, 4))
+        enriched.append(row)
+    _write_news_cache(cache)
+    enriched.sort(key=lambda row: (row["combined_rank_score"], row["technical_score"],
+                                   row["average_dollar_volume"]), reverse=True)
+    return enriched, rejected
 
 
 def validate_ai_decision(value: Any, expected_direction: str) -> dict[str, Any]:
@@ -358,6 +535,7 @@ def format_signal(candidate: dict[str, Any], decision: dict[str, Any], news: lis
 
 def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list[dict[str, Any]],
                  quote: tuple[float, str], portfolio: dict[str, Any], cfg: dict[str, Any], api) -> dict[str, Any] | None:
+    """Publish a paper signal; SELL never creates or increases a short position."""
     ticker, direction = candidate["ticker"], decision["action"]
     price, quote_at = quote
     positions = portfolio.get("positions") or []
@@ -367,17 +545,28 @@ def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list
     held_side = (position or {}).get("side")
     if direction == "BUY" and held_side == "short":
         return None
+    take_profit, stop_loss, risk_reward = levels(direction, price, candidate["atr"], cfg["min_risk_reward"])
+    if risk_reward + .001 < cfg["min_risk_reward"]:
+        return None
+    timestamp = datetime.now(timezone.utc).isoformat()
+    content = format_signal(candidate, decision, news, price, take_profit, stop_loss, risk_reward, timestamp)
+    if direction == "SELL" and not (held_side == "long" and held_quantity > 0):
+        result = api("POST", "/signals/strategy", json={
+            "market": "us-stock", "title": f"SELL {ticker} | Paper signal", "content": content,
+            "symbols": ticker, "tags": "stock-scanner,paper-only,sell-signal",
+        })
+        return {"ticker": ticker, "company": candidate["company"], "action": direction,
+                "entry": price, "take_profit": take_profit, "stop_loss": stop_loss,
+                "risk_reward": risk_reward, "confidence": decision["confidence"],
+                "time_horizon": decision["time_horizon"], "reason": decision["reason"],
+                "relevant_news": news[:3], "timestamp": timestamp, "quote_at": quote_at,
+                "signal_id": result.get("signal_id"), "paper_quantity": 0,
+                "paper_execution": "signal_only", "message_type": "strategy"}
     order_action = "buy"
     max_notional = min(cfg["paper_notional"], max(0, cfg["max_total_exposure"] - total_exposure))
     if direction == "SELL":
-        if held_side == "long" and held_quantity > 0:
-            order_action = "sell"
-            quantity = min(held_quantity, cfg["paper_notional"] / price)
-        else:
-            order_action = "short"
-            current_symbol_notional = held_quantity * price if held_side == "short" else 0
-            max_notional = min(max_notional, max(0, cfg["max_symbol_exposure"] - current_symbol_notional))
-            quantity = max_notional / price
+        order_action = "sell"
+        quantity = min(held_quantity, cfg["paper_notional"] / price)
     else:
         current_symbol_notional = held_quantity * price if held_side == "long" else 0
         max_notional = min(max_notional, float(portfolio.get("cash") or 0),
@@ -386,21 +575,94 @@ def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list
     quantity = math.floor(quantity * 1_000_000) / 1_000_000
     if quantity <= 0:
         return None
-    take_profit, stop_loss, risk_reward = levels(direction, price, candidate["atr"], cfg["min_risk_reward"])
-    if risk_reward + .001 < cfg["min_risk_reward"]:
-        return None
-    timestamp = datetime.now(timezone.utc).isoformat()
-    content = format_signal(candidate, decision, news, price, take_profit, stop_loss, risk_reward, timestamp)
     result = api("POST", "/signals/realtime", json={"market": "us-stock", "symbol": ticker,
         "action": order_action, "price": price, "quantity": quantity, "executed_at": "now", "content": content})
     return {"ticker": ticker, "company": candidate["company"], "action": direction,
             "entry": result.get("price", price), "take_profit": take_profit, "stop_loss": stop_loss,
             "risk_reward": risk_reward, "confidence": decision["confidence"],
             "time_horizon": decision["time_horizon"], "reason": decision["reason"],
-            "relevant_news": news[:3], "timestamp": timestamp, "signal_id": result.get("signal_id"),
-            "paper_quantity": quantity}
+            "relevant_news": news[:3], "timestamp": timestamp, "quote_at": quote_at,
+            "signal_id": result.get("signal_id"), "paper_quantity": quantity,
+            "paper_execution": "long_opened" if direction == "BUY" else "long_closed",
+            "message_type": "operation"}
 
 
+def _telegram_message(signal: dict[str, Any], event: str = "NEW STRONG SIGNAL") -> str:
+    news = " | ".join(item.get("title", "") for item in signal.get("relevant_news", [])[:3])
+    return "\n".join([
+        f"AI-Trader PAPER ONLY | {event}",
+        f"Ticker: {signal['ticker']}", f"Company: {signal['company']}", f"Action: {signal['action']}",
+        f"Entry: ${float(signal['entry']):.2f}", f"TP: ${float(signal['take_profit']):.2f}",
+        f"SL: ${float(signal['stop_loss']):.2f}", f"Risk/Reward: {float(signal['risk_reward']):.2f}",
+        f"Confidence: {float(signal['confidence']):.0%}", f"Time Horizon: {signal['time_horizon']}",
+        f"Reason: {signal['reason']}", f"Relevant News: {news or 'None'}",
+    ])[:4000]
+
+
+def send_telegram(message: str, cfg: dict[str, Any]) -> str:
+    if not cfg.get("telegram_enabled"):
+        return "disabled"
+    token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN", "").strip(), os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat_id:
+        return "missing_credentials"
+    try:
+        session = requests.Session()
+        session.trust_env = False
+        response = session.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                                data={"chat_id": chat_id, "text": message, "disable_web_page_preview": True}, timeout=15)
+        response.raise_for_status()
+        return "sent"
+    except Exception:
+        return "failed"
+
+
+def _track_signal(state: dict[str, Any], signal: dict[str, Any], cfg: dict[str, Any]) -> None:
+    tracked = state.get("tracked_signals") if isinstance(state.get("tracked_signals"), list) else []
+    item = dict(signal)
+    item.update(status="OPEN", outcome=None, entry_hit_at=signal["timestamp"],
+                signal_alert=send_telegram(_telegram_message(signal), cfg))
+    if cfg.get("telegram_entry_alerts"):
+        item["entry_alert"] = send_telegram(_telegram_message(signal, "ENTRY REACHED"), cfg)
+    tracked.insert(0, item)
+    state["tracked_signals"] = tracked[:100]
+
+
+@_state_synchronized
+def monitor_tracked_signals() -> dict[str, Any]:
+    """Record virtual TP/SL outcomes; this never submits an order."""
+    cfg = settings()
+    state = read_state()
+    tracked = state.get("tracked_signals") if isinstance(state.get("tracked_signals"), list) else []
+    checked, hits = 0, []
+    for signal in tracked:
+        if signal.get("status") != "OPEN":
+            continue
+        quote = current_intraday_quote(signal["ticker"])
+        if quote is None:
+            continue
+        checked += 1
+        price, quote_at = quote
+        action = signal["action"]
+        tp_hit = price >= float(signal["take_profit"]) if action == "BUY" else price <= float(signal["take_profit"])
+        sl_hit = price <= float(signal["stop_loss"]) if action == "BUY" else price >= float(signal["stop_loss"])
+        if not tp_hit and not sl_hit:
+            continue
+        signal.update(status="TP_HIT" if tp_hit else "SL_HIT", outcome="WIN" if tp_hit else "LOSS",
+                      hit_price=price, hit_at=quote_at)
+        if cfg.get("telegram_level_alerts"):
+            signal["level_alert"] = send_telegram(_telegram_message(
+                signal, f"{'TP' if tp_hit else 'SL'} REACHED @ ${price:.2f}"), cfg)
+        hits.append({"ticker": signal["ticker"], "level": "TP" if tp_hit else "SL", "price": price})
+        state["events"] = ([{"at": time.time(), "action": signal["status"],
+                             "reason": f"{signal['ticker']} paper level reached at ${price:.2f}; outcome {signal['outcome']}"}]
+                           + state.get("events", []))[:40]
+    state.update(last_level_monitor_at=time.time(), level_monitor_checked=checked,
+                 recent_level_hits=hits[-10:])
+    save_state(state)
+    return {"checked": checked, "hits": hits}
+
+
+@_state_synchronized
 def run_scan() -> dict[str, Any]:
     cfg = settings()
     state = read_state()
@@ -422,9 +684,9 @@ def run_scan() -> dict[str, Any]:
     universe = load_universe()
     symbols = sorted(universe)
     history_symbols = sorted(set(symbols + ["SPY", "QQQ"]))
-    histories = _download_history(history_symbols)
+    histories, cache_info = load_historical_data(history_symbols, cfg)
     context = _market_context(histories)
-    candidates = []
+    technical_candidates = []
     for symbol in symbols:
         if symbol not in histories:
             continue
@@ -432,24 +694,25 @@ def run_scan() -> dict[str, Any]:
         if candidate:
             candidate["indexes"] = universe[symbol]["indexes"]
             candidate["market_cap"] = universe[symbol].get("market_cap")
-            candidates.append(candidate)
-    candidates.sort(key=lambda row: (row["technical_score"], row["average_dollar_volume"], row.get("market_cap") or 0), reverse=True)
-    candidates = candidates[:cfg["candidate_limit"]]
+            technical_candidates.append(candidate)
+    technical_candidates.sort(key=lambda row: (row["technical_score"], row["average_dollar_volume"],
+                                                 row.get("market_cap") or 0), reverse=True)
+    shortlist = technical_candidates[:cfg["shortlist_limit"]]
+    ranked_candidates, news_rejected = enrich_and_rank_candidates(shortlist, context, cfg)
+    candidates = ranked_candidates[:cfg["ai_candidate_limit"]]
     portfolio = api("GET", "/positions")
     cooldowns = state.get("cooldowns") if isinstance(state.get("cooldowns"), dict) else {}
     cutoff = time.time() - cfg["cooldown_hours"] * 3600
     cooldowns = {key: value for key, value in cooldowns.items() if float(value) >= cutoff}
-    published, reviews, rejected = [], [], []
+    published, reviews, rejected = [], [], list(news_rejected)
     for candidate in candidates:
         ticker = candidate["ticker"]
         try:
-            news = fetch_recent_news(ticker, candidate["company"], cfg["news_max_age_hours"])
-            if not news:
-                rejected.append({"ticker": ticker, "reason": "insufficient_current_news"})
-                continue
+            news = candidate["news"]
             decision = ai_review(candidate, news, context)
             reviews.append({"ticker": ticker, "action": decision["action"], "confidence": decision["confidence"],
-                            "news_sentiment": decision["news_sentiment"], "news_relevance": decision["news_relevance"]})
+                            "news_sentiment": decision["news_sentiment"], "news_relevance": decision["news_relevance"],
+                            "combined_rank_score": candidate["combined_rank_score"]})
             if decision["action"] == "HOLD" or decision["confidence"] < cfg["min_confidence"] or decision["news_relevance"] < .6:
                 rejected.append({"ticker": ticker, "reason": "ai_or_confidence_filter"})
                 continue
@@ -474,8 +737,10 @@ def run_scan() -> dict[str, Any]:
             if signal:
                 published.append(signal)
                 cooldowns[cooldown_key] = time.time()
+                _track_signal(state, signal, cfg)
                 portfolio = api("GET", "/positions")
-                add_event(state, decision["action"], f"{ticker} paper signal published; confidence {decision['confidence']:.0%}")
+                add_event(state, decision["action"],
+                          f"{ticker} paper signal published ({signal['paper_execution']}); confidence {decision['confidence']:.0%}")
             if len(published) >= cfg["max_signals"]:
                 break
         except requests.Timeout:
@@ -488,11 +753,14 @@ def run_scan() -> dict[str, Any]:
                     state["order_pending"] = None
             rejected.append({"ticker": ticker, "reason": f"{type(exc).__name__}_fail_closed"})
     state.update(status="waiting", last_scan_at=time.time(), last_completed_at=time.time(),
-                 universe_count=len(universe), data_count=len(histories) - 2, candidates_count=len(candidates),
-                 ai_reviews=reviews[-12:], rejected=rejected[-20:], signals_published=len(published),
+                  universe_count=len(universe), data_count=max(0, len(histories) - 2),
+                  technical_candidates_count=len(technical_candidates), shortlist_count=len(shortlist),
+                  candidates_count=len(candidates), ai_candidates_count=len(candidates), history_cache=cache_info,
+                  ai_reviews=reviews[-12:], rejected=rejected[-20:], signals_published=len(published),
                  last_signal=published[-1] if published else state.get("last_signal"), cooldowns=cooldowns,
                  next_scan_at=time.time() + cfg["interval"])
-    add_event(state, "SCAN", f"Scanned {len(universe)} constituents; {len(candidates)} technical candidates; {len(published)} strong paper signals")
+    add_event(state, "SCAN", f"Scanned {len(universe)} constituents; enriched {len(shortlist)} technical candidates; "
+                              f"sent {len(candidates)} to AI; published {len(published)} strong paper signals")
     save_state(state)
     return state
 
@@ -516,11 +784,26 @@ async def stock_scanner_loop() -> None:
         await asyncio.sleep(1)
 
 
+async def stock_signal_monitor_loop() -> None:
+    if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
+        return
+    await asyncio.sleep(45)
+    while True:
+        try:
+            await asyncio.to_thread(monitor_tracked_signals)
+        except Exception as exc:
+            state = read_state()
+            add_event(state, "MONITOR_ERROR", f"TP/SL monitor failed safely ({type(exc).__name__})")
+        await asyncio.sleep(settings()["level_monitor_interval"])
+
+
 def public_status() -> dict[str, Any]:
     state = read_state()
     fields = ("mode", "agent", "model", "status", "last_started_at", "next_scan_at", "last_scan_at",
-              "last_completed_at", "universe_count", "data_count", "candidates_count", "signals_published",
-              "last_signal", "ai_reviews", "rejected", "events", "filters")
+              "last_completed_at", "universe_count", "data_count", "technical_candidates_count",
+              "shortlist_count", "candidates_count", "ai_candidates_count", "signals_published",
+              "last_signal", "ai_reviews", "rejected", "events", "filters", "history_cache",
+              "tracked_signals", "last_level_monitor_at", "level_monitor_checked", "recent_level_hits")
     result = {key: state.get(key) for key in fields}
     result["enabled"] = os.getenv("STOCK_SCANNER_ENABLED", "false").lower() == "true"
     result["stale"] = time.time() > float(state.get("next_scan_at") or 0) + 300
