@@ -183,7 +183,9 @@ class StockScannerTests(unittest.TestCase):
         signal = {"ticker": "AAPL", "company": "Apple", "action": "BUY", "entry": 100,
                   "take_profit": 106, "stop_loss": 97, "risk_reward": 2, "confidence": .9,
                   "time_horizon": "1-4 weeks", "reason": "Aligned", "relevant_news": [],
-                  "timestamp": "2026-01-01T00:00:00Z"}
+                  "timestamp": "2026-01-01T00:00:00Z",
+                  "telegram_reason_he": "המגמה חיובית. המומנטום תומך.",
+                  "telegram_news_he": []}
         messages = []
         with patch.object(stock_scanner, "send_telegram",
                           side_effect=lambda message, _cfg: messages.append(message) or "sent"):
@@ -195,12 +197,15 @@ class StockScannerTests(unittest.TestCase):
         self.assertIn("מחיר הכניסה הושג", messages[1])
         self.assertIn("פעולה: קנייה", messages[0])
         self.assertIn("טווח זמן: 1–4 שבועות", messages[0])
+        self.assertIn("המגמה חיובית.\n\nהמומנטום תומך.", messages[0])
+        self.assertIn("\n\nסיבה:\n", messages[0])
 
     def test_telegram_tp_and_sl_alert_paths(self):
         base = {"ticker": "AAPL", "company": "Apple", "action": "BUY", "entry": 100,
                 "take_profit": 106, "stop_loss": 97, "risk_reward": 2, "confidence": .9,
                 "time_horizon": "1-4 weeks", "reason": "Aligned", "relevant_news": [],
-                "timestamp": "2026-01-01T00:00:00Z", "status": "OPEN"}
+                "timestamp": "2026-01-01T00:00:00Z", "status": "OPEN",
+                "telegram_reason_he": "המגמה חיובית.", "telegram_news_he": []}
         cfg = config() | {"telegram_enabled": True, "telegram_level_alerts": True}
         for price, expected, expected_he in ((106.5, "TP", "יעד הרווח הושג"),
                                              (96.5, "SL", "עצירת ההפסד הופעלה")):
@@ -215,6 +220,20 @@ class StockScannerTests(unittest.TestCase):
                     result = stock_scanner.monitor_tracked_signals()
                 self.assertEqual(result["hits"][0]["level"], expected)
                 self.assertIn(expected_he, messages[0])
+
+    def test_telegram_uses_ollama_for_hebrew_reason_and_news(self):
+        response = Mock()
+        response.json.return_value = {"message": {"content": json.dumps({
+            "reason_he": "המגמה חיובית. החדשות תומכות.",
+            "news_titles_he": ["מניות האנרגיה עולות לפני פתיחת המסחר"],
+        })}}
+        signal = {"reason": "The trend is positive. News is supportive.",
+                  "relevant_news": [{"title": "Energy stocks advance premarket"}]}
+        with patch.object(stock_scanner.requests, "post", return_value=response) as post:
+            localized = stock_scanner._localize_telegram_signal(signal)
+        self.assertEqual(localized["telegram_reason_he"], "המגמה חיובית. החדשות תומכות.")
+        self.assertEqual(localized["telegram_news_he"], ["מניות האנרגיה עולות לפני פתיחת המסחר"])
+        self.assertEqual(post.call_args.args[0], "http://127.0.0.1:11434/api/chat")
 
     def test_tp_sl_monitor_records_win_without_submitting_order(self):
         with tempfile.TemporaryDirectory() as directory:
