@@ -788,7 +788,7 @@ export function FinancialEventsPage() {
                             )}
                             {item.price_source && (
                               <span className="intel-chip">
-                                {language === 'zh' ? '报价源' : 'Quote source'} {item.price_source === 'alpha_vantage_time_series_intraday' ? 'Alpha Vantage Intraday' : 'Alpha Vantage Daily'}
+                                {language === 'zh' ? '报价源' : 'Quote source'} {item.price_source === 'alpha_vantage_time_series_intraday' ? 'Alpha Vantage Intraday' : item.price_source === 'yahoo_finance_daily_adjusted' ? 'Yahoo Finance Daily' : 'Alpha Vantage Daily'}
                               </span>
                             )}
                             {analysis.as_of && (
@@ -1472,7 +1472,7 @@ export function SignalsFeed({ token }: { token?: string | null }) {
                       <div className="signal-header">
                         <span className="signal-symbol">{getInstrumentLabel(signal)}</span>
                         <span className={`signal-side ${signal.action || signal.side}`}>
-                          {getActionLabel(signal.action || signal.side)}
+                          {getActionLabel(signal.content?.match(/(?:^|\n)Action: (BUY|SELL|HOLD)(?:\n|$)/)?.[1] || signal.action || signal.side)}
                         </span>
                       </div>
                       <div className="signal-meta">

@@ -368,7 +368,7 @@ def _decorate_stock_analysis_with_quote(base_payload: dict[str, Any]) -> dict[st
     fallback_quote = {
         "current_price": payload.get("current_price"),
         "price_as_of": fallback_price_as_of,
-        "price_source": "alpha_vantage_time_series_daily_adjusted",
+        "price_source": "yahoo_finance_daily_adjusted" if str(analysis.get("data_source", "")).startswith("Yahoo") else "alpha_vantage_time_series_daily_adjusted",
     }
     quote_payload = _get_stock_quote_payload(payload["symbol"]) or fallback_quote
     payload["current_price"] = quote_payload.get("current_price")

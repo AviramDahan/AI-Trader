@@ -1,14 +1,17 @@
 [CmdletBinding()]
-param([switch]$Wait)
+param([switch]$Wait, [switch]$Watchdog)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $runtimeDir = Join-Path $projectRoot '.runtime'
+if ($Watchdog -and (Test-Path (Join-Path $runtimeDir 'stop.request'))) { exit 0 }
 $pythonExe = Join-Path $projectRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path $pythonExe)) { throw 'Install service/requirements.txt into .venv first.' }
 if (-not (Test-Path (Join-Path $projectRoot 'PRIVATE_SETUP_CREDENTIALS.txt'))) {
     & $pythonExe (Join-Path $PSScriptRoot 'bootstrap_private_setup.py')
     if ($LASTEXITCODE -ne 0) { throw 'Private setup failed.' }
 }
+& $pythonExe (Join-Path $PSScriptRoot 'configure_stock_scanner.py')
+if ($LASTEXITCODE -ne 0) { throw 'Stock scanner configuration failed.' }
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
 $existing = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
     $_.CommandLine -like '*supervise_ai_trader.py*' -and $_.CommandLine -like "*$projectRoot*"

@@ -29,7 +29,8 @@ def require(response: requests.Response, label: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend-url", "-BackendUrl")
-    parser.add_argument("--paper-trade", action="store_true", help="Submit one simulated BTC order")
+    parser.add_argument("--require-stock-signal", action="store_true",
+                        help="Require an already-published live scanner signal and tracked paper position")
     args = parser.parse_args()
     if not URL_FILE.exists():
         raise RuntimeError("Backend URL is missing; run scripts/start-ai-trader.ps1 first")
@@ -73,15 +74,15 @@ def main() -> None:
         overview_available = overview.json().get("available", False)
         if not overview_available:
             print("GAP Financial Events: no market-intelligence snapshot is available")
-        require(
-            session.get(
+        stock_quote = session.get(
                 f"{backend_url}/api/price",
-                params={"symbol": "BTC", "market": "crypto"},
+                params={"symbol": "AAPL", "market": "us-stock"},
                 headers=headers,
                 timeout=30,
-            ),
-            "public crypto quote",
-        )
+            )
+        require(stock_quote, "current US-stock quote")
+        if float(stock_quote.json().get("price") or 0) <= 0:
+            raise RuntimeError("US-stock quote is invalid")
         require(
             session.get(f"{backend_url}/api/experiments", headers=headers, timeout=20),
             "experiments admin",
@@ -91,33 +92,36 @@ def main() -> None:
             "positions",
         )
 
-        if not args.paper_trade:
-            print("PASS read-only API verification; paper trade not requested")
+        activity = session.get(f"{backend_url}/api/runtime/activity", timeout=20)
+        require(activity, "stock scanner status")
+        activity_data = activity.json()
+        if not activity_data.get("paper_only") or activity_data.get("agent") != "us-stock-scanner":
+            raise RuntimeError("US-stock paper scanner is not active")
+
+        if not args.require_stock_signal:
+            print("PASS read-only API verification; no test signal was injected")
             if not overview_available:
                 raise RuntimeError("Incomplete E2E: Financial Events has no snapshot")
             return
-
-        paper_trade = session.post(
-            f"{backend_url}/api/signals/realtime",
-            headers={**headers, "Content-Type": "application/json"},
-            json={
-                "market": "crypto",
-                "action": "buy",
-                "symbol": "BTC",
-                "price": 1,
-                "quantity": 0.0001,
-                "content": "Automated end-to-end paper-trading verification",
-                "executed_at": "now",
-            },
-            timeout=30,
-        )
-        require(paper_trade, "paper trade submission")
-
-        positions = session.get(f"{backend_url}/api/positions", headers=headers, timeout=30)
-        require(positions, "paper position after trade")
-        if not positions.json().get("positions"):
-            raise RuntimeError("Paper trade did not create a position")
-        print("PASS end-to-end paper position persisted")
+        with sqlite3.connect(DB_FILE) as connection:
+            scanner = connection.execute("SELECT id, token FROM agents WHERE name=?", ("us-stock-scanner",)).fetchone()
+        if not scanner:
+            raise RuntimeError("Scanner identity is missing")
+        scanner_headers = {"Authorization": f"Bearer {scanner[1]}"}
+        signals = session.get(f"{backend_url}/api/signals/{scanner[0]}?message_type=operation&limit=50", timeout=30).json().get("signals", [])
+        signal = next((item for item in signals if item.get("market") == "us-stock" and
+                       str(item.get("content") or "").startswith("US STOCK SCANNER | PAPER TRADING ONLY")), None)
+        if not signal:
+            raise RuntimeError("No live strong stock signal has been published yet")
+        for field in ("Ticker:", "Company:", "Action:", "Entry:", "Take Profit:", "Stop Loss:",
+                      "Risk/Reward:", "Confidence:", "Time Horizon:", "Reason:", "Relevant News:", "Timestamp:"):
+            if field not in signal["content"]:
+                raise RuntimeError(f"Stock signal is missing {field}")
+        positions = session.get(f"{backend_url}/api/positions", headers=scanner_headers, timeout=30)
+        require(positions, "scanner paper positions")
+        if not any(item.get("symbol") == signal.get("symbol") for item in positions.json().get("positions", [])):
+            raise RuntimeError("Live scanner signal is not represented in paper positions")
+        print("PASS live stock signal format, UI feed record and paper position")
 
     if not overview_available:
         raise RuntimeError("Incomplete E2E: trading checks passed but Financial Events has no snapshot")

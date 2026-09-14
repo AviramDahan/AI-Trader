@@ -20,4 +20,4 @@ foreach ($name in @('tunnel', 'backend')) {
     if ($process -and $process.CommandLine -like $expected) { Stop-Process -Id $processId -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $pidFile -ErrorAction SilentlyContinue
 }
-if (-not $Quiet) { Write-Output 'AI-Trader stopped. It will start again at next Windows login; disable the AI-Trader-Paper task to remove autostart.' }
+if (-not $Quiet) { Write-Output 'AI-Trader stopped. The watchdog respects this stop until scripts/start-ai-trader.ps1 is run manually.' }

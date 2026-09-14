@@ -1,52 +1,85 @@
-# Local paper operation
+# Autonomous US-stock paper scanner
 
-This is the upstream React/FastAPI/SQLite application with a small local agent client,
-free data fallbacks, and Windows process supervision. It has no brokerage credentials.
+This keeps the upstream React/FastAPI/SQLite architecture. A local, non-admin scanner calls the
+original `/api/signals/realtime` endpoint, so strong signals are visible in the original Market /
+Trading Signals cards and their virtual positions are tracked by the original Positions and PnL UI.
+No broker SDK, broker credential, real order route, leverage, or real-money mode is configured.
 
-## What runs
+## Universe and schedule
 
-- Windows task `AI-Trader-Paper`: starts at this user's Windows login, not before login.
-  It watches the supervisor process and retries failures up to ten times, one minute apart.
-- Supervisor: loopback API, owned Serveo SSH tunnel, and Ollama recovery when needed.
-  Local health every ~20 seconds; public HTTPS every ~60 seconds; three failures trigger recovery.
-  Tunnel restart means a new hostname. GitHub variable `BACKEND_URL` and the Pages deployment
-  are updated. Visitors discover a non-secret `runtime-config.json` every 30 seconds and reload
-  after endpoint changes. Recovery includes deployment/CDN delay, generally several minutes.
-- Original background tasks: quotes, portfolio metrics, news every 15 minutes, macro/ETF daily-price
-  indicators hourly, stock analysis every two hours.
-- `ollama-paper-agent`: non-admin, local `qwen3.5:9b-q4_K_M`, one evaluation every 15 minutes.
-  Actual news and price observations go to Ollama. Decisions, including HOLD, appear in the
-  original Discussions feed and expandable PAPER TRADING ONLY panel. History survives restarts.
-  The panel polls every 15 seconds. The original market feeds can refresh more slowly.
+The default universe is the union of current S&P 500 and Nasdaq-100 constituents. Constituents are
+discovered automatically; users never enter tickers. S&P 500 membership/company names come from the
+Wikipedia constituent table and Nasdaq-100 membership/market-cap fields from Nasdaq's public API.
+The list is refreshed each scan and a seven-day local cache is allowed only if a source is temporarily
+unavailable. Within this large-cap universe, average 20-session dollar volume determines priority.
 
-## Guardrails
+The scanner starts 20 seconds after the backend and runs every 30 minutes by default. `STOCK_SCANNER_SCAN_INTERVAL`
+is configurable from 900 seconds upward. A complete scan downloads six months of adjusted daily OHLCV
+for the universe, filters all constituents, and sends only the highest-ranked candidates to Ollama.
+The scanner publishes at most three signals per scan. Outside US cash-market hours it may complete the
+daily/news/AI review, but it cannot publish or open a position without a current intraday quote.
 
-BTC spot paper positions only. Fixed loopback destination; no model-controlled URL or tools.
-Maximum $25 virtual order, $100 BTC exposure, four execution attempts per UTC day. No shorts
-or leverage. Confidence below 0.75, missing/stale news, invalid JSON or invalid prices prevent
-execution. A timeout after an order is sent pauses further orders (`order_pending`) until a human
-reconciles the original signals/positions against `.runtime/paper-agent.json`; never blindly retry.
-News is untrusted input. Confidence is model-reported, not a calibrated probability or a profit guarantee.
-The $25 sizing cap uses the observed quote; execution price movement can slightly change notional.
+## Data, news, and analysis
 
-Sources: BBC Business, Federal Reserve, CoinDesk and US EIA RSS (headlines, source links, original
-publication dates; sentiment explicitly unassessed); Yahoo Finance via yfinance for adjusted daily
-stock/ETF/BTC series; original Hyperliquid public quotes. ETF 'flows' are the upstream price/volume
-proxy, NOT measured institutional fund flows. Low-frequency official news may have older dates.
+- Adjusted daily and one-minute intraday OHLCV: Yahoo Finance through `yfinance` (free, no key, unofficial API).
+- Recent company news: Yahoo Finance search feed, accepted only when `relatedTickers` contains the exact ticker.
+  Headlines preserve publisher, link, and provider timestamp. The scanner uses titles/metadata only.
+- Basic market context: SPY and QQQ 20/50-day trend plus 20-session return from the same daily feed.
+- AI review: local Ollama model from `OLLAMA_MODEL`; headlines are explicitly treated as untrusted data.
+  Ollama assesses direction agreement, news sentiment/relevance, confidence, and horizon. It cannot select
+  tickers, URLs, order size, or bypass deterministic filters.
 
-## Start/stop (PowerShell, repository root)
+For each symbol the deterministic stage calculates price action, 20-day return, EMA20/EMA50, RSI(14),
+MACD(12,26,9) histogram, ATR(14), annualized 20-session realized volatility, 20-session high/low, volume
+ratio, and average dollar volume. Daily data older than four calendar days, missing context, missing/recently
+irrelevant news, or an intraday quote older than 12 minutes fails closed and produces no signal.
+
+## Strong-signal and paper rules
+
+Default filters (all configurable in the ignored `.env`):
+
+- average dollar volume >= $50M;
+- ATR between 1% and 8% of price;
+- technical agreement score >= 5 of 7;
+- Ollama confidence >= 80% and news relevance >= 60%;
+- news sentiment may not conflict with direction;
+- calculated risk/reward >= 2.0;
+- 24-hour same-ticker/same-direction duplicate cooldown;
+- maximum eight AI candidates and three published signals per scan.
+
+BUY requires the bullish trend/momentum pattern; SELL requires the bearish mirror. HOLD or any rejected
+candidate is retained in scanner status but is not published as a trade. A published SELL closes an existing
+long; otherwise the original paper engine represents it as a virtual short while the card's structured action
+remains SELL. An opposing short prevents a new BUY until reconciled.
+
+Entry is a one-minute quote no older than 12 minutes. Stop distance is the greater of 1.5 x ATR(14) and 1%
+of entry. For BUY, stop is below entry and target above; SELL is mirrored. Take Profit equals entry plus/minus
+stop distance x `STOCK_SCANNER_MIN_RISK_REWARD`. Rounded levels are rechecked against the minimum ratio.
+Each paper operation defaults to $100 notional, max $250 per symbol and $1,000 total scanner exposure.
+The backend independently resolves the execution quote; the card's normal Price field is the recorded price.
+Ambiguous execution timeouts set a reconciliation lock and are never retried automatically.
+
+Every published card contains: Ticker, Company, BUY/SELL, Entry, Take Profit, Stop Loss, Risk/Reward,
+Confidence, Time Horizon, Reason, Relevant News, and UTC Timestamp. The expandable scanner panel shows
+universe/data/candidate counts, recent AI reviews, rejected scans, last signal, last/next scan, and errors.
+
+## Configuration
+
+The documented keys live in `.env.example`. Secrets remain only in ignored `.env`, local SQLite, and
+`PRIVATE_SETUP_CREDENTIALS.txt` plus its DPAPI-encrypted backup. `STOCK_SCANNER_TOKEN` is never returned by
+the public runtime endpoint or bundled into GitHub Pages. Only public `BACKEND_URL` is a GitHub variable.
+
+## Start, stop, and verification
 
 ```powershell
-Start-ScheduledTask -TaskName AI-Trader-Paper
+.\scripts\start-ai-trader.ps1
 .\scripts\stop-ai-trader.ps1
 ```
 
-Manual start without Windows task: `.\scripts\start-ai-trader.ps1`.
-Reinstall login task: `.\scripts\install-ai-trader-autostart.ps1`.
-Disable future automatic starts: `Disable-ScheduledTask -TaskName AI-Trader-Paper`.
-Re-enable: `Enable-ScheduledTask -TaskName AI-Trader-Paper`.
-
-## Verification
+The per-user `AI-Trader-Paper` Windows task starts at login and checks once per minute. An explicit stop marker
+is respected until manual start clears it. The local supervisor recovers the backend, Ollama, and anonymous
+Serveo HTTPS tunnel; a rotating public endpoint triggers a Pages manifest deployment. The computer must stay
+awake, logged in, and online. GitHub Pages remains visible during a backend outage but live data cannot.
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip check
@@ -56,21 +89,16 @@ npm --prefix service/frontend run build
 .\.venv\Scripts\python.exe scripts/verify_browser.py
 ```
 
-Optional `verify_end_to_end.py --paper-trade` submits one explicitly labelled tiny admin test order.
-It does not claim the autonomous AI decided to buy. Browser QA dependencies:
-`python -m pip install -r scripts/requirements-qa.txt`, then `python -m playwright install chromium`.
+After a genuine strong signal has been published during market hours,
+`verify_end_to_end.py --require-stock-signal` also validates its complete format and paper position.
 
-## Limits and recovery
+Scanner unit tests mock data only inside the test process; they never insert demo signals. A live validation
+runs `stock_scanner.run_scan()` against the real constituent/data/news/Ollama providers and accepts zero
+published signals when filters or closed-market freshness rules reject every candidate. Never weaken filters
+or inject a fake signal merely to make the UI non-empty.
 
-NOT an always-on cloud host: this PC must stay awake, powered, online, and logged in. Nothing changes
-the user's global sleep or power policy. Free anonymous Serveo provides no SLA, may show interstitials,
-and terminates HTTPS at the provider. A browser interstitial/CORS error is a real outage, not a pass.
-Pages remains accessible independently but cannot show live data while the local backend is unreachable.
-A stable hosted service/domain would be needed for stronger availability guarantees.
-
-Diagnostics: `.runtime/supervisor.log`, `supervisor-status.json`, `backend.log`, `tunnel.log`, and
-`paper-agent.json` (redacted public activity only). The original server logs rotate independently.
-Do not expose `.runtime`, `.env`, SQLite or the private backup via static hosting.
-Private secrets stay in `PRIVATE_SETUP_CREDENTIALS.txt`, DPAPI encrypted backup, ignored `.env`,
-and local SQLite. Newly created credentials are appended without rotating the admin login.
-Only `BACKEND_URL` is a GitHub repository variable. No new GitHub secret is necessary.
+Known limits: Yahoo Finance and anonymous Serveo are free, unofficial/no-SLA services; universe scraping can
+change; headlines are not full-text articles; AI confidence is not calibrated; daily adjusted data does not
+capture all intraday regime changes; US holiday detection relies on availability of a fresh intraday quote;
+TP/SL are tracking levels, not standing orders, and the original application does not automatically exit at
+those levels. This is experimental paper trading, not investment advice.

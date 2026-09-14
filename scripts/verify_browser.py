@@ -27,9 +27,9 @@ def main():
             expect(panel).to_be_visible(timeout=15000)
             panel.locator("summary").click()
             activity = page.evaluate("async url => (await fetch(url)).json()", backend + "/api/runtime/activity")
-            assert activity["enabled"] and not activity["stale"] and activity["last_ai_at"]
-            assert activity["last_decision"] in ("HOLD", "BUY", "SELL"), activity["last_decision"]
-            expect(panel).to_contain_text(activity["last_decision"], timeout=15000)
+            assert activity["enabled"] and not activity["stale"] and activity["last_scan_at"]
+            assert activity["universe_count"] >= 500 and activity["data_count"] > 0
+            expect(panel).to_contain_text("US STOCK SCANNER", timeout=15000)
             for path in ["/health", "/api/claw/agents/count", "/api/trending", "/api/market-intel/overview"]:
                 result = page.evaluate("""async url => {
                     const response = await fetch(url);

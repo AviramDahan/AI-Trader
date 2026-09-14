@@ -115,17 +115,18 @@ export function BackendStatusBanner() {
   )
 }
 
-type PaperActivity = {
-  enabled: boolean; stale: boolean; status: string; model: string; last_decision?: string;
-  last_reason?: string; last_ai_at?: number; next_run_at?: number; headlines?: number;
-  news_updated_at?: string; limits: string;
+type ScannerActivity = {
+  enabled: boolean; stale: boolean; status: string; model: string; next_scan_at?: number;
+  last_scan_at?: number; universe_count?: number; data_count?: number; candidates_count?: number;
+  signals_published?: number; last_signal?: { ticker: string; action: string; confidence: number };
+  ai_reviews?: { ticker: string; action: string; confidence: number }[];
   events?: { at: number; action: string; reason: string }[];
 }
 
 function PaperActivityPanel() {
   const { language } = useLanguage()
   const he = language === 'he'
-  const [activity, setActivity] = useState<PaperActivity | null>(null)
+  const [activity, setActivity] = useState<ScannerActivity | null>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     let active = true
@@ -145,16 +146,17 @@ function PaperActivityPanel() {
   const state = failed ? (he ? 'סטטוס לא זמין' : 'Status unavailable')
     : !activity?.enabled ? (he ? 'לא פעיל' : 'Disabled')
     : activity.stale ? (he ? 'הסוכן לא התעדכן בזמן' : 'Agent heartbeat overdue')
-    : activity.status === 'analyzing' ? (he ? 'מנתח עם AI' : 'AI analyzing')
+    : activity.status === 'scanning' ? (he ? 'סורק מניות' : 'Scanning stocks')
     : activity.status === 'error' ? (he ? 'תקלה — המסחר מושהה' : 'Error — trading paused')
     : (he ? 'ממתין למחזור הבא' : 'Waiting for next cycle')
   return <details className="paper-activity-panel" data-testid="paper-activity">
-    <summary>{he ? 'מסחר מדומה בלבד' : 'PAPER TRADING ONLY'} · {state} · {activity?.last_decision || '—'}</summary>
-    <p>{he ? 'בדיקת AI אחרונה' : 'Last AI evaluation'}: {time(activity?.last_ai_at)} | {he ? 'מחזור הבא' : 'Next cycle'}: {time(activity?.next_run_at)}</p>
-    <p>{he ? 'חדשות קריפטו' : 'Crypto headlines'}: {activity?.headlines || 0} | {he ? 'נאספו' : 'Fetched'}: {activity?.news_updated_at ? new Date(activity.news_updated_at).toLocaleString() : '—'}</p>
-    <p>{activity?.last_reason}</p>
-    <p>{activity?.limits}</p>
-    <p>{he ? 'המחשב חייב להיות דולק ומחובר. המתנה היא החלטה תקינה; אין התחייבות לקנייה בכל מחזור.' : 'This computer must stay on and connected. HOLD is a valid decision; a cycle does not guarantee a trade.'}</p>
+    <summary>{he ? 'סורק מניות · מסחר מדומה בלבד' : 'US STOCK SCANNER · PAPER ONLY'} · {state}</summary>
+    <p>{he ? 'סריקה אחרונה' : 'Last scan'}: {time(activity?.last_scan_at)} | {he ? 'סריקה הבאה' : 'Next scan'}: {time(activity?.next_scan_at)}</p>
+    <p>{he ? 'יקום מניות' : 'Universe'}: {activity?.universe_count || 0} | {he ? 'נתונים תקינים' : 'Fresh datasets'}: {activity?.data_count || 0} | {he ? 'מועמדים' : 'Candidates'}: {activity?.candidates_count || 0}</p>
+    <p>{he ? 'אותות חזקים בסריקה האחרונה' : 'Strong signals in last scan'}: {activity?.signals_published || 0}</p>
+    {activity?.last_signal && <p>{he ? 'אות אחרון' : 'Last signal'}: {activity.last_signal.ticker} {activity.last_signal.action} ({Math.round(activity.last_signal.confidence * 100)}%)</p>}
+    {!!activity?.ai_reviews?.length && <p>{he ? 'בדיקות AI אחרונות' : 'Recent AI reviews'}: {activity.ai_reviews.map(item => `${item.ticker} ${item.action} ${Math.round(item.confidence * 100)}%`).join(' · ')}</p>}
+    <p>{he ? 'אות מתפרסם רק עם מחיר תוך־יומי וחדשות עדכניים, ובשעות המסחר. HOLD ודחיות מוצגים בסטטוס אך אינם יוצרים פוזיציה.' : 'A signal is published only with a fresh intraday quote and recent relevant news during market hours. HOLD/rejections remain status events and do not create positions.'}</p>
     <ol>{activity?.events?.slice(0, 8).map((item, index) => <li key={`${item.at}-${index}`}>
       <time>{time(item.at)}</time> · {item.action}: {item.reason}
     </li>)}</ol>
