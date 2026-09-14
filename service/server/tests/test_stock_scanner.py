@@ -191,8 +191,10 @@ class StockScannerTests(unittest.TestCase):
             stock_scanner._track_signal(state, signal, cfg)
         self.assertEqual(state["tracked_signals"][0]["signal_alert"], "sent")
         self.assertEqual(state["tracked_signals"][0]["entry_alert"], "sent")
-        self.assertIn("NEW STRONG SIGNAL", messages[0])
-        self.assertIn("ENTRY REACHED", messages[1])
+        self.assertIn("אות מסחר חזק חדש", messages[0])
+        self.assertIn("מחיר הכניסה הושג", messages[1])
+        self.assertIn("פעולה: קנייה", messages[0])
+        self.assertIn("טווח זמן: 1–4 שבועות", messages[0])
 
     def test_telegram_tp_and_sl_alert_paths(self):
         base = {"ticker": "AAPL", "company": "Apple", "action": "BUY", "entry": 100,
@@ -200,7 +202,8 @@ class StockScannerTests(unittest.TestCase):
                 "time_horizon": "1-4 weeks", "reason": "Aligned", "relevant_news": [],
                 "timestamp": "2026-01-01T00:00:00Z", "status": "OPEN"}
         cfg = config() | {"telegram_enabled": True, "telegram_level_alerts": True}
-        for price, expected in ((106.5, "TP REACHED"), (96.5, "SL REACHED")):
+        for price, expected, expected_he in ((106.5, "TP", "יעד הרווח הושג"),
+                                             (96.5, "SL", "עצירת ההפסד הופעלה")):
             with self.subTest(expected=expected), tempfile.TemporaryDirectory() as directory:
                 messages = []
                 with patch.object(stock_scanner, "STATE_FILE", Path(directory) / "state.json"), \
@@ -210,8 +213,8 @@ class StockScannerTests(unittest.TestCase):
                                   side_effect=lambda message, _cfg: messages.append(message) or "sent"):
                     stock_scanner.save_state({"tracked_signals": [dict(base)], "events": []})
                     result = stock_scanner.monitor_tracked_signals()
-                self.assertEqual(result["hits"][0]["level"], expected[:2])
-                self.assertIn(expected, messages[0])
+                self.assertEqual(result["hits"][0]["level"], expected)
+                self.assertIn(expected_he, messages[0])
 
     def test_tp_sl_monitor_records_win_without_submitting_order(self):
         with tempfile.TemporaryDirectory() as directory:

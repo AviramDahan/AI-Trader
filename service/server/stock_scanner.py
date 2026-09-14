@@ -588,14 +588,32 @@ def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list
 
 
 def _telegram_message(signal: dict[str, Any], event: str = "NEW STRONG SIGNAL") -> str:
+    event_he = {
+        "NEW STRONG SIGNAL": "אות מסחר חזק חדש",
+        "ENTRY REACHED": "מחיר הכניסה הושג",
+    }.get(event, event)
+    if event.startswith("TP REACHED @"):
+        event_he = event.replace("TP REACHED @", "יעד הרווח הושג במחיר", 1)
+    elif event.startswith("SL REACHED @"):
+        event_he = event.replace("SL REACHED @", "עצירת ההפסד הופעלה במחיר", 1)
+    action_he = {"BUY": "קנייה", "SELL": "מכירה", "HOLD": "החזקה"}.get(
+        str(signal["action"]).upper(), str(signal["action"])
+    )
+    horizon = str(signal["time_horizon"])
+    horizon_he = {
+        "intraday": "תוך־יומי",
+        "1-5 days": "1–5 ימים",
+        "1-4 weeks": "1–4 שבועות",
+        "1-3 months": "1–3 חודשים",
+    }.get(horizon.lower(), horizon)
     news = " | ".join(item.get("title", "") for item in signal.get("relevant_news", [])[:3])
     return "\n".join([
-        f"AI-Trader PAPER ONLY | {event}",
-        f"Ticker: {signal['ticker']}", f"Company: {signal['company']}", f"Action: {signal['action']}",
-        f"Entry: ${float(signal['entry']):.2f}", f"TP: ${float(signal['take_profit']):.2f}",
-        f"SL: ${float(signal['stop_loss']):.2f}", f"Risk/Reward: {float(signal['risk_reward']):.2f}",
-        f"Confidence: {float(signal['confidence']):.0%}", f"Time Horizon: {signal['time_horizon']}",
-        f"Reason: {signal['reason']}", f"Relevant News: {news or 'None'}",
+        f"AI-Trader — מסחר מדומה בלבד | {event_he}",
+        f"סימול: {signal['ticker']}", f"חברה: {signal['company']}", f"פעולה: {action_he}",
+        f"מחיר כניסה: ${float(signal['entry']):.2f}", f"יעד רווח: ${float(signal['take_profit']):.2f}",
+        f"עצירת הפסד: ${float(signal['stop_loss']):.2f}", f"יחס סיכון/סיכוי: {float(signal['risk_reward']):.2f}",
+        f"רמת ביטחון: {float(signal['confidence']):.0%}", f"טווח זמן: {horizon_he}",
+        f"סיבה: {signal['reason']}", f"חדשות רלוונטיות: {news or 'אין'}",
     ])[:4000]
 
 
