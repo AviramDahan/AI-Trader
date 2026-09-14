@@ -1245,6 +1245,249 @@ def init_database():
         )
     """)
 
+    # Durable US-stock scanner lifecycle. These tables are deliberately separate
+    # from the original social trading tables so legacy/demo history is preserved.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id INTEGER NOT NULL UNIQUE,
+            initial_cash REAL NOT NULL,
+            cash REAL NOT NULL,
+            realized_pnl REAL NOT NULL DEFAULT 0,
+            fees_paid REAL NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            external_signal_id INTEGER,
+            agent_id INTEGER NOT NULL,
+            scan_id TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            company TEXT NOT NULL,
+            action TEXT NOT NULL,
+            status TEXT NOT NULL,
+            planned_entry REAL NOT NULL,
+            actual_entry REAL,
+            entry_type TEXT NOT NULL,
+            valid_until TEXT NOT NULL,
+            original_stop REAL NOT NULL,
+            current_stop REAL NOT NULL,
+            tp1 REAL NOT NULL,
+            tp2 REAL NOT NULL,
+            tp3 REAL NOT NULL,
+            tp1_pct REAL NOT NULL,
+            tp2_pct REAL NOT NULL,
+            tp3_pct REAL NOT NULL,
+            rr1 REAL NOT NULL,
+            rr2 REAL NOT NULL,
+            rr3 REAL NOT NULL,
+            weighted_rr REAL NOT NULL,
+            confidence REAL NOT NULL,
+            confidence_basis TEXT NOT NULL,
+            time_horizon TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            reason_he TEXT NOT NULL,
+            news_json TEXT NOT NULL,
+            technical_json TEXT NOT NULL,
+            market_context_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            legacy_unverified INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (agent_id) REFERENCES agents(id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            company TEXT,
+            stage TEXT NOT NULL,
+            status TEXT NOT NULL,
+            reason TEXT,
+            metrics_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id INTEGER NOT NULL,
+            client_order_key TEXT NOT NULL UNIQUE,
+            purpose TEXT NOT NULL,
+            side TEXT NOT NULL,
+            order_type TEXT NOT NULL,
+            limit_price REAL NOT NULL,
+            quantity REAL NOT NULL,
+            filled_quantity REAL NOT NULL DEFAULT 0,
+            average_fill_price REAL,
+            status TEXT NOT NULL,
+            valid_until TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (signal_id) REFERENCES scanner_signals(id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id INTEGER NOT NULL,
+            order_id INTEGER NOT NULL,
+            agent_id INTEGER NOT NULL,
+            ticker TEXT NOT NULL,
+            company TEXT NOT NULL,
+            side TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            is_shadow INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL,
+            original_quantity REAL NOT NULL,
+            remaining_quantity REAL NOT NULL,
+            entry_price REAL NOT NULL,
+            original_stop REAL NOT NULL,
+            current_stop REAL NOT NULL,
+            original_r REAL NOT NULL,
+            tp1 REAL NOT NULL,
+            tp2 REAL NOT NULL,
+            tp3 REAL NOT NULL,
+            tp1_pct REAL NOT NULL,
+            tp2_pct REAL NOT NULL,
+            tp3_pct REAL NOT NULL,
+            settings_json TEXT NOT NULL,
+            realized_pnl REAL NOT NULL DEFAULT 0,
+            unrealized_pnl REAL NOT NULL DEFAULT 0,
+            fees REAL NOT NULL DEFAULT 0,
+            slippage REAL NOT NULL DEFAULT 0,
+            opened_at TEXT NOT NULL,
+            closed_at TEXT,
+            outcome TEXT,
+            last_price REAL,
+            last_bar_at TEXT,
+            UNIQUE(signal_id, strategy),
+            FOREIGN KEY (signal_id) REFERENCES scanner_signals(id),
+            FOREIGN KEY (order_id) REFERENCES scanner_orders(id),
+            FOREIGN KEY (agent_id) REFERENCES agents(id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_fills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id INTEGER NOT NULL,
+            order_id INTEGER,
+            event_key TEXT NOT NULL UNIQUE,
+            fill_type TEXT NOT NULL,
+            target_index INTEGER,
+            price REAL NOT NULL,
+            quantity REAL NOT NULL,
+            gross_pnl REAL NOT NULL DEFAULT 0,
+            fee REAL NOT NULL DEFAULT 0,
+            slippage REAL NOT NULL DEFAULT 0,
+            bar_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (trade_id) REFERENCES scanner_trades(id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_price_cursors (
+            ticker TEXT PRIMARY KEY,
+            last_bar_at TEXT,
+            status TEXT NOT NULL,
+            last_attempt_at TEXT,
+            last_success_at TEXT,
+            error TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_news (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fingerprint TEXT NOT NULL UNIQUE,
+            signal_id INTEGER,
+            ticker TEXT,
+            scope TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary_he TEXT,
+            publisher TEXT NOT NULL,
+            url TEXT NOT NULL,
+            published_at TEXT NOT NULL,
+            sentiment TEXT,
+            relevance REAL,
+            impact TEXT,
+            materiality TEXT,
+            thesis_effect TEXT,
+            interpretation_he TEXT,
+            analysis_status TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            FOREIGN KEY (signal_id) REFERENCES scanner_signals(id)
+        )
+    """)
+    try:
+        cursor.execute("ALTER TABLE scanner_news ADD COLUMN signal_id INTEGER")
+    except Exception:
+        pass
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_trade_news (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id INTEGER NOT NULL,
+            news_id INTEGER NOT NULL,
+            linked_at TEXT NOT NULL,
+            UNIQUE(trade_id, news_id),
+            FOREIGN KEY (trade_id) REFERENCES scanner_trades(id),
+            FOREIGN KEY (news_id) REFERENCES scanner_news(id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_news_schedule (
+            ticker TEXT PRIMARY KEY,
+            last_attempt_at TEXT,
+            last_success_at TEXT,
+            next_due_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_telegram_outbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dedupe_key TEXT NOT NULL UNIQUE,
+            event_type TEXT NOT NULL,
+            message TEXT NOT NULL,
+            status TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at TEXT NOT NULL,
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            sent_at TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_service_status (
+            component TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            last_attempt_at TEXT,
+            last_success_at TEXT,
+            detail TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_settings (
+            key TEXT PRIMARY KEY,
+            value_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_legacy_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            source_key TEXT NOT NULL UNIQUE,
+            payload_json TEXT NOT NULL,
+            imported_at TEXT NOT NULL,
+            verified INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+
     # Add market column if it doesn't exist (for existing databases)
     try:
         cursor.execute("ALTER TABLE positions ADD COLUMN market TEXT NOT NULL DEFAULT 'us-stock'")
@@ -1686,6 +1929,13 @@ def init_database():
         CREATE INDEX IF NOT EXISTS idx_stock_analysis_market_symbol
         ON stock_analysis_snapshots(market, symbol)
     """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_signals_status_created ON scanner_signals(status, created_at DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_orders_status_valid ON scanner_orders(status, valid_until)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_trades_status_shadow ON scanner_trades(status, is_shadow)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_fills_trade_created ON scanner_fills(trade_id, created_at)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_news_published ON scanner_news(published_at DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_news_ticker_published ON scanner_news(ticker, published_at DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_outbox_status_due ON scanner_telegram_outbox(status, next_attempt_at)")
 
     if not using_postgres():
         conn.commit()

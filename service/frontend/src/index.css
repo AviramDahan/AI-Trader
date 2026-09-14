@@ -3594,3 +3594,70 @@ a {
 .paper-activity-panel summary { cursor: pointer; font-weight: 600; }
 .paper-activity-panel p, .paper-activity-panel li { margin-block: 8px; }
 .paper-activity-panel ol { padding-inline-start: 18px; }
+
+/* Autonomous scanner dashboard: extends the original visual system without a redesign. */
+.scanner-dashboard { width: 100%; max-width: 1180px; margin: 0 auto; min-width: 0; }
+.scanner-hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; padding: 24px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 16px; }
+.scanner-hero h1 { margin: 4px 0 8px; }
+.scanner-hero p { margin: 0; color: var(--text-secondary); }
+.scanner-kicker { font-size: 12px; font-weight: 800; letter-spacing: .12em; color: var(--accent-primary) !important; }
+.paper-only { flex: 0 0 auto; padding: 9px 12px; border-radius: 999px; color: #fff; background: #b42318; font-size: 12px; letter-spacing: .04em; }
+.scanner-stage-grid, .scanner-account-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
+.scanner-account-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.scanner-stat { min-width: 0; padding: 14px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-secondary); }
+.scanner-stat span { display: block; color: var(--text-secondary); font-size: 12px; }
+.scanner-stat strong { display: block; margin-top: 5px; font-size: 21px; overflow-wrap: anywhere; }
+.scanner-tabs { display: flex; gap: 8px; margin: 18px 0; overflow-x: auto; scrollbar-width: thin; }
+.scanner-tabs button, .scanner-strategy-controls button, .scanner-inline-error button { border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); padding: 10px 14px; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+.scanner-tabs button.active { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); }
+.scanner-section { min-width: 0; }
+.scanner-section h2 { display: flex; align-items: center; gap: 8px; margin: 24px 0 12px; }
+.scanner-section h2 small { font-size: 12px; background: var(--bg-tertiary); padding: 4px 8px; border-radius: 999px; }
+.scanner-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.scanner-signal-card, .scanner-trade-card, .scanner-news-card, .scanner-status { min-width: 0; padding: 18px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 14px; overflow-wrap: anywhere; }
+.scanner-signal-card header, .scanner-trade-card header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.scanner-signal-card header div span { display: block; margin-top: 3px; color: var(--text-secondary); }
+.scanner-ticker { font-size: 22px; }
+.scanner-action, .scanner-chip { display: inline-block; padding: 4px 8px; border-radius: 999px; background: var(--bg-tertiary); font-size: 12px; font-weight: 800; }
+.scanner-action.buy { color: #067647; background: #ecfdf3; }
+.scanner-action.sell { color: #b42318; background: #fef3f2; }
+.scanner-levels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 15px 0; }
+.scanner-levels span { color: var(--text-secondary); font-size: 12px; }
+.scanner-levels b { display: block; color: var(--text-primary); font-size: 16px; }
+.scanner-targets { display: grid; gap: 5px; padding: 12px; background: var(--bg-tertiary); border-radius: 10px; }
+.scanner-signal-card footer, .scanner-news-card footer { border-top: 1px solid var(--border-color); margin-top: 12px; padding-top: 10px; color: var(--text-secondary); font-size: 12px; }
+.scanner-signal-card pre { white-space: pre-wrap; max-width: 100%; font-size: 11px; }
+.scanner-empty, .scanner-note, .scanner-warning, .scanner-inline-error { padding: 16px; border-radius: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-secondary); }
+.scanner-warning, .scanner-inline-error { border-color: #f79009; }
+.scanner-inline-error { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.scanner-rejected { margin-top: 20px; padding: 14px; border: 1px solid var(--border-color); border-radius: 12px; }
+.scanner-table-wrap { overflow-x: auto; border: 1px solid var(--border-color); border-radius: 12px; }
+.scanner-table { width: 100%; border-collapse: collapse; min-width: 760px; background: var(--bg-secondary); }
+.scanner-table th, .scanner-table td { text-align: start; padding: 12px; border-bottom: 1px solid var(--border-color); }
+.scanner-filters, .scanner-strategy-controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.scanner-filters input, .scanner-filters select { min-height: 42px; padding: 8px 11px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 9px; }
+.scanner-news-card { margin-bottom: 10px; }
+.scanner-news-card h3 { margin: 10px 0; font-size: 17px; }
+.scanner-status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.scanner-status.ok { border-inline-start: 4px solid #12b76a; }
+.scanner-status.error { border-inline-start: 4px solid #f04438; }
+.scanner-status.waiting, .scanner-status.no_new { border-inline-start: 4px solid #f79009; }
+.scanner-sidebar-notice { display: grid; gap: 6px; padding: 14px; border: 1px solid #b42318; border-radius: 12px; background: var(--bg-tertiary); }
+.scanner-sidebar-notice strong { color: #f97066; font-size: 12px; }
+.scanner-sidebar-notice span { color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
+
+@media (max-width: 900px) {
+  .scanner-stage-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .scanner-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .scanner-dashboard { width: 100%; }
+  .scanner-hero { display: grid; padding: 16px; gap: 14px; }
+  .paper-only { justify-self: start; }
+  .scanner-stage-grid, .scanner-account-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scanner-card-grid, .scanner-status-grid { grid-template-columns: minmax(0, 1fr); }
+  .scanner-tabs { margin-inline: -4px; padding: 0 4px 4px; }
+  .scanner-signal-card, .scanner-trade-card, .scanner-news-card { padding: 14px; }
+  .scanner-inline-error { align-items: flex-start; flex-direction: column; }
+  .scanner-filters input, .scanner-filters select { width: 100%; }
+}

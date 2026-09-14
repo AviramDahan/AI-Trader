@@ -535,56 +535,31 @@ def format_signal(candidate: dict[str, Any], decision: dict[str, Any], news: lis
 
 def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list[dict[str, Any]],
                  quote: tuple[float, str], portfolio: dict[str, Any], cfg: dict[str, Any], api) -> dict[str, Any] | None:
-    """Publish a paper signal; SELL never creates or increases a short position."""
+    """Publish to the original strategy feed without executing a trade.
+
+    The durable scanner lifecycle creates a pending paper order separately. This
+    keeps signal creation distinct from execution and guarantees SELL never opens
+    a short position.
+    """
     ticker, direction = candidate["ticker"], decision["action"]
     price, quote_at = quote
-    positions = portfolio.get("positions") or []
-    position = next((row for row in positions if row.get("market") == "us-stock" and row.get("symbol") == ticker), None)
-    total_exposure = sum(abs(float(row.get("quantity") or 0) * float(row.get("current_price") or row.get("entry_price") or 0)) for row in positions)
-    held_quantity = abs(float((position or {}).get("quantity") or 0))
-    held_side = (position or {}).get("side")
-    if direction == "BUY" and held_side == "short":
-        return None
     take_profit, stop_loss, risk_reward = levels(direction, price, candidate["atr"], cfg["min_risk_reward"])
     if risk_reward + .001 < cfg["min_risk_reward"]:
         return None
     timestamp = datetime.now(timezone.utc).isoformat()
     content = format_signal(candidate, decision, news, price, take_profit, stop_loss, risk_reward, timestamp)
-    if direction == "SELL" and not (held_side == "long" and held_quantity > 0):
-        result = api("POST", "/signals/strategy", json={
-            "market": "us-stock", "title": f"SELL {ticker} | Paper signal", "content": content,
-            "symbols": ticker, "tags": "stock-scanner,paper-only,sell-signal",
-        })
-        return {"ticker": ticker, "company": candidate["company"], "action": direction,
-                "entry": price, "take_profit": take_profit, "stop_loss": stop_loss,
-                "risk_reward": risk_reward, "confidence": decision["confidence"],
-                "time_horizon": decision["time_horizon"], "reason": decision["reason"],
-                "relevant_news": news[:3], "timestamp": timestamp, "quote_at": quote_at,
-                "signal_id": result.get("signal_id"), "paper_quantity": 0,
-                "paper_execution": "signal_only", "message_type": "strategy"}
-    order_action = "buy"
-    max_notional = min(cfg["paper_notional"], max(0, cfg["max_total_exposure"] - total_exposure))
-    if direction == "SELL":
-        order_action = "sell"
-        quantity = min(held_quantity, cfg["paper_notional"] / price)
-    else:
-        current_symbol_notional = held_quantity * price if held_side == "long" else 0
-        max_notional = min(max_notional, float(portfolio.get("cash") or 0),
-                           max(0, cfg["max_symbol_exposure"] - current_symbol_notional))
-        quantity = max_notional / price
-    quantity = math.floor(quantity * 1_000_000) / 1_000_000
-    if quantity <= 0:
-        return None
-    result = api("POST", "/signals/realtime", json={"market": "us-stock", "symbol": ticker,
-        "action": order_action, "price": price, "quantity": quantity, "executed_at": "now", "content": content})
+    result = api("POST", "/signals/strategy", json={
+        "market": "us-stock", "title": f"{direction} {ticker} | Paper signal", "content": content,
+        "symbols": ticker, "tags": f"stock-scanner,paper-only,{direction.lower()}-signal",
+    })
     return {"ticker": ticker, "company": candidate["company"], "action": direction,
-            "entry": result.get("price", price), "take_profit": take_profit, "stop_loss": stop_loss,
+            "entry": price, "take_profit": take_profit, "stop_loss": stop_loss,
             "risk_reward": risk_reward, "confidence": decision["confidence"],
             "time_horizon": decision["time_horizon"], "reason": decision["reason"],
             "relevant_news": news[:3], "timestamp": timestamp, "quote_at": quote_at,
-            "signal_id": result.get("signal_id"), "paper_quantity": quantity,
-            "paper_execution": "long_opened" if direction == "BUY" else "long_closed",
-            "message_type": "operation"}
+            "signal_id": result.get("signal_id"), "paper_quantity": 0,
+            "paper_execution": "pending_entry" if direction == "BUY" else "signal_or_pending_close",
+            "message_type": "strategy"}
 
 
 def _localize_telegram_signal(signal: dict[str, Any]) -> dict[str, Any]:
@@ -716,43 +691,19 @@ def _track_signal(state: dict[str, Any], signal: dict[str, Any], cfg: dict[str, 
 
 @_state_synchronized
 def monitor_tracked_signals() -> dict[str, Any]:
-    """Record virtual TP/SL outcomes; this never submits an order."""
-    cfg = settings()
-    state = read_state()
-    tracked = state.get("tracked_signals") if isinstance(state.get("tracked_signals"), list) else []
-    checked, hits = 0, []
-    for signal in tracked:
-        if signal.get("status") != "OPEN":
-            continue
-        quote = current_intraday_quote(signal["ticker"])
-        if quote is None:
-            continue
-        checked += 1
-        price, quote_at = quote
-        action = signal["action"]
-        tp_hit = price >= float(signal["take_profit"]) if action == "BUY" else price <= float(signal["take_profit"])
-        sl_hit = price <= float(signal["stop_loss"]) if action == "BUY" else price >= float(signal["stop_loss"])
-        if not tp_hit and not sl_hit:
-            continue
-        signal.update(status="TP_HIT" if tp_hit else "SL_HIT", outcome="WIN" if tp_hit else "LOSS",
-                      hit_price=price, hit_at=quote_at)
-        if cfg.get("telegram_enabled") and cfg.get("telegram_level_alerts"):
-            signal["level_alert"] = send_telegram(_telegram_message(
-                signal, f"{'TP' if tp_hit else 'SL'} REACHED @ ${price:.2f}"), cfg)
-        hits.append({"ticker": signal["ticker"], "level": "TP" if tp_hit else "SL", "price": price})
-        state["events"] = ([{"at": time.time(), "action": signal["status"],
-                             "reason": f"{signal['ticker']} paper level reached at ${price:.2f}; outcome {signal['outcome']}"}]
-                           + state.get("events", []))[:40]
-    state.update(last_level_monitor_at=time.time(), level_monitor_checked=checked,
-                 recent_level_hits=hits[-10:])
-    save_state(state)
-    return {"checked": checked, "hits": hits}
+    """Compatibility wrapper for the durable OHLC paper lifecycle monitor."""
+    from scanner_engine import monitor_prices
+    return monitor_prices()
 
 
 @_state_synchronized
 def run_scan() -> dict[str, Any]:
+    from scanner_engine import (initialize_runtime, record_candidates, record_scan_news,
+                                record_signal, set_service_status)
+    initialize_runtime()
     cfg = settings()
     state = read_state()
+    scan_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     state.update(mode="paper", agent="us-stock-scanner", model=os.getenv("OLLAMA_MODEL"), status="scanning",
                  last_started_at=time.time(), next_scan_at=time.time() + cfg["interval"], filters=cfg)
     save_state(state)
@@ -773,6 +724,7 @@ def run_scan() -> dict[str, Any]:
     history_symbols = sorted(set(symbols + ["SPY", "QQQ"]))
     histories, cache_info = load_historical_data(history_symbols, cfg)
     context = _market_context(histories)
+    set_service_status("prices", "ok", f"daily_history={max(0, len(histories)-2)} cache={cache_info.get('status')}", success=True)
     technical_candidates = []
     for symbol in symbols:
         if symbol not in histories:
@@ -786,8 +738,10 @@ def run_scan() -> dict[str, Any]:
                                                  row.get("market_cap") or 0), reverse=True)
     shortlist = technical_candidates[:cfg["shortlist_limit"]]
     ranked_candidates, news_rejected = enrich_and_rank_candidates(shortlist, context, cfg)
+    set_service_status("news", "ok" if ranked_candidates else "no_new",
+                       f"shortlist={len(shortlist)} enriched={len(ranked_candidates)} rejected={len(news_rejected)}",
+                       success=True)
     candidates = ranked_candidates[:cfg["ai_candidate_limit"]]
-    portfolio = api("GET", "/positions")
     cooldowns = state.get("cooldowns") if isinstance(state.get("cooldowns"), dict) else {}
     cutoff = time.time() - cfg["cooldown_hours"] * 3600
     cooldowns = {key: value for key, value in cooldowns.items() if float(value) >= cutoff}
@@ -796,7 +750,12 @@ def run_scan() -> dict[str, Any]:
         ticker = candidate["ticker"]
         try:
             news = candidate["news"]
-            decision = ai_review(candidate, news, context)
+            try:
+                decision = ai_review(candidate, news, context)
+                set_service_status("ollama", "ok", f"Reviewed {ticker}", success=True)
+            except Exception as exc:
+                set_service_status("ollama", "error", f"{ticker}:{type(exc).__name__}")
+                raise
             reviews.append({"ticker": ticker, "action": decision["action"], "confidence": decision["confidence"],
                             "news_sentiment": decision["news_sentiment"], "news_relevance": decision["news_relevance"],
                             "combined_rank_score": candidate["combined_rank_score"]})
@@ -814,31 +773,24 @@ def run_scan() -> dict[str, Any]:
             if quote is None:
                 rejected.append({"ticker": ticker, "reason": "no_fresh_intraday_quote_or_market_closed"})
                 continue
-            if state.get("order_pending"):
-                rejected.append({"ticker": ticker, "reason": "execution_reconciliation_required"})
-                continue
-            state["order_pending"] = {"ticker": ticker, "action": decision["action"], "started_at": time.time()}
-            save_state(state)
-            signal = _paper_order(candidate, decision, news, quote, portfolio, cfg, api)
-            state["order_pending"] = None
+            signal = _paper_order(candidate, decision, news, quote, {}, cfg, api)
             if signal:
+                signal = _localize_telegram_signal(signal)
+                lifecycle = record_signal(signal, candidate, decision, context, scan_id)
+                signal["lifecycle_id"] = lifecycle["id"]
+                signal["paper_execution"] = lifecycle["status"].lower()
                 published.append(signal)
                 cooldowns[cooldown_key] = time.time()
-                _track_signal(state, signal, cfg)
-                portfolio = api("GET", "/positions")
                 add_event(state, decision["action"],
                           f"{ticker} paper signal published ({signal['paper_execution']}); confidence {decision['confidence']:.0%}")
             if len(published) >= cfg["max_signals"]:
                 break
         except requests.Timeout:
-            # If an execution was pending, preserve it and never retry automatically.
             rejected.append({"ticker": ticker, "reason": "timeout_fail_closed"})
         except Exception as exc:
-            if state.get("order_pending"):
-                # Definite HTTP errors are safe to retry next scan; ambiguous connection errors are not.
-                if isinstance(exc, requests.HTTPError) and exc.response is not None:
-                    state["order_pending"] = None
             rejected.append({"ticker": ticker, "reason": f"{type(exc).__name__}_fail_closed"})
+    record_candidates(scan_id, technical_candidates, rejected)
+    record_scan_news(ranked_candidates, published)
     state.update(status="waiting", last_scan_at=time.time(), last_completed_at=time.time(),
                   universe_count=len(universe), data_count=max(0, len(histories) - 2),
                   technical_candidates_count=len(technical_candidates), shortlist_count=len(shortlist),
@@ -849,6 +801,9 @@ def run_scan() -> dict[str, Any]:
     add_event(state, "SCAN", f"Scanned {len(universe)} constituents; enriched {len(shortlist)} technical candidates; "
                               f"sent {len(candidates)} to AI; published {len(published)} strong paper signals")
     save_state(state)
+    set_service_status("scan", "ok" if published else "no_signals", f"universe={len(universe)} data={max(0, len(histories)-2)} "
+                       f"technical={len(technical_candidates)} news={len(shortlist)} ai={len(candidates)} signals={len(published)}",
+                       success=True)
     return state
 
 
@@ -868,6 +823,8 @@ async def stock_scanner_loop() -> None:
             state = read_state()
             state.update(status="error", next_scan_at=time.time() + cfg["interval"])
             add_event(state, "ERROR", f"Scan stopped safely ({type(exc).__name__}); no signal published")
+            from scanner_engine import set_service_status
+            set_service_status("scan", "error", type(exc).__name__)
         await asyncio.sleep(1)
 
 
@@ -881,7 +838,52 @@ async def stock_signal_monitor_loop() -> None:
         except Exception as exc:
             state = read_state()
             add_event(state, "MONITOR_ERROR", f"TP/SL monitor failed safely ({type(exc).__name__})")
+            from scanner_engine import set_service_status
+            set_service_status("monitor", "error", type(exc).__name__)
         await asyncio.sleep(settings()["level_monitor_interval"])
+
+
+async def stock_position_news_loop() -> None:
+    if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
+        return
+    from scanner_engine import monitor_position_news
+    await asyncio.sleep(60)
+    while True:
+        try:
+            await asyncio.to_thread(monitor_position_news)
+        except Exception as exc:
+            from scanner_engine import set_service_status
+            set_service_status("position_news", "error", type(exc).__name__)
+        await asyncio.sleep(300)
+
+
+async def stock_news_translation_loop() -> None:
+    if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
+        return
+    from scanner_engine import ingest_market_news, translate_pending_news
+    await asyncio.sleep(90)
+    while True:
+        try:
+            await asyncio.to_thread(ingest_market_news)
+            await asyncio.to_thread(translate_pending_news)
+        except Exception as exc:
+            from scanner_engine import set_service_status
+            set_service_status("news", "error", type(exc).__name__)
+        await asyncio.sleep(600)
+
+
+async def stock_telegram_outbox_loop() -> None:
+    if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
+        return
+    from scanner_engine import process_telegram_outbox
+    await asyncio.sleep(30)
+    while True:
+        try:
+            await asyncio.to_thread(process_telegram_outbox)
+        except Exception as exc:
+            from scanner_engine import set_service_status
+            set_service_status("telegram", "error", type(exc).__name__)
+        await asyncio.sleep(30)
 
 
 def public_status() -> dict[str, Any]:

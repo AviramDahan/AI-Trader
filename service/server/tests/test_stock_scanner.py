@@ -154,10 +154,10 @@ class StockScannerTests(unittest.TestCase):
                                             {"positions": [], "cash": 100000}, config(), api)
         self.assertEqual(calls[0][0], "/signals/strategy")
         self.assertNotIn("short", json.dumps(calls).lower())
-        self.assertEqual(signal["paper_execution"], "signal_only")
+        self.assertEqual(signal["paper_execution"], "signal_or_pending_close")
         self.assertEqual(signal["paper_quantity"], 0)
 
-    def test_sell_closes_existing_long_paper_position(self):
+    def test_sell_never_executes_directly_even_with_existing_long(self):
         calls = []
         def api(method, path, **kwargs):
             calls.append((path, kwargs["json"]))
@@ -169,9 +169,9 @@ class StockScannerTests(unittest.TestCase):
         portfolio = {"positions": [{"market": "us-stock", "symbol": "MSFT", "side": "long",
                                     "quantity": 1, "entry_price": 110, "current_price": 100}], "cash": 100000}
         signal = stock_scanner._paper_order(candidate, decision, [], (100, "now"), portfolio, config(), api)
-        self.assertEqual(calls[0][0], "/signals/realtime")
-        self.assertEqual(calls[0][1]["action"], "sell")
-        self.assertEqual(signal["paper_execution"], "long_closed")
+        self.assertEqual(calls[0][0], "/signals/strategy")
+        self.assertNotIn("action", calls[0][1])
+        self.assertEqual(signal["paper_execution"], "signal_or_pending_close")
 
     def test_telegram_is_safely_disabled_without_credentials(self):
         cfg = config() | {"telegram_enabled": True}
@@ -209,17 +209,9 @@ class StockScannerTests(unittest.TestCase):
         cfg = config() | {"telegram_enabled": True, "telegram_level_alerts": True}
         for price, expected, expected_he in ((106.5, "TP", "יעד הרווח הושג"),
                                              (96.5, "SL", "עצירת ההפסד הופעלה")):
-            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as directory:
-                messages = []
-                with patch.object(stock_scanner, "STATE_FILE", Path(directory) / "state.json"), \
-                     patch.object(stock_scanner, "settings", return_value=cfg), \
-                     patch.object(stock_scanner, "current_intraday_quote", return_value=(price, "2026-01-02T00:00:00Z")), \
-                     patch.object(stock_scanner, "send_telegram",
-                                  side_effect=lambda message, _cfg: messages.append(message) or "sent"):
-                    stock_scanner.save_state({"tracked_signals": [dict(base)], "events": []})
-                    result = stock_scanner.monitor_tracked_signals()
-                self.assertEqual(result["hits"][0]["level"], expected)
-                self.assertIn(expected_he, messages[0])
+            with self.subTest(expected=expected):
+                message = stock_scanner._telegram_message(base, f"{expected} REACHED @ ${price:.2f}")
+                self.assertIn(expected_he, message)
 
     def test_telegram_uses_ollama_for_hebrew_reason_and_news(self):
         response = Mock()
@@ -235,22 +227,10 @@ class StockScannerTests(unittest.TestCase):
         self.assertEqual(localized["telegram_news_he"], ["מניות האנרגיה עולות לפני פתיחת המסחר"])
         self.assertEqual(post.call_args.args[0], "http://127.0.0.1:11434/api/chat")
 
-    def test_tp_sl_monitor_records_win_without_submitting_order(self):
-        with tempfile.TemporaryDirectory() as directory:
-            state_file = Path(directory) / "state.json"
-            signal = {"ticker": "AAPL", "company": "Apple", "action": "BUY", "entry": 100,
-                      "take_profit": 106, "stop_loss": 97, "risk_reward": 2, "confidence": .9,
-                      "time_horizon": "1-4 weeks", "reason": "Aligned", "relevant_news": [],
-                      "timestamp": "2026-01-01T00:00:00Z", "status": "OPEN"}
-            with patch.object(stock_scanner, "STATE_FILE", state_file), \
-                 patch.object(stock_scanner, "current_intraday_quote", return_value=(106.5, "2026-01-02T00:00:00Z")), \
-                 patch.dict(os.environ, {"STOCK_SCANNER_TELEGRAM_ENABLED": "false"}, clear=False):
-                stock_scanner.save_state({"tracked_signals": [signal], "events": []})
-                result = stock_scanner.monitor_tracked_signals()
-                state = stock_scanner.read_state()
-            self.assertEqual(result["hits"][0]["level"], "TP")
-            self.assertEqual(state["tracked_signals"][0]["status"], "TP_HIT")
-            self.assertEqual(state["tracked_signals"][0]["outcome"], "WIN")
+    def test_legacy_monitor_delegates_to_durable_engine(self):
+        with patch("scanner_engine.monitor_prices", return_value={"tickers": 1, "bars": 2, "errors": []}):
+            result = stock_scanner.monitor_tracked_signals()
+        self.assertEqual(result["bars"], 2)
 
     def test_full_pipeline_publishes_original_paper_operation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -261,9 +241,9 @@ class StockScannerTests(unittest.TestCase):
                 response = Mock()
                 if url.endswith("/positions"):
                     response.json.return_value = {"positions": [], "cash": 100000}
-                elif url.endswith("/signals/realtime"):
+                elif url.endswith("/signals/strategy"):
                     orders.append(kwargs["json"])
-                    response.json.return_value = {"signal_id": 99, "price": 140}
+                    response.json.return_value = {"signal_id": 99}
                 return response
             api_session.request.side_effect = request
             news = [{"title": "Current relevant headline", "publisher": "Wire",
@@ -285,15 +265,20 @@ class StockScannerTests(unittest.TestCase):
                  patch.object(stock_scanner, "_write_news_cache"), \
                  patch.object(stock_scanner, "ai_review", return_value=decision), \
                  patch.object(stock_scanner, "current_intraday_quote", return_value=(140, "2026-01-01T00:00:00+00:00")), \
+                 patch.object(stock_scanner, "_localize_telegram_signal", side_effect=lambda value: value | {"telegram_reason_he": "סיבה", "telegram_news_he": []}), \
+                 patch("scanner_engine.initialize_runtime"), \
+                 patch("scanner_engine.record_candidates"), \
+                 patch("scanner_engine.record_scan_news"), \
+                 patch("scanner_engine.set_service_status"), \
+                 patch("scanner_engine.record_signal", return_value={"id": 101, "status": "PENDING_ENTRY"}), \
                  patch.object(stock_scanner.requests, "Session", return_value=api_session):
                 state = stock_scanner.run_scan()
             self.assertEqual(state["signals_published"], 1)
             self.assertEqual(orders[0]["market"], "us-stock")
-            self.assertEqual(orders[0]["symbol"], "AAPL")
-            self.assertEqual(orders[0]["action"], "buy")
-            self.assertLessEqual(orders[0]["quantity"] * 140, 100)
+            self.assertEqual(orders[0]["symbols"], "AAPL")
             self.assertIn("Take Profit:", orders[0]["content"])
             self.assertEqual(state["last_signal"]["signal_id"], 99)
+            self.assertEqual(state["last_signal"]["paper_execution"], "pending_entry")
 
     def test_status_redacts_internal_execution_and_credentials(self):
         hidden = {"token": "secret", "cooldowns": {"AAPL:BUY": 1}, "order_pending": {"ticker": "AAPL"},

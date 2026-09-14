@@ -16,7 +16,6 @@ import {
   PositionsPage,
   RegisterPage,
   Sidebar,
-  SignalsFeed,
   StrategiesPage,
   ThemeContext,
   type ThemeMode,
@@ -32,6 +31,7 @@ import { ChallengePage } from './ChallengePage'
 import { ExperimentAdminPage } from './ExperimentAdminPage'
 import { ResearchExportsPage } from './ResearchExportsPage'
 import { TeamMissionsPage } from './TeamMissionsPage'
+import { ScannerDashboard } from './ScannerDashboard'
 import { Language, getT } from './i18n'
 import { hasPermission } from './appShared'
 
@@ -289,7 +289,7 @@ function AppRouter({
           <BackendStatusBanner />
 
           <Routes>
-            <Route path="/market" element={<SignalsFeed token={token} />} />
+            <Route path="/market" element={<ScannerDashboard token={token} />} />
             <Route path="/leaderboard" element={<LeaderboardPage token={token} />} />
             <Route path="/challenges" element={<ChallengePage token={token} canAdmin={canAdmin} />} />
             <Route path="/challenges/:challengeKey" element={<ChallengePage token={token} canAdmin={canAdmin} />} />
@@ -311,7 +311,7 @@ function AppRouter({
           </Routes>
         </div>
 
-        <TrendingSidebar />
+        {location.pathname !== '/market' && <TrendingSidebar />}
       </main>
     </div>
   )

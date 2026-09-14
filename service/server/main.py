@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 from cache import get_cache_status
 from database import init_database, get_database_status
+from scanner_engine import initialize_runtime
 from routes import create_app
 from routes_shared import api_access_log_enabled
 from tasks import (
@@ -54,6 +55,7 @@ if not api_access_log_enabled():
 
 # Initialize database
 init_database()
+initialize_runtime()
 
 # Create app
 app = create_app()

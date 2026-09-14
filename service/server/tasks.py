@@ -1223,11 +1223,16 @@ async def build_network_edges_loop():
         await asyncio.sleep(interval_s)
 
 
-from stock_scanner import stock_scanner_loop, stock_signal_monitor_loop
+from stock_scanner import (stock_news_translation_loop, stock_position_news_loop,
+                           stock_scanner_loop, stock_signal_monitor_loop,
+                           stock_telegram_outbox_loop)
 
 BACKGROUND_TASK_REGISTRY = {
     "stock_scanner": stock_scanner_loop,
     "stock_signal_monitor": stock_signal_monitor_loop,
+    "stock_position_news": stock_position_news_loop,
+    "stock_news_translation": stock_news_translation_loop,
+    "stock_telegram_outbox": stock_telegram_outbox_loop,
     "prices": update_position_prices,
     "profit_history": record_profit_history,
     "polymarket_settlement": settle_polymarket_positions,

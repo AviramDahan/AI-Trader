@@ -97,46 +97,35 @@ def main() -> None:
         activity_data = activity.json()
         if not activity_data.get("paper_only") or activity_data.get("agent") != "us-stock-scanner":
             raise RuntimeError("US-stock paper scanner is not active")
+        dashboard_response = session.get(f"{backend_url}/api/scanner/dashboard", timeout=30)
+        require(dashboard_response, "structured scanner dashboard")
+        dashboard = dashboard_response.json()
+        if not dashboard.get("paper_only") or dashboard.get("scanner_name") != "us-stock-scanner":
+            raise RuntimeError("Scanner dashboard safety identity is invalid")
+        required_components = {"prices", "news", "ollama", "scan", "monitor", "position_news", "telegram"}
+        if not required_components.issubset({item.get("component") for item in dashboard.get("services", [])}):
+            raise RuntimeError("Scanner component health is incomplete")
 
         if not args.require_stock_signal:
             print("PASS read-only API verification; no test signal was injected")
             if not overview_available:
                 raise RuntimeError("Incomplete E2E: Financial Events has no snapshot")
             return
-        with sqlite3.connect(DB_FILE) as connection:
-            scanner = connection.execute("SELECT id, token FROM agents WHERE name=?", ("us-stock-scanner",)).fetchone()
-        if not scanner:
-            raise RuntimeError("Scanner identity is missing")
-        scanner_headers = {"Authorization": f"Bearer {scanner[1]}"}
-        signals = []
-        for message_type in ("operation", "strategy"):
-            signals.extend(session.get(
-                f"{backend_url}/api/signals/{scanner[0]}?message_type={message_type}&limit=50", timeout=30
-            ).json().get("signals", []))
-        signals.sort(key=lambda item: int(item.get("timestamp") or 0), reverse=True)
-        signal = next((item for item in signals if item.get("market") == "us-stock" and
-                       str(item.get("content") or "").startswith("US STOCK SCANNER | PAPER TRADING ONLY")), None)
-        if not signal:
+        signals = dashboard.get("signals") or []
+        if not signals:
             raise RuntimeError("No live strong stock signal has been published yet")
-        for field in ("Ticker:", "Company:", "Action:", "Entry:", "Take Profit:", "Stop Loss:",
-                      "Risk/Reward:", "Confidence:", "Time Horizon:", "Reason:", "Relevant News:", "Timestamp:"):
-            if field not in signal["content"]:
-                raise RuntimeError(f"Stock signal is missing {field}")
-        positions = session.get(f"{backend_url}/api/positions", headers=scanner_headers, timeout=30)
-        require(positions, "scanner paper positions")
-        action = next((line.split(":", 1)[1].strip() for line in signal["content"].splitlines()
-                       if line.startswith("Action:")), "")
-        symbol = signal.get("symbol") or signal.get("symbols")
-        paper_positions = positions.json().get("positions", [])
-        if action == "BUY" and not any(item.get("symbol") == symbol for item in paper_positions):
-            raise RuntimeError("BUY signal is not represented in paper positions")
-        if action == "SELL" and signal.get("message_type") == "strategy" and any(
-                item.get("symbol") == symbol and item.get("side") == "short" for item in paper_positions):
-            raise RuntimeError("Signal-only SELL unexpectedly created a short position")
-        tracked = activity_data.get("tracked_signals") or []
-        if not any(item.get("signal_id") == signal.get("signal_id") for item in tracked):
-            raise RuntimeError("Published stock signal is missing from TP/SL tracking")
-        print("PASS live stock signal format, UI feed record, SELL safety and paper level tracking")
+        signal = signals[0]
+        for field in ("ticker", "company", "action", "planned_entry", "original_stop", "current_stop",
+                      "tp1", "tp2", "tp3", "confidence", "confidence_basis", "time_horizon", "reason",
+                      "news_json", "created_at", "valid_until"):
+            if field not in signal:
+                raise RuntimeError(f"Structured stock signal is missing {field}")
+        if signal["action"] == "SELL" and any(item.get("side") == "short" for item in dashboard.get("trades", [])):
+            raise RuntimeError("SELL unexpectedly created a short position")
+        if signal["action"] == "BUY" and signal["status"] == "ENTERED" and not any(
+                item.get("signal_id") == signal["id"] for item in dashboard.get("trades", [])):
+            raise RuntimeError("Entered BUY is missing its durable linked trade")
+        print("PASS structured signal, pending/fill separation, SELL safety and durable paper tracking")
 
     if not overview_available:
         raise RuntimeError("Incomplete E2E: trading checks passed but Financial Events has no snapshot")

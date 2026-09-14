@@ -1,106 +1,99 @@
 # Autonomous US-stock paper scanner
 
-This keeps the upstream React/FastAPI/SQLite architecture. A local, non-admin scanner calls the
-original `/api/signals/realtime` endpoint, so strong signals are visible in the original Market /
-Trading Signals cards and their virtual positions are tracked by the original Positions and PnL UI.
-No broker SDK, broker credential, real order route, leverage, or real-money mode is configured.
+The scanner keeps the upstream React/FastAPI/SQLite architecture and stable `us-stock-scanner` identity.
+`/market` is its public dashboard; no user or ticker selection is required. There is no broker integration,
+leverage, short selling, or real-money execution.
 
-## Universe and schedule
+## Universe, schedule, and data
 
-The default universe is the union of current S&P 500 and Nasdaq-100 constituents. Constituents are
-discovered automatically; users never enter tickers. S&P 500 membership/company names come from the
-Wikipedia constituent table and Nasdaq-100 membership/market-cap fields from Nasdaq's public API.
-The list is refreshed at most once per day and a seven-day local fallback is allowed only if a source is temporarily
-unavailable. Within this large-cap universe, average 20-session dollar volume determines priority.
+The default universe is the de-duplicated union of the S&P 500 and Nasdaq-100. S&P constituents/company
+names come from Wikipedia; Nasdaq-100 membership and market-cap fields come from Nasdaq's public API. The
+universe cache refreshes daily. Six months of adjusted daily OHLCV from Yahoo Finance/yfinance is cached
+locally and normally refreshes once per 20 hours, rather than on every 30-minute scan. A rate-limited or
+incomplete refresh uses only a sufficiently fresh cache; otherwise the scan fails closed.
 
-The scanner starts 20 seconds after the backend and runs every 30 minutes by default. `STOCK_SCANNER_SCAN_INTERVAL`
-is configurable from 900 seconds upward. Six months of adjusted daily OHLCV is held in a local compressed cache.
-The complete universe is refreshed at most once per 20 hours by default; ordinary scans reuse it and fetch only
-shortlist news and fresh quotes. Missing constituents are fetched incrementally only if cache coverage falls below
-95%; otherwise they wait for the next daily refresh. An incomplete/rate-limited
-Yahoo refresh uses a sufficiently recent cache or stops without publishing. It never generates a weak fallback.
-The scanner publishes at most three signals per scan. Outside US cash-market hours it may complete the
-daily/news/AI review, but it cannot publish or open a position without a current intraday quote.
+Every cycle applies quantitative price-action, EMA20/EMA50, RSI(14), MACD, ATR(14), realized-volatility,
+volume, liquidity, and 20-day range/return filters to the full universe. It then fetches exact-ticker company
+news for a 25-name shortlist, ranks technical strength + news relevance + deterministic sentiment + SPY/QQQ
+context, and sends only the best six candidates to local Ollama. Defaults are configurable in `.env`.
 
-## Data, news, and analysis
+The dashboard reports actual counts for universe, usable data, technical candidates, news shortlist, Ollama
+reviews, and approved signals. Zero approved signals is valid. A signal requires an intraday quote newer than
+12 minutes; weekends, regular-hours closure, and shared NYSE/Nasdaq full-day holidays are reported separately.
+Yahoo is a free unofficial delayed/no-SLA source, and the UI states this limitation.
 
-- Adjusted daily and one-minute intraday OHLCV: Yahoo Finance through `yfinance` (free, no key, unofficial API).
-- Recent company news: Yahoo Finance search feed, accepted only when `relatedTickers` contains the exact ticker.
-  Headlines preserve publisher, link, and provider timestamp. The scanner uses titles/metadata only.
-- Basic market context: SPY and QQQ 20/50-day trend plus 20-session return from the same daily feed.
-- AI review: local Ollama model from `OLLAMA_MODEL`; headlines are explicitly treated as untrusted data.
-  Ollama assesses direction agreement, news sentiment/relevance, confidence, and horizon. It cannot select
-  tickers, URLs, order size, or bypass deterministic filters.
+## Signal and paper lifecycle
 
-The deterministic stage first forms a 20–30 name liquid technical shortlist. News is fetched for the whole
-shortlist, not just the AI inputs. Candidates are ranked by technical strength (50%), news relevance (20%),
-direction-aligned headline sentiment (15%), and SPY/QQQ market alignment (15%). Only the top six go to Ollama
-by default. The news cache is short-lived (15 minutes) and is never accepted beyond the configured freshness rule.
+Each strong signal stores ticker/company, BUY/SELL/HOLD, planned/actual entry, original/current stop,
+TP1/TP2/TP3, allocation and R/R per target, weighted R/R, model score and inputs, horizon/expiry, English and
+Hebrew explanations, exact-source news, timestamps, and status. The model score is explicitly uncalibrated,
+not a probability. Ollama text never controls prices, quantities, targets, cash, or order state.
 
-For each symbol the deterministic stage calculates price action, 20-day return, EMA20/EMA50, RSI(14),
-MACD(12,26,9) histogram, ATR(14), annualized 20-session realized volatility, 20-session high/low, volume
-ratio, and average dollar volume. Daily data older than four calendar days, missing context, missing/recently
-irrelevant news, or an intraday quote older than 12 minutes fails closed and produces no signal.
+Signal creation is not execution. BUY creates an expiring paper LIMIT order. A complete five-minute bar must
+reach entry before a trade/fill is created. SELL closes a linked open long when its limit executes; without a
+long it remains bearish-only and never creates a short. HOLD is not an order. Duplicate tickers, insufficient
+cash, and configurable per-symbol/total exposure limits are blocked before order creation.
 
-## Strong-signal and paper rules
+Paper cash, fills, original/remaining quantity, fees, slippage, realized/unrealized P/L, price cursor, settings
+snapshot, and signal/order/trade/news links are stored in the database. Each event has a unique key and is
+atomic, so reprocessing cannot duplicate a fill. Open trades are not truncated. Legacy JSON tracking data is
+preserved as unverified and excluded from verified performance.
 
-Default filters (all configurable in the ignored `.env`):
+## Exit strategies and conservative bars
 
-- average dollar volume >= $50M;
-- ATR between 1% and 8% of price;
-- technical agreement score >= 5 of 7;
-- Ollama confidence >= 80% and news relevance >= 60%;
-- news sentiment may not conflict with direction;
-- calculated risk/reward >= 2.0;
-- 24-hour same-ticker/same-direction duplicate cooldown;
-- 25 technical/news candidates, maximum six AI candidates, and three published signals per scan.
+`single` remains the operational default for new trades. The same entry, initial risk, and bars are also
+evaluated as an isolated `staged` shadow; shadow results do not affect cash or Telegram. An admin can explicitly
+select the strategy for future trades in Results. Every trade has a settings snapshot, so changes never alter it.
 
-BUY requires the bullish trend/momentum pattern; SELL requires the bearish mirror. HOLD or any rejected
-candidate is retained in scanner status but is not published as a trade. A published SELL closes an existing
-long paper position; without an existing long it is posted as a signal-only strategy and cannot create or increase
-a short. An old opposing short from an earlier deployment prevents a new BUY until reconciled.
+The staged long freezes `R = actual entry - original stop`: TP1 closes one third at 1R and advances the stop to
+entry starting with the next bar; TP2 closes one third at 2R and normally keeps the stop at entry (or advances
+to TP1 when configured); TP3 closes the rounded remainder at 3R. Original R never changes, percentages total
+100%, and the stop never moves away. Equal thirds yield 2R before costs—not 3R. Entry-price stop and breakeven
+after costs are separate.
 
-Entry is a one-minute quote no older than 12 minutes. Stop distance is the greater of 1.5 x ATR(14) and 1%
-of entry. For BUY, stop is below entry and target above; SELL is mirrored. Take Profit equals entry plus/minus
-stop distance x `STOCK_SCANNER_MIN_RISK_REWARD`. Rounded levels are rechecked against the minimum ratio.
-Each BUY paper operation defaults to $100 notional, max $250 per symbol and $1,000 total scanner exposure.
-The backend independently resolves the execution quote; the card's normal Price field is the recorded price.
-Ambiguous execution timeouts set a reconciliation lock and are never retried automatically.
+The price monitor is independent from scanning/Ollama. It processes complete five-minute bars after the stored
+cursor and backfills within Yahoo retention. Gap opens fill conservatively. If a bar touches both the stop active
+at its open and the next target, stop wins. A newly advanced stop never applies retroactively to that bar. A gap
+beyond intraday retention reports an error. WIN/LOSS/BREAKEVEN is set only when the whole trade closes, using
+cumulative net P/L and the configured threshold; TP1 alone is not a win.
 
-Every published signal is tracked locally from Entry. A separate five-minute monitor uses a fresh one-minute
-quote to detect TP or SL, records `WIN`/`LOSS`, hit time, and hit price, and displays the result in the existing
-scanner activity panel. These are observational paper levels: the monitor never submits a broker order or
-automatically closes a paper position.
+Results compare single/staged trade count and period, marked net P/L, expectancy in R, win rate, drawdown including
+open marks, target-hit rates, and breakevens. Under 30 closed trades shows a sample warning; there is no synthetic
+history or superiority claim.
 
-Telegram alerts are optional and off by default. Set `STOCK_SCANNER_TELEGRAM_ENABLED=true` plus the secret
-`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the ignored local `.env`. New-signal alerts include the complete
-signal. `STOCK_SCANNER_TELEGRAM_ENTRY_ALERTS` controls a separate Entry notification and
-`STOCK_SCANNER_TELEGRAM_LEVEL_ALERTS` controls TP/SL notifications. Missing credentials disable delivery safely.
+## News and six-hour open-position review
 
-Every published card contains: Ticker, Company, BUY/SELL, Entry, Take Profit, Stop Loss, Risk/Reward,
-Confidence, Time Horizon, Reason, Relevant News, and UTC Timestamp. The expandable scanner panel shows
-universe/data/candidate counts, recent AI reviews, rejected scans, last signal, last/next scan, and errors.
+News is database-backed and newest-first. It separates broad market, scanner-shortlist, and open-position items,
+with ticker/time/sentiment filters, source time/link, analyzed fields, and documented links. It states actual
+coverage and never calls a shortlist a full-universe feed. Cached translation/analysis runs in the worker.
 
-## Configuration
+At entry, each open ticker is immediately due. Successful checks recur every six hours—including nights,
+weekends, and holidays—while primary quantity remains. Trades sharing a ticker reuse one fetch/analysis. A
+two-hour overlap catches late items; exact ticker metadata plus URL/title fingerprints prevent wrong links and
+duplicate alerts. Ollama returns structured related/impact/materiality/thesis-effect fields and a concise Hebrew
+explanation with uncertainty. Facts remain separate from interpretation. News may alert, but cannot close a trade
+or change TP/SL. Provider/Ollama failure is an error, never “no news”.
 
-The documented keys live in `.env.example`. Secrets remain only in ignored `.env`, local SQLite, and
-`PRIVATE_SETUP_CREDENTIALS.txt` plus its DPAPI-encrypted backup. `STOCK_SCANNER_TOKEN` is never returned by
-the public runtime endpoint or bundled into GitHub Pages. Only public `BACKEND_URL` is a GitHub variable.
+## Telegram and health
 
-## Start, stop, and verification
+Telegram uses a persistent server-side outbox with dedupe and retry/backoff. Hebrew alerts cover strong signals,
+entry, every TP, stop changes, stop/final exits, and material position news. Partial exits include closed/remaining
+quantity. Missing/disabled credentials safely disable delivery and never stop scanning. Tests mock delivery and
+never send a live experimental alert. Secrets remain only in ignored `.env` and the private local backup.
+
+Scanner status reports separate last attempt/success for prices, news, Ollama, scan, price monitor, position-news,
+and Telegram. It distinguishes market closed, no signals, no new news, and errors.
+
+## Start, stop, and verify
 
 ```powershell
 .\scripts\start-ai-trader.ps1
 .\scripts\stop-ai-trader.ps1
 ```
 
-The per-user `AI-Trader-Paper` Windows task starts at login and checks once per minute. An explicit stop marker
-is respected until manual start clears it. The local supervisor recovers the backend, Ollama, and HTTPS
-tunnel. It prefers the locally installed Cloudflare Quick Tunnel connector and retains anonymous Serveo as a
-fallback. When the public endpoint rotates, the supervisor redeploys the Pages runtime manifest and keeps
-retrying until the live Pages manifest confirms the new URL. The browser checks that manifest in the
-background, tolerates one transient health-check failure, and switches endpoints automatically. The computer
-must stay awake, logged in, and online. GitHub Pages remains visible during a backend outage but live data cannot.
+The Windows backend, worker, Ollama, and HTTPS tunnel must run; GitHub Pages is only the frontend. The scheduled
+task/supervisor recover processes and republish Pages runtime config when the free tunnel rotates. The computer
+must remain awake, logged in, and online.
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip check
@@ -110,17 +103,6 @@ npm --prefix service/frontend run build
 .\.venv\Scripts\python.exe scripts/verify_browser.py
 ```
 
-After a genuine strong signal has been published during market hours,
-`verify_end_to_end.py --require-stock-signal` also validates its complete format and paper position.
-
-Scanner unit tests mock data only inside the test process; they never insert demo signals. A live validation
-runs `stock_scanner.run_scan()` against the real constituent/data/news/Ollama providers and accepts zero
-published signals when filters or closed-market freshness rules reject every candidate. Never weaken filters
-or inject a fake signal merely to make the UI non-empty.
-
-Known limits: Yahoo Finance and anonymous Cloudflare Quick Tunnels/Serveo are free, no-SLA services; universe scraping can
-change; headlines are not full-text articles; AI confidence is not calibrated; daily adjusted data does not
-capture all intraday regime changes; US holiday detection relies on availability of a fresh intraday quote;
-the headline sentiment used for pre-ranking is a lightweight deterministic lexicon; a five-minute monitor can
-miss a brief intrabar touch between polls; TP/SL are tracking levels, not standing orders, and the application
-does not automatically exit at those levels. This is experimental paper trading, not investment advice.
+Live verification accepts zero signals and never injects production data. Limits remain free-provider delays/rate
+limits, headline-only news, Ollama availability, five-minute OHLC ordering, and computer/tunnel uptime. This is
+experimental paper trading, not investment advice.
