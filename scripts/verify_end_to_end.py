@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import socket
+import argparse
 import sqlite3
 import sys
-from contextlib import contextmanager
+from contextlib import nullcontext
 from pathlib import Path
 from urllib.parse import urlparse
 
-import dns.resolver
 import requests
 
 
@@ -19,34 +18,22 @@ URL_FILE = ROOT / ".runtime" / "backend-url.txt"
 PAGES_ORIGIN = "https://aviramdahan.github.io"
 
 
-@contextmanager
-def public_dns_override(hostname: str):
-    resolver = dns.resolver.Resolver(configure=False)
-    resolver.nameservers = ["1.1.1.1"]
-    address = str(next(iter(resolver.resolve(hostname, "A"))))
-    original = socket.getaddrinfo
-
-    def patched(host, port, family=0, type=0, proto=0, flags=0):
-        target = address if str(host).lower() == hostname.lower() else host
-        return original(target, port, family, type, proto, flags)
-
-    socket.getaddrinfo = patched
-    try:
-        yield
-    finally:
-        socket.getaddrinfo = original
-
-
 def require(response: requests.Response, label: str) -> None:
     if not response.ok:
         raise RuntimeError(f"{label} failed with HTTP {response.status_code}")
+    if response.request.method != "OPTIONS":
+        response.json()  # Reject tunnel warning pages masquerading as HTTP 200.
     print(f"PASS {label}")
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--backend-url", "-BackendUrl")
+    parser.add_argument("--paper-trade", action="store_true", help="Submit one simulated BTC order")
+    args = parser.parse_args()
     if not URL_FILE.exists():
         raise RuntimeError("Backend URL is missing; run scripts/start-ai-trader.ps1 first")
-    backend_url = URL_FILE.read_text(encoding="utf-8").strip().rstrip("/")
+    backend_url = (args.backend_url or URL_FILE.read_text(encoding="utf-8")).strip().rstrip("/")
     hostname = urlparse(backend_url).hostname
     if not hostname:
         raise RuntimeError("Invalid backend URL")
@@ -62,7 +49,7 @@ def main() -> None:
     session.trust_env = False
     headers = {"Authorization": f"Bearer {row[0]}"}
 
-    with public_dns_override(hostname):
+    with nullcontext():  # Use the same normal DNS path as visitors.
         require(session.get(f"{backend_url}/health", timeout=20), "HTTPS backend health")
 
         cors = session.options(
@@ -102,6 +89,10 @@ def main() -> None:
             session.get(f"{backend_url}/api/positions", headers=headers, timeout=30),
             "positions",
         )
+
+        if not args.paper_trade:
+            print("PASS read-only API verification; paper trade not requested")
+            return
 
         paper_trade = session.post(
             f"{backend_url}/api/signals/realtime",

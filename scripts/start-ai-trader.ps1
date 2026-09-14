@@ -79,16 +79,7 @@ for ($attempt = 0; $attempt -lt 45; $attempt++) {
     try {
         $publicHealth = Invoke-RestMethod -Uri "$backendUrl/health" -TimeoutSec 5
         if ($publicHealth.status -eq 'ok') { $publicHealthy = $true; break }
-    } catch {
-        try {
-            # Some Windows DNS resolvers cache a quick-tunnel NXDOMAIN briefly.
-            $publicIp = Resolve-DnsName $backendHost -Server 1.1.1.1 -Type A -ErrorAction Stop |
-                Select-Object -First 1 -ExpandProperty IPAddress
-            $curlHealth = & curl.exe --silent --show-error --fail `
-                --resolve "${backendHost}:443:$publicIp" "$backendUrl/health"
-            if (($curlHealth | ConvertFrom-Json).status -eq 'ok') { $publicHealthy = $true; break }
-        } catch {}
-    }
+    } catch {}
     Start-Sleep -Seconds 1
 }
 if (-not $publicHealthy) {
