@@ -207,6 +207,8 @@ def _credential_document(password: str, token: str) -> str:
 
 
 def main() -> None:
+    if PRIVATE_FILE.exists() or ENV_FILE.exists():
+        raise RuntimeError("Existing private setup found. Refusing to overwrite configuration or rotate credentials.")
     _write_local_env()
     password, token = _create_admin()
     content = _credential_document(password, token).encode("utf-8")

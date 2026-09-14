@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { discoverBackend, runtimeOrigin } from './runtimeConfig'
 
 import { Link, useLocation } from 'react-router-dom'
 
@@ -71,12 +72,21 @@ export function TopbarControls() {
 export function BackendStatusBanner() {
   const { language } = useLanguage()
   const [offline, setOffline] = useState(false)
+  const previouslyOffline = useRef(false)
 
   const checkBackend = async () => {
+    await discoverBackend()
+    if (runtimeOrigin() && runtimeOrigin() !== API_ORIGIN) {
+      window.location.reload()
+      return
+    }
     try {
-      const response = await fetch(`${API_ORIGIN}/health`, { cache: 'no-store' })
-      setOffline(!response.ok)
+      const response = await fetch(`${API_ORIGIN}/health`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+      if (!response.ok || (await response.json()).status !== 'ok') throw new Error('Unhealthy backend')
+      setOffline(false)
+      if (previouslyOffline.current) window.location.reload()
     } catch {
+      previouslyOffline.current = true
       setOffline(true)
     }
   }
@@ -87,7 +97,7 @@ export function BackendStatusBanner() {
     return () => window.clearInterval(interval)
   }, [])
 
-  if (!offline) return null
+  if (!offline) return <PaperActivityPanel />
 
   return (
     <div className="backend-status-banner" role="alert">
@@ -103,6 +113,52 @@ export function BackendStatusBanner() {
       </button>
     </div>
   )
+}
+
+type PaperActivity = {
+  enabled: boolean; stale: boolean; status: string; model: string; last_decision?: string;
+  last_reason?: string; last_ai_at?: number; next_run_at?: number; headlines?: number;
+  news_updated_at?: string; limits: string;
+  events?: { at: number; action: string; reason: string }[];
+}
+
+function PaperActivityPanel() {
+  const { language } = useLanguage()
+  const he = language === 'he'
+  const [activity, setActivity] = useState<PaperActivity | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      try {
+        const response = await fetch(`${API_ORIGIN}/api/runtime/activity`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+        if (!response.ok) throw new Error('Unavailable')
+        const value = await response.json()
+        if (active) { setActivity(value); setFailed(false) }
+      } catch { if (active) setFailed(true) }
+    }
+    void load()
+    const interval = window.setInterval(() => void load(), 15000)
+    return () => { active = false; window.clearInterval(interval) }
+  }, [])
+  const time = (value?: number) => value ? new Date(value * 1000).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
+  const state = failed ? (he ? 'סטטוס לא זמין' : 'Status unavailable')
+    : !activity?.enabled ? (he ? 'לא פעיל' : 'Disabled')
+    : activity.stale ? (he ? 'הסוכן לא התעדכן בזמן' : 'Agent heartbeat overdue')
+    : activity.status === 'analyzing' ? (he ? 'מנתח עם AI' : 'AI analyzing')
+    : activity.status === 'error' ? (he ? 'תקלה — המסחר מושהה' : 'Error — trading paused')
+    : (he ? 'ממתין למחזור הבא' : 'Waiting for next cycle')
+  return <details className="paper-activity-panel" data-testid="paper-activity">
+    <summary>{he ? 'מסחר מדומה בלבד' : 'PAPER TRADING ONLY'} · {state} · {activity?.last_decision || '—'}</summary>
+    <p>{he ? 'בדיקת AI אחרונה' : 'Last AI evaluation'}: {time(activity?.last_ai_at)} | {he ? 'מחזור הבא' : 'Next cycle'}: {time(activity?.next_run_at)}</p>
+    <p>{he ? 'חדשות קריפטו' : 'Crypto headlines'}: {activity?.headlines || 0} | {he ? 'נאספו' : 'Fetched'}: {activity?.news_updated_at ? new Date(activity.news_updated_at).toLocaleString() : '—'}</p>
+    <p>{activity?.last_reason}</p>
+    <p>{activity?.limits}</p>
+    <p>{he ? 'המחשב חייב להיות דולק ומחובר. המתנה היא החלטה תקינה; אין התחייבות לקנייה בכל מחזור.' : 'This computer must stay on and connected. HOLD is a valid decision; a cycle does not guarantee a trade.'}</p>
+    <ol>{activity?.events?.slice(0, 8).map((item, index) => <li key={`${item.at}-${index}`}>
+      <time>{time(item.at)}</time> · {item.action}: {item.reason}
+    </li>)}</ol>
+  </details>
 }
 
 export function Sidebar({

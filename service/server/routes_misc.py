@@ -26,6 +26,11 @@ def _resolve_skill_path(skill_name: Optional[str] = None):
 
 
 def register_misc_routes(app: FastAPI) -> None:
+    @app.get('/api/runtime/activity')
+    async def runtime_activity():
+        from paper_agent import public_status
+        return public_status()
+
     @app.get('/skill.md')
     @app.get('/SKILL.md')
     async def get_skill_index():

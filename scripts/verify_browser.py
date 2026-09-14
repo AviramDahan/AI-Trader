@@ -23,6 +23,13 @@ def main():
             page.goto(SITE + "/market", wait_until="networkidle")
             expect(page.get_by_text("ai-trader-admin", exact=True)).to_be_visible(timeout=30000)
             assert page.locator(".backend-status-banner").count() == 0
+            panel = page.get_by_test_id("paper-activity")
+            expect(panel).to_be_visible(timeout=15000)
+            panel.locator("summary").click()
+            activity = page.evaluate("async url => (await fetch(url)).json()", backend + "/api/runtime/activity")
+            assert activity["enabled"] and not activity["stale"] and activity["last_ai_at"]
+            assert activity["last_decision"] in ("HOLD", "BUY", "SELL"), activity["last_decision"]
+            expect(panel).to_contain_text(activity["last_decision"], timeout=15000)
             for path in ["/health", "/api/claw/agents/count", "/api/trending", "/api/market-intel/overview"]:
                 result = page.evaluate("""async url => {
                     const response = await fetch(url);
@@ -34,6 +41,9 @@ def main():
                     assert result["data"]["count"] > 0
                 if path.endswith("trending"):
                     assert result["data"]["trending"]
+                if path.endswith("overview"):
+                    assert result["data"]["available"], "Financial events unavailable"
+                    assert result["data"]["headline_count"] > 0
             for label, lang, direction in [("עברית", "he", "rtl"), ("EN", "en", "ltr")]:
                 page.get_by_role("button", name=label, exact=True).click()
                 expect(page.locator("html")).to_have_attribute("lang", lang)

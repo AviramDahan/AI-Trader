@@ -1223,7 +1223,10 @@ async def build_network_edges_loop():
         await asyncio.sleep(interval_s)
 
 
+from paper_agent import paper_agent_loop
+
 BACKGROUND_TASK_REGISTRY = {
+    "paper_agent": paper_agent_loop,
     "prices": update_position_prices,
     "profit_history": record_profit_history,
     "polymarket_settlement": settle_polymarket_positions,

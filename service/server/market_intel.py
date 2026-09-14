@@ -17,6 +17,8 @@ from collections import Counter
 from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from typing import Any, Optional
 import re
+from email.utils import parsedate_to_datetime
+from xml.etree import ElementTree
 
 import requests
 try:
@@ -628,7 +630,8 @@ def _generate_stock_analysis_summary(analysis: dict[str, Any]) -> str:
                     "model": OLLAMA_MODEL,
                     "messages": [{"role": "user", "content": prompt}],
                     "stream": False,
-                    "options": {"temperature": 0.2},
+                    "think": False,
+                    "options": {"temperature": 0.2, "num_predict": 250},
                 },
                 timeout=OLLAMA_TIMEOUT_SECONDS,
             )
@@ -691,7 +694,48 @@ def _build_news_summary(category: str, items: list[dict[str, Any]]) -> dict[str,
     }
 
 
+RSS_NEWS_SOURCES = {
+    "equities": ("BBC Business", "https://feeds.bbci.co.uk/news/business/rss.xml"),
+    "macro": ("Federal Reserve", "https://www.federalreserve.gov/feeds/press_all.xml"),
+    "crypto": ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
+    "commodities": ("US EIA", "https://www.eia.gov/rss/todayinenergy.xml"),
+}
+
+
+def _fetch_rss_news(category: str) -> list[dict[str, Any]]:
+    """No-key fallback: attributed headlines, actual dates, no invented sentiment."""
+    source, url = RSS_NEWS_SOURCES[category]
+    response = requests.get(url, timeout=20, headers={"User-Agent": "AI-Trader-Paper/1.0"})
+    response.raise_for_status()
+    if len(response.content) > 4_000_000 or b"<!ENTITY" in response.content:
+        raise ValueError("Unsafe or oversized RSS feed")
+    root = ElementTree.fromstring(response.content)
+    items = []
+    for entry in root.findall(".//item"):
+        title, link = entry.findtext("title", "").strip(), entry.findtext("link", "").strip()
+        try:
+            published = parsedate_to_datetime(entry.findtext("pubDate", ""))
+            if published.tzinfo is None:
+                published = published.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            continue
+        # Low-frequency official feeds keep their original dates, not a false 'now'.
+        if not title or not link.startswith("https://") or published > _utc_now() + timedelta(minutes=5):
+            continue
+        items.append({"title": title, "url": link, "source": source,
+                      "summary": "RSS headline; sentiment not assessed.", "banner_image": None,
+                      "time_published": published.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                      "overall_sentiment_score": 0, "overall_sentiment_label": "unassessed",
+                      "ticker_sentiment": [], "topics": []})
+    items.sort(key=lambda item: item["time_published"], reverse=True)
+    if not items:
+        raise RuntimeError("RSS provider returned no usable headlines")
+    return _dedupe_news_items(items)[:MARKET_NEWS_CATEGORY_LIMIT]
+
+
 def _fetch_news_feed(category: str, definition: dict[str, str]) -> list[dict[str, Any]]:
+    if not ALPHA_VANTAGE_API_KEY or ALPHA_VANTAGE_API_KEY == "demo":
+        return _fetch_rss_news(category)
     now = _utc_now()
     time_from = (now - timedelta(hours=MARKET_NEWS_LOOKBACK_HOURS)).strftime("%Y%m%dT%H%M")
     params: dict[str, Any] = {
@@ -705,7 +749,12 @@ def _fetch_news_feed(category: str, definition: dict[str, str]) -> list[dict[str
     if definition.get("tickers"):
         params["tickers"] = definition["tickers"]
 
-    payload = _alpha_vantage_get(params)
+    try:
+        payload = _alpha_vantage_get(params)
+    except requests.RequestException:
+        return _fetch_rss_news(category)
+    except RuntimeError:
+        return _fetch_rss_news(category)
     feed = payload.get("feed") if isinstance(payload, dict) else None
     if not isinstance(feed, list):
         return []
@@ -720,7 +769,21 @@ def _fetch_news_feed(category: str, definition: dict[str, str]) -> list[dict[str
     return _dedupe_news_items(normalized_items)
 
 
+def _fetch_yahoo_daily_series(symbol: str) -> list[dict[str, Any]]:
+    import yfinance as yf
+    history = yf.Ticker(symbol).history(period="6mo", interval="1d", auto_adjust=True, timeout=15)
+    rows = [{"date": index.strftime("%Y-%m-%d"), "close": float(row["Close"]),
+             "volume": float(row["Volume"]), "source": "Yahoo Finance (yfinance), daily adjusted"}
+            for index, row in history.iterrows() if float(row["Close"]) > 0]
+    rows.sort(key=lambda row: row["date"], reverse=True)
+    if not rows or (_utc_now().date() - date.fromisoformat(rows[0]["date"])).days > 7:
+        raise RuntimeError("Daily market data missing or stale")
+    return rows
+
+
 def _fetch_daily_adjusted_series(symbol: str) -> list[dict[str, Any]]:
+    if not ALPHA_VANTAGE_API_KEY or ALPHA_VANTAGE_API_KEY == "demo":
+        return _fetch_yahoo_daily_series(symbol)
     payload = _alpha_vantage_get({
         "function": "TIME_SERIES_DAILY_ADJUSTED",
         "symbol": symbol,
@@ -752,6 +815,8 @@ def _fetch_daily_adjusted_series(symbol: str) -> list[dict[str, Any]]:
 
 
 def _fetch_btc_daily_series() -> list[dict[str, Any]]:
+    if not ALPHA_VANTAGE_API_KEY or ALPHA_VANTAGE_API_KEY == "demo":
+        return _fetch_yahoo_daily_series("BTC-USD")
     payload = _alpha_vantage_get({
         "function": "DIGITAL_CURRENCY_DAILY",
         "symbol": "BTC",
@@ -1115,6 +1180,7 @@ def _build_stock_analysis(symbol: str) -> dict[str, Any]:
         "bullish_factors": bullish_factors,
         "risk_factors": risk_factors,
         "as_of": series[0]["date"],
+        "data_source": series[0].get("source", "Alpha Vantage"),
     }
     analysis["summary"] = _generate_stock_analysis_summary(analysis)
     return analysis
@@ -1158,7 +1224,7 @@ def _build_macro_signals() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "lookback_days": BTC_MACRO_LOOKBACK_DAYS,
             "explanation": explanation,
             "explanation_zh": explanation_zh,
-            "source": "DIGITAL_CURRENCY_DAILY",
+            "source": btc_series[0].get("source", "DIGITAL_CURRENCY_DAILY"),
             "as_of": btc_series[0]["date"],
         })
 
@@ -1185,7 +1251,7 @@ def _build_macro_signals() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "lookback_days": MACRO_SIGNAL_LOOKBACK_DAYS,
             "explanation": explanation,
             "explanation_zh": explanation_zh,
-            "source": "TIME_SERIES_DAILY_ADJUSTED",
+            "source": qqq_series[0].get("source", "TIME_SERIES_DAILY_ADJUSTED"),
             "as_of": qqq_series[0]["date"],
         })
 
@@ -1213,7 +1279,7 @@ def _build_macro_signals() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "lookback_days": MACRO_SIGNAL_LOOKBACK_DAYS,
             "explanation": explanation,
             "explanation_zh": explanation_zh,
-            "source": "TIME_SERIES_DAILY_ADJUSTED",
+            "source": qqq_series[0].get("source", "TIME_SERIES_DAILY_ADJUSTED"),
             "as_of": qqq_series[0]["date"],
         })
 
@@ -1241,7 +1307,7 @@ def _build_macro_signals() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "lookback_days": MACRO_SIGNAL_LOOKBACK_DAYS,
             "explanation": explanation,
             "explanation_zh": explanation_zh,
-            "source": "TIME_SERIES_DAILY_ADJUSTED",
+            "source": gld_series[0].get("source", "TIME_SERIES_DAILY_ADJUSTED"),
             "as_of": gld_series[0]["date"],
         })
 

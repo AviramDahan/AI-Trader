@@ -1,10 +1,15 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App.tsx'
+import { discoverBackend } from './runtimeConfig'
 import './index.css'
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+async function start() {
+  await discoverBackend()
+  const { default: App } = await import('./App.tsx')
+  ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,
 )
+}
+void start()

@@ -28,11 +28,13 @@ jobs:
         working-directory: service/frontend
         env:
           VITE_API_BASE: ${{ vars.BACKEND_URL }}/api
+          PUBLIC_BACKEND_URL: ${{ vars.BACKEND_URL }}
         run: |
           npm ci
           npm run build -- --base /AI-Trader/
           cp dist/index.html dist/404.html
           touch dist/.nojekyll
+          jq -n --arg url "$PUBLIC_BACKEND_URL" '{backend_url: $url}' > dist/runtime-config.json
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

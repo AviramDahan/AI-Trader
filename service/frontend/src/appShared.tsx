@@ -87,7 +87,8 @@ export const useTheme = () => {
   return context
 }
 
-export const API_BASE = (import.meta.env.VITE_API_BASE || '/api').replace(/\/+$/, '')
+import { runtimeOrigin } from './runtimeConfig'
+export const API_BASE = (runtimeOrigin() ? `${runtimeOrigin()}/api` : (import.meta.env.VITE_API_BASE || '/api')).replace(/\/+$/, '')
 export const API_ORIGIN = /^https?:\/\//i.test(API_BASE)
   ? new URL(API_BASE).origin
   : window.location.origin
