@@ -49,6 +49,14 @@ def main():
             expect(page.get_by_text("דשבורד סורק המניות", exact=True)).to_be_visible()
             for text in ("סיגנלים", "עסקאות דמו", "תוצאות", "חדשות", "מצב הסורק"):
                 expect(page.get_by_role("button", name=text, exact=True)).to_be_visible()
+            page.get_by_role("button", name="עסקאות דמו", exact=True).click()
+            expect(page.locator(".scanner-account-grid")).to_be_visible()
+            for button, heading in (("תוצאות", "השוואת אסטרטגיות יציאה"),
+                                    ("חדשות", "חדשות — מהחדש לישן"),
+                                    ("מצב הסורק", "מצב רכיבי הסורק"),
+                                    ("סיגנלים", "סיגנלים פעילים")):
+                page.get_by_role("button", name=button, exact=True).click()
+                expect(page.get_by_role("heading", name=heading, exact=False)).to_be_visible()
             assert page.evaluate("document.documentElement.dir === 'rtl'")
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Hebrew dashboard overflow"
             assert page.evaluate("""[...document.querySelectorAll('button')].filter(button => {
@@ -56,6 +64,7 @@ def main():
               }).every(button => { const box = button.getBoundingClientRect(); return box.left >= -1 && box.right <= innerWidth + 1 })"""), "button overflow"
             page.get_by_role("button", name="EN", exact=True).click()
             expect(page.get_by_text("Stock scanner dashboard", exact=True)).to_be_visible()
+            expect(page.get_by_role("heading", name="Active signals", exact=False)).to_be_visible()
             assert page.evaluate("document.documentElement.dir === 'ltr'")
             assert page.locator(".backend-status-banner").count() == 0
             if width == 390:

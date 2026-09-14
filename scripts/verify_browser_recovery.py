@@ -26,10 +26,10 @@ def main():
         page.route(OLD + '/**', lambda route: route.abort('connectionfailed'))
         page.goto('https://aviramdahan.github.io/AI-Trader/market', wait_until='domcontentloaded')
         expect(page.locator('.backend-status-banner')).to_be_visible(timeout=25000)
-        expect(page.get_by_role('button', name='בדיקה מחדש', exact=True)).to_be_visible()
-        expect(page.get_by_text('ai-trader-admin', exact=True)).to_be_visible(timeout=45000)
-        expect(page.locator('.backend-status-banner')).to_have_count(0)
-        expect(page.get_by_test_id('paper-activity')).to_be_visible()
+        expect(page.get_by_role('alert').get_by_role('button', name='בדיקה מחדש', exact=True)).to_be_visible()
+        expect(page.get_by_text('דשבורד סורק המניות', exact=True)).to_be_visible(timeout=45000)
+        expect(page.locator('.backend-status-banner')).to_have_count(0, timeout=45000)
+        expect(page.get_by_text('מסחר מדומה בלבד', exact=True).last).to_be_visible()
         assert len(calls) >= 4
 
         # A temporary health failure on the current URL must recover without a page reload.
@@ -43,7 +43,7 @@ def main():
         health_offline['value'] = True
         expect(page.locator('.backend-status-banner')).to_be_visible(timeout=25000)
         health_offline['value'] = False
-        page.get_by_role('button', name='בדיקה מחדש', exact=True).click()
+        page.get_by_role('alert').get_by_role('button', name='בדיקה מחדש', exact=True).click()
         expect(page.locator('.backend-status-banner')).to_have_count(0, timeout=10000)
         assert page.evaluate("Number(localStorage.getItem('ai_trader_backend_last_success')) > 0")
         print('PASS mobile browser handled offline, Retry, recovery and tunnel URL rotation without manual reload')
