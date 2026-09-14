@@ -3656,7 +3656,8 @@ a {
   .paper-only { justify-self: start; }
   .scanner-stage-grid, .scanner-account-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .scanner-card-grid, .scanner-status-grid { grid-template-columns: minmax(0, 1fr); }
-  .scanner-tabs { margin-inline: -4px; padding: 0 4px 4px; }
+  .scanner-tabs { flex-wrap: wrap; overflow-x: visible; }
+  .scanner-tabs button { flex: 1 1 calc(50% - 8px); }
   .scanner-signal-card, .scanner-trade-card, .scanner-news-card { padding: 14px; }
   .scanner-inline-error { align-items: flex-start; flex-direction: column; }
   .scanner-filters input, .scanner-filters select { width: 100%; }

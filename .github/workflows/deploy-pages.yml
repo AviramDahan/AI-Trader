@@ -33,6 +33,8 @@ jobs:
           npm ci
           npm run build -- --base /AI-Trader/
           cp dist/index.html dist/404.html
+          mkdir -p dist/market
+          cp dist/index.html dist/market/index.html
           touch dist/.nojekyll
           jq -n --arg url "$PUBLIC_BACKEND_URL" '{backend_url: $url}' > dist/runtime-config.json
       - uses: actions/configure-pages@v5

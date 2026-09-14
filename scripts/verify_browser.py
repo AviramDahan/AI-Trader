@@ -21,7 +21,7 @@ def main():
             page.on("requestfailed", lambda r: failures.append(r.url.split("?")[0]))
             page.goto(SITE + "/market", wait_until="networkidle")
             expect(page.get_by_text("Stock scanner dashboard", exact=True)).to_be_visible(timeout=30000)
-            expect(page.get_by_text("PAPER TRADING ONLY", exact=True).first).to_be_visible()
+            expect(page.locator(".scanner-hero").get_by_text("PAPER TRADING ONLY", exact=True)).to_be_visible()
             assert page.locator(".backend-status-banner").count() == 0
             activity = page.evaluate("async url => (await fetch(url)).json()", backend + "/api/runtime/activity")
             assert activity["enabled"] and not activity["stale"] and activity["last_scan_at"]
