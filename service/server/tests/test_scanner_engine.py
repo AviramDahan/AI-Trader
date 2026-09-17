@@ -123,6 +123,41 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertEqual(fills[-1]["fill_type"], "stop")
         self.assertNotIn(2, [row["target_index"] for row in fills])
 
+    def test_single_target_full_close_reconciles_cash_fees_and_net_outcome(self):
+        self.record()
+        scanner_engine.process_bar("AAPL", self.bar(1, 100, 101, 99, 100))
+        trade = self.fetchall("SELECT * FROM scanner_trades WHERE is_shadow=0")[0]
+        scanner_engine.process_bar("AAPL", self.bar(2, trade["tp2"], trade["tp2"] + .1,
+                                                     trade["current_stop"] + .1, trade["tp2"]))
+        closed = self.fetchall("SELECT * FROM scanner_trades WHERE is_shadow=0")[0]
+        account = self.fetchall("SELECT * FROM scanner_accounts")[0]
+        self.assertEqual(closed["status"], "closed")
+        self.assertEqual(closed["outcome"], "WIN")
+        self.assertAlmostEqual(account["cash"], account["initial_cash"] + closed["realized_pnl"] - closed["fees"], places=5)
+        self.assertAlmostEqual(account["realized_pnl"], closed["realized_pnl"], places=5)
+        self.assertAlmostEqual(account["fees_paid"], closed["fees"], places=5)
+
+    def test_stop_after_partial_exit_closes_remainder_and_outcome_uses_total_net(self):
+        scanner_engine.set_active_strategy("staged")
+        self.record()
+        scanner_engine.process_bar("AAPL", self.bar(1, 100, 101, 99, 100))
+        trade = self.fetchall("SELECT * FROM scanner_trades WHERE is_shadow=0")[0]
+        scanner_engine.process_bar("AAPL", self.bar(2, trade["tp1"], trade["tp1"] + .1,
+                                                     trade["current_stop"] + .1, trade["tp1"]))
+        partial = self.fetchall("SELECT * FROM scanner_trades WHERE is_shadow=0")[0]
+        self.assertGreater(partial["remaining_quantity"], 0)
+        self.assertAlmostEqual(partial["current_stop"], partial["entry_price"], places=6)
+        scanner_engine.process_bar("AAPL", self.bar(3, partial["current_stop"] - 1,
+                                                     partial["current_stop"] - .5,
+                                                     partial["current_stop"] - 2,
+                                                     partial["current_stop"] - 1))
+        closed = self.fetchall("SELECT * FROM scanner_trades WHERE is_shadow=0")[0]
+        fills = self.fetchall("SELECT fill_type,quantity FROM scanner_fills WHERE trade_id=? ORDER BY id", (closed["id"],))
+        self.assertEqual([row["fill_type"] for row in fills], ["entry", "tp", "stop"])
+        self.assertAlmostEqual(sum(row["quantity"] for row in fills if row["fill_type"] != "entry"), closed["original_quantity"], places=6)
+        expected = scanner_engine._outcome(closed["realized_pnl"] - closed["fees"], scanner_engine.lifecycle_settings()["breakeven_threshold"])
+        self.assertEqual(closed["outcome"], expected)
+
     def test_partial_trade_keeps_news_active_then_gap_stop_closes_it(self):
         scanner_engine.set_active_strategy("staged")
         self.record()

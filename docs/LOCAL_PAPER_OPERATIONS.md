@@ -22,6 +22,27 @@ reviews, and approved signals. Zero approved signals is valid. A signal requires
 12 minutes; weekends, regular-hours closure, and shared NYSE/Nasdaq full-day holidays are reported separately.
 Yahoo is a free unofficial delayed/no-SLA source, and the UI states this limitation.
 
+The durable server-side news feed also polls a small set of complementary primary sources even when the
+dashboard is closed: the [SEC EDGAR latest-filings Atom feed](https://www.sec.gov/about/rss-feeds), the
+[Federal Reserve Board press-release RSS feed](https://www.federalreserve.gov/feeds/feeds.htm), and the
+[BLS Employment, CPI and JOLTS RSS feeds](https://www.bls.gov/feed/). These public feeds require no paid
+plan or API key. SEC access declares the configured operator contact and stays far below the official
+[10 requests/second fair-access ceiling](https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data).
+The default collection cadence is five minutes for shared official feeds and fifteen minutes for a rotating
+Yahoo subset of up to ten tickers, prioritized as open positions, active signals, then scanner candidates.
+This is not whole-universe news coverage. Provider status, actual
+coverage, last success, and next check are exposed in Scanner status; this is periodic collection, not a
+real-time wire. Conditional HTTP caching, persistent checkpoints, per-provider backoff, and exact conservative
+deduplication protect quotas and restart recovery. Feed items older than seven days are not ingested as fresh
+events; a changed source URL/title/excerpt is reanalyzed as a new version of the same event. The official RSS
+sites do not publish a numeric polling quota, so five minutes is a conservative configurable default and 429
+responses trigger provider-specific backoff.
+
+Only provider metadata (original title/feed excerpt, publisher, direct URL and publication time) is recorded as
+source fact. Because full article bodies are not downloaded, the UI labels these items as headline/feed-summary
+only. Hebrew titles and summaries, sentiment, materiality and thesis impact are stored separately as cautious Ollama
+interpretation. External text is treated as untrusted input and cannot issue trades or change Entry/TP/SL.
+
 ## Signal and paper lifecycle
 
 Each strong signal stores ticker/company, BUY/SELL/HOLD, planned/actual entry, original/current stop,
@@ -67,12 +88,15 @@ News is database-backed and newest-first. It separates broad market, scanner-sho
 with ticker/time/sentiment filters, source time/link, analyzed fields, and documented links. It states actual
 coverage and never calls a shortlist a full-universe feed. Cached translation/analysis runs in the worker.
 
-At entry, each open ticker is immediately due. Successful checks recur every six hours—including nights,
-weekends, and holidays—while primary quantity remains. Trades sharing a ticker reuse one fetch/analysis. A
-two-hour overlap catches late items; exact ticker metadata plus URL/title fingerprints prevent wrong links and
-duplicate alerts. Ollama returns structured related/impact/materiality/thesis-effect fields and a concise Hebrew
-explanation with uncertainty. Facts remain separate from interpretation. News may alert, but cannot close a trade
-or change TP/SL. Provider/Ollama failure is an error, never “no news”.
+At entry, each open ticker becomes due and the independent position-news worker checks it within about one
+minute. Successful summary reviews recur every six hours—including nights, weekends, and holidays—while
+primary quantity remains. Each review refreshes the prioritized Yahoo subset and reuses already collected
+canonical news; unchanged items are not sent to Ollama again. Between reviews, newly collected relevant
+position news enters a separate AI job queue and may produce one Hebrew material-news alert per event version.
+Trades sharing a ticker reuse collection/analysis. A two-hour pre-entry overlap catches recent items; exact
+ticker metadata and canonical URL/headline keys prevent wrong links and duplicate alerts. Facts remain separate
+from interpretation. News may alert, but cannot close a trade or change TP/SL. Provider/Ollama failure is an
+error, never “no news”; the next review retries after backoff rather than waiting six hours.
 
 ## Telegram and health
 

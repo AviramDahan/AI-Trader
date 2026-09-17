@@ -3654,6 +3654,11 @@ html[dir='rtl'] .main-content {
 .scanner-filters input, .scanner-filters select { min-height: 42px; padding: 8px 11px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 9px; }
 .scanner-news-card { margin-bottom: 10px; }
 .scanner-news-card h3 { margin: 10px 0; font-size: 17px; }
+.scanner-source-fact, .scanner-ai-interpretation { padding: 10px 12px; border-radius: 9px; background: color-mix(in srgb, var(--bg-primary) 82%, transparent); }
+.scanner-ai-interpretation { border-inline-start: 3px solid #818cf8; }
+.scanner-news-meta { color: var(--text-secondary); font-size: 13px; }
+.scanner-news-card footer details { display: inline-block; margin-inline-start: 6px; }
+.scanner-news-card footer details a { display: block; margin-top: 4px; }
 .scanner-status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .scanner-status.ok { border-inline-start: 4px solid #12b76a; }
 .scanner-status.error { border-inline-start: 4px solid #f04438; }

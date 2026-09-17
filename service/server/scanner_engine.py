@@ -222,7 +222,7 @@ def initialize_runtime() -> None:
             pass
     conn.commit()
     conn.close()
-    for component in ("prices", "news", "ollama", "scan", "monitor", "position_news", "telegram"):
+    for component in ("prices", "news", "news_feed", "news_ai", "ollama", "scan", "monitor", "position_news", "telegram"):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT component FROM scanner_service_status WHERE component=?", (component,))
@@ -230,6 +230,11 @@ def initialize_runtime() -> None:
         conn.close()
         if not exists:
             _service(component, "waiting", "Not run since lifecycle initialization")
+    try:
+        from news_pipeline import initialize_providers
+        initialize_providers()
+    except Exception as exc:
+        _service("news_feed", "error", f"Provider initialization: {type(exc).__name__}")
 
 
 def _commission(quantity: float, settings: dict[str, Any]) -> float:
@@ -923,13 +928,26 @@ def dashboard_payload() -> dict[str, Any]:
         cur.execute("""SELECT n.* FROM scanner_news n JOIN scanner_trade_news l ON l.news_id=n.id
                        WHERE l.trade_id=? ORDER BY n.published_at DESC LIMIT 20""", (trade["id"],))
         trade["news"] = [dict(row) for row in cur.fetchall()]
-    cur.execute("SELECT * FROM scanner_news ORDER BY published_at DESC LIMIT 300"); news = [dict(row) for row in cur.fetchall()]
+    cur.execute("SELECT * FROM scanner_news ORDER BY published_at DESC LIMIT 500"); news = [dict(row) for row in cur.fetchall()]
     for item in news:
+        item["source_facts"] = _loads(item.pop("source_facts_json", None), {})
+        item["verified_tickers"] = _loads(item.pop("verified_tickers_json", None), [])
+        item["alternate_sources"] = _loads(item.pop("alternate_sources_json", None), [])
         cur.execute("SELECT trade_id FROM scanner_trade_news WHERE news_id=? ORDER BY trade_id", (item["id"],))
         item["trade_ids"] = [int(row["trade_id"]) for row in cur.fetchall()]
     cur.execute("SELECT * FROM scanner_news_schedule ORDER BY ticker"); schedules = [dict(row) for row in cur.fetchall()]
     cur.execute("SELECT * FROM scanner_service_status ORDER BY component"); services = [dict(row) for row in cur.fetchall()]
+    try:
+        cur.execute("SELECT * FROM scanner_news_providers ORDER BY provider")
+        news_providers = [dict(row) for row in cur.fetchall()]
+    except Exception:
+        news_providers = []
     cur.execute("SELECT COUNT(*) count FROM scanner_legacy_records WHERE verified=0"); legacy = int(cur.fetchone()["count"])
+    try:
+        cur.execute("SELECT COUNT(*) count FROM positions WHERE agent_id=?", (agent_id,))
+        legacy_positions = int(cur.fetchone()["count"])
+    except Exception:
+        legacy_positions = 0
     cur.execute("SELECT COUNT(*) count FROM scanner_candidates WHERE status='rejected'"); rejected_count = int(cur.fetchone()["count"])
     cur.execute("SELECT * FROM scanner_candidates WHERE status='rejected' ORDER BY created_at DESC LIMIT 50"); rejected = [dict(row) for row in cur.fetchall()]
     cur.execute("""SELECT strategy,COUNT(*) trades,MIN(opened_at) start,
@@ -975,7 +993,17 @@ def dashboard_payload() -> dict[str, Any]:
     primary = [trade for trade in trades if not trade["is_shadow"]]
     account["open_exposure"] = sum(float(t["remaining_quantity"]) * float(t.get("last_price") or t["entry_price"]) for t in primary if t["status"] == "open")
     account["unrealized_pnl"] = sum(float(t["unrealized_pnl"] or 0) for t in primary if t["status"] == "open")
+    collected_times = [item.get("collected_at") or item.get("fetched_at") for item in news if item.get("collected_at") or item.get("fetched_at")]
+    provider_success_times = [item["last_success_at"] for item in news_providers if item.get("last_success_at")]
     return {"paper_only": True, "scanner_name": SCANNER_NAME, "settings": lifecycle_settings(), "market": market_session_state(), "account": account,
             "signals": signals, "trades": trades, "news": news, "news_schedules": schedules,
-            "services": services, "strategy_comparison": comparisons, "legacy_unverified_count": legacy,
+            "services": services, "news_providers": news_providers,
+            "news_meta": {"screen_generated_at": now_z(),
+                          "last_collected_at": max(provider_success_times) if provider_success_times else None,
+                          "latest_item_collected_at": max(collected_times) if collected_times else None,
+                          "requested_refresh_seconds": int(os.getenv("STOCK_SCANNER_NEWS_FEED_INTERVAL_SECONDS", "300")),
+                          "coverage_note": "Prioritized feed: open positions, active signals, rotating scanner candidates, plus shared market/official feeds."},
+            "strategy_comparison": comparisons, "legacy_unverified_count": legacy,
+            "legacy_positions": {"count": legacy_positions, "marked_by_original_price_worker": legacy_positions > 0,
+                                 "managed_by_durable_lifecycle": False, "included_in_verified_statistics": False},
             "rejected_count": rejected_count, "rejected": rejected}

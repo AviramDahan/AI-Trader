@@ -1426,6 +1426,89 @@ def init_database():
         cursor.execute("ALTER TABLE scanner_news ADD COLUMN signal_id INTEGER")
     except Exception:
         pass
+    # Additive news-pipeline metadata. These columns deliberately keep the
+    # original scanner_news rows intact while making provenance and AI output
+    # explicit for new and legacy records.
+    for column_sql in (
+        "title_he TEXT",
+        "provider TEXT",
+        "canonical_key TEXT",
+        "original_publisher TEXT",
+        "collected_at TEXT",
+        "source_kind TEXT",
+        "headline_only INTEGER NOT NULL DEFAULT 1",
+        "source_facts_json TEXT",
+        "verified_tickers_json TEXT",
+        "alternate_sources_json TEXT",
+        "content_hash TEXT",
+        "analyzed_at TEXT",
+        "analysis_error TEXT",
+        "updated_at TEXT",
+    ):
+        try:
+            cursor.execute(f"ALTER TABLE scanner_news ADD COLUMN {column_sql}")
+        except Exception:
+            pass
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_news_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            news_id INTEGER NOT NULL,
+            source_key TEXT NOT NULL UNIQUE,
+            provider TEXT NOT NULL,
+            publisher TEXT NOT NULL,
+            url TEXT NOT NULL,
+            published_at TEXT NOT NULL,
+            collected_at TEXT NOT NULL,
+            source_kind TEXT NOT NULL,
+            headline_only INTEGER NOT NULL DEFAULT 1,
+            raw_metadata_json TEXT,
+            FOREIGN KEY (news_id) REFERENCES scanner_news(id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_news_providers (
+            provider TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            last_attempt_at TEXT,
+            last_success_at TEXT,
+            next_check_at TEXT NOT NULL,
+            cadence_seconds INTEGER NOT NULL,
+            coverage TEXT NOT NULL,
+            checkpoint_json TEXT,
+            etag TEXT,
+            last_modified TEXT,
+            consecutive_failures INTEGER NOT NULL DEFAULT 0,
+            rate_limit_until TEXT,
+            error TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_news_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            news_id INTEGER NOT NULL UNIQUE,
+            priority INTEGER NOT NULL DEFAULT 10,
+            status TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at TEXT NOT NULL,
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (news_id) REFERENCES scanner_news(id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_news_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            news_id INTEGER NOT NULL,
+            trade_id INTEGER NOT NULL,
+            alert_kind TEXT NOT NULL,
+            event_version TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(news_id, trade_id, alert_kind, event_version),
+            FOREIGN KEY (news_id) REFERENCES scanner_news(id),
+            FOREIGN KEY (trade_id) REFERENCES scanner_trades(id)
+        )
+    """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scanner_trade_news (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1447,6 +1530,10 @@ def init_database():
             error TEXT
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE scanner_news_schedule ADD COLUMN summary_he TEXT")
+    except Exception:
+        pass
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scanner_telegram_outbox (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1935,6 +2022,10 @@ def init_database():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_fills_trade_created ON scanner_fills(trade_id, created_at)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_news_published ON scanner_news(published_at DESC)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_news_ticker_published ON scanner_news(ticker, published_at DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_news_canonical ON scanner_news(canonical_key)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_news_provider_collected ON scanner_news(provider, collected_at DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_news_sources_news ON scanner_news_sources(news_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_news_jobs_due ON scanner_news_jobs(status, next_attempt_at, priority)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_outbox_status_due ON scanner_telegram_outbox(status, next_attempt_at)")
 
     if not using_postgres():

@@ -1,0 +1,231 @@
+import os
+import sys
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import database
+import news_pipeline
+import scanner_engine
+
+
+UTC = timezone.utc
+
+
+class NewsPipelineIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.original_path = database._SQLITE_DB_PATH
+        database._SQLITE_DB_PATH = str(Path(self.directory.name) / "news.db")
+        database.init_database()
+        conn = database.get_db_connection()
+        conn.execute("INSERT INTO agents(name,token,cash) VALUES('us-stock-scanner','test-token',100000)")
+        conn.commit(); conn.close()
+        with patch.dict(os.environ, {"STOCK_SCANNER_EXIT_STRATEGY": "single"}, clear=False):
+            scanner_engine.initialize_runtime()
+        self.clock = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
+
+    def tearDown(self):
+        database._SQLITE_DB_PATH = self.original_path
+        self.directory.cleanup()
+
+    def rows(self, sql, params=()):
+        conn = database.get_db_connection()
+        values = [dict(row) for row in conn.execute(sql, params).fetchall()]
+        conn.close()
+        return values
+
+    def item(self, provider="federal_reserve", url="https://example.test/release", ticker=None):
+        return {"provider": provider, "publisher": "Original Publisher", "title": "Company reports material update",
+                "url": url, "published_at": self.clock.isoformat(), "source_excerpt": "Published source metadata.",
+                "tickers": [ticker] if ticker else [], "scope": "universe" if ticker else "market",
+                "source_kind": "headline_summary", "headline_only": True}
+
+    def open_trade(self):
+        signal = {"signal_id": 1, "ticker": "AAPL", "company": "Apple", "action": "BUY", "entry": 100,
+                  "stop_loss": 97, "confidence": .9, "time_horizon": "1-4 weeks", "reason": "Verified thesis.",
+                  "telegram_reason_he": "תזה מאומתת.", "relevant_news": [], "telegram_news_he": []}
+        candidate = {"ticker": "AAPL", "company": "Apple", "technical_score": 7, "combined_rank_score": .9}
+        scanner_engine.record_signal(signal, candidate, {"news_relevance": .9, "news_sentiment": .5}, {}, "scan")
+        scanner_engine.process_bar("AAPL", {"at": self.clock.isoformat().replace("+00:00", "Z"),
+                                              "open": 100, "high": 101, "low": 99, "close": 100})
+
+    def test_periodic_collection_deduplicates_cross_provider_and_preserves_sources(self):
+        def first(state, at):
+            return {"items": [self.item()], "coverage": "fake shared feed", "checkpoint": {"cursor": "one"}}
+
+        result = news_pipeline.run_feed_cycle({"federal_reserve": first}, self.clock, force=True)
+        self.assertEqual(result["items_inserted"], 1)
+        second_item = self.item("bls", "https://second.example.test/release")
+        news_pipeline.ingest_items([second_item], self.clock + timedelta(minutes=1))
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_news")), 1)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_news_sources")), 2)
+        row = self.rows("SELECT * FROM scanner_news")[0]
+        self.assertEqual(row["analysis_status"], "pending_analysis")
+        self.assertIn("headline_and_feed_summary", row["source_facts_json"])
+
+    def test_provider_cadence_rate_limit_backoff_and_recovery(self):
+        calls = []
+
+        def limited(state, at):
+            calls.append(at)
+            if len(calls) == 1:
+                raise news_pipeline.ProviderRateLimited("limited", 600)
+            return {"items": [], "coverage": "recovered"}
+
+        first = news_pipeline.run_feed_cycle({"federal_reserve": limited}, self.clock, force=True)
+        self.assertEqual(first["errors"], ["federal_reserve:rate_limited"])
+        self.assertEqual(self.rows("SELECT status FROM scanner_news_providers WHERE provider='federal_reserve'")[0]["status"], "rate_limited")
+        skipped = news_pipeline.run_feed_cycle({"federal_reserve": limited}, self.clock + timedelta(minutes=5))
+        self.assertEqual(skipped["providers_checked"], 0)
+        recovered = news_pipeline.run_feed_cycle({"federal_reserve": limited}, self.clock + timedelta(minutes=11))
+        self.assertFalse(recovered["errors"])
+        self.assertEqual(self.rows("SELECT status FROM scanner_news_providers WHERE provider='federal_reserve'")[0]["status"], "ok")
+
+    def test_changed_source_version_requeues_once_without_losing_other_sources(self):
+        first = self.item()
+        news_pipeline.ingest_items([first], self.clock)
+        news_pipeline.analyze_news_jobs(
+            analyzer=lambda rows: [{"id": rows[0]["id"], "related": True, "summary_he": "תקציר.",
+                                    "sentiment": "neutral", "materiality": "low",
+                                    "thesis_effect": "unchanged", "interpretation_he": "לא ברור.",
+                                    "relevance": .5}], at=self.clock)
+        updated = {**first, "title": "Company reports a revised material update",
+                   "source_excerpt": "Revised published metadata."}
+        news_pipeline.ingest_items([updated], self.clock + timedelta(minutes=5))
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_news")), 1)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_news_sources")), 1)
+        self.assertEqual(self.rows("SELECT status FROM scanner_news_jobs")[0]["status"], "pending")
+        news_pipeline.ingest_items([updated], self.clock + timedelta(minutes=6))
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_news_sources")), 1)
+
+    def test_old_archive_item_is_not_queued_as_fresh_news(self):
+        old = {**self.item(), "published_at": (self.clock - timedelta(days=10)).isoformat()}
+        result = news_pipeline.ingest_items([old], self.clock)
+        self.assertEqual(result["inserted"], 0)
+        self.assertFalse(self.rows("SELECT * FROM scanner_news_jobs"))
+
+    def test_material_open_position_news_is_immediate_deduped_and_never_mutates_trade(self):
+        self.open_trade()
+        before = self.rows("SELECT remaining_quantity,current_stop FROM scanner_trades WHERE is_shadow=0")[0]
+        news_pipeline.ingest_items([self.item("yahoo_priority", "https://example.test/aapl", "AAPL")], self.clock)
+
+        def analyzer(rows):
+            return [{"id": rows[0]["id"], "related": True, "summary_he": "החברה פרסמה עדכון מהותי.",
+                     "sentiment": "positive", "materiality": "high", "thesis_effect": "supports",
+                     "interpretation_he": "פרשנות AI זהירה: העדכון עשוי לתמוך בתזה, אך קיימת אי־ודאות.",
+                     "relevance": .98}]
+
+        first = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
+        second = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock + timedelta(minutes=1))
+        after = self.rows("SELECT remaining_quantity,current_stop FROM scanner_trades WHERE is_shadow=0")[0]
+        self.assertEqual(first["alerts"], 1)
+        self.assertEqual(second["alerts"], 0)
+        self.assertEqual(before, after)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_trade_news")), 1)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news'")), 1)
+
+    def test_closed_position_does_not_receive_new_dedicated_news_alert(self):
+        self.open_trade()
+        trade = self.rows("SELECT * FROM scanner_trades WHERE is_shadow=0")[0]
+        scanner_engine.process_bar("AAPL", {"at": (self.clock + timedelta(minutes=5)).isoformat(),
+                                              "open": trade["current_stop"] - 1,
+                                              "high": trade["current_stop"] - .5,
+                                              "low": trade["current_stop"] - 2,
+                                              "close": trade["current_stop"] - 1})
+        self.assertEqual(self.rows("SELECT status FROM scanner_news_schedule WHERE ticker='AAPL'")[0]["status"], "closed")
+        item = {**self.item("yahoo_priority", "https://example.test/later", "AAPL"),
+                "published_at": (self.clock + timedelta(minutes=10)).isoformat()}
+        news_pipeline.ingest_items([item], self.clock + timedelta(minutes=10))
+        self.assertFalse(self.rows("SELECT * FROM scanner_trade_news"))
+        result = news_pipeline.analyze_news_jobs(
+            analyzer=lambda rows: [{"id": rows[0]["id"], "related": True, "title_he": "עדכון",
+                                    "summary_he": "פורסם עדכון מהותי.", "sentiment": "negative",
+                                    "materiality": "high", "thesis_effect": "weakens",
+                                    "interpretation_he": "השפעה אפשרית שלילית.", "relevance": .9}],
+            at=self.clock + timedelta(minutes=10))
+        self.assertEqual(result["alerts"], 0)
+
+    def test_six_hour_review_reuses_cache_and_partial_position_remains_scheduled(self):
+        self.open_trade()
+        trade = self.rows("SELECT * FROM scanner_trades WHERE is_shadow=0")[0]
+        scanner_engine.set_active_strategy("staged")  # current trade snapshot remains single
+        conn = database.get_db_connection()
+        conn.execute("UPDATE scanner_news_schedule SET next_due_at=? WHERE ticker='AAPL'", (self.clock.isoformat(),))
+        conn.commit(); conn.close()
+        fake = {"items": [], "coverage": "open ticker checked", "checkpoint": {"candidate_offset": 0}}
+        with patch.object(news_pipeline, "_fetch_yahoo_priority", return_value=fake):
+            result = news_pipeline.run_position_summary_cycle(self.clock)
+        self.assertEqual(result["checked"], 1)
+        schedule = self.rows("SELECT * FROM scanner_news_schedule WHERE ticker='AAPL'")[0]
+        self.assertEqual(schedule["status"], "no_new")
+        self.assertGreater(news_pipeline._parse_time(schedule["next_due_at"]), self.clock + timedelta(hours=5, minutes=59))
+        self.assertEqual(self.rows("SELECT strategy FROM scanner_trades WHERE id=?", (trade["id"],))[0]["strategy"], "single")
+
+    def test_six_hour_review_preserves_last_success_during_provider_backoff(self):
+        self.open_trade()
+        conn = database.get_db_connection()
+        conn.execute("UPDATE scanner_news_schedule SET next_due_at=?,last_success_at=? WHERE ticker='AAPL'",
+                     (self.clock.isoformat(), (self.clock - timedelta(hours=6)).isoformat()))
+        conn.execute("UPDATE scanner_news_providers SET status='rate_limited',next_check_at=? WHERE provider='yahoo_priority'",
+                     ((self.clock + timedelta(hours=1)).isoformat(),))
+        conn.commit(); conn.close()
+        with patch.object(news_pipeline, "_fetch_yahoo_priority") as fetch:
+            result = news_pipeline.run_position_summary_cycle(self.clock)
+        fetch.assert_not_called()
+        self.assertTrue(result["errors"])
+        schedule = self.rows("SELECT * FROM scanner_news_schedule WHERE ticker='AAPL'")[0]
+        self.assertEqual(schedule["status"], "error")
+        self.assertEqual(news_pipeline._parse_time(schedule["last_success_at"]), self.clock - timedelta(hours=6))
+
+    def test_provider_failure_is_not_no_news_and_collection_never_calls_price_monitor(self):
+        def failed(state, at):
+            raise RuntimeError("provider unavailable")
+
+        with patch.object(scanner_engine, "monitor_prices") as prices:
+            result = news_pipeline.run_feed_cycle({"federal_reserve": failed}, self.clock, force=True)
+        prices.assert_not_called()
+        self.assertTrue(result["errors"])
+        provider = self.rows("SELECT * FROM scanner_news_providers WHERE provider='federal_reserve'")[0]
+        self.assertEqual(provider["status"], "error")
+        self.assertNotEqual(provider["status"], "no_new")
+
+    def test_rss_parser_records_original_publication_and_headline_only_scope(self):
+        xml = b"""<rss><channel><item><title>Official release</title><link>https://official.test/item?utm_source=x</link>
+        <pubDate>Mon, 14 Sep 2026 12:00:00 GMT</pubDate><description>Official summary</description></item></channel></rss>"""
+        rows = news_pipeline._rss_items(xml, "official", "Official Publisher", "market")
+        self.assertEqual(rows[0]["url"], "https://official.test/item")
+        self.assertEqual(rows[0]["publisher"], "Official Publisher")
+        self.assertTrue(rows[0]["headline_only"])
+        self.assertEqual(news_pipeline._parse_time(rows[0]["published_at"]), self.clock)
+
+    def test_atom_uses_original_published_time_and_skips_missing_timestamp(self):
+        atom = b"""<feed xmlns="http://www.w3.org/2005/Atom">
+        <entry><title>Old official release</title><link href="https://official.test/old"/>
+        <published>2026-09-04T07:51:08.21-04:00</published><updated>2026-09-17T12:00:00Z</updated>
+        <content>Official release excerpt.</content></entry>
+        <entry><title>Undated item</title><link href="https://official.test/unknown"/></entry></feed>"""
+        rows = news_pipeline._rss_items(atom, "bls", "BLS", "market")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(news_pipeline._parse_time(rows[0]["published_at"]),
+                         datetime(2026, 9, 4, 11, 51, 8, 210000, tzinfo=UTC))
+        self.assertEqual(news_pipeline.ingest_items(rows, self.clock)["inserted"], 0)
+
+    def test_corrected_official_date_marks_previously_misdated_archive_stale(self):
+        wrong = {**self.item("bls", "https://official.test/old"),
+                 "published_at": self.clock.isoformat()}
+        news_pipeline.ingest_items([wrong], self.clock)
+        corrected = {**wrong, "published_at": (self.clock - timedelta(days=10)).isoformat()}
+        changed = news_pipeline._reconcile_source_publication_times("bls", [corrected], self.clock)
+        self.assertEqual(changed, 1)
+        row = self.rows("SELECT * FROM scanner_news")[0]
+        self.assertEqual(row["analysis_status"], "stale_skipped")
+        self.assertEqual(self.rows("SELECT status FROM scanner_news_jobs")[0]["status"], "stale_skipped")
+
+
+if __name__ == "__main__":
+    unittest.main()

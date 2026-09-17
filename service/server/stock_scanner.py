@@ -846,15 +846,46 @@ async def stock_signal_monitor_loop() -> None:
 async def stock_position_news_loop() -> None:
     if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
         return
-    from scanner_engine import monitor_position_news
+    from news_pipeline import run_position_summary_cycle
     await asyncio.sleep(60)
     while True:
         try:
-            await asyncio.to_thread(monitor_position_news)
+            await asyncio.to_thread(run_position_summary_cycle)
         except Exception as exc:
             from scanner_engine import set_service_status
             set_service_status("position_news", "error", type(exc).__name__)
-        await asyncio.sleep(300)
+        await asyncio.sleep(60)
+
+
+async def stock_news_feed_loop() -> None:
+    """Collect provider feeds continuously, independently of browser and LLM."""
+    if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
+        return
+    from news_pipeline import feed_settings, run_feed_cycle
+    await asyncio.sleep(15)
+    while True:
+        try:
+            if feed_settings()["enabled"]:
+                await asyncio.to_thread(run_feed_cycle)
+        except Exception as exc:
+            from scanner_engine import set_service_status
+            set_service_status("news_feed", "error", type(exc).__name__)
+        await asyncio.sleep(30)
+
+
+async def stock_news_ai_loop() -> None:
+    """Analyze only new/changed feed items without blocking collection or prices."""
+    if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
+        return
+    from news_pipeline import analyze_news_jobs, feed_settings
+    await asyncio.sleep(25)
+    while True:
+        try:
+            await asyncio.to_thread(analyze_news_jobs)
+        except Exception as exc:
+            from scanner_engine import set_service_status
+            set_service_status("news_ai", "error", type(exc).__name__)
+        await asyncio.sleep(feed_settings()["analysis_interval"])
 
 
 async def stock_news_translation_loop() -> None:
