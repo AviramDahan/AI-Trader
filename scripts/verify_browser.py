@@ -57,6 +57,15 @@ def main():
                                     ("סיגנלים", "סיגנלים פעילים")):
                 page.get_by_role("button", name=button, exact=True).click()
                 expect(page.get_by_role("heading", name=heading, exact=False)).to_be_visible()
+                if button == "חדשות":
+                    assert page.locator(".scanner-filters select").count() >= 5
+                    expect(page.get_by_text("רענון תצוגה", exact=False)).to_be_visible()
+                    expect(page.get_by_text("בדיקת ספק אחרונה", exact=False)).to_be_visible()
+                    assert page.locator(".scanner-status-grid .scanner-status").count() >= 5
+                    assert page.locator(".scanner-news-card").count() > 0
+                    expect(page.locator(".scanner-news-card").first.get_by_text("מידע מהמקור", exact=False)).to_be_visible()
+                    expect(page.locator(".scanner-news-card").first.get_by_text("מפרסם מקורי", exact=False)).to_be_visible()
+                    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Hebrew news overflow"
             assert page.evaluate("document.documentElement.dir === 'rtl'")
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Hebrew dashboard overflow"
             assert page.evaluate("""[...document.querySelectorAll('button')].filter(button => {
@@ -66,6 +75,11 @@ def main():
             expect(page.get_by_text("Stock scanner dashboard", exact=True)).to_be_visible()
             expect(page.get_by_role("heading", name="Active signals", exact=False)).to_be_visible()
             assert page.evaluate("document.documentElement.dir === 'ltr'")
+            page.get_by_role("button", name="News", exact=True).click()
+            expect(page.get_by_role("heading", name="News — newest first", exact=False)).to_be_visible()
+            expect(page.get_by_text("Screen refresh", exact=False)).to_be_visible()
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "English news overflow"
+            page.get_by_role("button", name="Signals", exact=True).click()
             assert page.locator(".backend-status-banner").count() == 0
             if width == 390:
                 toggle = page.locator(".mobile-nav-toggle")

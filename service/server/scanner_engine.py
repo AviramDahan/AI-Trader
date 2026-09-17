@@ -928,7 +928,16 @@ def dashboard_payload() -> dict[str, Any]:
         cur.execute("""SELECT n.* FROM scanner_news n JOIN scanner_trade_news l ON l.news_id=n.id
                        WHERE l.trade_id=? ORDER BY n.published_at DESC LIMIT 20""", (trade["id"],))
         trade["news"] = [dict(row) for row in cur.fetchall()]
-    cur.execute("SELECT * FROM scanner_news ORDER BY published_at DESC LIMIT 500"); news = [dict(row) for row in cur.fetchall()]
+    cur.execute("SELECT * FROM scanner_news WHERE analysis_status!='stale_skipped' ORDER BY published_at DESC LIMIT 500")
+    news_by_id = {int(row["id"]): dict(row) for row in cur.fetchall()}
+    # Reserve a small slot for primary-source releases that a high-volume
+    # Yahoo/legacy stream might otherwise push out of the 500 most recent.
+    for provider in ("bls", "sec_edgar", "federal_reserve"):
+        cur.execute("""SELECT * FROM scanner_news WHERE provider=? AND analysis_status!='stale_skipped'
+                       ORDER BY published_at DESC LIMIT 20""", (provider,))
+        for row in cur.fetchall():
+            news_by_id[int(row["id"])] = dict(row)
+    news = sorted(news_by_id.values(), key=lambda row: row["published_at"], reverse=True)
     for item in news:
         item["source_facts"] = _loads(item.pop("source_facts_json", None), {})
         item["verified_tickers"] = _loads(item.pop("verified_tickers_json", None), [])
