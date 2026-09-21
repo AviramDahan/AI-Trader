@@ -858,7 +858,7 @@ def monitor_position_news() -> dict[str, Any]:
     return {"checked": checked, "inserted": inserted, "errors": errors}
 
 
-def translate_pending_news(limit: int = 20) -> int:
+def translate_pending_news(limit: int = 5) -> int:
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("SELECT id,title FROM scanner_news WHERE analysis_status='pending_translation' ORDER BY published_at DESC LIMIT ?", (limit,))
     rows = [dict(row) for row in cur.fetchall()]; conn.close()

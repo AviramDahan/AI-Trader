@@ -97,7 +97,8 @@ def feed_settings() -> dict[str, Any]:
         "yahoo_cadence": _int_env("STOCK_SCANNER_YAHOO_NEWS_INTERVAL_SECONDS", 900, 300, 21600),
         "yahoo_tickers": _int_env("STOCK_SCANNER_YAHOO_NEWS_TICKERS_PER_CYCLE", 10, 1, 50),
         "analysis_interval": _int_env("STOCK_SCANNER_NEWS_AI_INTERVAL_SECONDS", 30, 10, 3600),
-        "analysis_batch": _int_env("STOCK_SCANNER_NEWS_AI_BATCH_SIZE", 12, 1, 30),
+        # Large JSON batches can exhaust Ollama's output budget mid-object.
+        "analysis_batch": _int_env("STOCK_SCANNER_NEWS_AI_BATCH_SIZE", 3, 1, 30),
         "sec_user_agent": os.getenv("NEWS_SEC_USER_AGENT", "").strip(),
     }
 

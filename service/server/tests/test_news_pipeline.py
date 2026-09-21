@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -225,6 +226,48 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         row = self.rows("SELECT * FROM scanner_news")[0]
         self.assertEqual(row["analysis_status"], "stale_skipped")
         self.assertEqual(self.rows("SELECT status FROM scanner_news_jobs")[0]["status"], "stale_skipped")
+
+    def test_malformed_ai_batch_retries_without_publishing_or_losing_news(self):
+        news_pipeline.ingest_items([self.item()], self.clock)
+
+        def malformed(_rows):
+            raise json.JSONDecodeError("truncated response", "{", 1)
+
+        failed = news_pipeline.analyze_news_jobs(analyzer=malformed, at=self.clock)
+        self.assertEqual(failed["analyzed"], 0)
+        self.assertEqual(failed["alerts"], 0)
+        self.assertEqual(self.rows("SELECT status FROM scanner_news_jobs")[0]["status"], "retry")
+        self.assertEqual(self.rows("SELECT analysis_status FROM scanner_news")[0]["analysis_status"], "analysis_error")
+
+        recovered = news_pipeline.analyze_news_jobs(
+            analyzer=lambda rows: [{"id": rows[0]["id"], "related": True, "title_he": "עדכון",
+                                    "summary_he": "תקציר זהיר.", "sentiment": "neutral",
+                                    "materiality": "low", "thesis_effect": "unchanged",
+                                    "interpretation_he": "השפעה לא ברורה.", "relevance": .5}],
+            at=self.clock + timedelta(minutes=2))
+        self.assertEqual(recovered["analyzed"], 1)
+        self.assertEqual(self.rows("SELECT status FROM scanner_news_jobs")[0]["status"], "done")
+
+    def test_legacy_headline_translation_uses_small_ollama_batches(self):
+        conn = database.get_db_connection()
+        for index in range(7):
+            conn.execute("""INSERT INTO scanner_news(fingerprint,scope,title,publisher,url,published_at,
+                            analysis_status,fetched_at) VALUES(?,?,?,?,?,?,?,?)""",
+                         (f"legacy-{index}", "market", f"Headline {index}", "Market feed",
+                          f"https://example.test/{index}", self.clock.isoformat(),
+                          "pending_translation", self.clock.isoformat()))
+        conn.commit(); conn.close()
+        batch_sizes = []
+
+        def translate(_system, rows, _predict):
+            batch_sizes.append(len(rows))
+            return {"items": [{"id": row["id"], "summary_he": "כותרת בעברית"} for row in rows]}
+
+        with patch.object(scanner_engine, "_ollama_json", side_effect=translate):
+            self.assertEqual(scanner_engine.translate_pending_news(), 5)
+            self.assertEqual(scanner_engine.translate_pending_news(), 2)
+        self.assertEqual(batch_sizes, [5, 2])
+        self.assertEqual(len(self.rows("SELECT id FROM scanner_news WHERE analysis_status='translated'")), 7)
 
 
 if __name__ == "__main__":
