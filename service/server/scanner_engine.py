@@ -96,6 +96,27 @@ def set_active_strategy(strategy: str) -> str:
     return strategy
 
 
+def set_news_watchlist(ticker: str, company: str | None = None, enabled: bool = True) -> dict[str, Any]:
+    ticker = str(ticker or "").strip().upper().replace(".", "-")
+    if not re.fullmatch(r"[A-Z][A-Z0-9-]{0,9}", ticker):
+        raise ValueError("Invalid US stock ticker")
+    company = re.sub(r"\s+", " ", str(company or ticker)).strip()[:120] or ticker
+    stamp = now_z()
+    conn = get_db_connection(); cur = conn.cursor(); begin_write_transaction(cur)
+    if enabled:
+        cur.execute("""INSERT INTO scanner_news_watchlist(ticker,company,enabled,created_at,updated_at)
+                       VALUES(?,?,1,?,?) ON CONFLICT(ticker) DO UPDATE SET company=excluded.company,
+                       enabled=1,updated_at=excluded.updated_at""", (ticker, company, stamp, stamp))
+        cur.execute("UPDATE scanner_news_providers SET next_check_at=? WHERE provider='yahoo_priority'", (stamp,))
+    else:
+        cur.execute("UPDATE scanner_news_watchlist SET enabled=0,updated_at=? WHERE ticker=?", (stamp, ticker))
+    cur.execute("SELECT ticker,company,enabled,created_at,updated_at FROM scanner_news_watchlist WHERE ticker=?", (ticker,))
+    row = cur.fetchone(); conn.commit(); conn.close()
+    if not row:
+        raise ValueError("Ticker is not on the news watchlist")
+    return dict(row)
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
 
@@ -953,7 +974,7 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
     for row in rows:
         cfg = settings()
         enabled = bool(cfg.get("telegram_enabled"))
-        if row["event_type"] == "entry":
+        if row["event_type"] in {"entry", "entry_chart"}:
             enabled = enabled and bool(cfg.get("telegram_entry_alerts"))
         elif row["event_type"] in {"tp", "stop", "sell", "stop_change"}:
             enabled = enabled and bool(cfg.get("telegram_level_alerts"))
@@ -962,13 +983,26 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             cur.execute("UPDATE scanner_telegram_outbox SET status='disabled',last_error='disabled_by_configuration' WHERE id=?", (row["id"],))
             conn.commit(); conn.close()
             continue
-        result = send_telegram(row["message"], cfg)
+        if row["event_type"] == "entry_chart":
+            from telegram_charts import send_entry_chart
+            result = send_entry_chart(_loads(row["message"], {}).get("trade_id", 0))
+        else:
+            result = send_telegram(row["message"], cfg)
         conn = get_db_connection(); cur = conn.cursor()
         if result == "sent":
             cur.execute("UPDATE scanner_telegram_outbox SET status='sent',attempts=attempts+1,sent_at=?,last_error=NULL WHERE id=?",
                         (now_z(), row["id"])); sent += 1
+            if row["event_type"] == "entry":
+                signal_id = int(row["dedupe_key"].split(":")[-1])
+                cur.execute("SELECT id FROM scanner_trades WHERE signal_id=? AND is_shadow=0 AND legacy_position_id IS NULL", (signal_id,))
+                primary = cur.fetchone()
+                if primary:
+                    enqueue_telegram(cur, f"entry-chart:{primary['id']}", "entry_chart", _json({"trade_id": primary["id"]}))
         elif result == "missing_credentials":
             cur.execute("UPDATE scanner_telegram_outbox SET status='disabled',attempts=attempts+1,last_error='missing_credentials' WHERE id=?", (row["id"],))
+        elif row["event_type"] == "entry_chart" and (int(row["attempts"]) >= 4 or result == "chart_unavailable"):
+            cur.execute("UPDATE scanner_telegram_outbox SET status='failed',attempts=attempts+1,last_error='entry_chart_unavailable' WHERE id=?", (row["id"],))
+            failed += 1
         else:
             attempts = int(row["attempts"]) + 1
             delay = min(3600, 30 * (2 ** min(attempts, 7)))
@@ -1045,6 +1079,8 @@ def dashboard_payload() -> dict[str, Any]:
         news_providers = [dict(row) for row in cur.fetchall()]
     except Exception:
         news_providers = []
+    cur.execute("SELECT ticker,company,enabled,created_at,updated_at FROM scanner_news_watchlist WHERE enabled=1 ORDER BY ticker")
+    watchlist = [dict(row) for row in cur.fetchall()]
     cur.execute("SELECT COUNT(*) count FROM scanner_legacy_records WHERE verified=0"); legacy = int(cur.fetchone()["count"])
     try:
         cur.execute("SELECT COUNT(*) count FROM positions WHERE agent_id=? AND quantity>0", (agent_id,))
@@ -1103,7 +1139,7 @@ def dashboard_payload() -> dict[str, Any]:
     collected_times = [item.get("collected_at") or item.get("fetched_at") for item in news if item.get("collected_at") or item.get("fetched_at")]
     provider_success_times = [item["last_success_at"] for item in news_providers if item.get("last_success_at")]
     return {"paper_only": True, "scanner_name": SCANNER_NAME, "settings": lifecycle_settings(), "market": market_session_state(), "account": account,
-            "signals": signals, "trades": trades, "news": news, "news_schedules": schedules,
+            "signals": signals, "trades": trades, "news": news, "news_schedules": schedules, "news_watchlist": watchlist,
             "services": services, "news_providers": news_providers,
             "news_meta": {"screen_generated_at": now_z(),
                           "last_collected_at": max(provider_success_times) if provider_success_times else None,

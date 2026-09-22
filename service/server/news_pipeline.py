@@ -293,6 +293,8 @@ def _priority_tickers(limit: int, checkpoint: dict[str, Any]) -> tuple[list[tupl
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("SELECT DISTINCT ticker,company FROM scanner_trades WHERE status='open' AND is_shadow=0 ORDER BY ticker")
     open_rows = [(row["ticker"], row["company"]) for row in cur.fetchall()]
+    cur.execute("SELECT ticker,company FROM scanner_news_watchlist WHERE enabled=1 ORDER BY created_at")
+    watch_rows = [(row["ticker"], row["company"]) for row in cur.fetchall()]
     cur.execute("SELECT DISTINCT ticker,company FROM scanner_signals WHERE status IN ('ACTIVE','PENDING_ENTRY','ENTERED') ORDER BY updated_at DESC")
     signal_rows = [(row["ticker"], row["company"]) for row in cur.fetchall()]
     cur.execute("SELECT ticker,MAX(company) company,MAX(id) latest FROM scanner_candidates WHERE status='candidate' GROUP BY ticker ORDER BY latest DESC LIMIT 100")
@@ -300,7 +302,7 @@ def _priority_tickers(limit: int, checkpoint: dict[str, Any]) -> tuple[list[tupl
     conn.close()
     fixed: list[tuple[str, str]] = []
     seen: set[str] = set()
-    for row in open_rows + signal_rows:
+    for row in open_rows + watch_rows + signal_rows:
         if row[0] not in seen:
             fixed.append(row); seen.add(row[0])
     remaining = max(0, limit - len(fixed))
@@ -308,8 +310,8 @@ def _priority_tickers(limit: int, checkpoint: dict[str, Any]) -> tuple[list[tupl
     offset = int(checkpoint.get("candidate_offset") or 0) % max(len(pool), 1)
     rotated = (pool[offset:] + pool[:offset])[:remaining]
     next_offset = (offset + len(rotated)) % max(len(pool), 1)
-    selected = (fixed + rotated)[:max(limit, len(open_rows))]
-    coverage = f"{len(open_rows)} open-position, {len(signal_rows)} active-signal and {len(rotated)} rotating candidate tickers"
+    selected = (fixed + rotated)[:max(limit, len(open_rows) + len(watch_rows))]
+    coverage = f"{len(open_rows)} open-position, {len(watch_rows)} watchlist, {len(signal_rows)} active-signal and {len(rotated)} rotating candidate tickers"
     return selected, {"candidate_offset": next_offset}, coverage
 
 
@@ -389,11 +391,15 @@ def _scope_context(tickers: list[str], published_at: str) -> tuple[str, int | No
     trades = [dict(row) for row in cur.fetchall()
               if _parse_time(published_at) >= _parse_time(row["opened_at"]) - overlap]
     cur.execute(f"SELECT id FROM scanner_signals WHERE status IN ('ACTIVE','PENDING_ENTRY','ENTERED') AND ticker IN ({placeholders}) ORDER BY id DESC LIMIT 1", tuple(tickers))
-    signal = cur.fetchone(); conn.close()
+    signal = cur.fetchone()
+    cur.execute(f"SELECT ticker FROM scanner_news_watchlist WHERE enabled=1 AND ticker IN ({placeholders}) LIMIT 1", tuple(tickers))
+    watched = cur.fetchone(); conn.close()
     if trades:
         return "open_position", int(signal["id"]) if signal else None, [int(row["id"]) for row in trades]
     if signal:
         return "active_signal", int(signal["id"]), []
+    if watched:
+        return "watchlist", None, []
     return "universe", None, []
 
 
@@ -460,7 +466,7 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
                  item.get("source_kind") or "headline_metadata", 1 if item.get("headline_only", True) else 0,
                  _json(facts), _json(item["tickers"]), "[]", version, stamp))
             news_id = int(cur.lastrowid); inserted += 1
-            priority = 100 if scope == "open_position" else 70 if scope == "active_signal" else 20 if scope == "market" else 40
+            priority = 100 if scope == "open_position" else 80 if scope == "watchlist" else 70 if scope == "active_signal" else 20 if scope == "market" else 40
             cur.execute("""INSERT INTO scanner_news_jobs(news_id,priority,status,next_attempt_at,created_at,updated_at)
                            VALUES(?,?,'pending',?,?,?)""", (news_id, priority, stamp, stamp, stamp))
         cur.execute("SELECT id FROM scanner_news_sources WHERE provider=? AND url=?", (item["provider"], item["url"]))
@@ -482,7 +488,7 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
                 cur.execute("INSERT INTO scanner_trade_news(trade_id,news_id,linked_at) VALUES(?,?,?)", (trade_id, news_id, stamp)); linked += 1
         cur.execute("SELECT provider,publisher,url,published_at FROM scanner_news_sources WHERE news_id=? ORDER BY id", (news_id,))
         alternates = [dict(row) for row in cur.fetchall()]
-        precedence = {"market": 0, "universe": 1, "active_signal": 2, "open_position": 3}
+        precedence = {"market": 0, "universe": 1, "active_signal": 2, "watchlist": 3, "open_position": 4}
         final_scope = scope
         if existing and precedence.get(existing["scope"], 0) > precedence.get(scope, 0):
             final_scope = existing["scope"]
@@ -621,6 +627,17 @@ def _news_alert_message(row: dict[str, Any]) -> str:
                          f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}"))[:4000]
 
 
+def _watchlist_alert_message(row: dict[str, Any]) -> str:
+    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
+    materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
+    return "\n\n".join(("AI-Trader — חדשות מהותיות מרשימת המעקב | ללא עסקה",
+                         f"סימול: {row['ticker']}\nהשפעה אפשרית: {impact}\nמהותיות אפשרית: {materiality}",
+                         f"תקציר המקור:\n{row.get('summary_he') or row['title']}",
+                         f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",
+                         f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
+                         "המניה נמצאת ברשימת מעקב חדשות בלבד. לא נוצרו סיגנל או עסקה."))[:4000]
+
+
 def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
                       at: datetime | None = None) -> dict[str, Any]:
     current, stamp = _now(at), _z(at)
@@ -708,6 +725,27 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
                              "summary_he": result.get("summary_he"), "interpretation_he": result.get("interpretation_he")}
                 enqueue_telegram(cur, f"news:{row['id']}:{row.get('content_hash') or 'v1'}:{','.join(linked_tickers)}",
                                  "position_news", _news_alert_message(alert_row)); alerts += 1
+            # A watched open position already receives the position alert above;
+            # never send a second notification for the same news/version.
+            verified = {str(value).upper() for value in _loads(row.get("verified_tickers_json"), [])}
+            if row.get("ticker"):
+                verified.add(str(row["ticker"]).upper())
+            if verified and not trade_rows:
+                placeholders = ",".join("?" for _ in verified)
+                cur.execute(f"SELECT ticker FROM scanner_news_watchlist WHERE enabled=1 AND ticker IN ({placeholders})", tuple(sorted(verified)))
+                watched = [value["ticker"] for value in cur.fetchall()]
+                for ticker in watched:
+                    version = row.get("content_hash") or "v1"
+                    cur.execute("SELECT 1 FROM scanner_news_watchlist_alerts WHERE news_id=? AND ticker=? AND event_version=?",
+                                (row["id"], ticker, version))
+                    if cur.fetchone():
+                        continue
+                    cur.execute("INSERT INTO scanner_news_watchlist_alerts(news_id,ticker,event_version,created_at) VALUES(?,?,?,?)",
+                                (row["id"], ticker, version, stamp))
+                    alert_row = {**row, "ticker": ticker, "impact": sentiment, "materiality": materiality,
+                                 "summary_he": result.get("summary_he"), "interpretation_he": result.get("interpretation_he")}
+                    enqueue_telegram(cur, f"watchlist-news:{row['id']}:{version}:{ticker}",
+                                     "watchlist_news", _watchlist_alert_message(alert_row)); alerts += 1
     conn.commit(); conn.close()
     from scanner_engine import set_service_status
     set_service_status("news_ai", "ok", f"analyzed={analyzed} alerts_queued={alerts}", success=True)

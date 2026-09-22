@@ -2,7 +2,7 @@
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
-from scanner_engine import dashboard_payload, set_active_strategy
+from scanner_engine import dashboard_payload, set_active_strategy, set_news_watchlist
 from services import _get_agent_by_token
 from stock_scanner import public_status
 from utils import _extract_token
@@ -10,6 +10,18 @@ from utils import _extract_token
 
 class ExitStrategyRequest(BaseModel):
     strategy: str
+
+
+class NewsWatchlistRequest(BaseModel):
+    ticker: str
+    company: str | None = None
+
+
+def _require_admin(authorization: str):
+    agent = _get_agent_by_token(_extract_token(authorization))
+    if not agent or agent.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin permission required")
+    return agent
 
 
 def register_scanner_routes(app: FastAPI) -> None:
@@ -21,11 +33,27 @@ def register_scanner_routes(app: FastAPI) -> None:
 
     @app.put("/api/scanner/settings/exit-strategy")
     async def update_exit_strategy(data: ExitStrategyRequest, authorization: str = Header(None)):
-        agent = _get_agent_by_token(_extract_token(authorization))
-        if not agent or agent.get("role") != "admin":
-            raise HTTPException(status_code=403, detail="Admin permission required")
+        _require_admin(authorization)
         try:
             strategy = set_active_strategy(data.strategy)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"success": True, "active_strategy": strategy, "applies_to": "new_trades_only"}
+
+    @app.post("/api/scanner/news-watchlist")
+    async def add_news_watchlist(data: NewsWatchlistRequest, authorization: str = Header(None)):
+        _require_admin(authorization)
+        try:
+            row = set_news_watchlist(data.ticker, data.company, True)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"success": True, "item": row, "paper_trade_created": False}
+
+    @app.delete("/api/scanner/news-watchlist/{ticker}")
+    async def remove_news_watchlist(ticker: str, authorization: str = Header(None)):
+        _require_admin(authorization)
+        try:
+            row = set_news_watchlist(ticker, enabled=False)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"success": True, "item": row}

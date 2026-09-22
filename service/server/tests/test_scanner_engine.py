@@ -283,6 +283,29 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertGreaterEqual(result["failed"], 1)
         self.assertTrue(self.fetchall("SELECT * FROM scanner_telegram_outbox WHERE status='retry'"))
 
+    def test_entry_photo_queued_once_after_text_and_failure_does_not_repeat_text(self):
+        self.record()
+        scanner_engine.process_bar("AAPL", self.bar(1,100,101,99,100))
+        with patch.dict(os.environ, {"STOCK_SCANNER_TELEGRAM_ENABLED":"true", "STOCK_SCANNER_TELEGRAM_ENTRY_ALERTS":"true"}), \
+             patch("stock_scanner.send_telegram", return_value="sent") as text_sender, \
+             patch("telegram_charts.send_entry_chart", return_value="failed") as photo_sender:
+            scanner_engine.process_telegram_outbox()
+            text_count = text_sender.call_count
+            scanner_engine.process_telegram_outbox()
+            self.assertEqual(text_sender.call_count,text_count)
+            photo_sender.assert_called_once()
+        photos = self.fetchall("SELECT * FROM scanner_telegram_outbox WHERE event_type='entry_chart'")
+        self.assertEqual(len(photos),1)
+        self.assertEqual(photos[0]["status"],"retry")
+        self.assertEqual(len(self.fetchall("SELECT * FROM scanner_trades WHERE is_shadow=0")),1)
+        conn = database.get_db_connection()
+        conn.execute("UPDATE scanner_telegram_outbox SET next_attempt_at='2000-01-01',attempts=4 WHERE event_type='entry_chart'")
+        conn.commit(); conn.close()
+        with patch.dict(os.environ, {"STOCK_SCANNER_TELEGRAM_ENABLED":"true", "STOCK_SCANNER_TELEGRAM_ENTRY_ALERTS":"true"}), \
+             patch("telegram_charts.send_entry_chart", return_value="failed"):
+            scanner_engine.process_telegram_outbox()
+        self.assertEqual(self.fetchall("SELECT status FROM scanner_telegram_outbox WHERE event_type='entry_chart'")[0]["status"],"failed")
+
     def test_monitor_first_order_has_unambiguous_start_and_rejects_prior_bar(self):
         self.record()
         old = self.bar(-10, 100, 101, 99, 100)

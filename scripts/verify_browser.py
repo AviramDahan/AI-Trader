@@ -65,6 +65,8 @@ def main():
                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Hebrew lifecycle status overflow"
                 if button == "חדשות":
                     assert page.locator(".scanner-filters select").count() >= 5
+                    expect(page.get_by_role("heading", name="רשימת מעקב לחדשות Telegram", exact=True)).to_be_visible()
+                    expect(page.get_by_text("הרשימה אינה יוצרת סיגנלים או עסקאות", exact=False)).to_be_visible()
                     expect(page.get_by_text("רענון תצוגה", exact=False)).to_be_visible()
                     expect(page.get_by_text("בדיקת ספק אחרונה", exact=False)).to_be_visible()
                     assert page.locator(".scanner-status-grid .scanner-status").count() >= 5
@@ -83,6 +85,7 @@ def main():
             assert page.evaluate("document.documentElement.dir === 'ltr'")
             page.get_by_role("button", name="News", exact=True).click()
             expect(page.get_by_role("heading", name="News — newest first", exact=False)).to_be_visible()
+            expect(page.get_by_role("heading", name="Telegram news watchlist", exact=True)).to_be_visible()
             expect(page.get_by_text("Screen refresh", exact=False)).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "English news overflow"
             page.get_by_role("button", name="Signals", exact=True).click()

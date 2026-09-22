@@ -1531,6 +1531,26 @@ def init_database():
         )
     """)
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_news_watchlist (
+            ticker TEXT PRIMARY KEY,
+            company TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_news_watchlist_alerts (
+            news_id INTEGER NOT NULL,
+            ticker TEXT NOT NULL,
+            event_version TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(news_id,ticker,event_version),
+            FOREIGN KEY (news_id) REFERENCES scanner_news(id),
+            FOREIGN KEY (ticker) REFERENCES scanner_news_watchlist(ticker)
+        )
+    """)
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS scanner_trade_news (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             trade_id INTEGER NOT NULL,

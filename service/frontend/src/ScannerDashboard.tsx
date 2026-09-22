@@ -15,6 +15,7 @@ type Dashboard = {
   news_schedules: Record<string, any>[]
   news_providers: Record<string, any>[]
   news_meta: Record<string, any>
+  news_watchlist: Record<string, any>[]
   services: Record<string, any>[]
   strategy_comparison: Record<string, any>[]
   rejected: Record<string, any>[]
@@ -42,6 +43,9 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const [sourceFilter, setSourceFilter] = useState('all')
   const [scopeFilter, setScopeFilter] = useState('all')
   const [timeFilter, setTimeFilter] = useState('168')
+  const [watchTicker, setWatchTicker] = useState('')
+  const [watchStatus, setWatchStatus] = useState('')
+  const [watchBusy, setWatchBusy] = useState(false)
 
   const load = async () => {
     try {
@@ -75,8 +79,8 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       existing_market: 'צילומי החדשות האחרונים ממנגנון חדשות השוק הקיים.',
     }
     if (provider.provider === 'yahoo_priority') {
-      const counts = String(provider.coverage || '').match(/(\d+) open-position, (\d+) active-signal and (\d+) rotating candidate/)
-      return counts ? `${counts[1]} פוזיציות פתוחות, ${counts[2]} סיגנלים פעילים ו־${counts[3]} מועמדים מתחלפים במחזור האחרון. לא כיסוי מלא של כל המניות.` : 'מניות בעדיפות: פוזיציות פתוחות, סיגנלים פעילים ומועמדים מתחלפים.'
+      const counts = String(provider.coverage || '').match(/(\d+) open-position, (\d+) watchlist, (\d+) active-signal and (\d+) rotating candidate/)
+      return counts ? `${counts[1]} פוזיציות פתוחות, ${counts[2]} מניות במעקב, ${counts[3]} סיגנלים פעילים ו־${counts[4]} מועמדים מתחלפים במחזור האחרון. לא כיסוי מלא של כל המניות.` : 'מניות בעדיפות: פוזיציות פתוחות, רשימת מעקב, סיגנלים פעילים ומועמדים מתחלפים.'
     }
     return fixed[provider.provider] || provider.coverage
   }
@@ -109,6 +113,31 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     await load()
+  }
+
+  const updateWatchlist = async (ticker: string, remove = false) => {
+    if (!token || watchBusy) return
+    const normalized = ticker.trim().toUpperCase().replace('.', '-')
+    if (!/^[A-Z][A-Z0-9-]{0,9}$/.test(normalized)) {
+      setWatchStatus(text('סימול אינו תקין.', 'Invalid ticker.'))
+      return
+    }
+    setWatchBusy(true)
+    try {
+      const response = await fetch(`${API_ORIGIN}/api/scanner/news-watchlist${remove ? `/${normalized}` : ''}`, {
+        method: remove ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: remove ? undefined : JSON.stringify({ ticker: normalized }),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      setWatchTicker('')
+      setWatchStatus(remove ? text(`${normalized} הוסר מרשימת המעקב.`, `${normalized} removed from watchlist.`) : text(`${normalized} נוסף. איסוף החדשות יתבצע במחזור הקרוב.`, `${normalized} added. News will be collected on the next cycle.`))
+      await load()
+    } catch (reason) {
+      setWatchStatus(text('העדכון נכשל. בדוק הרשאת מנהל וחיבור לשרת.', 'Update failed. Check admin permission and backend connection.'))
+    } finally {
+      setWatchBusy(false)
+    }
   }
 
   if (loading && !data) return <div className="scanner-empty">{text('טוען את דשבורד הסורק…', 'Loading scanner dashboard…')}</div>
@@ -177,19 +206,26 @@ export function ScannerDashboard({ token }: { token: string | null }) {
 
     {tab === 'news' && <div className="scanner-section">
       <h2>{text('חדשות — מהחדש לישן', 'News — newest first')}</h2>
+      <section className="scanner-watchlist"><h3>{text('רשימת מעקב לחדשות Telegram', 'Telegram news watchlist')}</h3>
+        <p>{text('חדשות חדשות, קשורות ומהותיות ינותחו ויישלחו גם ללא פוזיציה. הרשימה אינה יוצרת סיגנלים או עסקאות.', 'New, relevant, material news is analyzed and alerted even without a position. This list creates no signals or trades.')}</p>
+        {token ? <div className="scanner-watchlist-form"><input aria-label={text('סימול להוספה', 'Ticker to add')} value={watchTicker} maxLength={10} onChange={event => setWatchTicker(event.target.value.toUpperCase())} onKeyDown={event => { if (event.key === 'Enter') void updateWatchlist(watchTicker) }} placeholder="AAPL"/><button disabled={watchBusy || !watchTicker.trim()} onClick={() => void updateWatchlist(watchTicker)}>{text('הוסף למעקב', 'Add to watchlist')}</button></div> : <p className="scanner-warning">{text('הוספה והסרה דורשות התחברות מנהל; הקריאה ברשימה נשארת ציבורית.', 'Adding and removing require admin login; viewing remains public.')}</p>}
+        {!!watchStatus && <p className="scanner-note">{watchStatus}</p>}
+        <div className="scanner-watchlist-items">{(data?.news_watchlist || []).map(item => <span key={item.ticker}><b>{item.ticker}</b>{item.company && item.company !== item.ticker ? ` · ${item.company}` : ''}{token && <button aria-label={`${text('הסר', 'Remove')} ${item.ticker}`} disabled={watchBusy} onClick={() => void updateWatchlist(item.ticker, true)}>×</button>}</span>)}</div>
+        {!(data?.news_watchlist || []).length && <small>{text('הרשימה ריקה.', 'Watchlist is empty.')}</small>}
+      </section>
       <div className="scanner-filters"><input value={tickerFilter} onChange={event => setTickerFilter(event.target.value)} placeholder={text('סינון לפי סימול', 'Filter ticker')} />
         <select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}><option value="all">{text('כל המקורות', 'All sources')}</option>{sourceOptions.map(source => <option value={source} key={source}>{source}</option>)}</select>
         <select value={sentimentFilter} onChange={event => setSentimentFilter(event.target.value)}><option value="all">{text('כל הסנטימנטים', 'All sentiment')}</option><option value="positive">{text('חיובי', 'Positive')}</option><option value="negative">{text('שלילי', 'Negative')}</option><option value="mixed">{text('מעורב', 'Mixed')}</option><option value="neutral">{text('ניטרלי', 'Neutral')}</option></select>
         <select value={materialityFilter} onChange={event => setMaterialityFilter(event.target.value)}><option value="all">{text('כל רמות המהותיות', 'All materiality')}</option><option value="high">{text('מהותיות גבוהה', 'High')}</option><option value="medium">{text('מהותיות בינונית', 'Medium')}</option><option value="low">{text('מהותיות נמוכה', 'Low')}</option></select>
-        <select value={scopeFilter} onChange={event => setScopeFilter(event.target.value)}><option value="all">{text('כל סוגי הכיסוי', 'All coverage')}</option><option value="open_position">{text('עסקאות פתוחות', 'Open positions')}</option><option value="active_signal">{text('סיגנלים פעילים', 'Active signals')}</option><option value="universe">{text('יקום הסריקה', 'Scanner universe')}</option><option value="market">{text('שוק כללי', 'Broad market')}</option></select>
+        <select value={scopeFilter} onChange={event => setScopeFilter(event.target.value)}><option value="all">{text('כל סוגי הכיסוי', 'All coverage')}</option><option value="open_position">{text('עסקאות פתוחות', 'Open positions')}</option><option value="watchlist">{text('רשימת מעקב', 'Watchlist')}</option><option value="active_signal">{text('סיגנלים פעילים', 'Active signals')}</option><option value="universe">{text('יקום הסריקה', 'Scanner universe')}</option><option value="market">{text('שוק כללי', 'Broad market')}</option></select>
         <select value={timeFilter} onChange={event => setTimeFilter(event.target.value)}><option value="24">{text('24 שעות', '24 hours')}</option><option value="168">{text('7 ימים', '7 days')}</option><option value="all">{text('כל הזמנים', 'All time')}</option></select></div>
       <p className="scanner-note">{text(`איסוף מחזורי, לא זרם בזמן אמת. פידים רשמיים משותפים נבדקים כל ${Math.round(Number(data?.news_meta?.requested_refresh_seconds || 300) / 60)} דקות; Yahoo מכסה בעדיפות עסקאות פתוחות, סיגנלים פעילים ומדגם מתחלף של מועמדים — לא את כל ${activity.universe_count || 0} המניות בכל מחזור.`, `Periodic collection, not a real-time wire. Shared official feeds are checked every ${Math.round(Number(data?.news_meta?.requested_refresh_seconds || 300) / 60)} minutes; Yahoo prioritizes open positions, active signals and a rotating candidate sample—not all ${activity.universe_count || 0} stocks each cycle.`)}</p>
       <p className="scanner-news-meta">{text('רענון תצוגה', 'Screen refresh')}: {stamp(data?.news_meta?.screen_generated_at)} · {text('בדיקת ספק אחרונה', 'Last provider check')}: {stamp(data?.news_meta?.last_collected_at)} · {text('ידיעה אחרונה שנאספה', 'Latest collected item')}: {stamp(data?.news_meta?.latest_item_collected_at)}</p>
       <div className="scanner-status-grid">{(data?.news_providers || []).map(provider => <article key={provider.provider} className={`scanner-status ${provider.status}`}><h3>{providerName(provider.provider)}</h3><strong>{providerStatus(provider.status)}</strong><p>{providerCoverage(provider)}</p><small>{text('הצלחה אחרונה', 'Last success')}: {stamp(provider.last_success_at)}<br/>{text('בדיקה הבאה', 'Next check')}: {stamp(provider.next_check_at)}</small></article>)}</div>
-      {(['market', 'active_signal', 'universe', 'open_position'] as const).map(scope => {
+      {(['market', 'watchlist', 'active_signal', 'universe', 'open_position'] as const).map(scope => {
         const rows = filteredNews.filter(item => item.scope === scope)
         if (!rows.length) return null
-        const label = scope === 'market' ? text('חדשות שוק רחבות', 'Broad market news') : scope === 'open_position' ? text('חדשות לעסקאות פתוחות', 'Open-position news') : scope === 'active_signal' ? text('חדשות לסיגנלים פעילים', 'Active-signal news') : text('חדשות מניות ביקום הסריקה', 'Scanner-universe news')
+        const label = scope === 'market' ? text('חדשות שוק רחבות', 'Broad market news') : scope === 'open_position' ? text('חדשות לעסקאות פתוחות', 'Open-position news') : scope === 'watchlist' ? text('חדשות מרשימת המעקב', 'Watchlist news') : scope === 'active_signal' ? text('חדשות לסיגנלים פעילים', 'Active-signal news') : text('חדשות מניות ביקום הסריקה', 'Scanner-universe news')
         return <div key={scope}><h3>{label}</h3>{rows.map(item => <article className="scanner-news-card" key={item.id}><div>{[item.ticker, ...(item.verified_tickers || [])].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).map(ticker => <b key={ticker}>{ticker} </b>)}</div><h3>{he ? (item.title_he || item.summary_he || item.title) : item.title}</h3>{item.summary_he && <p><b>{text('תקציר בעברית', 'Hebrew summary')}:</b> {item.summary_he}</p>}<p className="scanner-source-fact"><b>{text('מידע מהמקור', 'Source information')}:</b> {item.title}{item.source_facts?.source_excerpt ? ` — ${item.source_facts.source_excerpt}` : ` — ${text('זמינה כותרת/מטא־דאטה בלבד; גוף הכתבה לא נותח.', 'Headline/metadata only; the full article was not analyzed.')}`}</p>{item.interpretation_he && <p className="scanner-ai-interpretation"><b>{text('פרשנות AI', 'AI interpretation')}:</b> {item.interpretation_he}</p>}<p>{text('סנטימנט', 'Sentiment')}: {item.analysis_status === 'analyzed' ? item.sentiment : text('לא נותח', 'Not analyzed')} · {text('מהותיות', 'Materiality')}: {item.analysis_status === 'analyzed' ? item.materiality : text('לא נותחה', 'Not analyzed')}</p><footer>{text('מפרסם מקורי', 'Original publisher')}: {item.original_publisher || item.publisher} · {text('פורסם', 'Published')}: {stamp(item.published_at)} · {text('נאסף', 'Collected')}: {stamp(item.collected_at || item.fetched_at)} · <a href={item.url} target="_blank" rel="noreferrer">{text('מקור ישיר', 'Direct source')}</a>{item.signal_id && <> · <a href={`/market?tab=signals#signal-${item.signal_id}`}>{text('לסיגנל', 'Signal')}</a></>}{item.trade_ids?.[0] && <> · <a href={`/market?tab=trades#trade-${item.trade_ids[0]}`}>{text('לעסקה', 'Trade')}</a></>}{item.alternate_sources?.length > 1 && <details><summary>{text('מקורות נוספים', 'Additional sources')} ({item.alternate_sources.length - 1})</summary>{item.alternate_sources.slice(1).map((source: any) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.publisher}</a>)}</details>}</footer></article>)}</div>
       })}
       {!filteredNews.length && <Empty text={text('אין חדשות תואמות. תקלה בספק תוצג בלשונית מצב הסורק ואינה מסומנת כ״אין חדשות״.', 'No matching news. Provider failures appear under Scanner status and are not labeled “no news”.')} />}

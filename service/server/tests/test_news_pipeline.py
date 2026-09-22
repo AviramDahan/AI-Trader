@@ -131,6 +131,50 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(len(self.rows("SELECT * FROM scanner_trade_news")), 1)
         self.assertEqual(len(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news'")), 1)
 
+    def test_watchlist_collects_and_alerts_without_signal_or_position(self):
+        scanner_engine.set_news_watchlist("NVDA", "NVIDIA")
+        selected, _, coverage = news_pipeline._priority_tickers(20, {})
+        self.assertIn(("NVDA", "NVIDIA"), selected)
+        self.assertIn("1 watchlist", coverage)
+        news_pipeline.ingest_items([self.item("yahoo_priority", "https://example.test/nvda", "NVDA")], self.clock)
+        self.assertEqual(self.rows("SELECT scope FROM scanner_news")[0]["scope"], "watchlist")
+        self.assertEqual(self.rows("SELECT priority FROM scanner_news_jobs")[0]["priority"], 80)
+
+        def analyzer(rows):
+            return [{"id": rows[0]["id"], "related": True, "title_he": "עדכון מהותי",
+                     "summary_he": "החברה פרסמה עדכון מהותי.", "sentiment": "positive",
+                     "materiality": "high", "thesis_effect": "unchanged",
+                     "interpretation_he": "עשויה להיות השפעה חיובית, אך קיימת אי־ודאות.", "relevance": .98}]
+
+        first = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
+        second = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock + timedelta(minutes=1))
+        self.assertEqual(first["alerts"], 1)
+        self.assertEqual(second["alerts"], 0)
+        self.assertFalse(self.rows("SELECT * FROM scanner_signals"))
+        self.assertFalse(self.rows("SELECT * FROM scanner_trades"))
+        alerts = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='watchlist_news'")
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("ללא עסקה", alerts[0]["message"])
+
+    def test_watchlist_does_not_duplicate_open_position_alert(self):
+        scanner_engine.set_news_watchlist("AAPL", "Apple")
+        self.open_trade()
+        news_pipeline.ingest_items([self.item("yahoo_priority", "https://example.test/aapl-watched", "AAPL")], self.clock)
+        result = news_pipeline.analyze_news_jobs(analyzer=lambda rows: [{"id": rows[0]["id"], "related": True,
+            "summary_he": "עדכון.", "sentiment": "negative", "materiality": "medium",
+            "thesis_effect": "weakens", "interpretation_he": "ייתכן סיכון.", "relevance": .9}], at=self.clock)
+        self.assertEqual(result["alerts"], 1)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news'")), 1)
+        self.assertFalse(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='watchlist_news'"))
+
+    def test_watchlist_remove_stops_collection_and_alerting(self):
+        scanner_engine.set_news_watchlist("NVDA", "NVIDIA")
+        scanner_engine.set_news_watchlist("NVDA", enabled=False)
+        selected, _, _ = news_pipeline._priority_tickers(20, {})
+        self.assertNotIn(("NVDA", "NVIDIA"), selected)
+        dashboard = scanner_engine.dashboard_payload()
+        self.assertFalse(dashboard["news_watchlist"])
+
     def test_closed_position_does_not_receive_new_dedicated_news_alert(self):
         self.open_trade()
         trade = self.rows("SELECT * FROM scanner_trades WHERE is_shadow=0")[0]

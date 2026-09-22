@@ -3659,6 +3659,12 @@ html[dir='rtl'] .main-content {
 .scanner-news-meta { color: var(--text-secondary); font-size: 13px; }
 .scanner-news-card footer details { display: inline-block; margin-inline-start: 6px; }
 .scanner-news-card footer details a { display: block; margin-top: 4px; }
+.scanner-watchlist { margin: 14px 0; padding: 14px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-secondary); }
+.scanner-watchlist-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.scanner-watchlist-form input { min-height: 42px; padding: 8px 11px; color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 9px; text-transform: uppercase; }
+.scanner-watchlist-items { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.scanner-watchlist-items > span { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid var(--border-color); border-radius: 999px; }
+.scanner-watchlist-items button { padding: 0 5px; min-width: 26px; min-height: 26px; }
 .scanner-status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .scanner-status.ok { border-inline-start: 4px solid #12b76a; }
 .scanner-status.error { border-inline-start: 4px solid #f04438; }
@@ -3682,4 +3688,5 @@ html[dir='rtl'] .main-content {
   .scanner-signal-card, .scanner-trade-card, .scanner-news-card { padding: 14px; }
   .scanner-inline-error { align-items: flex-start; flex-direction: column; }
   .scanner-filters input, .scanner-filters select { width: 100%; }
+  .scanner-watchlist-form input, .scanner-watchlist-form button { width: 100%; }
 }
