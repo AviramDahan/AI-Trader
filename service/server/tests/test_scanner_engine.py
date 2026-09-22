@@ -108,6 +108,17 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertEqual(signal["current_price"], 91)
         self.assertTrue(signal["price_stale"])
 
+    def test_unexpired_signal_without_order_still_gets_monitored_quote(self):
+        self.record()
+        conn = database.get_db_connection()
+        conn.execute("UPDATE scanner_orders SET status='risk_rejected'")
+        conn.execute("UPDATE scanner_signals SET status='RISK_BLOCKED'")
+        conn.commit(); conn.close()
+        with patch.object(scanner_engine, "_bar_dicts", return_value=[self.bar(1,100,102,99,101)]):
+            self.assertEqual(scanner_engine.monitor_prices()["tickers"], 1)
+        self.assertEqual(scanner_engine.dashboard_payload()["signals"][0]["current_price"], 101)
+        self.assertFalse(self.fetchall("SELECT * FROM scanner_trades"))
+
     def test_same_bar_is_idempotent_after_restart(self):
         self.record()
         entry_bar = self.bar(1, 100, 101, 99, 100)

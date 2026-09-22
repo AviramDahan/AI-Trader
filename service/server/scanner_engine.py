@@ -721,7 +721,7 @@ def monitor_prices() -> dict[str, Any]:
     cur.execute("""SELECT DISTINCT s.ticker FROM scanner_signals s LEFT JOIN scanner_orders o ON o.signal_id=s.id
                    LEFT JOIN scanner_trades t ON t.signal_id=s.id
                    WHERE o.status='pending' OR t.status='open'
-                      OR (s.status IN ('BEARISH_ONLY','HOLD','ACTIVE') AND s.valid_until>?)""", (now_z(),))
+                      OR (s.legacy_unverified=0 AND s.valid_until>?)""", (now_z(),))
     tickers = [row["ticker"] for row in cur.fetchall()]
     stamp = now_z()
     cur.execute("SELECT signal_id FROM scanner_orders WHERE status='pending' AND valid_until<?", (stamp,))
