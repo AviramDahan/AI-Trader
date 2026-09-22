@@ -1410,6 +1410,16 @@ def init_database():
             source TEXT NOT NULL
         )
     """)
+
+    # Narrow permission for managing scanner-only settings. This deliberately
+    # does not grant the agent global administrator privileges.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_operators (
+            agent_id INTEGER PRIMARY KEY,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (agent_id) REFERENCES agents(id)
+        )
+    """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scanner_price_cursors (
             ticker TEXT PRIMARY KEY,

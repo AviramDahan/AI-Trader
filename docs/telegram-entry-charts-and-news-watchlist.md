@@ -15,7 +15,10 @@ server-side. No chart is sent retroactively for Legacy or previously opened
 positions.
 
 The News tab also exposes a durable news-only watchlist. Adding/removing symbols
-requires the existing admin token; the public dashboard may display the list.
+requires either a global administrator or an explicitly enrolled scanner
+operator; the public dashboard may display the list. Scanner operators do not
+receive any other administrator capability. Enrollment is performed locally
+with `python scripts/configure_scanner_operator.py <agent-name>`.
 Watched symbols are fixed-priority inputs to the shared Yahoo collection batch,
 ahead of rotating candidates. They reuse provider cadence, caching, rate-limit
 backoff, cross-source deduplication and the separate Ollama analysis queue.
@@ -26,3 +29,9 @@ position receives its position alert instead of a duplicate watchlist alert.
 Removing a symbol stops future priority collection and alerts. Adding a symbol
 does not create a signal, order, position or trade, and old articles are not
 retroactively alerted. Yahoo coverage is periodic and may be delayed or limited.
+
+Authenticated browser notifications send their token in the first WebSocket
+message, never in the WebSocket URL. This prevents browser/proxy access logs from
+capturing credentials. Production supervision also disables Uvicorn access logs;
+`scripts/sanitize_runtime_logs.py` removes legacy credential-shaped entries from
+local operational logs.

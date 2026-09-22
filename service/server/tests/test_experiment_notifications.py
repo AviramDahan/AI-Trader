@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 
 SERVER_DIR = Path(__file__).resolve().parents[1]
@@ -445,15 +446,26 @@ class ExperimentNotificationTests(unittest.TestCase):
         self.assertEqual(targets[0]["unread_experiment_count"], 1)
 
     def test_websocket_allows_matching_token_and_rejects_mismatch(self):
-        with self.client.websocket_connect(f"/ws/notify/{self.agent_control}?token=token-notify-control") as websocket:
+        with self.client.websocket_connect(f"/ws/notify/{self.agent_control}") as websocket:
+            websocket.send_json({"type": "auth", "token": "token-notify-control"})
             websocket.send_text("ping")
 
-        with self.assertRaises(Exception):
-            with self.client.websocket_connect(f"/ws/notify/{self.agent_control}?token=token-notify-treatment"):
-                pass
+        with self.client.websocket_connect(f"/ws/notify/{self.agent_control}") as websocket:
+            websocket.send_json({"type": "auth", "token": "token-notify-treatment"})
+            with self.assertRaises(WebSocketDisconnect):
+                websocket.receive_text()
+
+    def test_websocket_does_not_accept_token_from_query_string(self):
+        with self.client.websocket_connect(
+            f"/ws/notify/{self.agent_control}?token=token-notify-control"
+        ) as websocket:
+            websocket.send_text("ping")
+            with self.assertRaises(WebSocketDisconnect):
+                websocket.receive_text()
 
     def test_online_agent_receives_websocket_payload(self):
-        with self.client.websocket_connect(f"/ws/notify/{self.agent_control}?token=token-notify-control") as websocket:
+        with self.client.websocket_connect(f"/ws/notify/{self.agent_control}") as websocket:
+            websocket.send_json({"type": "auth", "token": "token-notify-control"})
             response = self._notify(dry_run=False, agent_ids=[self.agent_control])
             self.assertEqual(response.status_code, 200, response.text)
             payload = websocket.receive_json()

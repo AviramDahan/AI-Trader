@@ -180,8 +180,12 @@ function App() {
     const apiOrigin = new URL(API_ORIGIN)
     const protocol = apiOrigin.protocol === 'https:' ? 'wss:' : 'ws:'
     if (!token) return
-    const wsUrl = `${protocol}//${apiOrigin.host}/ws/notify/${agentInfo.id}?token=${encodeURIComponent(token)}`
+    const wsUrl = `${protocol}//${apiOrigin.host}/ws/notify/${agentInfo.id}`
     const ws = new WebSocket(wsUrl)
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'auth', token }))
+    }
 
     ws.onmessage = (event) => {
       try {

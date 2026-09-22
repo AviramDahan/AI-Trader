@@ -158,7 +158,7 @@ def main():
             if backend is None or backend.poll() is not None or local_failures >= 3:
                 terminate(backend)
                 backend = spawn("backend", [sys.executable, "-u", "-m", "uvicorn", "main:app",
-                                             "--host", "127.0.0.1", "--port", "8000"], ROOT / "service" / "server")
+                                             "--host", "127.0.0.1", "--port", "8000", "--no-access-log"], ROOT / "service" / "server")
                 local_failures = 0
                 log("Backend started/recovered")
             local_ok = health("http://127.0.0.1:8000")

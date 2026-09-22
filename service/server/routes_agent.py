@@ -1,3 +1,4 @@
+import asyncio
 import json
 import math
 import secrets
@@ -114,18 +115,23 @@ def register_agent_routes(app: FastAPI, ctx: RouteContext) -> None:
         client_id_int = None
         try:
             client_id_int = int(client_id)
-            token = websocket.query_params.get('token')
+            await websocket.accept()
+            raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+            auth = json.loads(raw_auth)
+            token = auth.get('token') if auth.get('type') == 'auth' else None
             agent = _get_agent_by_token(token)
             if not agent or int(agent['id']) != client_id_int:
                 await websocket.close(code=1008)
                 return
 
-            await websocket.accept()
             ctx.ws_connections[client_id_int] = websocket
             while True:
                 await websocket.receive_text()
         except Exception:
-            pass
+            try:
+                await websocket.close(code=1008)
+            except Exception:
+                pass
         finally:
             if client_id_int is not None and client_id_int in ctx.ws_connections:
                 del ctx.ws_connections[client_id_int]

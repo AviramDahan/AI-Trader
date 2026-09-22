@@ -129,12 +129,21 @@ export function ScannerDashboard({ token }: { token: string | null }) {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: remove ? undefined : JSON.stringify({ ticker: normalized }),
       })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      if (!response.ok) {
+        if (response.status === 401) throw new Error('AUTH_REQUIRED')
+        if (response.status === 403) throw new Error('SCANNER_PERMISSION_REQUIRED')
+        throw new Error(`HTTP ${response.status}`)
+      }
       setWatchTicker('')
       setWatchStatus(remove ? text(`${normalized} הוסר מרשימת המעקב.`, `${normalized} removed from watchlist.`) : text(`${normalized} נוסף. איסוף החדשות יתבצע במחזור הקרוב.`, `${normalized} added. News will be collected on the next cycle.`))
       await load()
     } catch (reason) {
-      setWatchStatus(text('העדכון נכשל. בדוק הרשאת מנהל וחיבור לשרת.', 'Update failed. Check admin permission and backend connection.'))
+      const code = reason instanceof Error ? reason.message : ''
+      setWatchStatus(code === 'AUTH_REQUIRED'
+        ? text('ההתחברות פגה. יש להתחבר מחדש.', 'Your session expired. Please sign in again.')
+        : code === 'SCANNER_PERMISSION_REQUIRED'
+          ? text('למשתמש המחובר אין הרשאת ניהול לסורק.', 'The signed-in user does not have scanner management permission.')
+          : text('העדכון נכשל עקב שגיאת שרת או חיבור. נסה שוב.', 'Update failed due to a server or connection error. Please retry.'))
     } finally {
       setWatchBusy(false)
     }
@@ -208,7 +217,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       <h2>{text('חדשות — מהחדש לישן', 'News — newest first')}</h2>
       <section className="scanner-watchlist"><h3>{text('רשימת מעקב לחדשות Telegram', 'Telegram news watchlist')}</h3>
         <p>{text('חדשות חדשות, קשורות ומהותיות ינותחו ויישלחו גם ללא פוזיציה. הרשימה אינה יוצרת סיגנלים או עסקאות.', 'New, relevant, material news is analyzed and alerted even without a position. This list creates no signals or trades.')}</p>
-        {token ? <div className="scanner-watchlist-form"><input aria-label={text('סימול להוספה', 'Ticker to add')} value={watchTicker} maxLength={10} onChange={event => setWatchTicker(event.target.value.toUpperCase())} onKeyDown={event => { if (event.key === 'Enter') void updateWatchlist(watchTicker) }} placeholder="AAPL"/><button disabled={watchBusy || !watchTicker.trim()} onClick={() => void updateWatchlist(watchTicker)}>{text('הוסף למעקב', 'Add to watchlist')}</button></div> : <p className="scanner-warning">{text('הוספה והסרה דורשות התחברות מנהל; הקריאה ברשימה נשארת ציבורית.', 'Adding and removing require admin login; viewing remains public.')}</p>}
+        {token ? <div className="scanner-watchlist-form"><input aria-label={text('סימול להוספה', 'Ticker to add')} value={watchTicker} maxLength={10} onChange={event => setWatchTicker(event.target.value.toUpperCase())} onKeyDown={event => { if (event.key === 'Enter') void updateWatchlist(watchTicker) }} placeholder="AAPL"/><button disabled={watchBusy || !watchTicker.trim()} onClick={() => void updateWatchlist(watchTicker)}>{text('הוסף למעקב', 'Add to watchlist')}</button></div> : <p className="scanner-warning">{text('הוספה והסרה דורשות התחברות עם הרשאת ניהול לסורק; הקריאה ברשימה נשארת ציבורית.', 'Adding and removing require a login with scanner management permission; viewing remains public.')}</p>}
         {!!watchStatus && <p className="scanner-note">{watchStatus}</p>}
         <div className="scanner-watchlist-items">{(data?.news_watchlist || []).map(item => <span key={item.ticker}><b>{item.ticker}</b>{item.company && item.company !== item.ticker ? ` · ${item.company}` : ''}{token && <button aria-label={`${text('הסר', 'Remove')} ${item.ticker}`} disabled={watchBusy} onClick={() => void updateWatchlist(item.ticker, true)}>×</button>}</span>)}</div>
         {!(data?.news_watchlist || []).length && <small>{text('הרשימה ריקה.', 'Watchlist is empty.')}</small>}

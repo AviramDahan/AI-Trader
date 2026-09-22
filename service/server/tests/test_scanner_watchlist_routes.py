@@ -21,6 +21,9 @@ class ScannerWatchlistRoutesTests(unittest.TestCase):
         conn = database.get_db_connection()
         conn.execute("INSERT INTO agents(name,token,role,cash) VALUES('admin','admin-token','admin',100000)")
         conn.execute("INSERT INTO agents(name,token,role,cash) VALUES('regular','regular-token','agent',100000)")
+        conn.execute("INSERT INTO agents(name,token,role,cash) VALUES('operator','operator-token','agent',100000)")
+        operator_id = conn.execute("SELECT id FROM agents WHERE name='operator'").fetchone()[0]
+        conn.execute("INSERT INTO scanner_operators(agent_id) VALUES(?)", (operator_id,))
         conn.commit(); conn.close()
         self.client = TestClient(create_app())
 
@@ -44,6 +47,28 @@ class ScannerWatchlistRoutesTests(unittest.TestCase):
                                      headers={"Authorization":"Bearer admin-token"})
         self.assertEqual(removed.status_code,200)
         self.assertEqual(removed.json()["item"]["enabled"],0)
+
+    def test_scanner_operator_can_manage_watchlist_without_global_admin_role(self):
+        added = self.client.post(
+            "/api/scanner/news-watchlist",
+            json={"ticker": "INTC"},
+            headers={"Authorization": "Bearer operator-token"},
+        )
+        self.assertEqual(added.status_code, 200, added.text)
+        conn = database.get_db_connection()
+        role = conn.execute("SELECT role FROM agents WHERE name='operator'").fetchone()[0]
+        conn.close()
+        self.assertEqual(role, "agent")
+
+    def test_missing_auth_is_distinct_from_missing_permission(self):
+        unauthenticated = self.client.post("/api/scanner/news-watchlist", json={"ticker": "INTC"})
+        self.assertEqual(unauthenticated.status_code, 401)
+        forbidden = self.client.post(
+            "/api/scanner/news-watchlist",
+            json={"ticker": "INTC"},
+            headers={"Authorization": "Bearer regular-token"},
+        )
+        self.assertEqual(forbidden.status_code, 403)
 
     def test_invalid_ticker_fails_closed(self):
         response = self.client.post("/api/scanner/news-watchlist", json={"ticker":"../../bad"},
