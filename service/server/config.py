@@ -9,9 +9,15 @@ from pathlib import Path
 
 # Load environment variables from .env file in project root
 env_path = Path(__file__).parent.parent.parent / ".env"
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 
 load_dotenv(env_path)
+
+# This local deployment's private file is authoritative for Telegram routing.
+# An inherited Windows environment must not silently send alerts elsewhere.
+for _key, _value in dotenv_values(env_path).items():
+    if _key in {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"} and _value is not None:
+        os.environ[_key] = _value
 
 # ==================== Configuration ====================
 

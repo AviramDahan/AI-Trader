@@ -15,6 +15,7 @@ from pathlib import Path
 
 import requests
 import psutil
+from dotenv import dotenv_values
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / ".runtime"
@@ -32,6 +33,14 @@ def log(message):
     print(time.strftime("%Y-%m-%d %H:%M:%S"), message, flush=True)
 
 
+def child_environment():
+    environment = os.environ.copy()
+    for key, value in dotenv_values(ROOT / ".env").items():
+        if key in {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"} and value is not None:
+            environment[key] = value
+    return environment
+
+
 def spawn(name, args, cwd=ROOT):
     # Old log kept once, bounded disk usage between restarts.
     logfile = RUNTIME / f"{name}.log"
@@ -39,7 +48,7 @@ def spawn(name, args, cwd=ROOT):
         logfile.replace(RUNTIME / f"{name}.previous.log")
     with logfile.open("w", encoding="utf-8") as output:
         process = subprocess.Popen(args, cwd=cwd, stdout=output, stderr=subprocess.STDOUT,
-                                   creationflags=FLAGS)
+                                   creationflags=FLAGS, env=child_environment())
     (RUNTIME / f"{name}.pid").write_text(str(process.pid), encoding="ascii")
     try:
         created = psutil.Process(process.pid).create_time()
