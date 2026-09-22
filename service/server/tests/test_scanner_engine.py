@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+import pandas as pd
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -236,6 +237,74 @@ class ScannerEngineTests(unittest.TestCase):
             result = scanner_engine.process_telegram_outbox()
         self.assertGreaterEqual(result["failed"], 1)
         self.assertTrue(self.fetchall("SELECT * FROM scanner_telegram_outbox WHERE status='retry'"))
+
+    def test_monitor_first_order_has_unambiguous_start_and_rejects_prior_bar(self):
+        self.record()
+        old = self.bar(-10, 100, 101, 99, 100)
+        with patch.object(scanner_engine, "_bar_dicts", return_value=[old]):
+            result = scanner_engine.monitor_prices()
+        self.assertFalse(result["errors"])
+        self.assertFalse(self.fetchall("SELECT * FROM scanner_trades"))
+        self.assertEqual(self.fetchall("SELECT status FROM scanner_orders")[0]["status"], "pending")
+
+    def test_price_provider_excludes_current_incomplete_candle(self):
+        now = datetime.now(UTC)
+        start = now.replace(minute=now.minute // 5 * 5, second=0, microsecond=0)
+        frame = pd.DataFrame({"Open": [100, 100], "High": [101, 120], "Low": [99, 80], "Close": [100, 90]},
+                             index=pd.DatetimeIndex([start-timedelta(minutes=5), start]))
+        with patch.object(scanner_engine.yf, "Ticker") as provider:
+            provider.return_value.history.return_value = frame
+            bars = scanner_engine._bar_dicts("AAPL", start-timedelta(minutes=10))
+        self.assertEqual(len(bars), 1)
+        self.assertEqual(bars[0]["close"], 100)
+
+    def test_entry_candle_ambiguity_applies_stop_not_same_candle_profit(self):
+        self.record()
+        scanner_engine.process_bar("AAPL", self.bar(1, 101, 110, 96, 100))
+        trade = self.fetchall("SELECT * FROM scanner_trades WHERE is_shadow=0")[0]
+        self.assertEqual(trade["status"], "closed")
+        self.assertEqual(trade["outcome"], "LOSS")
+        fills = self.fetchall("SELECT fill_type FROM scanner_fills WHERE trade_id=? ORDER BY id", (trade["id"],))
+        self.assertEqual([row["fill_type"] for row in fills], ["entry", "stop"])
+
+    def test_live_verification_remains_pending_without_real_native_cycle(self):
+        report = scanner_engine.dashboard_payload()["lifecycle_verification"]
+        self.assertFalse(report["live_e2e_complete"])
+        self.assertTrue(report["accounting_ok"])
+
+    def test_complete_isolated_single_and_shadow_cycle_with_monitor_restart_and_alert_retry(self):
+        self.record()
+        entry = self.bar(1, 100, 101, 99, 100)
+        with patch.object(scanner_engine, "_bar_dicts", return_value=[entry]):
+            self.assertFalse(scanner_engine.monitor_prices()["errors"])
+        trade = self.fetchall("SELECT * FROM scanner_trades WHERE is_shadow=0")[0]
+        tp1 = self.bar(2, trade["tp1"], trade["tp1"]+.1, trade["entry_price"]+.1, trade["tp1"])
+        scanner_engine.process_bar("AAPL", tp1)
+        shadow = self.fetchall("SELECT * FROM scanner_trades WHERE is_shadow=1")[0]
+        self.assertAlmostEqual(shadow["current_stop"], shadow["entry_price"])
+        self.assertGreater(shadow["remaining_quantity"], 0)
+        scanner_engine.initialize_runtime()
+        tp3 = self.bar(3, trade["tp2"], trade["tp3"]+.1, trade["entry_price"]+.1, trade["tp3"])
+        with patch.object(scanner_engine, "_bar_dicts", return_value=[tp1, tp3]):
+            self.assertFalse(scanner_engine.monitor_prices()["errors"])
+        closed = self.fetchall("SELECT * FROM scanner_trades ORDER BY is_shadow")
+        self.assertTrue(all(row["status"] == "closed" for row in closed))
+        self.assertEqual(len(self.fetchall("SELECT * FROM scanner_fills WHERE fill_type='entry'")), 2)
+        with patch.dict(os.environ, {"STOCK_SCANNER_TELEGRAM_ENABLED": "true"}, clear=False), \
+             patch("stock_scanner.send_telegram", return_value="failed"):
+            self.assertGreater(scanner_engine.process_telegram_outbox()["failed"], 0)
+        conn = database.get_db_connection()
+        conn.execute("UPDATE scanner_telegram_outbox SET next_attempt_at='2000-01-01T00:00:00Z' WHERE status='retry'")
+        conn.commit(); conn.close()
+        with patch.dict(os.environ, {"STOCK_SCANNER_TELEGRAM_ENABLED": "true"}, clear=False), \
+             patch("stock_scanner.send_telegram", return_value="sent"):
+            self.assertGreater(scanner_engine.process_telegram_outbox()["sent"], 0)
+        report = scanner_engine.dashboard_payload()["lifecycle_verification"]
+        self.assertTrue(report["accounting_ok"], report)
+        self.assertEqual(report["stages"]["entry"], 1)
+        self.assertEqual(report["stages"]["closed"], 1)
+        self.assertEqual(report["stages"]["telegram_exit"], 1)
+        self.assertFalse(report["live_e2e_complete"])  # no stop/six-hour evidence fabricated
 
 
 if __name__ == "__main__":

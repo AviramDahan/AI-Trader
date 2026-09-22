@@ -20,6 +20,7 @@ type Dashboard = {
   rejected: Record<string, any>[]
   legacy_unverified_count: number
   legacy_positions: Record<string, any>
+  lifecycle_verification: Record<string, any>
 }
 
 const fmtPrice = (value: any) => Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '—'
@@ -80,8 +81,8 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     return fixed[provider.provider] || provider.coverage
   }
   const activity = data?.activity || {}
-  const activeSignals = (data?.signals || []).filter(item => !['CLOSED', 'EXPIRED'].includes(item.status))
-  const historicSignals = (data?.signals || []).filter(item => ['CLOSED', 'EXPIRED'].includes(item.status))
+  const activeSignals = (data?.signals || []).filter(item => !item.legacy_unverified && !['CLOSED', 'EXPIRED'].includes(item.status))
+  const historicSignals = (data?.signals || []).filter(item => !item.legacy_unverified && ['CLOSED', 'EXPIRED'].includes(item.status))
   const filteredNews = useMemo(() => (data?.news || []).filter(item => {
     const tickerOk = !tickerFilter || [item.ticker, ...(item.verified_tickers || [])].join(' ').toUpperCase().includes(tickerFilter.toUpperCase())
     const sentimentOk = sentimentFilter === 'all' || item.sentiment === sentimentFilter || item.impact === sentimentFilter
@@ -161,7 +162,8 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       {(data?.trades || []).filter(trade => !trade.is_shadow).map(trade => <TradeCard key={trade.id} trade={trade} schedules={data?.news_schedules || []} he={he} />)}
       {!(data?.trades || []).some(trade => !trade.is_shadow) && <Empty text={text('אין עדיין עסקאות דמו מאומתות.', 'No verified demo trades yet.')} />}
       {!!data?.legacy_unverified_count && <p className="scanner-warning">{text(`${data.legacy_unverified_count} רשומות ישנות נשמרו בנפרד ואינן נכללות בסטטיסטיקה המאומתת.`, `${data.legacy_unverified_count} legacy records are preserved separately and excluded from verified statistics.`)}</p>}
-      {!!data?.legacy_positions?.count && <p className="scanner-warning">{text(`${data.legacy_positions.count} פוזיציות ישנות נשמרו ומחירן עדיין מסומן על ידי מנגנון המחירים המקורי, אך אין להן היסטוריית Entry/TP/SL מאומתת ולכן הן אינן מנוהלות במחזור החיים החדש ואינן נכללות בתוצאות.`, `${data.legacy_positions.count} legacy positions are preserved and still price-marked by the original worker, but lack verified Entry/TP/SL history; they are not managed by the new lifecycle or included in results.`)}</p>}
+      {!!data?.legacy_positions?.adopted_count && <p className="scanner-note">{text(`תיק Legacy נפרד: ${data.legacy_positions.managed_count} עסקאות פתוחות בניהול מההעברה ואילך. מזומן בתיק הישן: ${fmtPrice(data.legacy_positions.cash)}. היעד והסטופ המקוריים נשמרו; אין שחזור יציאות היסטוריות ואין ערבוב עם המזומן והתוצאות של התיק המאומת.`, `Separate legacy portfolio: ${data.legacy_positions.managed_count} open trades managed from adoption onward. Original wallet cash: ${fmtPrice(data.legacy_positions.cash)}. Original stop/target retained; no historical exits reconstructed or mixing with verified cash/results.`)}</p>}
+      {!!data?.legacy_positions?.unmanaged_count && <p className="scanner-warning">{text(`${data.legacy_positions.unmanaged_count} פוזיציות ישנות עדיין דורשות טיפול ואינן מנוהלות.`, `${data.legacy_positions.unmanaged_count} legacy positions still require attention and are unmanaged.`)}</p>}
     </div>}
 
     {tab === 'results' && <div className="scanner-section">
@@ -195,6 +197,10 @@ export function ScannerDashboard({ token }: { token: string | null }) {
 
     {tab === 'status' && <div className="scanner-section">
       <h2>{text('מצב רכיבי הסורק', 'Scanner component health')}</h2>
+      <h3>{text('אימות מחזור עסקה חי', 'Live lifecycle verification')}</h3>
+      <p>{text('עסקאות חדשות בלבד; Legacy ו־Shadow אינם הוכחה למחזור חי חדש. אפס פירושו שטרם נצפה האירוע.', 'Native trades only; legacy and shadow are not proof of a new live lifecycle. Zero means not yet observed.')}</p>
+      <div className="scanner-stage-grid">{Object.entries(data?.lifecycle_verification?.stages || {}).map(([key, value]) => <Stat key={key} label={he ? ({signal: 'סיגנל', entry: 'כניסה', tp: 'מימוש יעד', stop: 'יציאה בסטופ', closed: 'סיום עסקה', news_review: 'בדיקת חדשות', six_hour_review: 'סקירה לאחר 6 שעות', telegram_entry: 'התראת כניסה', telegram_exit: 'התראת יציאה'} as Record<string, string>)[key] || key : key.replace(/_/g, ' ')} value={String(value)} />)}</div>
+      <p>{text('התאמת כמויות ומזומן', 'Quantity and cash reconciliation')}: {data?.lifecycle_verification?.accounting_ok ? text('תקינה', 'OK') : text('דורשת בדיקה', 'Needs attention')} · {text('אימות חי מלא', 'Full live verification')}: {data?.lifecycle_verification?.live_e2e_complete ? text('הושלם', 'Complete') : text('ממתין לאירועים אמיתיים', 'Awaiting real events')}</p>
       <div className="scanner-status-grid">{(data?.services || []).map(service => <article key={service.component} className={`scanner-status ${service.status}`}><h3>{service.component}</h3><strong>{service.status}</strong><p>{service.detail || '—'}</p><small>{text('הצלחה אחרונה', 'Last success')}: {stamp(service.last_success_at)}</small></article>)}</div>
       <h3>{text('מצב ספקי החדשות', 'News provider status')}</h3>
       <div className="scanner-status-grid">{(data?.news_providers || []).map(provider => <article key={provider.provider} className={`scanner-status ${provider.status}`}><h3>{providerName(provider.provider)}</h3><strong>{providerStatus(provider.status)}</strong><p>{providerCoverage(provider)}</p><small>{text('הצלחה אחרונה', 'Last success')}: {stamp(provider.last_success_at)}<br/>{text('בדיקה הבאה', 'Next check')}: {stamp(provider.next_check_at)}</small></article>)}</div>
@@ -230,8 +236,10 @@ function TradeCard({ trade, schedules, he }: { trade: Record<string, any>, sched
   const schedule = schedules.find(item => item.ticker === trade.ticker)
   const stamp = (value: any) => value ? new Date(value).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
   return <article className="scanner-trade-card" id={`trade-${trade.id}`}><header><div><b>{trade.ticker}</b> · {trade.company}</div><span>{trade.status}</span></header>
+    {!!trade.legacy_position_id && <p className="scanner-warning">{he ? 'Legacy — היסטוריה לא מאומתת; ניהול החל מ־' : 'Legacy — unverified history; managed from '}{stamp(trade.managed_from)}. {he ? 'עלויות כניסה היסטוריות אינן כלולות; לא נספר בסטטיסטיקה המאומתת.' : 'Historical entry costs excluded; not counted in verified statistics.'}</p>}
     <p>{he ? 'אסטרטגיה' : 'Strategy'}: {trade.strategy} · {he ? 'כמות מקורית' : 'Original qty'}: {Number(trade.original_quantity).toFixed(6)} · {he ? 'נותרה' : 'Remaining'}: {Number(trade.remaining_quantity).toFixed(6)}</p>
     <p>{he ? 'כניסה' : 'Entry'}: {fmtPrice(trade.entry_price)} · R: {fmtPrice(trade.original_r)} · {he ? 'סטופ' : 'Stop'}: {fmtPrice(trade.current_stop)}</p>
+    <p>{trade.strategy === 'single' ? `${he ? 'יעד יחיד' : 'Single target'}: ${fmtPrice(trade.tp2)}` : `TP1: ${fmtPrice(trade.tp1)} · TP2: ${fmtPrice(trade.tp2)} · TP3: ${fmtPrice(trade.tp3)}`} · {he ? 'מחיר אחרון' : 'Last price'}: {fmtPrice(trade.last_price)} · {stamp(trade.last_bar_at)}</p>
     <p>{he ? 'ממומש נטו לפני סגירה מלאה' : 'Realized before final close'}: {fmtPrice(Number(trade.realized_pnl) - Number(trade.fees))} · {he ? 'לא ממומש' : 'Unrealized'}: {fmtPrice(trade.unrealized_pnl)}</p>
     <p>{he ? 'חדשות — בדיקה אחרונה' : 'News — last check'}: {stamp(schedule?.last_success_at)} · {he ? 'הבאה' : 'next'}: {stamp(schedule?.next_due_at)} · {schedule?.status || '—'}</p>
     {schedule?.summary_he && <p className="scanner-ai-interpretation"><b>{he ? 'סקירת חדשות אחרונה' : 'Latest news review'}:</b> {schedule.summary_he}</p>}

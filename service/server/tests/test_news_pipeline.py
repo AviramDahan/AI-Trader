@@ -51,7 +51,8 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
                   "stop_loss": 97, "confidence": .9, "time_horizon": "1-4 weeks", "reason": "Verified thesis.",
                   "telegram_reason_he": "תזה מאומתת.", "relevant_news": [], "telegram_news_he": []}
         candidate = {"ticker": "AAPL", "company": "Apple", "technical_score": 7, "combined_rank_score": .9}
-        scanner_engine.record_signal(signal, candidate, {"news_relevance": .9, "news_sentiment": .5}, {}, "scan")
+        with patch.object(scanner_engine, "now_z", return_value=(self.clock - timedelta(minutes=5)).isoformat()):
+            scanner_engine.record_signal(signal, candidate, {"news_relevance": .9, "news_sentiment": .5}, {}, "scan")
         scanner_engine.process_bar("AAPL", {"at": self.clock.isoformat().replace("+00:00", "Z"),
                                               "open": 100, "high": 101, "low": 99, "close": 100})
 

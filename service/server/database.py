@@ -1371,6 +1371,19 @@ def init_database():
             FOREIGN KEY (agent_id) REFERENCES agents(id)
         )
     """)
+    # Legacy adoption preserves the original paper portfolio and its evidence.
+    for column_sql in ("legacy_position_id INTEGER", "managed_from TEXT"):
+        try:
+            cursor.execute(f"ALTER TABLE scanner_trades ADD COLUMN {column_sql}")
+        except Exception:
+            pass
+    cursor.execute("""CREATE TABLE IF NOT EXISTS scanner_legacy_adoptions (
+        position_id INTEGER PRIMARY KEY,
+        trade_id INTEGER NOT NULL UNIQUE,
+        adopted_at TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        FOREIGN KEY (trade_id) REFERENCES scanner_trades(id)
+    )""")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scanner_fills (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

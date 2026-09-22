@@ -423,12 +423,13 @@ def _bar_dicts(ticker: str, since: datetime) -> list[dict[str, Any]]:
     if frame is None or frame.empty:
         return []
     rows = []
+    observed_at = datetime.now(UTC)
     for index, row in frame.sort_index().iterrows():
         stamp = pd.Timestamp(index)
         if stamp.tzinfo is None:
             stamp = stamp.tz_localize("America/New_York")
         at = stamp.to_pydatetime().astimezone(UTC)
-        if at <= since:
+        if at <= since or at + timedelta(minutes=5) > observed_at:
             continue
         values = [float(row[name]) for name in ("Open", "High", "Low", "Close")]
         if all(math.isfinite(value) and value > 0 for value in values):
@@ -446,6 +447,8 @@ def _fill_message(trade: dict[str, Any], event: str, quantity: float, remaining:
              f"מחיר ביצוע: ${price:.2f}", f"כמות שנסגרה: {quantity:.6f}", f"כמות שנותרה: {remaining:.6f}"]
     if net is not None:
         lines.append(f"רווח/הפסד מצטבר נטו: ${net:.2f}")
+    if trade.get("legacy_position_id"):
+        lines.append("עסקת Legacy בניהול מכאן והלאה; עלויות הכניסה ההיסטוריות אינן מאומתות. אינה נכללת בסטטיסטיקה המאומתת.")
     return "\n\n".join(lines)
 
 
@@ -477,13 +480,22 @@ def _close_quantity(cur, trade: dict[str, Any], quantity: float, price: float, f
         remaining = 0
         status, closed = "closed", bar_at
         outcome = _outcome(realized - fees, settings["breakeven_threshold"])
-    cur.execute("UPDATE scanner_trades SET remaining_quantity=?,realized_pnl=?,fees=?,status=?,closed_at=?,outcome=?,last_price=?,last_bar_at=? WHERE id=?",
-                (remaining, realized, fees, status, closed, outcome, price, bar_at, trade["id"]))
+    cur.execute("UPDATE scanner_trades SET remaining_quantity=?,realized_pnl=?,fees=?,status=?,closed_at=?,outcome=?,last_price=?,last_bar_at=?,unrealized_pnl=? WHERE id=?",
+                (remaining, realized, fees, status, closed, outcome, price, bar_at,
+                 (price - float(trade["entry_price"])) * remaining, trade["id"]))
     trade.update(remaining_quantity=remaining, realized_pnl=realized, fees=fees, status=status,
                  closed_at=closed, outcome=outcome, last_price=price, last_bar_at=bar_at)
     if not int(trade["is_shadow"]):
-        cur.execute("UPDATE scanner_accounts SET cash=cash+?,realized_pnl=realized_pnl+?,fees_paid=fees_paid+?,updated_at=? WHERE agent_id=?",
-                    (price * quantity - fee, gross, fee, now_z(), trade["agent_id"]))
+        if trade.get("legacy_position_id"):
+            # The historical purchase was already charged to the original wallet.
+            # Preserve that wallet; never credit the new scanner account for it.
+            cur.execute("UPDATE agents SET cash=cash+? WHERE id=?",
+                        (price * quantity - fee, trade["agent_id"]))
+            cur.execute("UPDATE positions SET quantity=?,current_price=? WHERE id=? AND agent_id=?",
+                        (remaining, price, trade["legacy_position_id"], trade["agent_id"]))
+        else:
+            cur.execute("UPDATE scanner_accounts SET cash=cash+?,realized_pnl=realized_pnl+?,fees_paid=fees_paid+?,updated_at=? WHERE agent_id=?",
+                        (price * quantity - fee, gross, fee, now_z(), trade["agent_id"]))
         label = {"tp": f"מימוש TP{target_index}", "stop": "יציאה בסטופ", "sell": "סגירה בעקבות SELL"}[fill_type]
         enqueue_telegram(cur, f"fill:{trade['id']}:{bar_at}:{fill_type}:{target_index or 0}", fill_type,
                          _fill_message(trade, label, quantity, remaining, price,
@@ -508,6 +520,8 @@ def _advance_stop(cur, trade: dict[str, Any], target_index: int, settings: dict[
     cur.execute("UPDATE scanner_trades SET current_stop=? WHERE id=?", (proposed, trade["id"]))
     trade["current_stop"] = proposed
     if not int(trade["is_shadow"]):
+        cur.execute("UPDATE scanner_signals SET current_stop=?,updated_at=? WHERE id=?",
+                    (proposed, now_z(), trade["signal_id"]))
         message = "\n\n".join(["AI-Trader — מסחר מדומה בלבד", "אירוע: קידום סטופ",
                                   f"סימול: {trade['ticker']}", f"סטופ קודם: ${previous:.2f}",
                                   f"סטופ חדש: ${proposed:.2f}", "הסטופ החדש יחול מהנר הבא ואינו מבטיח הימנעות מהפסד לאחר עלויות."])
@@ -609,9 +623,19 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
 
 def process_bar(ticker: str, bar: dict[str, Any]) -> None:
     """Atomically process one complete OHLC bar and its cursor."""
+    values = [float(bar[key]) for key in ("open", "high", "low", "close")]
+    if not all(math.isfinite(value) and value > 0 for value in values) or not (
+            bar["low"] <= min(bar["open"], bar["close"]) <= max(bar["open"], bar["close"]) <= bar["high"]):
+        raise ValueError("Invalid OHLC bar")
+    bar_at = parse_time(bar["at"])
     conn = get_db_connection()
     cur = conn.cursor()
     begin_write_transaction(cur)
+    cur.execute("SELECT last_bar_at FROM scanner_price_cursors WHERE ticker=?", (ticker,))
+    cursor_row = cur.fetchone()
+    if cursor_row and bar_at <= parse_time(cursor_row["last_bar_at"]):
+        conn.rollback(); conn.close()
+        return
     cur.execute("""SELECT o.*,s.ticker,s.company,s.action,s.valid_until AS signal_valid_until
                    FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
                    WHERE s.ticker=? AND o.status='pending' ORDER BY o.id""",
@@ -620,6 +644,10 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
     entered_ids: set[int] = set()
     for order in orders:
         order_id = int(order["id"])
+        # Yahoo labels candles by their opening time. The entire candle must
+        # follow order creation; a low reached before creation cannot fill it.
+        if bar_at < parse_time(order["created_at"]):
+            continue
         if parse_time(order["valid_until"]) < parse_time(bar["at"]):
             cur.execute("UPDATE scanner_orders SET status='expired',updated_at=? WHERE id=?", (now_z(), order_id))
             cur.execute("UPDATE scanner_signals SET status='EXPIRED',updated_at=? WHERE id=?", (now_z(), order["signal_id"]))
@@ -642,7 +670,15 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
     cur.execute("SELECT * FROM scanner_trades WHERE ticker=? AND status='open' ORDER BY id", (ticker,))
     for row in cur.fetchall():
         trade = dict(row)
-        if int(trade["signal_id"]) not in entered_ids and parse_time(bar["at"]) > parse_time(trade.get("last_bar_at")):
+        if int(trade["signal_id"]) in entered_ids:
+            # Intrabar order is unknown: permit adverse stop touch, never a
+            # same-candle profit assumption after a limit entry.
+            if bar["low"] <= float(trade["current_stop"]):
+                cfg = _loads(trade["settings_json"], lifecycle_settings())
+                _close_quantity(cur, trade, float(trade["remaining_quantity"]),
+                                float(trade["current_stop"]) * (1 - cfg["slippage_bps"] / 10000),
+                                "stop", None, bar["at"], cfg)
+        elif parse_time(bar["at"]) > parse_time(trade.get("last_bar_at")):
             _process_trade_bar(cur, trade, bar)
     cur.execute("SELECT ticker FROM scanner_price_cursors WHERE ticker=?", (ticker,))
     if cur.fetchone():
@@ -681,13 +717,19 @@ def monitor_prices() -> dict[str, Any]:
         if row and row["last_bar_at"]:
             since = parse_time(row["last_bar_at"])
         else:
-            cur.execute("""SELECT MIN(created_at) started FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
+            cur.execute("""SELECT MIN(o.created_at) started FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
                            WHERE s.ticker=? AND o.status='pending'""", (ticker,))
             started = cur.fetchone()["started"]
-            since = parse_time(started) - timedelta(minutes=5)
+            cur.execute("SELECT MIN(COALESCE(managed_from,opened_at)) started FROM scanner_trades WHERE ticker=? AND status='open'", (ticker,))
+            trade_started = cur.fetchone()["started"]
+            starts = [parse_time(value) for value in (started, trade_started) if value]
+            since = min(starts) if starts else datetime.now(UTC)
         conn.close()
         try:
             bars = _bar_dicts(ticker, since)
+            if market_session_state()["is_open"] and (
+                    datetime.now(UTC) - (parse_time(bars[-1]["at"]) if bars else since)).total_seconds() > 900:
+                errors.append(f"{ticker}:stale_or_missing_bars")
             for bar in bars:
                 process_bar(ticker, bar)
                 processed += 1
@@ -953,7 +995,7 @@ def dashboard_payload() -> dict[str, Any]:
         news_providers = []
     cur.execute("SELECT COUNT(*) count FROM scanner_legacy_records WHERE verified=0"); legacy = int(cur.fetchone()["count"])
     try:
-        cur.execute("SELECT COUNT(*) count FROM positions WHERE agent_id=?", (agent_id,))
+        cur.execute("SELECT COUNT(*) count FROM positions WHERE agent_id=? AND quantity>0", (agent_id,))
         legacy_positions = int(cur.fetchone()["count"])
     except Exception:
         legacy_positions = 0
@@ -964,10 +1006,10 @@ def dashboard_payload() -> dict[str, Any]:
                 SUM(CASE WHEN status='closed' THEN realized_pnl-fees ELSE 0 END) net,
                 SUM(CASE WHEN outcome='WIN' THEN 1 ELSE 0 END) wins,
                 SUM(CASE WHEN outcome='BREAKEVEN' THEN 1 ELSE 0 END) breakevens
-                FROM scanner_trades GROUP BY strategy""")
+                FROM scanner_trades WHERE legacy_position_id IS NULL GROUP BY strategy""")
     comparisons = [dict(row) for row in cur.fetchall()]
     for item in comparisons:
-        strategy_trades = [trade for trade in trades if trade["strategy"] == item["strategy"]]
+        strategy_trades = [trade for trade in trades if trade["strategy"] == item["strategy"] and not trade.get("legacy_position_id")]
         closed = [trade for trade in strategy_trades if trade["status"] == "closed"]
         net_r_values = []
         marked_results = []
@@ -998,8 +1040,12 @@ def dashboard_payload() -> dict[str, Any]:
             tp3_rate=target_hits[3] / max(len(strategy_trades), 1),
             sample_warning=len(closed) < 30,
         )
+    primary = [trade for trade in trades if not trade["is_shadow"] and not trade.get("legacy_position_id")]
+    legacy_trades = [trade for trade in trades if trade.get("legacy_position_id")]
+    cur.execute("SELECT cash FROM agents WHERE id=?", (agent_id,))
+    legacy_cash = float(cur.fetchone()["cash"])
+    lifecycle_checks = lifecycle_verification(cur, signals, primary, account)
     conn.close()
-    primary = [trade for trade in trades if not trade["is_shadow"]]
     account["open_exposure"] = sum(float(t["remaining_quantity"]) * float(t.get("last_price") or t["entry_price"]) for t in primary if t["status"] == "open")
     account["unrealized_pnl"] = sum(float(t["unrealized_pnl"] or 0) for t in primary if t["status"] == "open")
     collected_times = [item.get("collected_at") or item.get("fetched_at") for item in news if item.get("collected_at") or item.get("fetched_at")]
@@ -1014,5 +1060,52 @@ def dashboard_payload() -> dict[str, Any]:
                           "coverage_note": "Prioritized feed: open positions, active signals, rotating scanner candidates, plus shared market/official feeds."},
             "strategy_comparison": comparisons, "legacy_unverified_count": legacy,
             "legacy_positions": {"count": legacy_positions, "marked_by_original_price_worker": legacy_positions > 0,
-                                 "managed_by_durable_lifecycle": False, "included_in_verified_statistics": False},
+                                 "managed_count": sum(t["status"] == "open" for t in legacy_trades),
+                                 "adopted_count": len(legacy_trades),
+                                 "unmanaged_count": max(0, legacy_positions - sum(t["status"] == "open" for t in legacy_trades)),
+                                 "cash": legacy_cash,
+                                 "managed_by_durable_lifecycle": bool(legacy_trades), "included_in_verified_statistics": False},
+            "lifecycle_verification": lifecycle_checks,
             "rejected_count": rejected_count, "rejected": rejected}
+
+
+def lifecycle_verification(cur, signals, trades, account):
+    """Read-only evidence, never mark live E2E complete just because tests pass."""
+    native = [s for s in signals if not s.get("legacy_unverified")]
+    stages = dict(signal=len(native), entry=0, tp=0, stop=0, closed=0, news_review=0,
+                  six_hour_review=0, telegram_entry=0, telegram_exit=0)
+    errors = []
+    expected_cash = float(account["initial_cash"])
+    for trade in trades:
+        fills = trade["fills"]
+        entries = [f for f in fills if f["fill_type"] == "entry"]
+        exits = [f for f in fills if f["fill_type"] in {"tp", "stop", "sell"}]
+        stages["entry"] += bool(entries)
+        stages["tp"] += any(f["fill_type"] == "tp" for f in exits)
+        stages["stop"] += any(f["fill_type"] == "stop" for f in exits)
+        stages["closed"] += trade["status"] == "closed"
+        expected_cash -= sum(f["quantity"] * f["price"] + f["fee"] for f in entries)
+        expected_cash += sum(f["quantity"] * f["price"] - f["fee"] for f in exits)
+        if not math.isclose(sum(f["quantity"] for f in entries) - sum(f["quantity"] for f in exits),
+                            trade["remaining_quantity"], abs_tol=1e-5):
+            errors.append(f"trade:{trade['id']}:quantity_mismatch")
+        if not math.isclose(sum(f["fee"] for f in fills), trade["fees"], abs_tol=1e-5):
+            errors.append(f"trade:{trade['id']}:fee_mismatch")
+        if not math.isclose(sum(f["gross_pnl"] for f in exits), trade["realized_pnl"], abs_tol=1e-5):
+            errors.append(f"trade:{trade['id']}:pnl_mismatch")
+        cur.execute("SELECT last_success_at FROM scanner_news_schedule WHERE ticker=?", (trade["ticker"],))
+        schedule = cur.fetchone()
+        if schedule and schedule["last_success_at"] and parse_time(schedule["last_success_at"]) >= parse_time(trade["opened_at"]):
+            stages["news_review"] += 1
+            stages["six_hour_review"] += parse_time(schedule["last_success_at"]) >= parse_time(trade["opened_at"]) + timedelta(hours=6)
+        cur.execute("SELECT COUNT(*) n FROM scanner_telegram_outbox WHERE dedupe_key=? AND status='sent'", (f"entry:{trade['signal_id']}",))
+        stages["telegram_entry"] += cur.fetchone()["n"] > 0
+        cur.execute("SELECT COUNT(*) n FROM scanner_telegram_outbox WHERE dedupe_key LIKE ? AND status='sent'", (f"fill:{trade['id']}:%",))
+        stages["telegram_exit"] += cur.fetchone()["n"] > 0
+    delta = float(account["cash"]) - expected_cash
+    if abs(delta) > 1e-4:
+        errors.append("verified_account_cash_mismatch")
+    return {"checked_at": now_z(), "stages": stages, "accounting_ok": not errors,
+            "accounting_errors": errors, "cash_reconciliation_delta": round(delta, 6),
+            "live_e2e_complete": not errors and all(stages.values()),
+            "scope": "Native live paper trades only; legacy and shadow excluded"}

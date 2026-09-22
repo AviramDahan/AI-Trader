@@ -237,6 +237,13 @@ def _update_position_from_signal(
     current_qty = row["quantity"] if row else 0
     position_id = row["id"] if row else None
 
+    if position_id is not None and market == "us-stock":
+        cursor.execute("SELECT trade_id FROM scanner_legacy_adoptions WHERE position_id = ?", (position_id,))
+        if cursor.fetchone():
+            if own_connection:
+                conn.close()
+            raise ValueError("This adopted paper position is managed by the scanner lifecycle only")
+
     action_lower = action.lower()
     if quantity is None:
         raise ValueError("Invalid quantity")

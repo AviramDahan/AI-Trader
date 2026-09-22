@@ -111,7 +111,7 @@ def main() -> None:
             if not overview_available:
                 raise RuntimeError("Incomplete E2E: Financial Events has no snapshot")
             return
-        signals = dashboard.get("signals") or []
+        signals = [item for item in dashboard.get("signals") or [] if not item.get("legacy_unverified")]
         if not signals:
             raise RuntimeError("No live strong stock signal has been published yet")
         signal = signals[0]

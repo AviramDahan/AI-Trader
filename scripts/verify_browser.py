@@ -37,6 +37,8 @@ def main():
                 assert result["status"] == 200, path
                 if path.endswith("dashboard"):
                     assert result["data"]["paper_only"] and result["data"]["scanner_name"] == "us-stock-scanner"
+                    assert result["data"]["lifecycle_verification"]["accounting_ok"]
+                    assert result["data"]["legacy_positions"]["unmanaged_count"] == 0
                 if path.endswith("overview"):
                     assert result["data"]["available"], "Financial events unavailable"
                     assert result["data"]["headline_count"] > 0
@@ -51,12 +53,16 @@ def main():
                 expect(page.get_by_role("button", name=text, exact=True)).to_be_visible()
             page.get_by_role("button", name="עסקאות דמו", exact=True).click()
             expect(page.locator(".scanner-account-grid")).to_be_visible()
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Hebrew trades overflow"
             for button, heading in (("תוצאות", "השוואת אסטרטגיות יציאה"),
                                     ("חדשות", "חדשות — מהחדש לישן"),
                                     ("מצב הסורק", "מצב רכיבי הסורק"),
                                     ("סיגנלים", "סיגנלים פעילים")):
                 page.get_by_role("button", name=button, exact=True).click()
                 expect(page.get_by_role("heading", name=heading, exact=False)).to_be_visible()
+                if button == "מצב הסורק":
+                    expect(page.get_by_role("heading", name="אימות מחזור עסקה חי", exact=True)).to_be_visible()
+                    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Hebrew lifecycle status overflow"
                 if button == "חדשות":
                     assert page.locator(".scanner-filters select").count() >= 5
                     expect(page.get_by_text("רענון תצוגה", exact=False)).to_be_visible()
