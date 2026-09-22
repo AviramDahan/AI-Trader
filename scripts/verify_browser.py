@@ -39,6 +39,11 @@ def main():
                     assert result["data"]["paper_only"] and result["data"]["scanner_name"] == "us-stock-scanner"
                     assert result["data"]["lifecycle_verification"]["accounting_ok"]
                     assert result["data"]["legacy_positions"]["unmanaged_count"] == 0
+                    open_primary = [trade for trade in result["data"]["trades"]
+                                    if trade["status"] == "open" and not trade["is_shadow"]]
+                    assert open_primary
+                    assert all(trade["settings"].get("target_plan", {}).get("method") ==
+                               "daily_resistance_and_measured_move_v1" for trade in open_primary)
                 if path.endswith("overview"):
                     assert result["data"]["available"], "Financial events unavailable"
                     assert result["data"]["headline_count"] > 0
@@ -53,6 +58,8 @@ def main():
                 expect(page.get_by_role("button", name=text, exact=True)).to_be_visible()
             page.get_by_role("button", name="עסקאות דמו", exact=True).click()
             expect(page.locator(".scanner-account-grid")).to_be_visible()
+            expect(page.locator(".scanner-trade-card").first.get_by_text("TP1:", exact=False)).to_be_visible()
+            expect(page.locator(".scanner-trade-card").first.get_by_text("יעד המימוש היחיד הוא TP2", exact=False)).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Hebrew trades overflow"
             for button, heading in (("תוצאות", "השוואת אסטרטגיות יציאה"),
                                     ("חדשות", "חדשות — מהחדש לישן"),

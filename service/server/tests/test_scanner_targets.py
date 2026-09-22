@@ -3,7 +3,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import unittest
 import pandas as pd
-from scanner_targets import structure_plan, swing_zones, validate_plan
+from scanner_targets import open_position_target_plan, structure_plan, swing_zones, validate_plan
 
 
 def zones(prices):
@@ -44,3 +44,41 @@ class TargetsTests(unittest.TestCase):
         self.assertIn(97, prices)
         self.assertNotIn(104, prices)
         self.assertNotIn(96, prices)
+
+    def test_open_position_targets_prefer_confirmed_resistance(self):
+        index = pd.date_range(end=pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=1), periods=120)
+        frame = pd.DataFrame({
+            "Open": [100.0] * 120,
+            "High": [102.0] * 120,
+            "Low": [98.0] * 120,
+            "Close": [100.0] * 119 + [104.0],
+            "Volume": [1_000_000.0] * 120,
+        }, index=index)
+        for offset, price in ((20, 115.0), (45, 125.0), (70, 135.0), (95, 145.0)):
+            frame.iloc[offset, frame.columns.get_loc("High")] = price
+        plan = open_position_target_plan(frame, 100, 90, [.2, .3, .5], current_price=112)
+        self.assertEqual(plan["method"], "daily_resistance_and_measured_move_v1")
+        self.assertEqual(plan["objectives"][0]["source"], "confirmed_daily_resistance")
+        self.assertTrue(any(item["source"] == "confirmed_daily_resistance" for item in plan["objectives"]))
+        self.assertTrue(112 < plan["targets"][0] < plan["targets"][1] < plan["targets"][2])
+        self.assertAlmostEqual(plan["weighted_rr"], sum(r*f for r, f in zip(plan["rr"], [.2, .3, .5])))
+
+    def test_price_discovery_uses_labelled_measured_move_not_fake_resistance(self):
+        index = pd.date_range(end=pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=1), periods=100)
+        close = pd.Series([100 + index * .4 for index in range(100)], index=index)
+        frame = pd.DataFrame({
+            "Open": close - .2,
+            "High": close + 1,
+            "Low": close - 1,
+            "Close": close,
+            "Volume": [1_000_000.0] * 100,
+        }, index=index)
+        plan = open_position_target_plan(frame, 130, 120, [1/3, 1/3, 1/3], current_price=float(close.iloc[-1]))
+        self.assertEqual(len(plan["targets"]), 3)
+        self.assertTrue(all(item["source"] == "twenty_session_measured_move" for item in plan["objectives"]))
+        self.assertIn("projections", plan["note"])
+
+    def test_open_position_target_inputs_fail_closed(self):
+        frame = pd.DataFrame(index=pd.date_range("2026-01-01", periods=10))
+        with self.assertRaises(ValueError):
+            open_position_target_plan(frame, 100, 101, [.2, .3, .5])

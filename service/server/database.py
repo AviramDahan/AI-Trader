@@ -1410,6 +1410,22 @@ def init_database():
             source TEXT NOT NULL
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_target_revisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id INTEGER NOT NULL,
+            signal_id INTEGER NOT NULL,
+            applied_at TEXT NOT NULL,
+            requested_by TEXT NOT NULL,
+            method TEXT NOT NULL,
+            data_as_of TEXT NOT NULL,
+            previous_json TEXT NOT NULL,
+            revised_json TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            FOREIGN KEY (trade_id) REFERENCES scanner_trades(id),
+            FOREIGN KEY (signal_id) REFERENCES scanner_signals(id)
+        )
+    """)
 
     # Narrow permission for managing scanner-only settings. This deliberately
     # does not grant the agent global administrator privileges.

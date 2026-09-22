@@ -272,7 +272,7 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
     <div className="scanner-levels"><span>{he ? 'כניסה מתוכננת' : 'Planned entry'}<b>{fmtPrice(signal.planned_entry)}</b></span><span>{he ? 'כניסה בפועל' : 'Actual entry'}<b>{fmtPrice(signal.actual_entry)}</b></span><span>{he ? 'סטופ מקורי' : 'Original stop'}<b>{fmtPrice(signal.original_stop)}</b></span><span>{he ? 'סטופ נוכחי' : 'Current stop'}<b>{fmtPrice(signal.current_stop)}</b></span></div>
     <div className="scanner-targets">{[1, 2, 3].map(index => <span key={index}>TP{index}: <b>{fmtPrice(signal[`tp${index}`])}</b> · {fmtPct(signal[`tp${index}_pct`])} · {Number(signal[`rr${index}`]).toFixed(1)}R</span>)}</div>
     <p>{he ? 'האחוזים מציינים כמות למימוש, לא שינוי במחיר.' : 'Percentages are quantity allocations, not price changes.'}</p>
-    <details><summary>{he ? 'כיצד חושבו היעדים?' : 'How were targets calculated?'}</summary>{plan ? <><p>{he ? 'רמות שיא/שפל יומיות מאומתות, מאוחדות לאזורים. היעד ממוקם לפני האזור במרווח 0.15 ATR. שיטה ניסיונית, לא תחזית מובטחת.' : 'Confirmed daily swing zones; targets placed 0.15 ATR before each zone. Experimental, not guaranteed forecasts.'}</p>{plan.zones.map((zone: any, index: number) => <p key={index}>TP{index+1}: {fmtPrice(zone.low)}–{fmtPrice(zone.high)} · {he ? 'נגיעות' : 'Touches'}: {zone.touches} · {zone.pivots.map((pivot: any) => pivot.date).join(', ')}</p>)}</> : <p>{he ? 'תוכנית קודמת: יעדים במרחק 1R/2R/3R; ללא אימות התנגדויות. היעדים הישנים נשמרו.' : 'Earlier plan: fixed 1R/2R/3R targets without resistance validation. Historical levels preserved.'}</p>}</details>
+    <TargetPlanDetails plan={plan} he={he} />
     <p><b>{he ? 'ציון איכות מודל לא־מכויל' : 'Uncalibrated model quality score'}:</b> {fmtPct(signal.confidence)} · {he ? 'תוכנית משוקללת' : 'Weighted plan'} {Number(signal.weighted_rr).toFixed(1)}R</p>
     <details><summary>{he ? 'פירוט מקור הציון' : 'Score basis'}</summary><pre>{JSON.stringify(basis, null, 2)}</pre></details>
     <p><b>{he ? 'סיבה' : 'Reason'}:</b> {(he && signal.reason_he) || signal.reason}</p>
@@ -283,16 +283,36 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
 
 function TradeCard({ trade, schedules, he }: { trade: Record<string, any>, schedules: Record<string, any>[], he: boolean }) {
   const schedule = schedules.find(item => item.ticker === trade.ticker)
+  const plan = trade.settings?.target_plan
   const stamp = (value: any) => value ? new Date(value).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
   return <article className="scanner-trade-card" id={`trade-${trade.id}`}><header><div><b>{trade.ticker}</b> · {trade.company}</div><span>{trade.status}</span></header>
     {!!trade.legacy_position_id && <p className="scanner-warning">{he ? 'Legacy — היסטוריה לא מאומתת; ניהול החל מ־' : 'Legacy — unverified history; managed from '}{stamp(trade.managed_from)}. {he ? 'עלויות כניסה היסטוריות אינן כלולות; לא נספר בסטטיסטיקה המאומתת.' : 'Historical entry costs excluded; not counted in verified statistics.'}</p>}
     <p>{he ? 'אסטרטגיה' : 'Strategy'}: {trade.strategy} · {he ? 'כמות מקורית' : 'Original qty'}: {Number(trade.original_quantity).toFixed(6)} · {he ? 'נותרה' : 'Remaining'}: {Number(trade.remaining_quantity).toFixed(6)}</p>
     <p>{he ? 'כניסה' : 'Entry'}: {fmtPrice(trade.entry_price)} · R: {fmtPrice(trade.original_r)} · {he ? 'סטופ' : 'Stop'}: {fmtPrice(trade.current_stop)}</p>
-    <p>{trade.strategy === 'single' ? `${he ? 'יעד יחיד' : 'Single target'}: ${fmtPrice(trade.tp2)}` : `TP1: ${fmtPrice(trade.tp1)} · TP2: ${fmtPrice(trade.tp2)} · TP3: ${fmtPrice(trade.tp3)}`} · {he ? 'מחיר אחרון' : 'Last price'}: {fmtPrice(trade.last_price)} · {stamp(trade.last_bar_at)}</p>
+    <p>TP1: {fmtPrice(trade.tp1)} · TP2: {fmtPrice(trade.tp2)} · TP3: {fmtPrice(trade.tp3)} · {he ? 'מחיר אחרון' : 'Last price'}: {fmtPrice(trade.last_price)} · {stamp(trade.last_bar_at)}</p>
+    <p className="scanner-note">{trade.strategy === 'single'
+      ? (he ? 'בעסקה הפעילה יעד המימוש היחיד הוא TP2; ‏TP1 ו־TP3 מוצגים להשוואת Shadow בלבד.' : 'The active trade exits at TP2 only; TP1 and TP3 are shown for Shadow comparison.')
+      : (he ? 'אסטרטגיית Shadow מדורגת: מימוש חלקי ב־TP1/TP2 וסגירת היתרה ב־TP3.' : 'Staged Shadow strategy: partial exits at TP1/TP2 and final exit at TP3.')}</p>
+    <TargetPlanDetails plan={plan} he={he} />
     <p>{he ? 'ממומש נטו לפני סגירה מלאה' : 'Realized before final close'}: {fmtPrice(Number(trade.realized_pnl) - Number(trade.fees))} · {he ? 'לא ממומש' : 'Unrealized'}: {fmtPrice(trade.unrealized_pnl)}</p>
     <p>{he ? 'חדשות — בדיקה אחרונה' : 'News — last check'}: {stamp(schedule?.last_success_at)} · {he ? 'הבאה' : 'next'}: {stamp(schedule?.next_due_at)} · {schedule?.status || '—'}</p>
     {schedule?.summary_he && <p className="scanner-ai-interpretation"><b>{he ? 'סקירת חדשות אחרונה' : 'Latest news review'}:</b> {schedule.summary_he}</p>}
     {!!trade.news?.length && <details><summary>{he ? 'היסטוריית הערכות חדשות' : 'News assessment history'}</summary>{trade.news.map((item: any) => <p key={item.id}><b>{stamp(item.published_at)}</b> · {item.impact}/{item.materiality} · {item.interpretation_he}<br/><a href={item.url} target="_blank" rel="noreferrer">{item.publisher}</a></p>)}</details>}
     <details><summary>{he ? 'ביצועים' : 'Fills'} ({trade.fills?.length || 0})</summary>{(trade.fills || []).map((fill: any) => <p key={fill.id}>{fill.fill_type}{fill.target_index ? ` TP${fill.target_index}` : ''} · {Number(fill.quantity).toFixed(6)} @ {fmtPrice(fill.price)} · {stamp(fill.bar_at)}</p>)}</details>
   </article>
+}
+
+function TargetPlanDetails({ plan, he }: { plan: Record<string, any> | undefined, he: boolean }) {
+  if (!plan) return <details><summary>{he ? 'כיצד חושבו היעדים?' : 'How were targets calculated?'}</summary><p>{he ? 'תוכנית Legacy או תוכנית קודמת ללא ראיות מבנה שמורות.' : 'Legacy or earlier plan without stored structural evidence.'}</p></details>
+  const objectives = Array.isArray(plan.objectives) ? plan.objectives : Array.isArray(plan.zones) ? plan.zones.map((zone: any) => ({ source: 'confirmed_daily_resistance', zone })) : []
+  const revised = plan.method === 'daily_resistance_and_measured_move_v1'
+  return <details><summary>{he ? 'כיצד חושבו היעדים?' : 'How were targets calculated?'}</summary>
+    <p>{revised
+      ? (he ? 'נבחרו יעדי גרף קדמיים: התנגדויות יומיות מאומתות קיבלו עדיפות; כאשר אין שלוש התנגדויות מעל המחיר, נוספו יעדי תנועה מדודה מטווח 20 ימי מסחר. יעד תנועה מדודה הוא השלכה מהגרף ולא התנגדות מוכחת או תחזית.' : 'Forward chart objectives: confirmed daily resistance was preferred; when fewer than three overhead levels exist, 20-session measured-move objectives fill the gaps. A measured move is a chart projection, not proven resistance or a forecast.')
+      : (he ? 'רמות שיא/שפל יומיות מאומתות, מאוחדות לאזורים. היעד מוקם לפני האזור באמצעות מרווח ATR.' : 'Confirmed daily swing zones, clustered into price areas; the target is placed before the zone using an ATR buffer.')}</p>
+    {plan.data_as_of && <p>{he ? 'נתוני גרף עד' : 'Chart data through'}: {plan.data_as_of} · ATR: {Number(plan.atr || 0).toFixed(2)}</p>}
+    {objectives.map((item: any, index: number) => item.source === 'confirmed_daily_resistance'
+      ? <p key={index}>TP{index + 1}: {he ? 'התנגדות מאומתת' : 'Confirmed resistance'} {fmtPrice((item.zone || item).low)}–{fmtPrice((item.zone || item).high)} · {he ? 'נגיעות' : 'Touches'}: {(item.zone || item).touches || item.touches || 1}</p>
+      : <p key={index}>TP{index + 1}: {he ? 'תנועה מדודה' : 'Measured move'} · {Number(item.ratio || 0).toFixed(3)}× · {he ? 'טווח בסיס' : 'Base range'} {fmtPrice(item.range_low)}–{fmtPrice(item.range_high)}</p>)}
+  </details>
 }

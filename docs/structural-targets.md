@@ -22,7 +22,25 @@ One third at each target remains the quantity-allocation rule, NOT a price
 increase of 33%. The prices and resulting R ratios vary with observed structure.
 Single remains operational (TP2); staged remains shadow. New structural targets
 are preserved at actual entry, not replaced by fixed R multiples. Older pending
-fixed-R plans retain their previous behavior. No current trade is migrated.
+fixed-R plans retain their previous behavior.
+
+## Explicit revision of already-open paper positions
+
+Open positions are never silently retargeted by the scanner. A user-requested,
+one-time revision can be prepared with
+`python scripts/revise_open_position_targets.py` and applied only after review
+with `--apply`. It runs only while the US market is closed, downloads five years
+of adjusted daily history plus the completed latest session, creates a SQLite
+backup, and refuses any trade that already recorded a TP fill.
+
+The revision method `daily_resistance_and_measured_move_v1` preserves entry,
+quantity, original/current stop, original R, fills and accounting. It first uses
+confirmed overhead daily resistance zones. Where price discovery leaves fewer
+than three overhead zones, it fills the gaps with clearly labelled measured-move
+objectives projected from the completed 20-session high/low range. These are
+chart projections, not claimed resistance or forecasts. Every before/after value
+and the full evidence snapshot is stored in `scanner_target_revisions` and in the
+trade settings snapshot. Re-running an unchanged plan is idempotent.
 
 Current/last prices in signal cards are served from a persistent server cache:
 the signal's verified quote, then completed 5-minute monitor bars. No network or
