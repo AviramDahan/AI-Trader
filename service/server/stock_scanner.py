@@ -23,6 +23,7 @@ import pandas as pd
 import requests
 import yfinance as yf
 import config  # loads the ignored project-root .env
+from scanner_targets import swing_zones
 
 ROOT = Path(__file__).resolve().parents[2]
 STATE_FILE = ROOT / ".runtime" / "stock-scanner.json"
@@ -309,7 +310,8 @@ def analyze_history(symbol: str, company: str, frame: pd.DataFrame, cfg: dict[st
             "ema20": ema20, "ema50": ema50, "rsi14": rsi, "macd_histogram": macd_hist,
             "return_20d_pct": return20, "volume_ratio": volume_ratio,
             "recent_high_20d": high20, "recent_low_20d": low20,
-            "price_as_of": last_date.isoformat()}
+            "price_as_of": last_date.isoformat(),
+            "price_zones": swing_zones(frame, atr)}
 
 
 def _market_context(histories: dict[str, pd.DataFrame]) -> dict[str, Any]:
@@ -543,7 +545,13 @@ def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list
     """
     ticker, direction = candidate["ticker"], decision["action"]
     price, quote_at = quote
-    take_profit, stop_loss, risk_reward = levels(direction, price, candidate["atr"], cfg["min_risk_reward"])
+    from scanner_targets import structure_plan
+    try:
+        plan = structure_plan(direction, price, candidate["atr"], candidate.get("price_zones", []), cfg["min_risk_reward"])
+    except ValueError as exc:
+        candidate["target_rejection"] = str(exc)
+        return None
+    take_profit, stop_loss, risk_reward = plan["targets"][1], plan["stop"], plan["rr"][1]
     if risk_reward + .001 < cfg["min_risk_reward"]:
         return None
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -554,7 +562,7 @@ def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list
     })
     return {"ticker": ticker, "company": candidate["company"], "action": direction,
             "entry": price, "take_profit": take_profit, "stop_loss": stop_loss,
-            "risk_reward": risk_reward, "confidence": decision["confidence"],
+            "risk_reward": risk_reward, "target_plan": plan, "confidence": decision["confidence"],
             "time_horizon": decision["time_horizon"], "reason": decision["reason"],
             "relevant_news": news[:3], "timestamp": timestamp, "quote_at": quote_at,
             "signal_id": result.get("signal_id"), "paper_quantity": 0,
@@ -783,6 +791,8 @@ def run_scan() -> dict[str, Any]:
                 cooldowns[cooldown_key] = time.time()
                 add_event(state, decision["action"],
                           f"{ticker} paper signal published ({signal['paper_execution']}); confidence {decision['confidence']:.0%}")
+            else:
+                rejected.append({"ticker": ticker, "reason": candidate.get("target_rejection", "target_plan_rejected")})
             if len(published) >= cfg["max_signals"]:
                 break
         except requests.Timeout:

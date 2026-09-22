@@ -293,6 +293,15 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
         raise ValueError("Invalid target order")
     cfg = lifecycle_settings()
     created = now_z()
+    plan = signal.get("target_plan")
+    if plan:
+        from scanner_targets import validate_plan
+        plan = validate_plan(plan, entry, stop, action)
+        tp1, tp2, tp3 = plan["targets"]
+    rr_values = plan["rr"] if plan else [1, 2, 3]
+    fractions = plan["fractions"] if plan else [cfg["tp1_pct"], cfg["tp2_pct"], cfg["tp3_pct"]]
+    weighted_rr = sum(r*p for r, p in zip(rr_values, fractions))
+    candidate = dict(candidate, target_plan=plan) if plan else candidate
     valid_until = (parse_time(created) + timedelta(hours=cfg["signal_validity_hours"])).isoformat().replace("+00:00", "Z")
     confidence = float(signal["confidence"])
     if not 0 <= confidence <= 1:
@@ -320,10 +329,12 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
         created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (signal.get("signal_id"), agent_id, scan_id, signal["ticker"], signal["company"], action, "HOLD" if action == "HOLD" else "ACTIVE",
          entry, cfg["entry_order_type"], valid_until, stop, stop, tp1, tp2, tp3,
-         cfg["tp1_pct"], cfg["tp2_pct"], cfg["tp3_pct"], 1, 2, 3, 2,
+         *fractions, *rr_values, weighted_rr,
          confidence, _json(basis), signal["time_horizon"], signal["reason"], signal.get("telegram_reason_he") or "",
          _json(structured_news), _json(candidate), _json(market_context), created, created))
     signal_id = int(cur.lastrowid)
+    if signal.get("quote_at"):
+        store_quote(cur, signal["ticker"], entry, signal["quote_at"], "Yahoo 1m")
     status = "HOLD"
     if action == "BUY":
         cur.execute("""SELECT 1 FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
@@ -589,15 +600,27 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
         cur.execute("UPDATE scanner_orders SET status='invalid',updated_at=? WHERE id=?", (now_z(), order["id"]))
         return
     active = cfg["active_strategy"]
+    target_plan = _loads(signal.get("technical_json"), {}).get("target_plan")
+    targets = [float(signal[f"tp{i}"]) for i in (1, 2, 3)] if target_plan else [fill_price + i*original_r for i in (1, 2, 3)]
+    if not fill_price < targets[0] < targets[1] < targets[2]:
+        cur.execute("UPDATE scanner_orders SET status='invalid',updated_at=? WHERE id=?", (now_z(), order["id"]))
+        return
+    if target_plan:
+        actual_rr = [(target-fill_price)/original_r for target in targets]
+        weighted = sum(actual_rr[i-1]*float(signal[f"tp{i}_pct"]) for i in (1,2,3))
+        if actual_rr[0] < 1 or actual_rr[1] < target_plan["minimum_rr"] or weighted < target_plan["minimum_rr"]:
+            cur.execute("UPDATE scanner_orders SET status='risk_rejected',updated_at=? WHERE id=?", (now_z(), order["id"]))
+            cur.execute("UPDATE scanner_signals SET status='RISK_BLOCKED',updated_at=? WHERE id=?", (now_z(), signal["id"]))
+            return
     strategies = [(active, 0), ("staged" if active == "single" else "single", 1)]
     for strategy, shadow in strategies:
-        snapshot = dict(cfg, strategy=strategy, captured_at=bar_at)
+        snapshot = dict(cfg, strategy=strategy, captured_at=bar_at, target_plan=target_plan)
         cur.execute("""INSERT INTO scanner_trades(signal_id,order_id,agent_id,ticker,company,side,strategy,is_shadow,status,
             original_quantity,remaining_quantity,entry_price,original_stop,current_stop,original_r,tp1,tp2,tp3,tp1_pct,tp2_pct,tp3_pct,
             settings_json,fees,opened_at,last_price,last_bar_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (signal["id"], order["id"], signal["agent_id"], signal["ticker"], signal["company"], "long", strategy, shadow,
              "open", qty, qty, fill_price, signal["original_stop"], signal["original_stop"], original_r,
-             fill_price + original_r, fill_price + 2 * original_r, fill_price + 3 * original_r,
+             *targets,
              signal["tp1_pct"], signal["tp2_pct"], signal["tp3_pct"], _json(snapshot), fee, bar_at, fill_price, bar_at))
         trade_id = int(cur.lastrowid)
         cur.execute("INSERT INTO scanner_fills(trade_id,order_id,event_key,fill_type,price,quantity,fee,slippage,bar_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -680,6 +703,7 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
                                 "stop", None, bar["at"], cfg)
         elif parse_time(bar["at"]) > parse_time(trade.get("last_bar_at")):
             _process_trade_bar(cur, trade, bar)
+    store_quote(cur, ticker, float(bar["close"]), (bar_at+timedelta(minutes=5)).isoformat(), "Yahoo completed 5m")
     cur.execute("SELECT ticker FROM scanner_price_cursors WHERE ticker=?", (ticker,))
     if cur.fetchone():
         cur.execute("UPDATE scanner_price_cursors SET last_bar_at=?,status='ok',last_attempt_at=?,last_success_at=?,error=NULL WHERE ticker=?",
@@ -696,7 +720,8 @@ def monitor_prices() -> dict[str, Any]:
     cur = conn.cursor()
     cur.execute("""SELECT DISTINCT s.ticker FROM scanner_signals s LEFT JOIN scanner_orders o ON o.signal_id=s.id
                    LEFT JOIN scanner_trades t ON t.signal_id=s.id
-                   WHERE o.status='pending' OR t.status='open'""")
+                   WHERE o.status='pending' OR t.status='open'
+                      OR (s.status IN ('BEARISH_ONLY','HOLD','ACTIVE') AND s.valid_until>?)""", (now_z(),))
     tickers = [row["ticker"] for row in cur.fetchall()]
     stamp = now_z()
     cur.execute("SELECT signal_id FROM scanner_orders WHERE status='pending' AND valid_until<?", (stamp,))
@@ -723,7 +748,7 @@ def monitor_prices() -> dict[str, Any]:
             cur.execute("SELECT MIN(COALESCE(managed_from,opened_at)) started FROM scanner_trades WHERE ticker=? AND status='open'", (ticker,))
             trade_started = cur.fetchone()["started"]
             starts = [parse_time(value) for value in (started, trade_started) if value]
-            since = min(starts) if starts else datetime.now(UTC)
+            since = min(starts) if starts else datetime.now(UTC)-timedelta(minutes=15)
         conn.close()
         try:
             bars = _bar_dicts(ticker, since)
@@ -955,6 +980,19 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
     return {"sent": sent, "failed": failed}
 
 
+def store_quote(cur, ticker, price, as_of, source):
+    if not math.isfinite(price) or price <= 0:
+        return
+    stamp = parse_time(as_of).isoformat()
+    cur.execute("SELECT as_of FROM scanner_quotes WHERE ticker=?", (ticker,))
+    existing = cur.fetchone()
+    if existing and parse_time(existing["as_of"]) >= parse_time(stamp):
+        return
+    cur.execute("""INSERT INTO scanner_quotes(ticker,price,as_of,source) VALUES(?,?,?,?)
+                   ON CONFLICT(ticker) DO UPDATE SET price=excluded.price,as_of=excluded.as_of,source=excluded.source""",
+                (ticker, price, stamp, source))
+
+
 def dashboard_payload() -> dict[str, Any]:
     conn = get_db_connection(); cur = conn.cursor(); agent_id = scanner_agent_id(cur)
     cur.execute("SELECT * FROM scanner_accounts WHERE agent_id=?", (agent_id,)); account = dict(cur.fetchone())
@@ -962,6 +1000,12 @@ def dashboard_payload() -> dict[str, Any]:
     for row in signals:
         for key, default in (("confidence_basis", {}), ("news_json", []), ("technical_json", {}), ("market_context_json", {})):
             row[key] = _loads(row.get(key), default)
+        cur.execute("SELECT price,as_of,source FROM scanner_quotes WHERE ticker=?", (row["ticker"],))
+        quote = cur.fetchone()
+        row["current_price"] = float(quote["price"]) if quote else None
+        row["price_as_of"] = quote["as_of"] if quote else None
+        row["price_source"] = quote["source"] if quote else None
+        row["price_stale"] = not quote or (datetime.now(UTC)-parse_time(quote["as_of"])).total_seconds() > 900
     cur.execute("SELECT * FROM scanner_trades ORDER BY opened_at DESC"); trades = [dict(row) for row in cur.fetchall()]
     for trade in trades:
         trade["settings"] = _loads(trade.pop("settings_json", None), {})

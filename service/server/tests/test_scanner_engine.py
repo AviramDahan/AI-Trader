@@ -74,6 +74,33 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertEqual(trades[0]["status"], "open")
         self.assertEqual(self.fetchall("SELECT status FROM scanner_signals")[0]["status"], "ENTERED")
 
+    def test_structural_targets_survive_fill_and_quote_updates_do_not_change_entry(self):
+        from scanner_targets import structure_plan
+        zones = [{"low": p, "high": p, "touches": 1, "pivots": []} for p in (98,104,108,112)]
+        signal = self.signal()
+        signal.update(target_plan=structure_plan("BUY",100,2,zones,2), quote_at=scanner_engine.now_z())
+        scanner_engine.record_signal(signal, self.candidate(), self.decision(), {}, "structured")
+        initial = scanner_engine.dashboard_payload()["signals"][0]
+        self.assertEqual(initial["current_price"], 100)
+        self.assertFalse(initial["price_stale"])
+        scanner_engine.process_bar("AAPL", self.bar(1,99.5,101,99,100.5))
+        for trade in self.fetchall("SELECT * FROM scanner_trades"):
+            self.assertEqual([trade[f"tp{i}"] for i in (1,2,3)], [103.7,107.7,111.7])
+        updated = scanner_engine.dashboard_payload()["signals"][0]
+        self.assertEqual(updated["current_price"], 100.5)
+        self.assertEqual(updated["planned_entry"], 100)
+
+    def test_missing_quote_not_replaced_with_entry_and_old_quote_is_stale(self):
+        self.record()
+        self.assertIsNone(scanner_engine.dashboard_payload()["signals"][0]["current_price"])
+        conn = database.get_db_connection()
+        scanner_engine.store_quote(conn.cursor(), "AAPL", 91, "2026-01-02T15:00:00Z", "test")
+        scanner_engine.store_quote(conn.cursor(), "AAPL", 88, "2026-01-01T15:00:00Z", "test")
+        conn.commit(); conn.close()
+        signal = scanner_engine.dashboard_payload()["signals"][0]
+        self.assertEqual(signal["current_price"], 91)
+        self.assertTrue(signal["price_stale"])
+
     def test_same_bar_is_idempotent_after_restart(self):
         self.record()
         entry_bar = self.bar(1, 100, 101, 99, 100)

@@ -1403,6 +1403,14 @@ def init_database():
         )
     """)
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_quotes (
+            ticker TEXT PRIMARY KEY,
+            price REAL NOT NULL,
+            as_of TEXT NOT NULL,
+            source TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS scanner_price_cursors (
             ticker TEXT PRIMARY KEY,
             last_bar_at TEXT,

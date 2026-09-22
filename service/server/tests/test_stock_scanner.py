@@ -147,7 +147,7 @@ class StockScannerTests(unittest.TestCase):
             calls.append((path, kwargs["json"]))
             return {"signal_id": 7}
         candidate = {"ticker": "MSFT", "company": "Microsoft", "atr": 2, "atr_pct": 2,
-                     "average_dollar_volume": 1e9}
+                     "average_dollar_volume": 1e9, "price_zones": [{"low": p, "high": p, "touches": 1, "pivots": []} for p in (102, 96, 92, 88)]}
         decision = {"action": "SELL", "confidence": .9, "time_horizon": "1-4 weeks", "reason": "Weak trend",
                     "news_sentiment": -.4, "news_relevance": .9}
         signal = stock_scanner._paper_order(candidate, decision, [], (100, "now"),
@@ -163,7 +163,7 @@ class StockScannerTests(unittest.TestCase):
             calls.append((path, kwargs["json"]))
             return {"signal_id": 8, "price": 100}
         candidate = {"ticker": "MSFT", "company": "Microsoft", "atr": 2, "atr_pct": 2,
-                     "average_dollar_volume": 1e9}
+                     "average_dollar_volume": 1e9, "price_zones": [{"low": p, "high": p, "touches": 1, "pivots": []} for p in (102, 96, 92, 88)]}
         decision = {"action": "SELL", "confidence": .9, "time_horizon": "1-4 weeks", "reason": "Weak trend",
                     "news_sentiment": -.4, "news_relevance": .9}
         portfolio = {"positions": [{"market": "us-stock", "symbol": "MSFT", "side": "long",
@@ -260,6 +260,7 @@ class StockScannerTests(unittest.TestCase):
                  patch.dict(os.environ, environment), \
                  patch.object(stock_scanner, "load_universe", return_value={"AAPL": {"company": "Apple", "indexes": ["S&P 500"], "market_cap": 1e12}}), \
                  patch.object(stock_scanner, "load_historical_data", return_value=(histories, {"status": "cache_hit", "age_seconds": 1, "refreshed_symbols": 0})), \
+                 patch.object(stock_scanner, "swing_zones", return_value=[{"low": p, "high": p, "touches": 1, "pivots": []} for p in (137,148,156,164)]), \
                  patch.object(stock_scanner, "fetch_recent_news", return_value=news), \
                  patch.object(stock_scanner, "_read_news_cache", return_value={}), \
                  patch.object(stock_scanner, "_write_news_cache"), \
