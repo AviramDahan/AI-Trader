@@ -89,6 +89,13 @@ class ScannerEngineTests(unittest.TestCase):
         updated = scanner_engine.dashboard_payload()["signals"][0]
         self.assertEqual(updated["current_price"], 100.5)
         self.assertEqual(updated["planned_entry"], 100)
+        scanner_engine.process_bar("AAPL", self.bar(2,100.5,101.5,100,101))
+        conn = database.get_db_connection()
+        conn.execute("DELETE FROM scanner_quotes")
+        conn.commit(); conn.close()
+        bridged = scanner_engine.dashboard_payload()["signals"][0]
+        self.assertEqual(bridged["current_price"], 101)
+        self.assertEqual(bridged["price_source"], "Yahoo stored completed 5m")
 
     def test_missing_quote_not_replaced_with_entry_and_old_quote_is_stale(self):
         self.record()

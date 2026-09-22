@@ -1002,6 +1002,14 @@ def dashboard_payload() -> dict[str, Any]:
             row[key] = _loads(row.get(key), default)
         cur.execute("SELECT price,as_of,source FROM scanner_quotes WHERE ticker=?", (row["ticker"],))
         quote = cur.fetchone()
+        if not quote:
+            # Upgrade bridge: use an actual monitored bar from an open trade,
+            # never its simulated entry/exit fill or a legacy adoption mark.
+            cur.execute("SELECT last_price,last_bar_at,opened_at,managed_from FROM scanner_trades WHERE ticker=? AND status='open' AND is_shadow=0 ORDER BY last_bar_at DESC LIMIT 1", (row["ticker"],))
+            prior = cur.fetchone()
+            if prior and prior["last_bar_at"] and parse_time(prior["last_bar_at"]) > parse_time(prior["managed_from"] or prior["opened_at"]):
+                quote = {"price": prior["last_price"], "as_of": (parse_time(prior["last_bar_at"])+timedelta(minutes=5)).isoformat(),
+                         "source": "Yahoo stored completed 5m"}
         row["current_price"] = float(quote["price"]) if quote else None
         row["price_as_of"] = quote["as_of"] if quote else None
         row["price_source"] = quote["source"] if quote else None
