@@ -67,6 +67,7 @@ def main():
                     assert page.locator(".scanner-filters select").count() >= 5
                     expect(page.get_by_role("heading", name="רשימת מעקב לחדשות Telegram", exact=True)).to_be_visible()
                     expect(page.get_by_text("הרשימה אינה יוצרת סיגנלים או עסקאות", exact=False)).to_be_visible()
+                    expect(page.locator(".scanner-watchlist-items").get_by_text("INTC", exact=True)).to_be_visible()
                     expect(page.get_by_text("רענון תצוגה", exact=False)).to_be_visible()
                     expect(page.get_by_text("בדיקת ספק אחרונה", exact=False)).to_be_visible()
                     assert page.locator(".scanner-status-grid .scanner-status").count() >= 5
