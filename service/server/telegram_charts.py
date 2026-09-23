@@ -96,6 +96,7 @@ def send_entry_chart(trade_id):
         return "missing_credentials"
     trade = dict(row)
     try:
+        from telegram_topics import destination_fields
         png = entry_chart_bytes(trade)
         caption = (f"{trade['ticker']} — גרף כניסה לעסקת דמו בלבד\n\n"
                    f"כניסה בפועל: ${trade['entry_price']:.2f}\nסטופ מקורי: ${trade['original_stop']:.2f}\n"
@@ -104,7 +105,8 @@ def send_entry_chart(trade_id):
                    + "\nהנרות לפני הכניסה; המשולש מסמן ביצוע מדומה. נתוני Yahoo עשויים להיות מושהים.")
         session = requests.Session(); session.trust_env = False
         response = session.post(f"https://api.telegram.org/bot{token}/sendPhoto",
-            data={"chat_id":chat,"caption":caption},files={"photo":("entry.png",png,"image/png")},timeout=20)
+            data={**destination_fields(chat, "entry_chart"), "caption":caption},
+            files={"photo":("entry.png",png,"image/png")},timeout=20)
         result = response.json()
         return "sent" if response.ok and result.get("ok") and str(result.get("result",{}).get("chat",{}).get("id")) == chat else "failed"
     except Exception:

@@ -178,6 +178,20 @@ class StockScannerTests(unittest.TestCase):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}, clear=False):
             self.assertEqual(stock_scanner.send_telegram("test", cfg), "missing_credentials")
 
+    def test_telegram_text_routes_news_to_configured_forum_topic(self):
+        cfg = config() | {"telegram_enabled": True}
+        response = Mock(ok=True)
+        response.json.return_value = {"ok": True}
+        session = Mock(); session.post.return_value = response
+        with patch.dict(os.environ, {
+            "TELEGRAM_BOT_TOKEN": "test-token", "TELEGRAM_CHAT_ID": "-1001",
+            "TELEGRAM_NEWS_THREAD_ID": "101", "TELEGRAM_TRADING_THREAD_ID": "202",
+        }, clear=False), patch.object(stock_scanner.requests, "Session", return_value=session):
+            self.assertEqual(stock_scanner.send_telegram("חדשות", cfg, "position_news"), "sent")
+        payload = session.post.call_args.kwargs["data"]
+        self.assertEqual(payload["chat_id"], "-1001")
+        self.assertEqual(payload["message_thread_id"], 101)
+
     def test_telegram_new_signal_and_entry_alert_paths(self):
         cfg = config() | {"telegram_enabled": True, "telegram_entry_alerts": True}
         signal = {"ticker": "AAPL", "company": "Apple", "action": "BUY", "entry": 100,

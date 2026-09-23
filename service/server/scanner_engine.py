@@ -988,7 +988,7 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             from telegram_charts import send_entry_chart
             result = send_entry_chart(_loads(row["message"], {}).get("trade_id", 0))
         else:
-            result = send_telegram(row["message"], cfg)
+            result = send_telegram(row["message"], cfg, row["event_type"])
         conn = get_db_connection(); cur = conn.cursor()
         if result == "sent":
             cur.execute("UPDATE scanner_telegram_outbox SET status='sent',attempts=attempts+1,sent_at=?,last_error=NULL WHERE id=?",
