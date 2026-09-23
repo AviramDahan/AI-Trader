@@ -3631,8 +3631,15 @@ html[dir='rtl'] .main-content {
 .scanner-section h2 small { font-size: 12px; background: var(--bg-tertiary); padding: 4px 8px; border-radius: 999px; }
 .scanner-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .scanner-signal-card, .scanner-trade-card, .scanner-news-card, .scanner-status { min-width: 0; padding: 18px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 14px; overflow-wrap: anywhere; }
-.scanner-signal-card header, .scanner-trade-card header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.scanner-signal-card header div span { display: block; margin-top: 3px; color: var(--text-secondary); }
+.scanner-trade-card header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.scanner-signal-summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; cursor: pointer; list-style: none; }
+.scanner-signal-summary::-webkit-details-marker { display: none; }
+.scanner-signal-identity { min-width: 0; }
+.scanner-signal-identity > span { display: block; margin-top: 3px; color: var(--text-secondary); }
+.scanner-signal-summary-meta { display: flex; flex: 0 0 auto; align-items: center; gap: 9px; }
+.scanner-signal-chevron { color: var(--text-secondary); font-size: 22px; line-height: 1; transition: transform .18s ease; }
+.scanner-signal-card[open] .scanner-signal-chevron { transform: rotate(180deg); }
+.scanner-signal-body { margin-top: 14px; border-top: 1px solid var(--border-color); padding-top: 4px; }
 .scanner-ticker { font-size: 22px; }
 .scanner-action, .scanner-chip { display: inline-block; padding: 4px 8px; border-radius: 999px; background: var(--bg-tertiary); font-size: 12px; font-weight: 800; }
 .scanner-action.buy { color: #067647; background: #ecfdf3; }

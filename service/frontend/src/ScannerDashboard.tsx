@@ -274,8 +274,12 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
   const plan = signal.technical_json?.target_plan
   const movementEntry = signal.actual_entry ?? signal.planned_entry
   const stamp = (value: any) => value ? new Date(value).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
-  return <article className="scanner-signal-card" id={`signal-${signal.id}`}>
-    <header><div><b className="scanner-ticker">{signal.ticker}</b><span>{signal.company}</span></div><span className={`scanner-action ${String(signal.action).toLowerCase()}`}>{signal.action}</span></header>
+  return <details className="scanner-signal-card" id={`signal-${signal.id}`}>
+    <summary className="scanner-signal-summary">
+      <span className="scanner-signal-identity"><b className="scanner-ticker">{signal.ticker}</b><span>{signal.company}</span></span>
+      <span className="scanner-signal-summary-meta"><b>{fmtPrice(signal.current_price)}</b><span className={`scanner-action ${String(signal.action).toLowerCase()}`}>{signal.action}</span><span className="scanner-signal-chevron" aria-hidden="true">⌄</span></span>
+    </summary>
+    <div className="scanner-signal-body">
     <p><b>{he ? (signal.price_stale ? 'מחיר אחרון ידוע — לא עדכני' : 'מחיר נוכחי אחרון') : (signal.price_stale ? 'Last known price — stale' : 'Latest current price')}: {fmtPrice(signal.current_price)}</b><br/>{he ? 'זמן נתוני המחיר' : 'Price timestamp'}: {stamp(signal.price_as_of)} · {signal.price_source || '—'}<br/>{he ? 'נתוני ספק מושהים; רענון המסך אינו מעדכן את זמן המחיר.' : 'Provider data may be delayed; screen refresh does not change the quote timestamp.'}</p>
     <div className="scanner-levels"><span>{he ? 'כניסה מתוכננת' : 'Planned entry'}<b>{fmtPrice(signal.planned_entry)}</b></span><span>{he ? 'כניסה בפועל' : 'Actual entry'}<b>{fmtPrice(signal.actual_entry)}</b></span><span>{he ? 'סטופ מקורי' : 'Original stop'}<b>{fmtPrice(signal.original_stop)}</b></span><span>{he ? 'סטופ נוכחי' : 'Current stop'}<b>{fmtPrice(signal.current_stop)}</b></span></div>
     <TargetRows record={signal} entry={movementEntry} strategy={signal.operational_strategy || 'single'} he={he} />
@@ -285,8 +289,9 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
     <details><summary>{he ? 'פירוט מקור הציון' : 'Score basis'}</summary><pre>{JSON.stringify(basis, null, 2)}</pre></details>
     <p><b>{he ? 'סיבה' : 'Reason'}:</b> {(he && signal.reason_he) || signal.reason}</p>
     {!!news.length && <ul>{news.map((item: any, index: number) => <li key={`${item.url}-${index}`}><a href={item.url} target="_blank" rel="noreferrer">{(he && item.title_he) || item.title}</a> · {item.publisher} · {stamp(item.published_at)}</li>)}</ul>}
-    <footer>{signal.status} · {he ? 'אופק' : 'Horizon'}: {signal.time_horizon} · {he ? 'בתוקף עד' : 'Valid until'}: {stamp(signal.valid_until)} · {he ? 'עודכן' : 'Updated'}: {stamp(signal.updated_at)}</footer>
-  </article>
+      <footer>{signal.status} · {he ? 'אופק' : 'Horizon'}: {signal.time_horizon} · {he ? 'בתוקף עד' : 'Valid until'}: {stamp(signal.valid_until)} · {he ? 'עודכן' : 'Updated'}: {stamp(signal.updated_at)}</footer>
+    </div>
+  </details>
 }
 
 function TradeCard({ trade, schedules, he }: { trade: Record<string, any>, schedules: Record<string, any>[], he: boolean }) {
