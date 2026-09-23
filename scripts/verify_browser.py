@@ -28,7 +28,7 @@ def main():
             assert activity["universe_count"] >= 500 and activity["data_count"] > 0
             for name in ("Signals", "Demo trades", "Results", "News", "Scanner status"):
                 expect(page.get_by_role("button", name=name, exact=True)).to_be_visible()
-            for path in ["/health", "/api/scanner/dashboard", "/api/market-intel/overview"]:
+            for path in ["/health", "/api/scanner/dashboard", "/api/scanner/quotes", "/api/market-intel/overview"]:
                 result = page.evaluate("""async url => {
                     const response = await fetch(url);
                     const data = await response.json();
@@ -44,6 +44,10 @@ def main():
                     assert open_primary
                     assert all(trade["settings"].get("target_plan", {}).get("method") ==
                                "daily_resistance_and_measured_move_v1" for trade in open_primary)
+                if path.endswith("quotes"):
+                    assert result["data"]["refresh_seconds"] <= 30
+                    assert result["data"]["realtime_guaranteed"] is False
+                    assert result["data"]["quotes"]
                 if path.endswith("overview"):
                     assert result["data"]["available"], "Financial events unavailable"
                     assert result["data"]["headline_count"] > 0
@@ -56,6 +60,27 @@ def main():
             expect(page.get_by_text("דשבורד סורק המניות", exact=True)).to_be_visible()
             for text in ("סיגנלים", "עסקאות דמו", "תוצאות", "חדשות", "מצב הסורק"):
                 expect(page.get_by_role("button", name=text, exact=True)).to_be_visible()
+            first_signal = page.locator("details.scanner-signal-card").first
+            expect(first_signal).to_be_visible()
+            assert first_signal.get_attribute("open") is None
+            expect(first_signal.locator(".scanner-signal-summary")).to_contain_text("$")
+            first_signal.locator("summary").click()
+            expect(first_signal.locator(".scanner-signal-body")).to_be_visible()
+            expect(first_signal.get_by_text("מחיר", exact=False).first).to_be_visible()
+            assert ": —" not in first_signal.locator(".scanner-signal-summary").inner_text()
+            signal_chart = first_signal.locator(".scanner-position-chart")
+            signal_chart.locator("summary").click()
+            expect(signal_chart.locator("img")).to_be_visible(timeout=30000)
+            page.wait_for_function(
+                "() => document.querySelector('.scanner-signal-card .scanner-position-chart img')?.naturalWidth > 100",
+                timeout=30000,
+            )
+            signal_chart.locator("img").click()
+            signal_dialog = page.get_by_role("dialog").first
+            expect(signal_dialog).to_be_visible()
+            signal_dialog.get_by_role("button", name="סגור גרף", exact=True).click()
+            expect(signal_dialog).not_to_be_visible()
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Hebrew signal overflow"
             page.get_by_role("button", name="עסקאות דמו", exact=True).click()
             expect(page.locator(".scanner-account-grid")).to_be_visible()
             first_trade = page.locator(".scanner-trade-card").first
