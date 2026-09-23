@@ -89,6 +89,13 @@ def _int_env(name: str, default: int, low: int, high: int) -> int:
         return default
 
 
+def _float_env(name: str, default: float, low: float, high: float) -> float:
+    try:
+        return min(high, max(low, float(os.getenv(name, default))))
+    except (TypeError, ValueError):
+        return default
+
+
 def feed_settings() -> dict[str, Any]:
     cadence = _int_env("STOCK_SCANNER_NEWS_FEED_INTERVAL_SECONDS", DEFAULT_INTERVAL, 300, 21600)
     return {
@@ -99,6 +106,7 @@ def feed_settings() -> dict[str, Any]:
         "analysis_interval": _int_env("STOCK_SCANNER_NEWS_AI_INTERVAL_SECONDS", 30, 10, 3600),
         # Large JSON batches can exhaust Ollama's output budget mid-object.
         "analysis_batch": _int_env("STOCK_SCANNER_NEWS_AI_BATCH_SIZE", 3, 1, 30),
+        "alert_min_relevance": _float_env("STOCK_SCANNER_NEWS_ALERT_MIN_RELEVANCE", .65, 0, 1),
         "sec_user_agent": os.getenv("NEWS_SEC_USER_AGENT", "").strip(),
     }
 
@@ -647,7 +655,8 @@ def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
     once for the full news analyzer instead of silently leaving it translated.
     """
     cutoff = current - timedelta(hours=_int_env("STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS", 168, 24, 720))
-    cur.execute("""SELECT n.id,n.scope,n.published_at,w.enabled watch_enabled,w.created_at watch_created
+    cur.execute("""SELECT n.id,n.ticker,n.scope,n.signal_id,n.published_at,n.verified_tickers_json,
+            w.enabled watch_enabled,w.created_at watch_created
         FROM scanner_news n LEFT JOIN scanner_news_watchlist w ON w.ticker=n.ticker
         WHERE n.analysis_status IN ('pending_translation','translated')
           AND n.scope IN ('open_position','active_signal','watchlist')""")
@@ -656,10 +665,22 @@ def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
         published = _parse_time(row["published_at"])
         if published < cutoff:
             continue
-        if row["scope"] == "watchlist" and (
-            not row["watch_enabled"] or not row["watch_created"] or published < _parse_time(row["watch_created"])
-        ):
-            continue
+        if row["scope"] == "watchlist":
+            verified = {str(value).upper() for value in _loads(row["verified_tickers_json"], [])}
+            ticker = str(row["ticker"] or "").upper()
+            if (not row["watch_enabled"] or not row["watch_created"] or
+                    published < _parse_time(row["watch_created"]) or (verified and ticker not in verified)):
+                continue
+        elif row["scope"] == "open_position":
+            cur.execute("""SELECT 1 FROM scanner_trade_news l JOIN scanner_trades t ON t.id=l.trade_id
+                WHERE l.news_id=? AND t.status='open' AND t.is_shadow=0 LIMIT 1""", (row["id"],))
+            if not cur.fetchone():
+                continue
+        elif row["scope"] == "active_signal":
+            cur.execute("""SELECT 1 FROM scanner_signals WHERE id=?
+                AND status IN ('ACTIVE','PENDING_ENTRY','ENTERED') LIMIT 1""", (row["signal_id"],))
+            if not cur.fetchone():
+                continue
         priority = 100 if row["scope"] == "open_position" else 80 if row["scope"] == "watchlist" else 70
         cur.execute("UPDATE scanner_news SET analysis_status='pending_analysis',analysis_error=NULL,updated_at=? WHERE id=?",
                     (stamp, row["id"]))
@@ -747,7 +768,8 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
              stamp, stamp, row["id"]))
         cur.execute("UPDATE scanner_news_jobs SET status='done',attempts=attempts+1,last_error=NULL,updated_at=? WHERE id=?", (stamp, row["job_id"]))
         analyzed += 1
-        if related and materiality in {"medium", "high"} and sentiment in {"positive", "negative", "mixed"}:
+        if (related and relevance >= feed_settings()["alert_min_relevance"] and
+                materiality in {"medium", "high"} and sentiment in {"positive", "negative", "mixed"}):
             cur.execute("""SELECT t.id,t.ticker FROM scanner_trade_news l JOIN scanner_trades t ON t.id=l.trade_id
                            WHERE l.news_id=? AND t.status='open' AND t.is_shadow=0 ORDER BY t.id""", (row["id"],))
             trade_rows = [dict(value) for value in cur.fetchall()]
@@ -768,7 +790,9 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
             # A watched open position already receives the position alert above;
             # never send a second notification for the same news/version.
             verified = {str(value).upper() for value in _loads(row.get("verified_tickers_json"), [])}
-            if row.get("ticker"):
+            # Priority-provider verified tickers are authoritative. Only fall
+            # back to the legacy ticker when no verified mapping exists.
+            if not verified and row.get("ticker"):
                 verified.add(str(row["ticker"]).upper())
             if verified and not trade_rows:
                 placeholders = ",".join("?" for _ in verified)

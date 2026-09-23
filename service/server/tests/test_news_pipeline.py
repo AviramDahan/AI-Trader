@@ -186,6 +186,55 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         self.assertIn("INTC", alerts[0]["message"])
 
+    def test_verified_tickers_override_wrong_legacy_ticker_and_low_relevance_never_alerts(self):
+        scanner_engine.set_news_watchlist("INTC", "Intel")
+        conn = database.get_db_connection()
+        conn.execute("UPDATE scanner_news_watchlist SET created_at=? WHERE ticker='INTC'",
+                     ((self.clock - timedelta(minutes=1)).isoformat(),))
+        conn.execute("""INSERT INTO scanner_news(
+            fingerprint,ticker,scope,title,publisher,url,published_at,analysis_status,fetched_at,
+            verified_tickers_json,content_hash,updated_at)
+            VALUES('wrong-legacy-ticker','INTC','watchlist','AMD-only verified update','Publisher',
+                   'https://example.test/amd-only',?,'pending_analysis',?,'[\"AMD\"]','v1',?)""",
+                     (self.clock.isoformat(), self.clock.isoformat(), self.clock.isoformat()))
+        news_id = conn.execute("SELECT id FROM scanner_news WHERE fingerprint='wrong-legacy-ticker'").fetchone()[0]
+        conn.execute("""INSERT INTO scanner_news_jobs(news_id,priority,status,next_attempt_at,created_at,updated_at)
+                      VALUES(?,80,'pending',?,?,?)""", (news_id, self.clock.isoformat(), self.clock.isoformat(), self.clock.isoformat()))
+        conn.commit(); conn.close()
+        result = news_pipeline.analyze_news_jobs(analyzer=lambda rows: [{
+            "id": rows[0]["id"], "related": True, "title_he": "עדכון AMD",
+            "summary_he": "המידע אומת עבור AMD בלבד.", "sentiment": "positive",
+            "materiality": "high", "thesis_effect": "unchanged",
+            "interpretation_he": "אין שיוך מאומת ל־INTC.", "relevance": .3,
+        }], at=self.clock)
+        self.assertEqual(result["alerts"], 0)
+        self.assertFalse(self.rows("SELECT * FROM scanner_news_watchlist_alerts"))
+        self.assertFalse(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='watchlist_news'"))
+
+    def test_legacy_priority_backfill_requires_a_live_relationship(self):
+        conn = database.get_db_connection()
+        for index, scope in enumerate(("open_position", "active_signal"), 1):
+            conn.execute("""INSERT INTO scanner_news(
+                fingerprint,ticker,scope,title,publisher,url,published_at,analysis_status,fetched_at,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                         (f"orphan-{index}", "INTC", scope, "Orphan legacy item", "Publisher",
+                          f"https://example.test/orphan-{index}", self.clock.isoformat(), "translated",
+                          self.clock.isoformat(), self.clock.isoformat()))
+        conn.commit(); conn.close()
+        called = False
+
+        def analyzer(_rows):
+            nonlocal called
+            called = True
+            return []
+
+        result = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
+        self.assertFalse(called)
+        self.assertEqual(result["analyzed"], 0)
+        self.assertFalse(self.rows("SELECT * FROM scanner_news_jobs"))
+        self.assertEqual({row["analysis_status"] for row in self.rows("SELECT analysis_status FROM scanner_news")},
+                         {"translated"})
+
     def test_watchlist_does_not_duplicate_open_position_alert(self):
         scanner_engine.set_news_watchlist("AAPL", "Apple")
         self.open_trade()
