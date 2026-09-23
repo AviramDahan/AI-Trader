@@ -58,8 +58,21 @@ def main():
                 expect(page.get_by_role("button", name=text, exact=True)).to_be_visible()
             page.get_by_role("button", name="עסקאות דמו", exact=True).click()
             expect(page.locator(".scanner-account-grid")).to_be_visible()
-            expect(page.locator(".scanner-trade-card").first.locator("p", has_text="TP1: $").first).to_be_visible()
-            expect(page.locator(".scanner-trade-card").first.get_by_text("יעד המימוש היחיד הוא TP2", exact=False)).to_be_visible()
+            first_trade = page.locator(".scanner-trade-card").first
+            targets = first_trade.locator(".scanner-targets")
+            expect(targets).to_contain_text("TP1:")
+            expect(targets).to_contain_text("שינוי מהכניסה")
+            expect(targets).to_contain_text("מימוש 0%")
+            expect(targets).to_contain_text("מימוש 100%")
+            expect(first_trade.get_by_text("יעד המימוש היחיד הוא TP2", exact=False)).to_be_visible()
+            chart = first_trade.locator(".scanner-position-chart")
+            chart.locator("summary").click()
+            image = chart.locator("img")
+            expect(image).to_be_visible(timeout=30000)
+            page.wait_for_function(
+                "() => document.querySelector('.scanner-trade-card .scanner-position-chart img')?.naturalWidth > 100",
+                timeout=30000,
+            )
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Hebrew trades overflow"
             for button, heading in (("תוצאות", "השוואת אסטרטגיות יציאה"),
                                     ("חדשות", "חדשות — מהחדש לישן"),

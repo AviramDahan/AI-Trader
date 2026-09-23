@@ -1,8 +1,9 @@
 """Public dashboard and controlled settings routes for the paper stock scanner."""
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel
 
 from database import get_db_connection
+from position_charts import position_chart_bytes
 from scanner_engine import dashboard_payload, set_active_strategy, set_news_watchlist
 from services import _get_agent_by_token
 from stock_scanner import public_status
@@ -43,6 +44,16 @@ def register_scanner_routes(app: FastAPI) -> None:
         payload = dashboard_payload()
         payload["activity"] = public_status()
         return payload
+
+    @app.get("/api/scanner/trades/{trade_id}/chart")
+    def scanner_trade_chart(trade_id: int):
+        try:
+            png = position_chart_bytes(trade_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Position chart is temporarily unavailable") from exc
+        return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=300"})
 
     @app.put("/api/scanner/settings/exit-strategy")
     async def update_exit_strategy(data: ExitStrategyRequest, authorization: str = Header(None)):

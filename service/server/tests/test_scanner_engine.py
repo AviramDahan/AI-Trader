@@ -67,11 +67,21 @@ class ScannerEngineTests(unittest.TestCase):
     def test_signal_is_pending_until_a_later_verified_bar(self):
         result = self.record()
         self.assertEqual(result["status"], "PENDING_ENTRY")
+        pending = scanner_engine.dashboard_payload()["signals"][0]
+        self.assertEqual(
+            [pending[f"operational_tp{i}_pct"] for i in (1, 2, 3)],
+            [0.0, 1.0, 0.0],
+        )
         self.assertFalse(self.fetchall("SELECT * FROM scanner_trades"))
         scanner_engine.process_bar("AAPL", self.bar(1, 101, 101.5, 99.5, 100.5))
         trades = self.fetchall("SELECT * FROM scanner_trades ORDER BY is_shadow")
         self.assertEqual(len(trades), 2)
         self.assertEqual(trades[0]["status"], "open")
+        dashboard_trades = scanner_engine.dashboard_payload()["trades"]
+        primary = next(row for row in dashboard_trades if not row["is_shadow"])
+        shadow = next(row for row in dashboard_trades if row["is_shadow"])
+        self.assertEqual([primary[f"operational_tp{i}_pct"] for i in (1, 2, 3)], [0.0, 1.0, 0.0])
+        self.assertAlmostEqual(sum(shadow[f"operational_tp{i}_pct"] for i in (1, 2, 3)), 1.0)
         self.assertEqual(self.fetchall("SELECT status FROM scanner_signals")[0]["status"], "ENTERED")
 
     def test_structural_targets_survive_fill_and_quote_updates_do_not_change_entry(self):

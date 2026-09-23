@@ -3641,6 +3641,10 @@ html[dir='rtl'] .main-content {
 .scanner-levels span { color: var(--text-secondary); font-size: 12px; }
 .scanner-levels b { display: block; color: var(--text-primary); font-size: 16px; }
 .scanner-targets { display: grid; gap: 5px; padding: 12px; background: var(--bg-tertiary); border-radius: 10px; }
+.scanner-position-chart { margin: 12px 0; }
+.scanner-position-chart summary { cursor: pointer; font-weight: 700; }
+.scanner-position-chart img { display: block; width: 100%; height: auto; margin: 12px 0 8px; border: 1px solid var(--border-color); border-radius: 10px; background: #101b25; }
+.scanner-position-chart small { display: block; color: var(--text-secondary); line-height: 1.55; }
 .scanner-signal-card footer, .scanner-news-card footer { border-top: 1px solid var(--border-color); margin-top: 12px; padding-top: 10px; color: var(--text-secondary); font-size: 12px; }
 .scanner-signal-card pre { white-space: pre-wrap; max-width: 100%; font-size: 11px; }
 .scanner-empty, .scanner-note, .scanner-warning, .scanner-inline-error { padding: 16px; border-radius: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-secondary); }

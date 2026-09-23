@@ -26,6 +26,13 @@ type Dashboard = {
 
 const fmtPrice = (value: any) => Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '—'
 const fmtPct = (value: any) => Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : '—'
+const fmtMove = (entry: any, target: any) => {
+  const from = Number(entry)
+  const to = Number(target)
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from <= 0) return '—'
+  const change = (to / from - 1) * 100
+  return `${change >= 0 ? '+' : ''}${change.toFixed(1)}%`
+}
 
 export function ScannerDashboard({ token }: { token: string | null }) {
   const { language } = useLanguage()
@@ -270,8 +277,8 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
     <header><div><b className="scanner-ticker">{signal.ticker}</b><span>{signal.company}</span></div><span className={`scanner-action ${String(signal.action).toLowerCase()}`}>{signal.action}</span></header>
     <p><b>{he ? (signal.price_stale ? 'מחיר אחרון ידוע — לא עדכני' : 'מחיר נוכחי אחרון') : (signal.price_stale ? 'Last known price — stale' : 'Latest current price')}: {fmtPrice(signal.current_price)}</b><br/>{he ? 'זמן נתוני המחיר' : 'Price timestamp'}: {stamp(signal.price_as_of)} · {signal.price_source || '—'}<br/>{he ? 'נתוני ספק מושהים; רענון המסך אינו מעדכן את זמן המחיר.' : 'Provider data may be delayed; screen refresh does not change the quote timestamp.'}</p>
     <div className="scanner-levels"><span>{he ? 'כניסה מתוכננת' : 'Planned entry'}<b>{fmtPrice(signal.planned_entry)}</b></span><span>{he ? 'כניסה בפועל' : 'Actual entry'}<b>{fmtPrice(signal.actual_entry)}</b></span><span>{he ? 'סטופ מקורי' : 'Original stop'}<b>{fmtPrice(signal.original_stop)}</b></span><span>{he ? 'סטופ נוכחי' : 'Current stop'}<b>{fmtPrice(signal.current_stop)}</b></span></div>
-    <div className="scanner-targets">{[1, 2, 3].map(index => <span key={index}>TP{index}: <b>{fmtPrice(signal[`tp${index}`])}</b> · {fmtPct(signal[`tp${index}_pct`])} · {Number(signal[`rr${index}`]).toFixed(1)}R</span>)}</div>
-    <p>{he ? 'האחוזים מציינים כמות למימוש, לא שינוי במחיר.' : 'Percentages are quantity allocations, not price changes.'}</p>
+    <div className="scanner-targets">{[1, 2, 3].map(index => <span key={index}>TP{index}: <b>{fmtPrice(signal[`tp${index}`])}</b> · {he ? 'שינוי מהכניסה' : 'Move from entry'} {fmtMove(signal.planned_entry, signal[`tp${index}`])} · {he ? 'מימוש' : 'Exit qty'} {fmtPct(signal[`operational_tp${index}_pct`] ?? signal[`tp${index}_pct`])} · {Number(signal[`rr${index}`]).toFixed(1)}R</span>)}</div>
+    <p>{he ? '״שינוי מהכניסה״ הוא מרחק המחיר; ״מימוש״ הוא אחוז הכמות שייסגר בפועל באסטרטגיה הפעילה.' : '“Move from entry” is the price distance; “Exit qty” is the quantity actually closed by the active strategy.'}</p>
     <TargetPlanDetails plan={plan} he={he} />
     <p><b>{he ? 'ציון איכות מודל לא־מכויל' : 'Uncalibrated model quality score'}:</b> {fmtPct(signal.confidence)} · {he ? 'תוכנית משוקללת' : 'Weighted plan'} {Number(signal.weighted_rr).toFixed(1)}R</p>
     <details><summary>{he ? 'פירוט מקור הציון' : 'Score basis'}</summary><pre>{JSON.stringify(basis, null, 2)}</pre></details>
@@ -289,17 +296,36 @@ function TradeCard({ trade, schedules, he }: { trade: Record<string, any>, sched
     {!!trade.legacy_position_id && <p className="scanner-warning">{he ? 'Legacy — היסטוריה לא מאומתת; ניהול החל מ־' : 'Legacy — unverified history; managed from '}{stamp(trade.managed_from)}. {he ? 'עלויות כניסה היסטוריות אינן כלולות; לא נספר בסטטיסטיקה המאומתת.' : 'Historical entry costs excluded; not counted in verified statistics.'}</p>}
     <p>{he ? 'אסטרטגיה' : 'Strategy'}: {trade.strategy} · {he ? 'כמות מקורית' : 'Original qty'}: {Number(trade.original_quantity).toFixed(6)} · {he ? 'נותרה' : 'Remaining'}: {Number(trade.remaining_quantity).toFixed(6)}</p>
     <p>{he ? 'כניסה' : 'Entry'}: {fmtPrice(trade.entry_price)} · R: {fmtPrice(trade.original_r)} · {he ? 'סטופ' : 'Stop'}: {fmtPrice(trade.current_stop)}</p>
-    <p>TP1: {fmtPrice(trade.tp1)} · TP2: {fmtPrice(trade.tp2)} · TP3: {fmtPrice(trade.tp3)} · {he ? 'מחיר אחרון' : 'Last price'}: {fmtPrice(trade.last_price)} · {stamp(trade.last_bar_at)}</p>
+    <div className="scanner-targets">{[1, 2, 3].map(index => <span key={index}>TP{index}: <b>{fmtPrice(trade[`tp${index}`])}</b> · {he ? 'שינוי מהכניסה' : 'Move from entry'} {fmtMove(trade.entry_price, trade[`tp${index}`])} · {he ? 'מימוש' : 'Exit qty'} {fmtPct(trade[`operational_tp${index}_pct`] ?? trade[`tp${index}_pct`])}</span>)}</div>
+    <p>{he ? 'מחיר אחרון' : 'Last price'}: {fmtPrice(trade.last_price)} · {stamp(trade.last_bar_at)}</p>
     <p className="scanner-note">{trade.strategy === 'single'
       ? (he ? 'בעסקה הפעילה יעד המימוש היחיד הוא TP2; ‏TP1 ו־TP3 מוצגים להשוואת Shadow בלבד.' : 'The active trade exits at TP2 only; TP1 and TP3 are shown for Shadow comparison.')
       : (he ? 'אסטרטגיית Shadow מדורגת: מימוש חלקי ב־TP1/TP2 וסגירת היתרה ב־TP3.' : 'Staged Shadow strategy: partial exits at TP1/TP2 and final exit at TP3.')}</p>
     <TargetPlanDetails plan={plan} he={he} />
+    {trade.status === 'open' && <PositionChart trade={trade} he={he} />}
     <p>{he ? 'ממומש נטו לפני סגירה מלאה' : 'Realized before final close'}: {fmtPrice(Number(trade.realized_pnl) - Number(trade.fees))} · {he ? 'לא ממומש' : 'Unrealized'}: {fmtPrice(trade.unrealized_pnl)}</p>
     <p>{he ? 'חדשות — בדיקה אחרונה' : 'News — last check'}: {stamp(schedule?.last_success_at)} · {he ? 'הבאה' : 'next'}: {stamp(schedule?.next_due_at)} · {schedule?.status || '—'}</p>
     {schedule?.summary_he && <p className="scanner-ai-interpretation"><b>{he ? 'סקירת חדשות אחרונה' : 'Latest news review'}:</b> {schedule.summary_he}</p>}
     {!!trade.news?.length && <details><summary>{he ? 'היסטוריית הערכות חדשות' : 'News assessment history'}</summary>{trade.news.map((item: any) => <p key={item.id}><b>{stamp(item.published_at)}</b> · {item.impact}/{item.materiality} · {item.interpretation_he}<br/><a href={item.url} target="_blank" rel="noreferrer">{item.publisher}</a></p>)}</details>}
     <details><summary>{he ? 'ביצועים' : 'Fills'} ({trade.fills?.length || 0})</summary>{(trade.fills || []).map((fill: any) => <p key={fill.id}>{fill.fill_type}{fill.target_index ? ` TP${fill.target_index}` : ''} · {Number(fill.quantity).toFixed(6)} @ {fmtPrice(fill.price)} · {stamp(fill.bar_at)}</p>)}</details>
   </article>
+}
+
+function PositionChart({ trade, he }: { trade: Record<string, any>, he: boolean }) {
+  const [open, setOpen] = useState(false)
+  const version = encodeURIComponent([
+    trade.entry_price, trade.current_stop, trade.tp1, trade.tp2, trade.tp3, trade.strategy, trade.last_bar_at,
+  ].join('|'))
+  const description = he
+    ? `גרף יומי של ${trade.ticker} עם מחיר כניסה, סטופ ויעדי TP1, TP2 ו־TP3`
+    : `${trade.ticker} daily chart with entry, stop, TP1, TP2 and TP3 levels`
+  return <details className="scanner-position-chart" onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary>{he ? 'גרף כניסה, סטופ ויעדים' : 'Entry, stop and target chart'}</summary>
+    {open && <>
+      <img src={`${API_ORIGIN}/api/scanner/trades/${trade.id}/chart?v=${version}`} alt={description} />
+      <small>{he ? 'נרות יומיים מ־Yahoo Finance, שעשויים להיות מושהים. קו מלא הוא יעד פעיל; קו מקווקו הוא יעד Shadow להשוואה בלבד.' : 'Daily Yahoo Finance candles may be delayed. A solid line is an active target; a dashed line is a Shadow comparison target only.'}</small>
+    </>}
+  </details>
 }
 
 function TargetPlanDetails({ plan, he }: { plan: Record<string, any> | undefined, he: boolean }) {

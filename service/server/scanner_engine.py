@@ -1029,6 +1029,7 @@ def store_quote(cur, ticker, price, as_of, source):
 
 def dashboard_payload() -> dict[str, Any]:
     conn = get_db_connection(); cur = conn.cursor(); agent_id = scanner_agent_id(cur)
+    default_operational_strategy = lifecycle_settings()["active_strategy"]
     cur.execute("SELECT * FROM scanner_accounts WHERE agent_id=?", (agent_id,)); account = dict(cur.fetchone())
     cur.execute("SELECT * FROM scanner_signals ORDER BY created_at DESC LIMIT 200"); signals = [dict(row) for row in cur.fetchall()]
     for row in signals:
@@ -1048,9 +1049,23 @@ def dashboard_payload() -> dict[str, Any]:
         row["price_as_of"] = quote["as_of"] if quote else None
         row["price_source"] = quote["source"] if quote else None
         row["price_stale"] = not quote or (datetime.now(UTC)-parse_time(quote["as_of"])).total_seconds() > 900
+        cur.execute("SELECT strategy FROM scanner_trades WHERE signal_id=? AND is_shadow=0 ORDER BY id LIMIT 1", (row["id"],))
+        primary_trade = cur.fetchone()
+        operational_strategy = primary_trade["strategy"] if primary_trade else default_operational_strategy
+        row["operational_strategy"] = operational_strategy
+        if operational_strategy == "single":
+            row["operational_tp1_pct"], row["operational_tp2_pct"], row["operational_tp3_pct"] = 0.0, 1.0, 0.0
+        else:
+            for index in (1, 2, 3):
+                row[f"operational_tp{index}_pct"] = float(row[f"tp{index}_pct"])
     cur.execute("SELECT * FROM scanner_trades ORDER BY opened_at DESC"); trades = [dict(row) for row in cur.fetchall()]
     for trade in trades:
         trade["settings"] = _loads(trade.pop("settings_json", None), {})
+        if trade["strategy"] == "single":
+            trade["operational_tp1_pct"], trade["operational_tp2_pct"], trade["operational_tp3_pct"] = 0.0, 1.0, 0.0
+        else:
+            for index in (1, 2, 3):
+                trade[f"operational_tp{index}_pct"] = float(trade[f"tp{index}_pct"])
         cur.execute("SELECT * FROM scanner_fills WHERE trade_id=? ORDER BY created_at", (trade["id"],))
         trade["fills"] = [dict(row) for row in cur.fetchall()]
         cur.execute("""SELECT n.* FROM scanner_news n JOIN scanner_trade_news l ON l.news_id=n.id

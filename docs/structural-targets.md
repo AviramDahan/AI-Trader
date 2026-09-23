@@ -18,11 +18,21 @@ Insufficient zones (including price discovery above all observed levels) means
 no published signal, not extrapolated targets. This stricter experimental method
 may substantially reduce coverage; no predictive edge has been demonstrated.
 
-One third at each target remains the quantity-allocation rule, NOT a price
-increase of 33%. The prices and resulting R ratios vary with observed structure.
-Single remains operational (TP2); staged remains shadow. New structural targets
-are preserved at actual entry, not replaced by fixed R multiples. Older pending
-fixed-R plans retain their previous behavior.
+The dashboard shows the quantity allocation of the strategy that can actually
+affect the primary paper account, NOT the percentage change in price. With the
+current `single` strategy this is TP1 0%, TP2 100%, TP3 0%; TP1 and TP3 remain
+visible as dashed Shadow comparison levels. A `staged` trade displays its stored
+three allocations (which must total 100%). The prices and resulting R ratios vary
+with observed structure. New structural targets are preserved at actual entry,
+not replaced by fixed R multiples. Older pending fixed-R plans retain their
+previous behavior.
+
+Each open primary paper position also exposes an on-demand daily candlestick
+chart. It marks simulated entry, current stop and all three target prices. Solid
+target lines have a non-zero operational allocation and dashed target lines are
+Shadow-only. Charts are cached by trade levels and last processed bar; opening
+the chart does not call the LLM. The Yahoo Finance candles can be delayed and
+are labelled as such.
 
 ## Explicit revision of already-open paper positions
 
