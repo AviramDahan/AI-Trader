@@ -1616,6 +1616,18 @@ def init_database():
         )
     """)
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_telegram_topic_state (
+            state_key TEXT PRIMARY KEY,
+            chat_id TEXT NOT NULL,
+            thread_id INTEGER,
+            message_id INTEGER,
+            content_hash TEXT,
+            last_attempt_at TEXT,
+            last_success_at TEXT,
+            last_error TEXT
+        )
+    """)
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS scanner_service_status (
             component TEXT PRIMARY KEY,
             status TEXT NOT NULL,

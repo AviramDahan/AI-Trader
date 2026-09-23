@@ -35,6 +35,23 @@ Removing a symbol stops future priority collection and alerts. Adding a symbol
 does not create a signal, order, position or trade, and old articles are not
 retroactively alerted. Yahoo coverage is periodic and may be delayed or limited.
 
+Telegram Forum routing uses three server-side topic IDs: `חדשות`, `סיגנלים
+ועסקאות דמו`, and `מצב תיק דמו`. The News topic contains one pinned scope card
+that lists the independently watched symbols separately from open-position
+symbols. The card is edited in place, so it does not create repeated messages.
+Every material alert names the verified ticker and company, preserves the
+original publisher/title/publication time/direct URL, and labels Hebrew summary
+and interpretation as AI output. Headline-only coverage is stated explicitly.
+
+The paper-portfolio topic contains one pinned mark-to-market card. It is edited
+every five minutes and after a delivered entry/TP/stop/SELL/stop-change event.
+It reports managed-account equity, cash, exposure, net result, gross realized
+P&L, current unrealized P&L, fees and open-position levels. Adopted Legacy
+positions remain visible but are counted separately from the managed scanner
+account so their historic funding is not invented or mixed into its equity.
+The topic message ID is durable in SQLite; bot token, chat ID and forum topic IDs
+remain only in ignored local configuration/private backup.
+
 Authenticated browser notifications send their token in the first WebSocket
 message, never in the WebSocket URL. This prevents browser/proxy access logs from
 capturing credentials. Production supervision also disables Uvicorn access logs;

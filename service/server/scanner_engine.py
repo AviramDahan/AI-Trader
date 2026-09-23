@@ -244,7 +244,7 @@ def initialize_runtime() -> None:
             pass
     conn.commit()
     conn.close()
-    for component in ("prices", "news", "news_feed", "news_ai", "ollama", "scan", "monitor", "position_news", "telegram"):
+    for component in ("prices", "news", "news_feed", "news_ai", "ollama", "scan", "monitor", "position_news", "telegram", "telegram_status"):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT component FROM scanner_service_status WHERE component=?", (component,))
@@ -972,6 +972,7 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
                 (now_z(), limit))
     rows = [dict(row) for row in cur.fetchall()]; conn.close()
     sent = failed = 0
+    portfolio_changed = False
     for row in rows:
         cfg = settings()
         enabled = bool(cfg.get("telegram_enabled"))
@@ -993,6 +994,7 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
         if result == "sent":
             cur.execute("UPDATE scanner_telegram_outbox SET status='sent',attempts=attempts+1,sent_at=?,last_error=NULL WHERE id=?",
                         (now_z(), row["id"])); sent += 1
+            portfolio_changed = portfolio_changed or row["event_type"] in {"entry", "tp", "stop", "sell", "stop_change"}
             if row["event_type"] == "entry":
                 signal_id = int(row["dedupe_key"].split(":")[-1])
                 cur.execute("SELECT id FROM scanner_trades WHERE signal_id=? AND is_shadow=0 AND legacy_position_id IS NULL", (signal_id,))
@@ -1012,6 +1014,14 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
                         (attempts, due, result, row["id"])); failed += 1
         conn.commit(); conn.close()
     _service("telegram", "error" if failed else "ok", f"sent={sent} retry={failed}", success=not failed)
+    if portfolio_changed:
+        try:
+            from telegram_status import refresh_telegram_status_cards
+            status = refresh_telegram_status_cards()
+            healthy = all(value in {"created", "updated"} for value in status.values())
+            _service("telegram_status", "ok" if healthy else "error", str(status), success=healthy)
+        except Exception as exc:
+            _service("telegram_status", "error", type(exc).__name__)
     return {"sent": sent, "failed": failed}
 
 

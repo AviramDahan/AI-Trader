@@ -34,7 +34,7 @@ def _write_env(updates: dict[str, str]) -> None:
     temporary.replace(ENV_FILE)
 
 
-def _record_backup(chat_id: str, news_thread: str, trading_thread: str) -> None:
+def _record_backup(chat_id: str, news_thread: str, trading_thread: str, portfolio_thread: str) -> None:
     if not CREDENTIALS_FILE.exists():
         return
     begin, end = "--- BEGIN TELEGRAM TOPICS ---", "--- END TELEGRAM TOPICS ---"
@@ -48,13 +48,13 @@ def _record_backup(chat_id: str, news_thread: str, trading_thread: str) -> None:
         "Password: N/A",
         "API key: Stored separately as TELEGRAM_BOT_TOKEN; value intentionally not duplicated here",
         "API secret/token: Stored in ignored .env",
-        f"Account/project ID: chat={chat_id}; news_thread={news_thread}; trading_thread={trading_thread}",
+        f"Account/project ID: chat={chat_id}; news_thread={news_thread}; trading_thread={trading_thread}; portfolio_thread={portfolio_thread}",
         "Free plan/tier: Telegram Bot API",
-        "Environment variable name: TELEGRAM_CHAT_ID, TELEGRAM_NEWS_THREAD_ID, TELEGRAM_TRADING_THREAD_ID",
+        "Environment variable name: TELEGRAM_CHAT_ID, TELEGRAM_NEWS_THREAD_ID, TELEGRAM_TRADING_THREAD_ID, TELEGRAM_PORTFOLIO_THREAD_ID",
         "Where the secret is stored: Project-root ignored .env",
         f"Date created: {datetime.now(timezone.utc).date().isoformat()}",
         "Where it is used: Server-side Telegram message and entry-chart delivery",
-        "Notes: News routes to חדשות; signals, entries, TP/SL and SELL routes to סיגנלים ועסקאות דמו.",
+        "Notes: News routes to חדשות; signals, entries, TP/SL and SELL route to סיגנלים ועסקאות דמו; the edited paper-account card routes to מצב תיק דמו.",
         end,
     ])
     text = CREDENTIALS_FILE.read_text(encoding="utf-8")
@@ -123,6 +123,7 @@ def main() -> int:
 
     news_thread = str(values.get("TELEGRAM_NEWS_THREAD_ID") or "").strip()
     trading_thread = str(values.get("TELEGRAM_TRADING_THREAD_ID") or "").strip()
+    portfolio_thread = str(values.get("TELEGRAM_PORTFOLIO_THREAD_ID") or "").strip()
     updates = {"TELEGRAM_CHAT_ID": chat_id}
     if not news_thread.isdigit():
         topic = call("createForumTopic", {"chat_id": chat_id, "name": "📰 חדשות", "icon_color": 7322096})
@@ -133,8 +134,13 @@ def main() -> int:
         topic = call("createForumTopic", {"chat_id": chat_id, "name": "📈 סיגנלים ועסקאות דמו", "icon_color": 9367192})
         trading_thread = str(topic["message_thread_id"])
         updates["TELEGRAM_TRADING_THREAD_ID"] = trading_thread
+        _write_env(updates)
+    if not portfolio_thread.isdigit():
+        topic = call("createForumTopic", {"chat_id": chat_id, "name": "💼 מצב תיק דמו", "icon_color": 16766590})
+        portfolio_thread = str(topic["message_thread_id"])
+        updates["TELEGRAM_PORTFOLIO_THREAD_ID"] = portfolio_thread
     _write_env(updates)
-    _record_backup(chat_id, news_thread, trading_thread)
+    _record_backup(chat_id, news_thread, trading_thread, portfolio_thread)
     print("Telegram topic routing configured in the ignored .env. Restart AI-Trader to activate it.")
     return 0
 

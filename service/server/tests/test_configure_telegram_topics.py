@@ -49,7 +49,8 @@ class ConfigureTelegramTopicsTests(unittest.TestCase):
     def test_existing_thread_ids_are_idempotent(self):
         code, session = self.run_with(
             {"TELEGRAM_BOT_TOKEN": "test", "TELEGRAM_CHAT_ID": "-1001",
-             "TELEGRAM_NEWS_THREAD_ID": "101", "TELEGRAM_TRADING_THREAD_ID": "202"},
+             "TELEGRAM_NEWS_THREAD_ID": "101", "TELEGRAM_TRADING_THREAD_ID": "202",
+             "TELEGRAM_PORTFOLIO_THREAD_ID": "303"},
             {"getChat": {"type": "supergroup", "is_forum": True},
              "getMe": {"id": 7},
              "getChatMember": {"status": "administrator", "can_manage_topics": True}},

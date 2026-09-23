@@ -5,13 +5,21 @@ from __future__ import annotations
 import os
 
 
-NEWS_EVENT_TYPES = {"position_news", "watchlist_news", "watchlist_news_correction", "correction"}
+NEWS_EVENT_TYPES = {
+    "position_news", "watchlist_news", "watchlist_news_correction", "correction", "news_status",
+}
+PORTFOLIO_EVENT_TYPES = {"portfolio_status"}
 
 
 def thread_id_for_event(event_type: str | None) -> int | None:
     if not event_type:
         return None
-    name = "TELEGRAM_NEWS_THREAD_ID" if event_type in NEWS_EVENT_TYPES else "TELEGRAM_TRADING_THREAD_ID"
+    if event_type in NEWS_EVENT_TYPES:
+        name = "TELEGRAM_NEWS_THREAD_ID"
+    elif event_type in PORTFOLIO_EVENT_TYPES:
+        name = "TELEGRAM_PORTFOLIO_THREAD_ID"
+    else:
+        name = "TELEGRAM_TRADING_THREAD_ID"
     value = os.getenv(name, "").strip()
     try:
         thread_id = int(value)

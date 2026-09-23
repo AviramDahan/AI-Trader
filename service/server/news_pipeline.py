@@ -628,9 +628,12 @@ def _default_analyzer(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _news_alert_message(row: dict[str, Any]) -> str:
     impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
     materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
+    company_line = f"\nחברה: {row['company']}" if row.get("company") else ""
+    source_limit = "זמינים כותרת ומטא־דאטה בלבד." if row.get("headline_only") else "זמין תקציר שסופק בפיד; הכתבה המלאה לא נותחה."
     return "\n\n".join(("AI-Trader — חדשות מהותיות לפוזיציה פתוחה | מסחר מדומה בלבד",
-                         f"סימול: {row['ticker']}\nהשפעה אפשרית: {impact}\nמהותיות אפשרית: {materiality}",
-                         f"תקציר המקור:\n{row.get('summary_he') or row['title']}",
+                         f"סימול: {row['ticker']}{company_line}\nהשפעה אפשרית: {impact}\nמהותיות אפשרית: {materiality}",
+                         f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {row['published_at']}\n{source_limit}",
+                         f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
                          f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",
                          f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}"))[:4000]
 
@@ -638,9 +641,12 @@ def _news_alert_message(row: dict[str, Any]) -> str:
 def _watchlist_alert_message(row: dict[str, Any]) -> str:
     impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
     materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
-    return "\n\n".join(("AI-Trader — חדשות מהותיות מרשימת המעקב | ללא עסקה",
-                         f"סימול: {row['ticker']}\nהשפעה אפשרית: {impact}\nמהותיות אפשרית: {materiality}",
-                         f"תקציר המקור:\n{row.get('summary_he') or row['title']}",
+    company_line = f"\nחברה: {row['company']}" if row.get("company") else ""
+    source_limit = "זמינים כותרת ומטא־דאטה בלבד." if row.get("headline_only") else "זמין תקציר שסופק בפיד; הכתבה המלאה לא נותחה."
+    return "\n\n".join(("AI-Trader — חדשות חשובות מרשימת המעקב | ללא עסקה וללא תלות בפוזיציה",
+                         f"סימול: {row['ticker']}{company_line}\nהשפעה אפשרית: {impact}\nמהותיות אפשרית: {materiality}",
+                         f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {row['published_at']}\n{source_limit}",
+                         f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
                          f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",
                          f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
                          "המניה נמצאת ברשימת מעקב חדשות בלבד. לא נוצרו סיגנל או עסקה."))[:4000]
@@ -770,7 +776,7 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
         analyzed += 1
         if (related and relevance >= feed_settings()["alert_min_relevance"] and
                 materiality in {"medium", "high"} and sentiment in {"positive", "negative", "mixed"}):
-            cur.execute("""SELECT t.id,t.ticker FROM scanner_trade_news l JOIN scanner_trades t ON t.id=l.trade_id
+            cur.execute("""SELECT t.id,t.ticker,t.company FROM scanner_trade_news l JOIN scanner_trades t ON t.id=l.trade_id
                            WHERE l.news_id=? AND t.status='open' AND t.is_shadow=0 ORDER BY t.id""", (row["id"],))
             trade_rows = [dict(value) for value in cur.fetchall()]
             newly_alerted = False
@@ -783,7 +789,9 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
                                 (row["id"], trade_id, row.get("content_hash") or "v1", stamp)); newly_alerted = True
             if newly_alerted:
                 linked_tickers = sorted({trade["ticker"] for trade in trade_rows})
-                alert_row = {**row, "ticker": ", ".join(linked_tickers), "impact": sentiment, "materiality": materiality,
+                linked_companies = sorted({trade["company"] for trade in trade_rows if trade.get("company")})
+                alert_row = {**row, "ticker": ", ".join(linked_tickers), "company": ", ".join(linked_companies),
+                             "impact": sentiment, "materiality": materiality,
                              "summary_he": result.get("summary_he"), "interpretation_he": result.get("interpretation_he")}
                 enqueue_telegram(cur, f"news:{row['id']}:{row.get('content_hash') or 'v1'}:{','.join(linked_tickers)}",
                                  "position_news", _news_alert_message(alert_row)); alerts += 1
@@ -794,11 +802,14 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
             # back to the legacy ticker when no verified mapping exists.
             if not verified and row.get("ticker"):
                 verified.add(str(row["ticker"]).upper())
-            if verified and not trade_rows:
-                placeholders = ",".join("?" for _ in verified)
-                cur.execute(f"SELECT ticker FROM scanner_news_watchlist WHERE enabled=1 AND ticker IN ({placeholders})", tuple(sorted(verified)))
-                watched = [value["ticker"] for value in cur.fetchall()]
-                for ticker in watched:
+            position_tickers = {str(trade["ticker"]).upper() for trade in trade_rows}
+            watchlist_tickers = verified - position_tickers
+            if watchlist_tickers:
+                placeholders = ",".join("?" for _ in watchlist_tickers)
+                cur.execute(f"SELECT ticker,company FROM scanner_news_watchlist WHERE enabled=1 AND ticker IN ({placeholders})", tuple(sorted(watchlist_tickers)))
+                watched = [dict(value) for value in cur.fetchall()]
+                for watched_row in watched:
+                    ticker = watched_row["ticker"]
                     version = row.get("content_hash") or "v1"
                     cur.execute("SELECT 1 FROM scanner_news_watchlist_alerts WHERE news_id=? AND ticker=? AND event_version=?",
                                 (row["id"], ticker, version))
@@ -806,7 +817,8 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
                         continue
                     cur.execute("INSERT INTO scanner_news_watchlist_alerts(news_id,ticker,event_version,created_at) VALUES(?,?,?,?)",
                                 (row["id"], ticker, version, stamp))
-                    alert_row = {**row, "ticker": ticker, "impact": sentiment, "materiality": materiality,
+                    alert_row = {**row, "ticker": ticker, "company": watched_row["company"],
+                                 "impact": sentiment, "materiality": materiality,
                                  "summary_he": result.get("summary_he"), "interpretation_he": result.get("interpretation_he")}
                     enqueue_telegram(cur, f"watchlist-news:{row['id']}:{version}:{ticker}",
                                      "watchlist_news", _watchlist_alert_message(alert_row)); alerts += 1

@@ -156,6 +156,32 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         self.assertIn("ללא עסקה", alerts[0]["message"])
 
+    def test_multi_ticker_news_alerts_position_and_other_watchlist_without_duplicates(self):
+        self.open_trade()
+        scanner_engine.set_news_watchlist("NVDA", "NVIDIA")
+        conn = database.get_db_connection()
+        conn.execute("UPDATE scanner_news_watchlist SET created_at=? WHERE ticker='NVDA'",
+                     ((self.clock - timedelta(minutes=1)).isoformat(),))
+        conn.commit(); conn.close()
+        item = self.item("yahoo_priority", "https://example.test/aapl-nvda")
+        item["tickers"] = ["AAPL", "NVDA"]
+        news_pipeline.ingest_items([item], self.clock)
+
+        def analyzer(rows):
+            return [{"id": rows[0]["id"], "related": True, "title_he": "עדכון משותף",
+                     "summary_he": "עדכון מהותי לשתי החברות.", "sentiment": "positive",
+                     "materiality": "high", "thesis_effect": "supports",
+                     "interpretation_he": "עשויה להיות השפעה חיובית, אך קיימת אי־ודאות.", "relevance": .98}]
+
+        first = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
+        second = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock + timedelta(minutes=1))
+        self.assertEqual(first["alerts"], 2)
+        self.assertEqual(second["alerts"], 0)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news'")), 1)
+        watched = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='watchlist_news'")
+        self.assertEqual(len(watched), 1)
+        self.assertIn("NVDA", watched[0]["message"])
+
     def test_legacy_translated_item_is_fully_analyzed_after_verified_watchlist_upgrade(self):
         scanner_engine.set_news_watchlist("INTC", "Intel")
         conn = database.get_db_connection()

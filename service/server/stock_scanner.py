@@ -944,6 +944,27 @@ async def stock_telegram_outbox_loop() -> None:
         await asyncio.sleep(30)
 
 
+async def stock_telegram_status_loop() -> None:
+    """Refresh pinned portfolio/news-scope cards without producing chat noise."""
+    if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
+        return
+    from telegram_status import refresh_telegram_status_cards
+    from scanner_engine import set_service_status
+    await asyncio.sleep(35)
+    while True:
+        try:
+            result = await asyncio.to_thread(refresh_telegram_status_cards)
+            healthy = all(value in {"created", "updated", "disabled"} for value in result.values())
+            set_service_status("telegram_status", "ok" if healthy else "error", str(result), success=healthy)
+        except Exception as exc:
+            set_service_status("telegram_status", "error", type(exc).__name__)
+        try:
+            interval = int(os.getenv("STOCK_SCANNER_TELEGRAM_PORTFOLIO_STATUS_INTERVAL", "300"))
+        except ValueError:
+            interval = 300
+        await asyncio.sleep(max(60, min(3600, interval)))
+
+
 def public_status() -> dict[str, Any]:
     state = read_state()
     fields = ("mode", "agent", "model", "status", "last_started_at", "next_scan_at", "last_scan_at",
