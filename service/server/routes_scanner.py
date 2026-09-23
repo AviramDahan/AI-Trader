@@ -3,7 +3,7 @@ from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel
 
 from database import get_db_connection
-from position_charts import position_chart_bytes
+from position_charts import position_chart_bytes, signal_chart_bytes
 from scanner_engine import dashboard_payload, set_active_strategy, set_news_watchlist
 from services import _get_agent_by_token
 from stock_scanner import public_status
@@ -53,6 +53,16 @@ def register_scanner_routes(app: FastAPI) -> None:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=503, detail="Position chart is temporarily unavailable") from exc
+        return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=300"})
+
+    @app.get("/api/scanner/signals/{signal_id}/chart")
+    def scanner_signal_chart(signal_id: int):
+        try:
+            png = signal_chart_bytes(signal_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Signal chart is temporarily unavailable") from exc
         return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=300"})
 
     @app.put("/api/scanner/settings/exit-strategy")

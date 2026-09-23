@@ -57,6 +57,18 @@ class PositionChartTests(unittest.TestCase):
         self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertGreater(len(png), 10_000)
 
+    def test_signal_entry_label_distinguishes_planned_from_actual_fill(self):
+        base = {
+            **trade(), "planned_entry": 101.0, "actual_entry": None,
+            "created_at": "2026-07-15T14:30:00Z",
+        }
+        planned = position_charts.signal_chart_record(base, "single")
+        self.assertEqual(planned["entry_price"], 101.0)
+        self.assertIn("not filled", planned["entry_label"])
+        filled = position_charts.signal_chart_record({**base, "actual_entry": 100.5}, "single")
+        self.assertEqual(filled["entry_price"], 100.5)
+        self.assertEqual(filled["entry_label"], "Actual paper entry")
+
     def test_chart_route_returns_png_and_fails_closed(self):
         client = TestClient(create_app())
         with patch("routes_scanner.position_chart_bytes", return_value=b"\x89PNG\r\n\x1a\nchart"):
@@ -65,6 +77,16 @@ class PositionChartTests(unittest.TestCase):
         self.assertEqual(response.headers["content-type"], "image/png")
         with patch("routes_scanner.position_chart_bytes", side_effect=LookupError("not open")):
             missing = client.get("/api/scanner/trades/999/chart")
+        self.assertEqual(missing.status_code, 404)
+
+    def test_signal_chart_route_returns_png_and_fails_closed(self):
+        client = TestClient(create_app())
+        with patch("routes_scanner.signal_chart_bytes", return_value=b"\x89PNG\r\n\x1a\nsignal"):
+            response = client.get("/api/scanner/signals/7/chart")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/png")
+        with patch("routes_scanner.signal_chart_bytes", side_effect=LookupError("not found")):
+            missing = client.get("/api/scanner/signals/999/chart")
         self.assertEqual(missing.status_code, 404)
 
 

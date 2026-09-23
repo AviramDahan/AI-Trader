@@ -285,6 +285,7 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
     <TargetRows record={signal} entry={movementEntry} strategy={signal.operational_strategy || 'single'} he={he} />
     <p>{he ? `התשואה ליעד מחושבת מ${signal.actual_entry != null ? 'מחיר הכניסה שבוצע בפועל' : 'מחיר הכניסה המתוכנן'}. יעד Shadow מוצג להשוואה בלבד ואינו מבצע מימוש.` : `Target return uses the ${signal.actual_entry != null ? 'actual filled entry' : 'planned entry'}. A Shadow level is shown for comparison and performs no exit.`}</p>
     <TargetPlanDetails plan={plan} he={he} />
+    <LevelChart record={signal} kind="signal" he={he} />
     <p><b>{he ? 'ציון איכות מודל לא־מכויל' : 'Uncalibrated model quality score'}:</b> {fmtPct(signal.confidence)} · {he ? 'תוכנית משוקללת' : 'Weighted plan'} {Number(signal.weighted_rr).toFixed(1)}R</p>
     <details><summary>{he ? 'פירוט מקור הציון' : 'Score basis'}</summary><pre>{JSON.stringify(basis, null, 2)}</pre></details>
     <p><b>{he ? 'סיבה' : 'Reason'}:</b> {(he && signal.reason_he) || signal.reason}</p>
@@ -310,7 +311,7 @@ function TradeCard({ trade, schedules, he }: { trade: Record<string, any>, sched
     <TargetRows record={trade} entry={trade.entry_price} strategy={trade.strategy} he={he} />
     <p className={trade.price_stale ? 'scanner-warning' : 'scanner-note'}><b>{he ? (trade.price_stale ? 'מחיר אחרון ידוע — לא עדכני' : 'מחיר נוכחי אחרון') : (trade.price_stale ? 'Last known price — stale' : 'Latest current price')}: {fmtPrice(currentPrice)}</b><br/>{he ? 'זמן נתוני המחיר' : 'Price timestamp'}: {stamp(currentPriceAt)} · {trade.price_source || '—'}{trade.price_stale && <><br/>{he ? 'המחיר נשמר ומוצג, אך אינו מוצג כמחיר חי כאשר השוק סגור או שהנתון ישן.' : 'The stored price remains visible, but is not presented as live while the market is closed or the quote is old.'}</>}</p>
     <TargetPlanDetails plan={plan} he={he} />
-    {trade.status === 'open' && <PositionChart trade={trade} he={he} />}
+    {trade.status === 'open' && <LevelChart record={trade} kind="trade" he={he} />}
     <p>{he ? 'ממומש נטו לפני סגירה מלאה' : 'Realized before final close'}: {fmtPrice(Number(trade.realized_pnl) - Number(trade.fees))} · {he ? 'לא ממומש' : 'Unrealized'}: {fmtPrice(trade.unrealized_pnl)}</p>
     <p>{he ? 'חדשות — בדיקה אחרונה' : 'News — last check'}: {stamp(schedule?.last_success_at)} · {he ? 'הבאה' : 'next'}: {stamp(schedule?.next_due_at)} · {schedule?.status || '—'}</p>
     {schedule?.summary_he && <p className="scanner-ai-interpretation"><b>{he ? 'סקירת חדשות אחרונה' : 'Latest news review'}:</b> {schedule.summary_he}</p>}
@@ -332,16 +333,18 @@ function TargetRows({ record, entry, strategy, he }: { record: Record<string, an
   })}</div>
 }
 
-function PositionChart({ trade, he }: { trade: Record<string, any>, he: boolean }) {
+function LevelChart({ record, kind, he }: { record: Record<string, any>, kind: 'signal' | 'trade', he: boolean }) {
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const isSignal = kind === 'signal'
   const version = encodeURIComponent([
-    trade.entry_price, trade.current_stop, trade.tp1, trade.tp2, trade.tp3, trade.strategy, trade.last_bar_at,
+    record.actual_entry ?? record.planned_entry ?? record.entry_price, record.current_stop,
+    record.tp1, record.tp2, record.tp3, record.operational_strategy ?? record.strategy, record.updated_at ?? record.last_bar_at,
   ].join('|'))
-  const src = `${API_ORIGIN}/api/scanner/trades/${trade.id}/chart?v=${version}`
+  const src = `${API_ORIGIN}/api/scanner/${isSignal ? 'signals' : 'trades'}/${record.id}/chart?v=${version}`
   const description = he
-    ? `גרף יומי של ${trade.ticker} עם מחיר כניסה, סטופ ויעדי TP1, TP2 ו־TP3`
-    : `${trade.ticker} daily chart with entry, stop, TP1, TP2 and TP3 levels`
+    ? `גרף יומי של ${record.ticker} עם ${isSignal && record.actual_entry == null ? 'כניסה מתוכננת שטרם בוצעה' : 'כניסה בפועל'}, סטופ ויעדי TP1, TP2 ו־TP3`
+    : `${record.ticker} daily chart with ${isSignal && record.actual_entry == null ? 'planned entry not yet filled' : 'actual entry'}, stop, TP1, TP2 and TP3 levels`
   useEffect(() => {
     if (!expanded) return
     const previousOverflow = document.body.style.overflow
@@ -358,14 +361,14 @@ function PositionChart({ trade, he }: { trade: Record<string, any>, he: boolean 
   return <details className="scanner-position-chart" onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>{he ? 'גרף כניסה, סטופ ויעדים' : 'Entry, stop and target chart'}</summary>
     {open && <>
-      <button type="button" className="scanner-chart-preview" onClick={() => setExpanded(true)} aria-label={he ? `פתח גרף מוגדל של ${trade.ticker}` : `Open enlarged ${trade.ticker} chart`}>
+      <button type="button" className="scanner-chart-preview" onClick={() => setExpanded(true)} aria-label={he ? `פתח גרף מוגדל של ${record.ticker}` : `Open enlarged ${record.ticker} chart`}>
         <img src={src} alt={description} />
         <span>{he ? 'לחץ על הגרף להגדלה' : 'Tap chart to enlarge'}</span>
       </button>
-      <small>{he ? 'נרות יומיים מ־Yahoo Finance, שעשויים להיות מושהים. קו מלא הוא יעד פעיל; קו מקווקו הוא יעד Shadow להשוואה בלבד.' : 'Daily Yahoo Finance candles may be delayed. A solid line is an active target; a dashed line is a Shadow comparison target only.'}</small>
+      <small>{he ? `${isSignal && record.actual_entry == null ? 'המשולש מסמן כניסה מתוכננת שטרם בוצעה. ' : ''}נרות יומיים מ־Yahoo Finance, שעשויים להיות מושהים. קו מלא הוא יעד פעיל; קו מקווקו הוא יעד Shadow להשוואה בלבד.` : `${isSignal && record.actual_entry == null ? 'The triangle marks a planned entry that has not filled. ' : ''}Daily Yahoo Finance candles may be delayed. A solid line is an active target; a dashed line is a Shadow comparison target only.`}</small>
       {expanded && <div className="scanner-chart-modal" role="presentation" onMouseDown={() => setExpanded(false)}>
         <section role="dialog" aria-modal="true" aria-label={description} className="scanner-chart-modal-content" onMouseDown={event => event.stopPropagation()}>
-          <header><strong>{trade.ticker} · {he ? 'גרף פוזיציית דמו' : 'Paper position chart'}</strong><button type="button" autoFocus onClick={() => setExpanded(false)} aria-label={he ? 'סגור גרף' : 'Close chart'}>×</button></header>
+          <header><strong>{record.ticker} · {he ? (isSignal ? 'גרף תוכנית סיגנל' : 'גרף פוזיציית דמו') : (isSignal ? 'Signal plan chart' : 'Paper position chart')}</strong><button type="button" autoFocus onClick={() => setExpanded(false)} aria-label={he ? 'סגור גרף' : 'Close chart'}>×</button></header>
           <img src={src} alt={description} />
         </section>
       </div>}
