@@ -3645,6 +3645,20 @@ html[dir='rtl'] .main-content {
 .scanner-position-chart summary { cursor: pointer; font-weight: 700; }
 .scanner-position-chart img { display: block; width: 100%; height: auto; margin: 12px 0 8px; border: 1px solid var(--border-color); border-radius: 10px; background: #101b25; }
 .scanner-position-chart small { display: block; color: var(--text-secondary); line-height: 1.55; }
+.scanner-chart-preview { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: var(--text-secondary); cursor: zoom-in; text-align: center; }
+.scanner-chart-preview img { margin-bottom: 6px; }
+.scanner-chart-preview span { display: block; font-size: .85rem; }
+.scanner-chart-modal { position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; padding: 20px; background: rgba(3, 8, 14, .88); backdrop-filter: blur(4px); }
+.scanner-chart-modal-content { width: min(1180px, 96vw); max-height: 94vh; overflow: auto; padding: 14px; border: 1px solid var(--border-color); border-radius: 14px; background: var(--bg-secondary); box-shadow: 0 24px 80px rgba(0, 0, 0, .55); }
+.scanner-chart-modal-content header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.scanner-chart-modal-content header button { flex: 0 0 auto; width: 42px; height: 42px; padding: 0; border-radius: 50%; font-size: 1.65rem; line-height: 1; }
+.scanner-chart-modal-content img { width: 100%; max-height: calc(94vh - 82px); margin: 10px 0 0; object-fit: contain; cursor: default; }
+
+@media (max-width: 600px) {
+  .scanner-chart-modal { padding: 8px; }
+  .scanner-chart-modal-content { width: 100%; max-height: 96vh; padding: 10px; }
+  .scanner-chart-modal-content img { max-height: calc(96vh - 74px); }
+}
 .scanner-signal-card footer, .scanner-news-card footer { border-top: 1px solid var(--border-color); margin-top: 12px; padding-top: 10px; color: var(--text-secondary); font-size: 12px; }
 .scanner-signal-card pre { white-space: pre-wrap; max-width: 100%; font-size: 11px; }
 .scanner-empty, .scanner-note, .scanner-warning, .scanner-inline-error { padding: 16px; border-radius: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-secondary); }

@@ -329,17 +329,41 @@ function TargetRows({ record, entry, strategy, he }: { record: Record<string, an
 
 function PositionChart({ trade, he }: { trade: Record<string, any>, he: boolean }) {
   const [open, setOpen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const version = encodeURIComponent([
     trade.entry_price, trade.current_stop, trade.tp1, trade.tp2, trade.tp3, trade.strategy, trade.last_bar_at,
   ].join('|'))
+  const src = `${API_ORIGIN}/api/scanner/trades/${trade.id}/chart?v=${version}`
   const description = he
     ? `גרף יומי של ${trade.ticker} עם מחיר כניסה, סטופ ויעדי TP1, TP2 ו־TP3`
     : `${trade.ticker} daily chart with entry, stop, TP1, TP2 and TP3 levels`
+  useEffect(() => {
+    if (!expanded) return
+    const previousOverflow = document.body.style.overflow
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setExpanded(false)
+    }
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [expanded])
   return <details className="scanner-position-chart" onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>{he ? 'גרף כניסה, סטופ ויעדים' : 'Entry, stop and target chart'}</summary>
     {open && <>
-      <img src={`${API_ORIGIN}/api/scanner/trades/${trade.id}/chart?v=${version}`} alt={description} />
+      <button type="button" className="scanner-chart-preview" onClick={() => setExpanded(true)} aria-label={he ? `פתח גרף מוגדל של ${trade.ticker}` : `Open enlarged ${trade.ticker} chart`}>
+        <img src={src} alt={description} />
+        <span>{he ? 'לחץ על הגרף להגדלה' : 'Tap chart to enlarge'}</span>
+      </button>
       <small>{he ? 'נרות יומיים מ־Yahoo Finance, שעשויים להיות מושהים. קו מלא הוא יעד פעיל; קו מקווקו הוא יעד Shadow להשוואה בלבד.' : 'Daily Yahoo Finance candles may be delayed. A solid line is an active target; a dashed line is a Shadow comparison target only.'}</small>
+      {expanded && <div className="scanner-chart-modal" role="presentation" onMouseDown={() => setExpanded(false)}>
+        <section role="dialog" aria-modal="true" aria-label={description} className="scanner-chart-modal-content" onMouseDown={event => event.stopPropagation()}>
+          <header><strong>{trade.ticker} · {he ? 'גרף פוזיציית דמו' : 'Paper position chart'}</strong><button type="button" autoFocus onClick={() => setExpanded(false)} aria-label={he ? 'סגור גרף' : 'Close chart'}>×</button></header>
+          <img src={src} alt={description} />
+        </section>
+      </div>}
     </>}
   </details>
 }

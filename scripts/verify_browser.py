@@ -76,6 +76,13 @@ def main():
                 "() => document.querySelector('.scanner-trade-card .scanner-position-chart img')?.naturalWidth > 100",
                 timeout=30000,
             )
+            image.click()
+            dialog = page.get_by_role("dialog", name=f"גרף יומי של {first_trade.locator('header b').first.inner_text()} עם מחיר כניסה, סטופ ויעדי TP1, TP2 ו־TP3")
+            expect(dialog).to_be_visible()
+            expect(dialog.locator("img")).to_be_visible()
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Chart modal overflow"
+            dialog.get_by_role("button", name="סגור גרף", exact=True).click()
+            expect(dialog).not_to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Hebrew trades overflow"
             page.screenshot(path=str(ROOT / ".runtime" / f"qa-trades-{width}.png"), full_page=True)
             for button, heading in (("תוצאות", "השוואת אסטרטגיות יציאה"),
