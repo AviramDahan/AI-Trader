@@ -1299,8 +1299,17 @@ def lifecycle_verification(cur, signals, trades, account):
     """Read-only evidence, never mark live E2E complete just because tests pass."""
     native = [s for s in signals if not s.get("legacy_unverified")]
     stages = dict(signal=len(native), entry=0, tp=0, stop=0, closed=0, news_review=0,
-                  six_hour_review=0, telegram_entry=0, telegram_exit=0)
+                  six_hour_review=0, telegram_buy_signal=0, telegram_sell_signal=0,
+                  telegram_entry=0, telegram_exit=0)
     errors = []
+    for signal in native:
+        cur.execute("SELECT COUNT(*) n FROM scanner_telegram_outbox WHERE dedupe_key=? AND status='sent'",
+                    (f"signal:{signal['id']}",))
+        delivered = cur.fetchone()["n"] > 0
+        if delivered and signal["action"] == "BUY":
+            stages["telegram_buy_signal"] += 1
+        elif delivered and signal["action"] == "SELL":
+            stages["telegram_sell_signal"] += 1
     expected_cash = float(account["initial_cash"])
     for trade in trades:
         fills = trade["fills"]

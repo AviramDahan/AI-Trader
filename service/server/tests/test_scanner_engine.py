@@ -327,6 +327,47 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertGreaterEqual(result["failed"], 1)
         self.assertTrue(self.fetchall("SELECT * FROM scanner_telegram_outbox WHERE status='retry'"))
 
+    def test_buy_signal_and_executed_entry_are_delivered_to_telegram(self):
+        self.record("BUY", "AAPL")
+        scanner_engine.process_bar("AAPL", self.bar(1, 100, 101, 99, 100))
+        with patch.dict(os.environ, {
+            "STOCK_SCANNER_TELEGRAM_ENABLED": "true",
+            "STOCK_SCANNER_TELEGRAM_ENTRY_ALERTS": "true",
+            "STOCK_SCANNER_TELEGRAM_LEVEL_ALERTS": "true",
+        }, clear=False), patch("stock_scanner.send_telegram", return_value="sent") as sender:
+            scanner_engine.process_telegram_outbox()
+        rows = self.fetchall("SELECT event_type,status FROM scanner_telegram_outbox WHERE event_type IN ('new_signal','entry')")
+        self.assertEqual({row["event_type"] for row in rows}, {"new_signal", "entry"})
+        self.assertTrue(all(row["status"] == "sent" for row in rows))
+        messages = [call.args[0] for call in sender.call_args_list]
+        self.assertTrue(any("פעולה: קנייה" in message for message in messages))
+        self.assertTrue(any("אירוע: כניסה בוצעה" in message for message in messages))
+
+    def test_sell_signal_closes_existing_long_and_both_alerts_are_delivered(self):
+        self.record("BUY", "AAPL")
+        scanner_engine.process_bar("AAPL", self.bar(1, 100, 101, 99, 100))
+        sell = self.record("SELL", "AAPL")
+        self.assertEqual(sell["status"], "PENDING_CLOSE")
+        scanner_engine.process_bar("AAPL", self.bar(2, 100, 101, 99, 100))
+        self.assertFalse(self.fetchall("SELECT * FROM scanner_trades WHERE status='open'"))
+        self.assertFalse(self.fetchall("SELECT * FROM scanner_trades WHERE side='short'"))
+        with patch.dict(os.environ, {
+            "STOCK_SCANNER_TELEGRAM_ENABLED": "true",
+            "STOCK_SCANNER_TELEGRAM_ENTRY_ALERTS": "true",
+            "STOCK_SCANNER_TELEGRAM_LEVEL_ALERTS": "true",
+        }, clear=False), patch("stock_scanner.send_telegram", return_value="sent") as sender:
+            scanner_engine.process_telegram_outbox()
+        sell_rows = self.fetchall("SELECT event_type,status FROM scanner_telegram_outbox WHERE event_type='sell'")
+        self.assertEqual(sell_rows, [{"event_type": "sell", "status": "sent"}])
+        messages = [call.args[0] for call in sender.call_args_list]
+        self.assertTrue(any("פעולה: מכירה" in message for message in messages))
+        self.assertTrue(any("סגירה בעקבות SELL" in message for message in messages))
+        stages = scanner_engine.dashboard_payload()["lifecycle_verification"]["stages"]
+        self.assertEqual(stages["telegram_buy_signal"], 1)
+        self.assertEqual(stages["telegram_sell_signal"], 1)
+        self.assertEqual(stages["telegram_entry"], 1)
+        self.assertEqual(stages["telegram_exit"], 1)
+
     def test_entry_photo_queued_once_after_text_and_failure_does_not_repeat_text(self):
         self.record()
         scanner_engine.process_bar("AAPL", self.bar(1,100,101,99,100))
