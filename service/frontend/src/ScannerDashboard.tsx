@@ -272,13 +272,14 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
   const news = Array.isArray(signal.news_json) ? signal.news_json : []
   const basis = signal.confidence_basis || {}
   const plan = signal.technical_json?.target_plan
+  const movementEntry = signal.actual_entry ?? signal.planned_entry
   const stamp = (value: any) => value ? new Date(value).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
   return <article className="scanner-signal-card" id={`signal-${signal.id}`}>
     <header><div><b className="scanner-ticker">{signal.ticker}</b><span>{signal.company}</span></div><span className={`scanner-action ${String(signal.action).toLowerCase()}`}>{signal.action}</span></header>
     <p><b>{he ? (signal.price_stale ? 'מחיר אחרון ידוע — לא עדכני' : 'מחיר נוכחי אחרון') : (signal.price_stale ? 'Last known price — stale' : 'Latest current price')}: {fmtPrice(signal.current_price)}</b><br/>{he ? 'זמן נתוני המחיר' : 'Price timestamp'}: {stamp(signal.price_as_of)} · {signal.price_source || '—'}<br/>{he ? 'נתוני ספק מושהים; רענון המסך אינו מעדכן את זמן המחיר.' : 'Provider data may be delayed; screen refresh does not change the quote timestamp.'}</p>
     <div className="scanner-levels"><span>{he ? 'כניסה מתוכננת' : 'Planned entry'}<b>{fmtPrice(signal.planned_entry)}</b></span><span>{he ? 'כניסה בפועל' : 'Actual entry'}<b>{fmtPrice(signal.actual_entry)}</b></span><span>{he ? 'סטופ מקורי' : 'Original stop'}<b>{fmtPrice(signal.original_stop)}</b></span><span>{he ? 'סטופ נוכחי' : 'Current stop'}<b>{fmtPrice(signal.current_stop)}</b></span></div>
-    <div className="scanner-targets">{[1, 2, 3].map(index => <span key={index}>TP{index}: <b>{fmtPrice(signal[`tp${index}`])}</b> · {he ? 'שינוי מהכניסה' : 'Move from entry'} {fmtMove(signal.planned_entry, signal[`tp${index}`])} · {he ? 'מימוש' : 'Exit qty'} {fmtPct(signal[`operational_tp${index}_pct`] ?? signal[`tp${index}_pct`])} · {Number(signal[`rr${index}`]).toFixed(1)}R</span>)}</div>
-    <p>{he ? '״שינוי מהכניסה״ הוא מרחק המחיר; ״מימוש״ הוא אחוז הכמות שייסגר בפועל באסטרטגיה הפעילה.' : '“Move from entry” is the price distance; “Exit qty” is the quantity actually closed by the active strategy.'}</p>
+    <div className="scanner-targets">{[1, 2, 3].map(index => <span key={index}>TP{index}: <b>{fmtPrice(signal[`tp${index}`])}</b> · {he ? 'שינוי מהכניסה' : 'Move from entry'} {fmtMove(movementEntry, signal[`tp${index}`])} · {he ? 'מימוש' : 'Exit qty'} {fmtPct(signal[`operational_tp${index}_pct`] ?? signal[`tp${index}_pct`])} · {Number(signal[`rr${index}`]).toFixed(1)}R</span>)}</div>
+    <p>{he ? `״שינוי מהכניסה״ מחושב מ${signal.actual_entry != null ? 'מחיר הכניסה שבוצע בפועל' : 'מחיר הכניסה המתוכנן'}; ״מימוש״ הוא אחוז הכמות שייסגר בפועל באסטרטגיה הפעילה.` : `“Move from entry” uses the ${signal.actual_entry != null ? 'actual filled entry' : 'planned entry'}; “Exit qty” is the quantity actually closed by the active strategy.`}</p>
     <TargetPlanDetails plan={plan} he={he} />
     <p><b>{he ? 'ציון איכות מודל לא־מכויל' : 'Uncalibrated model quality score'}:</b> {fmtPct(signal.confidence)} · {he ? 'תוכנית משוקללת' : 'Weighted plan'} {Number(signal.weighted_rr).toFixed(1)}R</p>
     <details><summary>{he ? 'פירוט מקור הציון' : 'Score basis'}</summary><pre>{JSON.stringify(basis, null, 2)}</pre></details>
