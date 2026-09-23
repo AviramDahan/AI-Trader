@@ -53,6 +53,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const [watchTicker, setWatchTicker] = useState('')
   const [watchStatus, setWatchStatus] = useState('')
   const [watchBusy, setWatchBusy] = useState(false)
+  const [quoteInfo, setQuoteInfo] = useState<Record<string, any> | null>(null)
 
   const load = async () => {
     try {
@@ -70,6 +71,34 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   useEffect(() => {
     void load()
     const interval = window.setInterval(() => void load(), 30000)
+    return () => window.clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    const loadQuotes = async () => {
+      try {
+        const response = await fetch(`${API_ORIGIN}/api/scanner/quotes`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+        if (!response.ok) return
+        const payload = await response.json()
+        const quotes = new Map((payload.quotes || []).map((quote: Record<string, any>) => [quote.ticker, quote]))
+        setQuoteInfo(payload)
+        setData(current => current ? {
+          ...current,
+          signals: current.signals.map(signal => {
+            const quote: any = quotes.get(signal.ticker)
+            return quote ? { ...signal, current_price: quote.price, price_as_of: quote.as_of, price_source: quote.source, price_stale: quote.stale } : signal
+          }),
+          trades: current.trades.map(trade => {
+            const quote: any = quotes.get(trade.ticker)
+            return quote ? { ...trade, current_price: quote.price, price_as_of: quote.as_of, price_source: quote.source, price_stale: quote.stale } : trade
+          }),
+        } : current)
+      } catch {
+        // Keep the last successful quote. The main connection status remains independent.
+      }
+    }
+    void loadQuotes()
+    const interval = window.setInterval(() => void loadQuotes(), 10000)
     return () => window.clearInterval(interval)
   }, [])
 
@@ -259,6 +288,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       <h3>{text('תפעול וטריות', 'Operations and freshness')}</h3>
       <p>{text('סריקה אחרונה', 'Last scan')}: {activity.last_scan_at ? stamp(activity.last_scan_at * 1000) : '—'} · {text('סריקה הבאה', 'Next scan')}: {activity.next_scan_at ? stamp(activity.next_scan_at * 1000) : '—'}</p>
       <p>{text('ספק מחירים', 'Price provider')}: Yahoo Finance/yfinance · {text('המחירים עשויים להיות מושהים. סיגנל לא מתפרסם ללא מחיר תוך־יומי בן פחות מ־12 דקות.', 'Quotes may be delayed. No signal is published without an intraday quote fresher than 12 minutes.')}</p>
+      <p>{text('רענון מחיר לתצוגה', 'Display quote refresh')}: {quoteInfo?.refresh_seconds || data?.settings?.quote_refresh_seconds || 30}s · {text('הדפדפן בודק את מטמון השרת כל 10 שניות. זהו מחיר דקה אחרון מספק חינמי, לא פיד בורסה מובטח בזמן אמת; מחיר אחרון נשמר גם בתקלה או כשהשוק סגור.', 'The browser checks the server cache every 10 seconds. This is the latest 1-minute quote from a free provider, not guaranteed exchange real-time; the last value is retained on failure or while the market is closed.')}</p>
       <p>{text('מטמון היסטורי', 'History cache')}: {activity.history_cache?.status || '—'} · {text('גיל', 'age')} {Math.round((activity.history_cache?.age_seconds || 0) / 3600)}h</p>
       <p>{text('מזהה סורק יציב', 'Stable scanner identity')}: <code>{data?.scanner_name}</code> · Ollama: <code>{activity.model || '—'}</code></p>
     </div>}
@@ -280,7 +310,7 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
       <span className="scanner-signal-summary-meta"><b>{fmtPrice(signal.current_price)}</b><span className={`scanner-action ${String(signal.action).toLowerCase()}`}>{signal.action}</span><span className="scanner-signal-chevron" aria-hidden="true">⌄</span></span>
     </summary>
     <div className="scanner-signal-body">
-    <p><b>{he ? (signal.price_stale ? 'מחיר אחרון ידוע — לא עדכני' : 'מחיר נוכחי אחרון') : (signal.price_stale ? 'Last known price — stale' : 'Latest current price')}: {fmtPrice(signal.current_price)}</b><br/>{he ? 'זמן נתוני המחיר' : 'Price timestamp'}: {stamp(signal.price_as_of)} · {signal.price_source || '—'}<br/>{he ? 'נתוני ספק מושהים; רענון המסך אינו מעדכן את זמן המחיר.' : 'Provider data may be delayed; screen refresh does not change the quote timestamp.'}</p>
+    <p><b>{he ? (signal.price_stale ? 'מחיר אחרון ידוע — לא עדכני' : 'מחיר דקה אחרון') : (signal.price_stale ? 'Last known price — stale' : 'Latest 1-minute quote')}: {fmtPrice(signal.current_price)}</b><br/>{he ? 'זמן נתוני המחיר' : 'Price timestamp'}: {stamp(signal.price_as_of)} · {signal.price_source || '—'}<br/>{he ? 'מתרענן בנפרד מניטור העסקאות; Yahoo עשוי להשהות נתונים וזה אינו פיד בורסה מובטח בזמן אמת.' : 'Refreshes independently from trade monitoring; Yahoo may delay data and this is not guaranteed exchange real-time.'}</p>
     <div className="scanner-levels"><span>{he ? 'כניסה מתוכננת' : 'Planned entry'}<b>{fmtPrice(signal.planned_entry)}</b></span><span>{he ? 'כניסה בפועל' : 'Actual entry'}<b>{fmtPrice(signal.actual_entry)}</b></span><span>{he ? 'סטופ מקורי' : 'Original stop'}<b>{fmtPrice(signal.original_stop)}</b></span><span>{he ? 'סטופ נוכחי' : 'Current stop'}<b>{fmtPrice(signal.current_stop)}</b></span></div>
     <TargetRows record={signal} entry={movementEntry} strategy={signal.operational_strategy || 'single'} he={he} />
     <p>{he ? `התשואה ליעד מחושבת מ${signal.actual_entry != null ? 'מחיר הכניסה שבוצע בפועל' : 'מחיר הכניסה המתוכנן'}. יעד Shadow מוצג להשוואה בלבד ואינו מבצע מימוש.` : `Target return uses the ${signal.actual_entry != null ? 'actual filled entry' : 'planned entry'}. A Shadow level is shown for comparison and performs no exit.`}</p>

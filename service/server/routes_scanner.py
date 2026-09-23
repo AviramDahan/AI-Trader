@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from database import get_db_connection
 from position_charts import position_chart_bytes, signal_chart_bytes
-from scanner_engine import dashboard_payload, set_active_strategy, set_news_watchlist
+from scanner_engine import dashboard_payload, quotes_payload, set_active_strategy, set_news_watchlist
 from services import _get_agent_by_token
 from stock_scanner import public_status
 from utils import _extract_token
@@ -44,6 +44,10 @@ def register_scanner_routes(app: FastAPI) -> None:
         payload = dashboard_payload()
         payload["activity"] = public_status()
         return payload
+
+    @app.get("/api/scanner/quotes")
+    async def scanner_quotes():
+        return quotes_payload()
 
     @app.get("/api/scanner/trades/{trade_id}/chart")
     def scanner_trade_chart(trade_id: int):

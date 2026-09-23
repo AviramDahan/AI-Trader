@@ -121,6 +121,37 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertEqual(signal["current_price"], 91)
         self.assertTrue(signal["price_stale"])
 
+    def test_batched_minute_quote_refresh_updates_display_cache_and_retains_last_on_failure(self):
+        self.record()
+        index = pd.DatetimeIndex([datetime.now(UTC) - timedelta(minutes=1)])
+        frame = pd.DataFrame({"Close": [123.45]}, index=index)
+        with patch.object(scanner_engine.yf, "download", return_value=frame):
+            result = scanner_engine.refresh_current_quotes()
+        self.assertEqual(result["updated"], 1)
+        quote = scanner_engine.quotes_payload()["quotes"][0]
+        self.assertEqual(quote["ticker"], "AAPL")
+        self.assertAlmostEqual(quote["price"], 123.45)
+        self.assertIn("1m batch", quote["source"])
+        with patch.object(scanner_engine.yf, "download", side_effect=RuntimeError("rate limited")):
+            failed = scanner_engine.refresh_current_quotes()
+        self.assertEqual(failed["updated"], 0)
+        self.assertAlmostEqual(scanner_engine.quotes_payload()["quotes"][0]["price"], 123.45)
+
+    def test_multi_ticker_quote_extraction_fails_closed_for_absent_symbol(self):
+        index = pd.DatetimeIndex([datetime.now(UTC) - timedelta(minutes=1)])
+        columns = pd.MultiIndex.from_tuples([("AAPL", "Close"), ("MSFT", "Close")])
+        frame = pd.DataFrame([[101.0, 202.0]], index=index, columns=columns)
+        self.assertEqual(float(scanner_engine._quote_series(frame, "MSFT").iloc[-1]), 202.0)
+        self.assertIsNone(scanner_engine._quote_series(frame, "NVDA"))
+        field_first = frame.swaplevel(0, 1, axis=1)
+        field_first.columns.names = ["Price", "Ticker"]
+        low_columns = pd.MultiIndex.from_tuples(
+            [("Close", "LOW"), ("Low", "LOW")], names=["Price", "Ticker"]
+        )
+        low_frame = pd.DataFrame([[77.0, 76.0]], index=index, columns=low_columns)
+        self.assertEqual(float(scanner_engine._quote_series(field_first, "MSFT").iloc[-1]), 202.0)
+        self.assertEqual(float(scanner_engine._quote_series(low_frame, "LOW").iloc[-1]), 77.0)
+
     def test_unexpired_signal_without_order_still_gets_monitored_quote(self):
         self.record()
         conn = database.get_db_connection()

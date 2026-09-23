@@ -79,6 +79,7 @@ def lifecycle_settings() -> dict[str, Any]:
         "news_interval_hours": _env_float("STOCK_SCANNER_POSITION_NEWS_INTERVAL_HOURS", 6, 1, 48),
         "news_overlap_hours": _env_float("STOCK_SCANNER_POSITION_NEWS_OVERLAP_HOURS", 2, .25, 12),
         "monitor_interval": int(_env_float("STOCK_SCANNER_LEVEL_MONITOR_INTERVAL", 300, 60, 3600)),
+        "quote_refresh_seconds": int(_env_float("STOCK_SCANNER_QUOTE_REFRESH_SECONDS", 30, 15, 300)),
     }
 
 
@@ -1025,6 +1026,115 @@ def store_quote(cur, ticker, price, as_of, source):
     cur.execute("""INSERT INTO scanner_quotes(ticker,price,as_of,source) VALUES(?,?,?,?)
                    ON CONFLICT(ticker) DO UPDATE SET price=excluded.price,as_of=excluded.as_of,source=excluded.source""",
                 (ticker, price, stamp, source))
+
+
+def _tracked_quote_tickers(cur, limit: int = 50) -> list[str]:
+    cur.execute("""SELECT ticker FROM (
+        SELECT ticker,MAX(updated_at) touched FROM scanner_signals
+         WHERE legacy_unverified=0 AND (valid_until>? OR status IN ('PENDING_ENTRY','ENTERED','RISK_BLOCKED')) GROUP BY ticker
+        UNION ALL
+        SELECT ticker,MAX(opened_at) touched FROM scanner_trades WHERE status='open' AND is_shadow=0 GROUP BY ticker
+    ) GROUP BY ticker ORDER BY MAX(touched) DESC LIMIT ?""", (now_z(), int(limit)))
+    return [str(row["ticker"]) for row in cur.fetchall()]
+
+
+def _quote_series(frame: pd.DataFrame, ticker: str):
+    if frame is None or frame.empty:
+        return None
+    selected = frame
+    if isinstance(frame.columns, pd.MultiIndex):
+        field_names = {"OPEN", "HIGH", "LOW", "CLOSE", "ADJ CLOSE", "VOLUME"}
+        named_levels = [index for index, name in enumerate(frame.columns.names)
+                        if str(name or "").lower() in {"ticker", "symbol"}]
+        levels = named_levels + [index for index in range(frame.columns.nlevels) if index not in named_levels]
+        selected = None
+        for level in levels:
+            originals = list(frame.columns.get_level_values(level))
+            values = [str(value).upper() for value in originals]
+            # A price-field level can contain LOW, which is also a real NYSE ticker.
+            if len(set(values) & field_names) >= 2 or ticker.upper() not in values:
+                continue
+            original = originals[values.index(ticker.upper())]
+            try:
+                candidate = frame.xs(original, axis=1, level=level, drop_level=True)
+            except (KeyError, TypeError, ValueError):
+                continue
+            flat = candidate
+            if isinstance(flat.columns, pd.MultiIndex):
+                flat = flat.copy()
+                flat.columns = [next((str(part) for part in column if str(part).upper() in field_names), str(column[-1]))
+                                for column in flat.columns]
+            if "Close" in flat.columns:
+                selected = flat
+                break
+        if selected is None:
+            return None
+    if "Close" not in selected.columns:
+        return None
+    series = selected["Close"]
+    if isinstance(series, pd.DataFrame):
+        series = series.iloc[:, 0]
+    series = pd.to_numeric(series, errors="coerce").dropna()
+    return series if not series.empty else None
+
+
+def refresh_current_quotes() -> dict[str, Any]:
+    """Refresh display-only 1-minute quotes in one batch; never execute trades from them."""
+    conn = get_db_connection(); cur = conn.cursor()
+    tickers = _tracked_quote_tickers(cur)
+    conn.close()
+    if not tickers:
+        _service("quotes", "idle", "No active signal or open paper position requires a quote", success=True)
+        return {"requested": 0, "updated": 0, "missing": [], "market": market_session_state()}
+    try:
+        frame = yf.download(tickers, period="5d", interval="1m", group_by="ticker", auto_adjust=True,
+                            prepost=False, progress=False, threads=True, timeout=20)
+    except Exception as exc:
+        _service("quotes", "error", f"Batch quote provider failed; retained prior quotes ({type(exc).__name__})")
+        return {"requested": len(tickers), "updated": 0, "missing": tickers, "error": type(exc).__name__,
+                "market": market_session_state()}
+    conn = get_db_connection(); cur = conn.cursor(); updated, missing = 0, []
+    for ticker in tickers:
+        try:
+            series = _quote_series(frame, ticker)
+            if series is None:
+                raise ValueError("Ticker missing from batch")
+            price = float(series.iloc[-1])
+            stamp = pd.Timestamp(series.index[-1])
+            if stamp.tzinfo is None:
+                stamp = stamp.tz_localize(ET)
+            as_of = stamp.to_pydatetime().astimezone(UTC)
+            if not math.isfinite(price) or price <= 0 or as_of > datetime.now(UTC) + timedelta(minutes=2):
+                raise ValueError("Invalid quote")
+            store_quote(cur, ticker, price, as_of.isoformat(), "Yahoo 1m batch quote (may be delayed)")
+            updated += 1
+        except (KeyError, TypeError, ValueError, IndexError, OverflowError):
+            missing.append(ticker)
+            continue
+    conn.commit(); conn.close()
+    status = "ok" if updated else "error"
+    _service("quotes", status, f"updated={updated}/{len(tickers)} missing={','.join(missing[:8])}", success=bool(updated))
+    return {"requested": len(tickers), "updated": updated, "missing": missing, "market": market_session_state()}
+
+
+def quotes_payload() -> dict[str, Any]:
+    conn = get_db_connection(); cur = conn.cursor()
+    tickers = _tracked_quote_tickers(cur)
+    if tickers:
+        placeholders = ",".join("?" for _ in tickers)
+        cur.execute(f"SELECT ticker,price,as_of,source FROM scanner_quotes WHERE ticker IN ({placeholders})", tickers)
+        rows = [dict(row) for row in cur.fetchall()]
+    else:
+        rows = []
+    conn.close()
+    interval = lifecycle_settings()["quote_refresh_seconds"]
+    now = datetime.now(UTC)
+    for row in rows:
+        row["age_seconds"] = max(0, int((now - parse_time(row["as_of"])).total_seconds()))
+        row["stale"] = row["age_seconds"] > max(120, interval * 3)
+    return {"generated_at": now_z(), "refresh_seconds": interval, "realtime_guaranteed": False,
+            "provider_note": "Yahoo Finance 1-minute batch quotes may be delayed; last known value is retained on provider failure.",
+            "market": market_session_state(), "quotes": rows}
 
 
 def dashboard_payload() -> dict[str, Any]:

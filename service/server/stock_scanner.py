@@ -853,6 +853,21 @@ async def stock_signal_monitor_loop() -> None:
         await asyncio.sleep(settings()["level_monitor_interval"])
 
 
+async def stock_quote_refresh_loop() -> None:
+    """Keep display quotes fresh without coupling them to 5-minute fill monitoring."""
+    if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
+        return
+    from scanner_engine import lifecycle_settings, refresh_current_quotes
+    await asyncio.sleep(10)
+    while True:
+        try:
+            await asyncio.to_thread(refresh_current_quotes)
+        except Exception as exc:
+            from scanner_engine import set_service_status
+            set_service_status("quotes", "error", f"Retained prior quotes ({type(exc).__name__})")
+        await asyncio.sleep(lifecycle_settings()["quote_refresh_seconds"])
+
+
 async def stock_position_news_loop() -> None:
     if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
         return

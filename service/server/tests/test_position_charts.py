@@ -89,6 +89,14 @@ class PositionChartTests(unittest.TestCase):
             missing = client.get("/api/scanner/signals/999/chart")
         self.assertEqual(missing.status_code, 404)
 
+    def test_quote_route_returns_non_realtime_contract(self):
+        client = TestClient(create_app())
+        payload = {"refresh_seconds": 30, "realtime_guaranteed": False, "quotes": []}
+        with patch("routes_scanner.quotes_payload", return_value=payload):
+            response = client.get("/api/scanner/quotes")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), payload)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1224,12 +1224,13 @@ async def build_network_edges_loop():
 
 
 from stock_scanner import (stock_news_ai_loop, stock_news_feed_loop, stock_news_translation_loop, stock_position_news_loop,
-                           stock_scanner_loop, stock_signal_monitor_loop,
+                           stock_quote_refresh_loop, stock_scanner_loop, stock_signal_monitor_loop,
                            stock_telegram_outbox_loop)
 
 BACKGROUND_TASK_REGISTRY = {
     "stock_scanner": stock_scanner_loop,
     "stock_signal_monitor": stock_signal_monitor_loop,
+    "stock_quote_refresh": stock_quote_refresh_loop,
     "stock_position_news": stock_position_news_loop,
     "stock_news_feed": stock_news_feed_loop,
     "stock_news_ai": stock_news_ai_loop,
