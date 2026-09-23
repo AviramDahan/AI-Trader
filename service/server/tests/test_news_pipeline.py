@@ -156,6 +156,36 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         self.assertIn("ללא עסקה", alerts[0]["message"])
 
+    def test_legacy_translated_item_is_fully_analyzed_after_verified_watchlist_upgrade(self):
+        scanner_engine.set_news_watchlist("INTC", "Intel")
+        conn = database.get_db_connection()
+        conn.execute("UPDATE scanner_news_watchlist SET created_at=? WHERE ticker='INTC'",
+                     ((self.clock - timedelta(minutes=1)).isoformat(),))
+        conn.execute("""INSERT INTO scanner_news(
+            fingerprint,ticker,scope,title,publisher,url,published_at,analysis_status,fetched_at,
+            verified_tickers_json,content_hash,updated_at)
+            VALUES('legacy-intc','INTC','watchlist','Intel announces verified update','Publisher',
+                   'https://example.test/intc',?,'translated',?,'[\"INTC\"]','v1',?)""",
+                     (self.clock.isoformat(), self.clock.isoformat(), self.clock.isoformat()))
+        conn.commit(); conn.close()
+
+        def analyzer(rows):
+            self.assertEqual(len(rows), 1)
+            return [{"id": rows[0]["id"], "related": True, "title_he": "עדכון מאינטל",
+                     "summary_he": "אינטל פרסמה עדכון מאומת.", "sentiment": "positive",
+                     "materiality": "high", "thesis_effect": "unchanged",
+                     "interpretation_he": "עשויה להיות השפעה חיובית, אך קיימת אי־ודאות.",
+                     "relevance": .95}]
+
+        first = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
+        second = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock + timedelta(minutes=1))
+        self.assertEqual(first["alerts"], 1)
+        self.assertEqual(second["alerts"], 0)
+        self.assertEqual(self.rows("SELECT analysis_status FROM scanner_news")[0]["analysis_status"], "analyzed")
+        alerts = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='watchlist_news'")
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("INTC", alerts[0]["message"])
+
     def test_watchlist_does_not_duplicate_open_position_alert(self):
         scanner_engine.set_news_watchlist("AAPL", "Apple")
         self.open_trade()

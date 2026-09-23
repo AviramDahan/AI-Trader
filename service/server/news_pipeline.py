@@ -638,11 +638,51 @@ def _watchlist_alert_message(row: dict[str, Any]) -> str:
                          "המניה נמצאת ברשימת מעקב חדשות בלבד. לא נוצרו סיגנל או עסקה."))[:4000]
 
 
+def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
+    """Upgrade legacy translated rows after they gain a priority relationship.
+
+    The older market-news translator records Hebrew text but does not evaluate
+    materiality. If the priority provider later verifies the same item for a
+    watchlist ticker/open position, the canonical row is reused. Queue that row
+    once for the full news analyzer instead of silently leaving it translated.
+    """
+    cutoff = current - timedelta(hours=_int_env("STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS", 168, 24, 720))
+    cur.execute("""SELECT n.id,n.scope,n.published_at,w.enabled watch_enabled,w.created_at watch_created
+        FROM scanner_news n LEFT JOIN scanner_news_watchlist w ON w.ticker=n.ticker
+        WHERE n.analysis_status IN ('pending_translation','translated')
+          AND n.scope IN ('open_position','active_signal','watchlist')""")
+    queued = 0
+    for row in cur.fetchall():
+        published = _parse_time(row["published_at"])
+        if published < cutoff:
+            continue
+        if row["scope"] == "watchlist" and (
+            not row["watch_enabled"] or not row["watch_created"] or published < _parse_time(row["watch_created"])
+        ):
+            continue
+        priority = 100 if row["scope"] == "open_position" else 80 if row["scope"] == "watchlist" else 70
+        cur.execute("UPDATE scanner_news SET analysis_status='pending_analysis',analysis_error=NULL,updated_at=? WHERE id=?",
+                    (stamp, row["id"]))
+        cur.execute("SELECT id FROM scanner_news_jobs WHERE news_id=?", (row["id"],))
+        job = cur.fetchone()
+        if job:
+            cur.execute("""UPDATE scanner_news_jobs SET priority=?,status='pending',attempts=0,
+                next_attempt_at=?,last_error=NULL,updated_at=? WHERE news_id=?""",
+                        (priority, stamp, stamp, row["id"]))
+        else:
+            cur.execute("""INSERT INTO scanner_news_jobs(news_id,priority,status,next_attempt_at,created_at,updated_at)
+                VALUES(?,?,'pending',?,?,?)""", (row["id"], priority, stamp, stamp, stamp))
+        queued += 1
+    return queued
+
+
 def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
                       at: datetime | None = None) -> dict[str, Any]:
     current, stamp = _now(at), _z(at)
     limit = limit or feed_settings()["analysis_batch"]
     conn = get_db_connection(); cur = conn.cursor()
+    _queue_legacy_priority_news(cur, current, stamp)
+    conn.commit()
     cur.execute("""SELECT n.*,j.id job_id,j.attempts,
         (SELECT s.reason FROM scanner_trade_news l JOIN scanner_trades t ON t.id=l.trade_id
          JOIN scanner_signals s ON s.id=t.signal_id

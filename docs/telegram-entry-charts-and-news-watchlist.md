@@ -26,6 +26,11 @@ backoff, cross-source deduplication and the separate Ollama analysis queue.
 Only new, verified-ticker, actually related news assessed as medium/high
 materiality and positive/negative/mixed creates a Hebrew Telegram alert. An open
 position receives its position alert instead of a duplicate watchlist alert.
+When a priority fetch matches a canonical row that the older market feed already
+translated, the row is promoted to the full materiality analyzer rather than
+being left at translation-only status. This promotion applies only to fresh
+priority relationships (including watchlist articles published after the symbol
+was added) and remains deduplicated by article/version/ticker.
 Removing a symbol stops future priority collection and alerts. Adding a symbol
 does not create a signal, order, position or trade, and old articles are not
 retroactively alerted. Yahoo coverage is periodic and may be delayed or limited.
