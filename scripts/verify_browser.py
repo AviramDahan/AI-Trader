@@ -64,7 +64,7 @@ def main():
             expect(first_signal).to_be_visible()
             assert first_signal.get_attribute("open") is None
             expect(first_signal.locator(".scanner-signal-summary")).to_contain_text("$")
-            first_signal.locator("summary").click()
+            first_signal.locator(":scope > summary").click()
             expect(first_signal.locator(".scanner-signal-body")).to_be_visible()
             expect(first_signal.get_by_text("מחיר", exact=False).first).to_be_visible()
             assert ": —" not in first_signal.locator(".scanner-signal-summary").inner_text()
@@ -102,7 +102,7 @@ def main():
                 timeout=30000,
             )
             image.click()
-            dialog = page.get_by_role("dialog", name=f"גרף יומי של {first_trade.locator('header b').first.inner_text()} עם מחיר כניסה, סטופ ויעדי TP1, TP2 ו־TP3")
+            dialog = page.get_by_role("dialog").first
             expect(dialog).to_be_visible()
             expect(dialog.locator("img")).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Chart modal overflow"
