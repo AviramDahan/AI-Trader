@@ -27,6 +27,13 @@ with observed structure. New structural targets are preserved at actual entry,
 not replaced by fixed R multiples. Older pending fixed-R plans retain their
 previous behavior.
 
+To avoid confusing allocation with return, the UI does not present a bare
+`100%` label. It separately shows the target return from the actual filled entry
+and describes TP2 as closing all remaining quantity under `single`; zero-allocation
+levels are labelled Shadow-only. Position cards use the persistent quote cache,
+fall back to the last completed monitored bar, and keep the value visible with
+its timestamp and source even when it must be marked stale.
+
 Each open primary paper position also exposes an on-demand daily candlestick
 chart. It marks simulated entry, current stop and all three target prices. Solid
 target lines have a non-zero operational allocation and dashed target lines are

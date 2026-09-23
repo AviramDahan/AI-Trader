@@ -1061,6 +1061,19 @@ def dashboard_payload() -> dict[str, Any]:
     cur.execute("SELECT * FROM scanner_trades ORDER BY opened_at DESC"); trades = [dict(row) for row in cur.fetchall()]
     for trade in trades:
         trade["settings"] = _loads(trade.pop("settings_json", None), {})
+        cur.execute("SELECT price,as_of,source FROM scanner_quotes WHERE ticker=?", (trade["ticker"],))
+        quote = cur.fetchone()
+        if quote:
+            trade["current_price"] = float(quote["price"])
+            trade["price_as_of"] = quote["as_of"]
+            trade["price_source"] = quote["source"]
+        else:
+            trade["current_price"] = float(trade["last_price"]) if trade.get("last_price") is not None else None
+            trade["price_as_of"] = trade.get("last_bar_at")
+            trade["price_source"] = "Yahoo stored completed 5m" if trade.get("last_bar_at") else None
+        trade["price_stale"] = not trade["price_as_of"] or (
+            datetime.now(UTC) - parse_time(trade["price_as_of"])
+        ).total_seconds() > 900
         if trade["strategy"] == "single":
             trade["operational_tp1_pct"], trade["operational_tp2_pct"], trade["operational_tp3_pct"] = 0.0, 1.0, 0.0
         else:

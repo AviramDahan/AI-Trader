@@ -61,10 +61,13 @@ def main():
             first_trade = page.locator(".scanner-trade-card").first
             targets = first_trade.locator(".scanner-targets")
             expect(targets).to_contain_text("TP1:")
-            expect(targets).to_contain_text("שינוי מהכניסה")
-            expect(targets).to_contain_text("מימוש 0%")
-            expect(targets).to_contain_text("מימוש 100%")
-            expect(first_trade.get_by_text("יעד המימוש היחיד הוא TP2", exact=False)).to_be_visible()
+            expect(targets).to_contain_text("תשואה מהכניסה")
+            expect(targets).to_contain_text("Shadow בלבד — אין מימוש בפועל")
+            expect(targets).to_contain_text("יעד פעיל — סגירת כל הכמות שנותרה")
+            expect(first_trade.get_by_text("אסטרטגיה פעילה: יעד יחיד", exact=False)).to_be_visible()
+            expect(first_trade.get_by_text("מחיר אחרון", exact=False)).to_be_visible()
+            assert "מחיר אחרון ידוע — לא עדכני: —" not in first_trade.inner_text()
+            assert "מחיר נוכחי אחרון: —" not in first_trade.inner_text()
             chart = first_trade.locator(".scanner-position-chart")
             chart.locator("summary").click()
             image = chart.locator("img")
@@ -74,6 +77,7 @@ def main():
                 timeout=30000,
             )
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Hebrew trades overflow"
+            page.screenshot(path=str(ROOT / ".runtime" / f"qa-trades-{width}.png"), full_page=True)
             for button, heading in (("תוצאות", "השוואת אסטרטגיות יציאה"),
                                     ("חדשות", "חדשות — מהחדש לישן"),
                                     ("מצב הסורק", "מצב רכיבי הסורק"),

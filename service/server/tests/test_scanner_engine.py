@@ -81,6 +81,9 @@ class ScannerEngineTests(unittest.TestCase):
         primary = next(row for row in dashboard_trades if not row["is_shadow"])
         shadow = next(row for row in dashboard_trades if row["is_shadow"])
         self.assertEqual([primary[f"operational_tp{i}_pct"] for i in (1, 2, 3)], [0.0, 1.0, 0.0])
+        self.assertEqual(primary["current_price"], 100.5)
+        self.assertEqual(primary["price_source"], "Yahoo completed 5m")
+        self.assertFalse(primary["price_stale"])
         self.assertAlmostEqual(sum(shadow[f"operational_tp{i}_pct"] for i in (1, 2, 3)), 1.0)
         self.assertEqual(self.fetchall("SELECT status FROM scanner_signals")[0]["status"], "ENTERED")
 
