@@ -134,7 +134,13 @@ must remain awake, logged in, and online.
 npm --prefix service/frontend run build
 .\.venv\Scripts\python.exe scripts/verify_end_to_end.py
 .\.venv\Scripts\python.exe scripts/verify_browser.py
+.\.venv\Scripts\python.exe scripts/verify_telegram_topics_e2e.py
 ```
+
+The Telegram E2E check validates the configured Forum and bot-admin access, sends one explicitly labelled
+non-trading diagnostic to each of the five topics, verifies Telegram returned the expected thread and content,
+then deletes its diagnostics. It refreshes the real pinned cards, respects Telegram `Retry-After`, and asserts
+that positions and the persistent alert outbox did not change. It never creates a signal, news item, order or fill.
 
 Live verification accepts zero signals and never injects production data. Limits remain free-provider delays/rate
 limits, headline-only news, Ollama availability, five-minute OHLC ordering, and computer/tunnel uptime. This is
