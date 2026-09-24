@@ -16,6 +16,8 @@ from telegram_topics import destination_fields, thread_id_for_event
 UTC = timezone.utc
 ISRAEL = ZoneInfo("Asia/Jerusalem")
 LIFECYCLE_EVENTS = {"entry", "tp", "stop", "sell", "stop_change"}
+SCANNER_KEY = "us-stock-scanner"
+SCANNER_DISPLAY_NAME_HE = "סיגנלים פעילים"
 
 
 def _now_z() -> str:
@@ -40,6 +42,14 @@ def _rtl(value: str) -> str:
     return "\u200f" + value
 
 
+def _scanner_agent_id(cur) -> int:
+    cur.execute("SELECT id FROM agents WHERE name=?", (SCANNER_KEY,))
+    row = cur.fetchone()
+    if not row:
+        raise RuntimeError("scanner identity missing")
+    return int(row["id"])
+
+
 def _next_target(trade: dict, hit_indexes: set[int]) -> tuple[str, float]:
     if trade["strategy"] == "single":
         return "יעד תפעולי", float(trade["tp2"])
@@ -52,12 +62,7 @@ def _next_target(trade: dict, hit_indexes: set[int]) -> tuple[str, float]:
 def portfolio_status_message() -> str:
     """Build a concise, auditable mark-to-market view of the paper account."""
     conn = get_db_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM agents WHERE name='us-stock-scanner'")
-    agent = cur.fetchone()
-    if not agent:
-        conn.close()
-        raise RuntimeError("scanner identity missing")
-    agent_id = int(agent["id"])
+    agent_id = _scanner_agent_id(cur)
     cur.execute("SELECT * FROM scanner_accounts WHERE agent_id=?", (agent_id,))
     account = dict(cur.fetchone())
     cur.execute("""SELECT * FROM scanner_trades
@@ -89,7 +94,7 @@ def portfolio_status_message() -> str:
     updated = datetime.now(ISRAEL).strftime("%d/%m/%Y %H:%M:%S")
 
     blocks = [
-        "💼 מצב תיק דמו — AI-Trader",
+        f"💼 תיק דמו ראשי — {SCANNER_DISPLAY_NAME_HE}",
         "⚠️ מסחר מדומה בלבד. אין כאן פקודות ברוקר או כסף אמיתי.",
         "\n".join((
             f"שווי חשבון מנוהל: {_money(equity)}",
@@ -100,7 +105,7 @@ def portfolio_status_message() -> str:
             f"רווח/הפסד לא ממומש: {_money(unrealized)}",
             f"עמלות שנרשמו: {_money(float(account.get('fees_paid') or 0))}",
         )),
-        f"פוזיציות מנוהלות: {len(managed)} | פוזיציות Legacy מנוטרות בנפרד: {len(legacy)}",
+        f"סה״כ פוזיציות בתיק הראשי: {len(trades)} | מאומתות חשבונאית: {len(managed)} | Legacy: {len(legacy)}",
     ]
     def position_lines(rows: list[dict]) -> list[str]:
         lines: list[str] = []
@@ -118,10 +123,10 @@ def portfolio_status_message() -> str:
         return lines
 
     managed_lines = position_lines(managed)
-    blocks.append("פוזיציות מנוהלות בחשבון:\n\n" + ("\n\n".join(managed_lines) if managed_lines else "אין פוזיציות מנוהלות פתוחות."))
+    blocks.append("פוזיציות מאומתות בתיק הראשי:\n\n" + ("\n\n".join(managed_lines) if managed_lines else "אין פוזיציות מאומתות פתוחות."))
     if legacy:
         legacy_lines = position_lines(legacy)
-        blocks.append("פוזיציות Legacy — מנוטרות אך אינן נכללות בשווי החשבון המנוהל:\n\n" + "\n\n".join(legacy_lines))
+        blocks.append("פוזיציות Legacy בתיק הראשי — מנוטרות, אך אינן נכללות בשווי ובסטטיסטיקה המאומתים:\n\n" + "\n\n".join(legacy_lines))
     blocks.append(f"עודכן: {updated} (שעון ישראל)\nהמחירים מגיעים מ־Yahoo ועשויים להיות מושהים.")
     return "\n\n".join(blocks)[:4096]
 
@@ -129,11 +134,12 @@ def portfolio_status_message() -> str:
 def news_scope_status_message() -> str:
     """Explain the independent, anti-spam stock-news coverage."""
     conn = get_db_connection(); cur = conn.cursor()
+    agent_id = _scanner_agent_id(cur)
     cur.execute("SELECT ticker,company FROM scanner_news_watchlist WHERE enabled=1 ORDER BY ticker")
     watched = [dict(row) for row in cur.fetchall()]
-    cur.execute("SELECT DISTINCT ticker,company FROM scanner_trades WHERE status='open' AND is_shadow=0 ORDER BY ticker")
+    cur.execute("SELECT DISTINCT ticker,company FROM scanner_trades WHERE agent_id=? AND status='open' AND is_shadow=0 ORDER BY ticker", (agent_id,))
     positions = [dict(row) for row in cur.fetchall()]
-    cur.execute("SELECT DISTINCT ticker FROM scanner_signals WHERE status IN ('ACTIVE','PENDING_ENTRY','ENTERED') ORDER BY ticker")
+    cur.execute("SELECT DISTINCT ticker FROM scanner_signals WHERE agent_id=? AND status IN ('ACTIVE','PENDING_ENTRY','ENTERED') ORDER BY ticker", (agent_id,))
     active_signals = [str(row["ticker"]) for row in cur.fetchall()]
     cur.execute("SELECT COUNT(DISTINCT ticker) count FROM scanner_candidates WHERE status='candidate'")
     candidate_count = int(cur.fetchone()["count"])
@@ -185,9 +191,10 @@ def market_news_status_message() -> str:
 def signals_status_messages() -> list[str]:
     """List every open primary paper position, paginating before Telegram's limit."""
     conn = get_db_connection(); cur = conn.cursor()
+    agent_id = _scanner_agent_id(cur)
     cur.execute("""SELECT t.*,s.confidence,s.time_horizon
         FROM scanner_trades t JOIN scanner_signals s ON s.id=t.signal_id
-        WHERE t.status='open' AND t.is_shadow=0 ORDER BY t.opened_at DESC,t.ticker""")
+        WHERE t.agent_id=? AND t.status='open' AND t.is_shadow=0 ORDER BY t.opened_at DESC,t.ticker""", (agent_id,))
     trades = [dict(row) for row in cur.fetchall()]
     quotes: dict[str, dict] = {}
     if trades:
@@ -252,7 +259,7 @@ def signals_status_messages() -> list[str]:
     for index, chunk in enumerate(chunks, 1):
         page_label = _rtl(f"עמוד {_ltr(index)} מתוך {_ltr(page_count)}") if page_count > 1 else ""
         message = "\n\n".join(value for value in (
-            _rtl("📡 סיגנלים פעילים / פוזיציות פתוחות"),
+            _rtl(f"📡 {SCANNER_DISPLAY_NAME_HE} — המשתמש הראשי והיחיד"),
             page_label,
             _rtl("⚠️ מסחר מדומה בלבד. זו תמונת מצב, לא המלצה או פקודת מסחר."),
             _rtl(f"סה״כ פוזיציות פתוחות: {_ltr(len(trades))}"),

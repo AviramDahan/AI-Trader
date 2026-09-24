@@ -63,6 +63,8 @@ class TelegramStatusTests(unittest.TestCase):
 
         portfolio = telegram_status.portfolio_status_message()
         news = telegram_status.news_scope_status_message()
+        self.assertIn("תיק דמו ראשי — סיגנלים פעילים", portfolio)
+        self.assertIn("סה״כ פוזיציות בתיק הראשי: 1", portfolio)
         self.assertIn("שווי חשבון מנוהל: $100,002.00", portfolio)
         self.assertIn("AAPL", portfolio)
         self.assertIn("מחיר נוכחי: $102.00 (+2.00%)", portfolio)
@@ -72,7 +74,7 @@ class TelegramStatusTests(unittest.TestCase):
         self.assertIn("65%", news)
         self.assertIn("אין מכסה לפי מניה", news)
         signals = telegram_status.signals_status_message()
-        self.assertIn("סיגנלים פעילים / פוזיציות פתוחות", signals)
+        self.assertIn("סיגנלים פעילים — המשתמש הראשי והיחיד", signals)
         self.assertIn("סה״כ פוזיציות פתוחות:", signals)
         self.assertIn("AAPL", signals)
         self.assertIn("Apple", signals)

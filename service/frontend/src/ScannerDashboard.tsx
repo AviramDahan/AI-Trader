@@ -6,6 +6,9 @@ import { API_ORIGIN, useLanguage } from './appShared'
 type Dashboard = {
   paper_only: boolean
   scanner_name: string
+  primary_user: Record<string, any>
+  visible_users: Record<string, any>[]
+  main_portfolio: Record<string, any>
   settings: Record<string, any>
   account: Record<string, any>
   activity: Record<string, any>
@@ -121,6 +124,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     return fixed[provider.provider] || provider.coverage
   }
   const activity = data?.activity || {}
+  const primaryName = he ? (data?.primary_user?.display_name_he || 'סיגנלים פעילים') : (data?.primary_user?.display_name || 'Active Signals')
   const activeSignals = (data?.signals || []).filter(item => !item.legacy_unverified && !['CLOSED', 'EXPIRED'].includes(item.status))
   const historicSignals = (data?.signals || []).filter(item => !item.legacy_unverified && ['CLOSED', 'EXPIRED'].includes(item.status))
   const filteredNews = useMemo(() => (data?.news || []).filter(item => {
@@ -191,8 +195,8 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     <header className="scanner-hero">
       <div>
         <p className="scanner-kicker">US STOCK SCANNER</p>
-        <h1>{text('דשבורד סורק המניות', 'Stock scanner dashboard')}</h1>
-        <p>{text('סריקה אוטומטית של S&P 500 ו־Nasdaq 100. אין צורך לבחור משתמש או להזין סימול.', 'Automatic S&P 500 + Nasdaq 100 scan. No user or ticker input required.')}</p>
+        <h1>{primaryName}</h1>
+        <p>{text('המשתמש הראשי והיחיד בדשבורד, והוא גם הבעלים של תיק הדמו הראשי. סריקה אוטומטית של S&P 500 ו־Nasdaq 100 — ללא בחירת משתמש או הזנת סימול.', 'The dashboard’s only visible primary user and owner of the main demo portfolio. Automatic S&P 500 + Nasdaq 100 scan—no user or ticker input required.')}</p>
       </div>
       <strong className="paper-only">{text('מסחר מדומה בלבד', 'PAPER TRADING ONLY')}</strong>
     </header>
@@ -226,7 +230,9 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     </div>}
 
     {tab === 'trades' && <div className="scanner-section">
+      <h2>{text(`תיק דמו ראשי — ${primaryName}`, `Main demo portfolio — ${primaryName}`)}</h2>
       <div className="scanner-account-grid">
+        <Stat label={text('פוזיציות פתוחות', 'Open positions')} value={String(data?.main_portfolio?.open_position_count ?? 0)} />
         <Stat label={text('מזומן', 'Cash')} value={fmtPrice(data?.account?.cash)} />
         <Stat label={text('חשיפה פתוחה', 'Open exposure')} value={fmtPrice(data?.account?.open_exposure)} />
         <Stat label={text('רווח ממומש', 'Realized P/L')} value={fmtPrice(data?.account?.realized_pnl)} />
@@ -236,7 +242,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       {(data?.trades || []).filter(trade => !trade.is_shadow).map(trade => <TradeCard key={trade.id} trade={trade} schedules={data?.news_schedules || []} he={he} />)}
       {!(data?.trades || []).some(trade => !trade.is_shadow) && <Empty text={text('אין עדיין עסקאות דמו מאומתות.', 'No verified demo trades yet.')} />}
       {!!data?.legacy_unverified_count && <p className="scanner-warning">{text(`${data.legacy_unverified_count} רשומות ישנות נשמרו בנפרד ואינן נכללות בסטטיסטיקה המאומתת.`, `${data.legacy_unverified_count} legacy records are preserved separately and excluded from verified statistics.`)}</p>}
-      {!!data?.legacy_positions?.adopted_count && <p className="scanner-note">{text(`תיק Legacy נפרד: ${data.legacy_positions.managed_count} עסקאות פתוחות בניהול מההעברה ואילך. מזומן בתיק הישן: ${fmtPrice(data.legacy_positions.cash)}. היעד והסטופ המקוריים נשמרו; אין שחזור יציאות היסטוריות ואין ערבוב עם המזומן והתוצאות של התיק המאומת.`, `Separate legacy portfolio: ${data.legacy_positions.managed_count} open trades managed from adoption onward. Original wallet cash: ${fmtPrice(data.legacy_positions.cash)}. Original stop/target retained; no historical exits reconstructed or mixing with verified cash/results.`)}</p>}
+      {!!data?.legacy_positions?.adopted_count && <p className="scanner-note">{text(`כל ${data.main_portfolio.open_position_count} הפוזיציות מוצגות בתיק הראשי של “${primaryName}”. מתוכן ${data.main_portfolio.verified_position_count} מאומתות חשבונאית ו־${data.main_portfolio.legacy_position_count} מסומנות Legacy ומנוטרות מההעברה ואילך. ל־Legacy לא משוחזרת היסטוריה חסרה, ולכן היא אינה מעורבבת במזומן ובסטטיסטיקה המאומתים.`, `All ${data.main_portfolio.open_position_count} positions appear in the “${primaryName}” main portfolio. ${data.main_portfolio.verified_position_count} are accounting-verified and ${data.main_portfolio.legacy_position_count} are marked Legacy and monitored from adoption onward. Missing Legacy history is not reconstructed, so it remains excluded from verified cash and statistics.`)}</p>}
       {!!data?.legacy_positions?.unmanaged_count && <p className="scanner-warning">{text(`${data.legacy_positions.unmanaged_count} פוזיציות ישנות עדיין דורשות טיפול ואינן מנוהלות.`, `${data.legacy_positions.unmanaged_count} legacy positions still require attention and are unmanaged.`)}</p>}
     </div>}
 
@@ -290,7 +296,8 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       <p>{text('ספק מחירים', 'Price provider')}: Yahoo Finance/yfinance · {text('המחירים עשויים להיות מושהים. סיגנל לא מתפרסם ללא מחיר תוך־יומי בן פחות מ־12 דקות.', 'Quotes may be delayed. No signal is published without an intraday quote fresher than 12 minutes.')}</p>
       <p>{text('רענון מחיר לתצוגה', 'Display quote refresh')}: {quoteInfo?.refresh_seconds || data?.settings?.quote_refresh_seconds || 30}s · {text('הדפדפן בודק את מטמון השרת כל 10 שניות. זהו מחיר דקה אחרון מספק חינמי, לא פיד בורסה מובטח בזמן אמת; מחיר אחרון נשמר גם בתקלה או כשהשוק סגור.', 'The browser checks the server cache every 10 seconds. This is the latest 1-minute quote from a free provider, not guaranteed exchange real-time; the last value is retained on failure or while the market is closed.')}</p>
       <p>{text('מטמון היסטורי', 'History cache')}: {activity.history_cache?.status || '—'} · {text('גיל', 'age')} {Math.round((activity.history_cache?.age_seconds || 0) / 3600)}h</p>
-      <p>{text('מזהה סורק יציב', 'Stable scanner identity')}: <code>{data?.scanner_name}</code> · Ollama: <code>{activity.model || '—'}</code></p>
+      <p>{text('משתמש ותיק ראשיים', 'Primary user and portfolio')}: <b>{primaryName}</b> · {text('המשתמש היחיד שמוצג בדשבורד', 'the only user exposed in the dashboard')}</p>
+      <p>{text('מפתח טכני יציב', 'Stable technical key')}: <code>{data?.primary_user?.key || data?.scanner_name}</code> · Ollama: <code>{activity.model || '—'}</code></p>
     </div>}
   </section>
 }

@@ -87,6 +87,31 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertAlmostEqual(sum(shadow[f"operational_tp{i}_pct"] for i in (1, 2, 3)), 1.0)
         self.assertEqual(self.fetchall("SELECT status FROM scanner_signals")[0]["status"], "ENTERED")
 
+    def test_dashboard_exposes_one_primary_user_and_filters_other_agents(self):
+        self.record(ticker="AAPL")
+        scanner_engine.process_bar("AAPL", self.bar(1, 100, 101, 99, 100))
+        conn = database.get_db_connection(); cur = conn.cursor()
+        cur.execute("INSERT INTO agents(name,token,cash) VALUES('other-agent','other-token',1000)")
+        other_id = cur.lastrowid
+        cur.execute("UPDATE scanner_signals SET agent_id=? WHERE ticker='AAPL'", (other_id,))
+        cur.execute("UPDATE scanner_trades SET agent_id=? WHERE ticker='AAPL'", (other_id,))
+        conn.commit(); conn.close()
+
+        self.record(ticker="MSFT")
+        scanner_engine.process_bar("MSFT", self.bar(2, 100, 101, 99, 100))
+        dashboard = scanner_engine.dashboard_payload()
+
+        self.assertEqual(dashboard["primary_user"]["display_name_he"], "סיגנלים פעילים")
+        self.assertTrue(dashboard["primary_user"]["is_only_visible_user"])
+        self.assertEqual(dashboard["visible_users"], [dashboard["primary_user"]])
+        self.assertEqual({row["ticker"] for row in dashboard["signals"]}, {"MSFT"})
+        self.assertEqual({row["ticker"] for row in dashboard["trades"]}, {"MSFT"})
+        self.assertEqual(dashboard["main_portfolio"]["open_position_count"], 1)
+        self.assertEqual(dashboard["account"]["owner_agent_id"], dashboard["primary_user"]["agent_id"])
+        conn = database.get_db_connection(); cur = conn.cursor()
+        self.assertEqual(scanner_engine._tracked_quote_tickers(cur), ["MSFT"])
+        conn.close()
+
     def test_structural_targets_survive_fill_and_quote_updates_do_not_change_entry(self):
         from scanner_targets import structure_plan
         zones = [{"low": p, "high": p, "touches": 1, "pivots": []} for p in (98,104,108,112)]

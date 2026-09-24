@@ -4,6 +4,13 @@ The scanner keeps the upstream React/FastAPI/SQLite architecture and stable `us-
 `/market` is its public dashboard; no user or ticker selection is required. There is no broker integration,
 leverage, short selling, or real-money execution.
 
+The public product identity is **Active Signals / סיגנלים פעילים**. It is the only user identity exposed by
+the scanner dashboard and owns the main paper portfolio. The internal `us-stock-scanner` key remains unchanged
+so existing permissions, signals, trades and scheduled jobs keep their stable foreign-key owner. All open
+primary positions appear in that one portfolio. Adopted Legacy positions are visibly tagged and monitored there,
+but missing historical fills are never reconstructed and their cash/performance remain excluded from verified
+accounting.
+
 ## Universe, schedule, and data
 
 The default universe is the de-duplicated union of the S&P 500 and Nasdaq-100. S&P constituents/company

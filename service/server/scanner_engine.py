@@ -23,6 +23,8 @@ from database import begin_write_transaction, get_db_connection
 
 
 SCANNER_NAME = "us-stock-scanner"
+SCANNER_DISPLAY_NAME = "Active Signals"
+SCANNER_DISPLAY_NAME_HE = "סיגנלים פעילים"
 UTC = timezone.utc
 ET = ZoneInfo("America/New_York")
 
@@ -184,6 +186,24 @@ def scanner_agent_id(cursor=None) -> int:
     if not row:
         raise RuntimeError("Stable scanner identity is missing")
     return int(row["id"])
+
+
+def scanner_identity(agent_id: int) -> dict[str, Any]:
+    """Public identity for the one visible scanner user and its paper portfolio.
+
+    SCANNER_NAME remains the immutable database key.  The friendly identity is
+    deliberately separate so existing rows, permissions and integrations are
+    not renamed or orphaned.
+    """
+    return {
+        "agent_id": int(agent_id),
+        "key": SCANNER_NAME,
+        "display_name": SCANNER_DISPLAY_NAME,
+        "display_name_he": SCANNER_DISPLAY_NAME_HE,
+        "is_primary": True,
+        "is_only_visible_user": True,
+        "portfolio_role": "primary_paper_portfolio",
+    }
 
 
 def _service(component: str, status: str, detail: str = "", success: bool = False) -> None:
@@ -1067,12 +1087,13 @@ def store_quote(cur, ticker, price, as_of, source):
 
 
 def _tracked_quote_tickers(cur, limit: int = 50) -> list[str]:
+    agent_id = scanner_agent_id(cur)
     cur.execute("""SELECT ticker FROM (
         SELECT ticker,MAX(updated_at) touched FROM scanner_signals
-         WHERE legacy_unverified=0 AND (valid_until>? OR status IN ('PENDING_ENTRY','ENTERED','RISK_BLOCKED')) GROUP BY ticker
+         WHERE agent_id=? AND legacy_unverified=0 AND (valid_until>? OR status IN ('PENDING_ENTRY','ENTERED','RISK_BLOCKED')) GROUP BY ticker
         UNION ALL
-        SELECT ticker,MAX(opened_at) touched FROM scanner_trades WHERE status='open' AND is_shadow=0 GROUP BY ticker
-    ) GROUP BY ticker ORDER BY MAX(touched) DESC LIMIT ?""", (now_z(), int(limit)))
+        SELECT ticker,MAX(opened_at) touched FROM scanner_trades WHERE agent_id=? AND status='open' AND is_shadow=0 GROUP BY ticker
+    ) GROUP BY ticker ORDER BY MAX(touched) DESC LIMIT ?""", (agent_id, now_z(), agent_id, int(limit)))
     return [str(row["ticker"]) for row in cur.fetchall()]
 
 
@@ -1177,9 +1198,10 @@ def quotes_payload() -> dict[str, Any]:
 
 def dashboard_payload() -> dict[str, Any]:
     conn = get_db_connection(); cur = conn.cursor(); agent_id = scanner_agent_id(cur)
+    identity = scanner_identity(agent_id)
     default_operational_strategy = lifecycle_settings()["active_strategy"]
     cur.execute("SELECT * FROM scanner_accounts WHERE agent_id=?", (agent_id,)); account = dict(cur.fetchone())
-    cur.execute("SELECT * FROM scanner_signals ORDER BY created_at DESC LIMIT 200"); signals = [dict(row) for row in cur.fetchall()]
+    cur.execute("SELECT * FROM scanner_signals WHERE agent_id=? ORDER BY created_at DESC LIMIT 200", (agent_id,)); signals = [dict(row) for row in cur.fetchall()]
     for row in signals:
         for key, default in (("confidence_basis", {}), ("news_json", []), ("technical_json", {}), ("market_context_json", {})):
             row[key] = _loads(row.get(key), default)
@@ -1188,7 +1210,7 @@ def dashboard_payload() -> dict[str, Any]:
         if not quote:
             # Upgrade bridge: use an actual monitored bar from an open trade,
             # never its simulated entry/exit fill or a legacy adoption mark.
-            cur.execute("SELECT last_price,last_bar_at,opened_at,managed_from FROM scanner_trades WHERE ticker=? AND status='open' AND is_shadow=0 ORDER BY last_bar_at DESC LIMIT 1", (row["ticker"],))
+            cur.execute("SELECT last_price,last_bar_at,opened_at,managed_from FROM scanner_trades WHERE agent_id=? AND ticker=? AND status='open' AND is_shadow=0 ORDER BY last_bar_at DESC LIMIT 1", (agent_id, row["ticker"]))
             prior = cur.fetchone()
             if prior and prior["last_bar_at"] and parse_time(prior["last_bar_at"]) > parse_time(prior["managed_from"] or prior["opened_at"]):
                 quote = {"price": prior["last_price"], "as_of": (parse_time(prior["last_bar_at"])+timedelta(minutes=5)).isoformat(),
@@ -1206,7 +1228,7 @@ def dashboard_payload() -> dict[str, Any]:
         else:
             for index in (1, 2, 3):
                 row[f"operational_tp{index}_pct"] = float(row[f"tp{index}_pct"])
-    cur.execute("SELECT * FROM scanner_trades ORDER BY opened_at DESC"); trades = [dict(row) for row in cur.fetchall()]
+    cur.execute("SELECT * FROM scanner_trades WHERE agent_id=? ORDER BY opened_at DESC", (agent_id,)); trades = [dict(row) for row in cur.fetchall()]
     for trade in trades:
         trade["settings"] = _loads(trade.pop("settings_json", None), {})
         cur.execute("SELECT price,as_of,source FROM scanner_quotes WHERE ticker=?", (trade["ticker"],))
@@ -1270,7 +1292,7 @@ def dashboard_payload() -> dict[str, Any]:
                 SUM(CASE WHEN status='closed' THEN realized_pnl-fees ELSE 0 END) net,
                 SUM(CASE WHEN outcome='WIN' THEN 1 ELSE 0 END) wins,
                 SUM(CASE WHEN outcome='BREAKEVEN' THEN 1 ELSE 0 END) breakevens
-                FROM scanner_trades WHERE legacy_position_id IS NULL GROUP BY strategy""")
+                FROM scanner_trades WHERE agent_id=? AND legacy_position_id IS NULL GROUP BY strategy""", (agent_id,))
     comparisons = [dict(row) for row in cur.fetchall()]
     for item in comparisons:
         strategy_trades = [trade for trade in trades if trade["strategy"] == item["strategy"] and not trade.get("legacy_position_id")]
@@ -1312,9 +1334,33 @@ def dashboard_payload() -> dict[str, Any]:
     conn.close()
     account["open_exposure"] = sum(float(t["remaining_quantity"]) * float(t.get("last_price") or t["entry_price"]) for t in primary if t["status"] == "open")
     account["unrealized_pnl"] = sum(float(t["unrealized_pnl"] or 0) for t in primary if t["status"] == "open")
+    open_primary = [trade for trade in trades if not trade["is_shadow"] and trade["status"] == "open"]
+    open_native = [trade for trade in open_primary if not trade.get("legacy_position_id")]
+    open_legacy = [trade for trade in open_primary if trade.get("legacy_position_id")]
+    account.update({
+        "owner_agent_id": agent_id,
+        "owner_key": SCANNER_NAME,
+        "owner_display_name": SCANNER_DISPLAY_NAME,
+        "owner_display_name_he": SCANNER_DISPLAY_NAME_HE,
+        "is_primary": True,
+        "open_positions_total": len(open_primary),
+        "verified_open_positions": len(open_native),
+        "legacy_open_positions": len(open_legacy),
+    })
+    main_portfolio = {
+        "owner": identity,
+        "paper_only": True,
+        "includes_all_primary_positions": True,
+        "open_position_count": len(open_primary),
+        "verified_position_count": len(open_native),
+        "legacy_position_count": len(open_legacy),
+        "legacy_accounting_separate": bool(open_legacy),
+    }
     collected_times = [item.get("collected_at") or item.get("fetched_at") for item in news if item.get("collected_at") or item.get("fetched_at")]
     provider_success_times = [item["last_success_at"] for item in news_providers if item.get("last_success_at")]
-    return {"paper_only": True, "scanner_name": SCANNER_NAME, "settings": lifecycle_settings(), "market": market_session_state(), "account": account,
+    return {"paper_only": True, "scanner_name": SCANNER_NAME,
+            "primary_user": identity, "visible_users": [identity], "main_portfolio": main_portfolio,
+            "settings": lifecycle_settings(), "market": market_session_state(), "account": account,
             "signals": signals, "trades": trades, "news": news, "news_schedules": schedules, "news_watchlist": watchlist,
             "services": services, "news_providers": news_providers,
             "news_meta": {"screen_generated_at": now_z(),
