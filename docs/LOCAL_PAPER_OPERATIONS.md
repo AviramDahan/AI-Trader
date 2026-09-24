@@ -131,7 +131,7 @@ and Telegram. It distinguishes market closed, no signals, no new news, and error
 ```powershell
 .\scripts\start-ai-trader.ps1
 .\scripts\stop-ai-trader.ps1
-.\.venv\Scripts\python.exe scripts/reset_telegram_topics.py  # destructive: recreates the five managed topics
+.\.venv\Scripts\python.exe scripts/reset_telegram_topics.py --confirm-delete  # destructive: recreates the five managed topics
 ```
 
 The Windows backend, worker, Ollama, and HTTPS tunnel must run; GitHub Pages is only the frontend. The scheduled

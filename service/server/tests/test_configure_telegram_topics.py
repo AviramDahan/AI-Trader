@@ -1,8 +1,11 @@
 import importlib.util
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+
+import requests
 
 
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "configure_telegram_topics.py"
@@ -75,6 +78,55 @@ class ConfigureTelegramTopicsTests(unittest.TestCase):
         )
         self.assertEqual(code, 0)
         self.assertFalse(any(call.args[0].endswith("/createForumTopic") for call in session.post.call_args_list))
+
+    def test_write_env_removes_secret_temporary_file_after_success(self):
+        self.env.write_text("TELEGRAM_BOT_TOKEN=secret\nUNCHANGED=yes\n", encoding="utf-8")
+        temporary = self.env.with_name(f"{self.env.name}.topics.tmp")
+        real_chmod = os.chmod
+        with patch.object(topics_setup, "ENV_FILE", self.env), \
+             patch.object(topics_setup.os, "chmod", wraps=real_chmod) as chmod:
+            topics_setup._write_env({"TELEGRAM_CHAT_ID": "-1001"})
+        self.assertIn("TELEGRAM_BOT_TOKEN=secret", self.env.read_text(encoding="utf-8"))
+        self.assertFalse(temporary.exists())
+        mode = topics_setup.stat.S_IRUSR | topics_setup.stat.S_IWUSR
+        chmod.assert_any_call(temporary, mode)
+        chmod.assert_any_call(self.env, mode)
+
+    def test_write_env_cleans_secret_temporary_file_when_replace_fails(self):
+        original = "TELEGRAM_BOT_TOKEN=secret\n"
+        self.env.write_text(original, encoding="utf-8")
+        temporary = self.env.with_name(f"{self.env.name}.topics.tmp")
+        with patch.object(topics_setup, "ENV_FILE", self.env), \
+             patch.object(topics_setup.os, "replace", side_effect=OSError("replace failed")):
+            with self.assertRaises(OSError):
+                topics_setup._write_env({"TELEGRAM_CHAT_ID": "-1001"})
+        self.assertEqual(self.env.read_text(encoding="utf-8"), original)
+        self.assertFalse(temporary.exists())
+
+    def test_network_error_does_not_expose_bot_token(self):
+        session = Mock()
+        session.post.side_effect = requests.Timeout(
+            "request failed for https://api.telegram.org/botSUPER-SECRET/getChat"
+        )
+        with self.assertRaises(RuntimeError) as caught:
+            topics_setup._request_json(
+                session, "https://api.telegram.org/botSUPER-SECRET", "getChat", {}
+            )
+        self.assertNotIn("SUPER-SECRET", str(caught.exception))
+        self.assertIsNone(caught.exception.__cause__)
+
+    def test_invalid_json_is_reported_without_response_body(self):
+        session = Mock()
+        response_value = Mock(ok=False, status_code=502)
+        response_value.json.side_effect = ValueError("body contained SUPER-SECRET")
+        session.post.return_value = response_value
+        with self.assertRaises(RuntimeError) as caught:
+            topics_setup._request_json(
+                session, "https://api.telegram.org/botSUPER-SECRET", "getChat", {}
+            )
+        self.assertEqual(
+            str(caught.exception), "Telegram getChat returned invalid JSON (HTTP 502)"
+        )
 
 
 if __name__ == "__main__":

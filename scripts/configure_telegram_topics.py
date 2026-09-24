@@ -29,9 +29,51 @@ def _write_env(updates: dict[str, str]) -> None:
     if pending and output and output[-1]:
         output.append("")
     output.extend(f"{key}={value}" for key, value in pending.items())
-    temporary = ENV_FILE.with_suffix(".topics.tmp")
-    temporary.write_text("\n".join(output) + "\n", encoding="utf-8")
-    temporary.replace(ENV_FILE)
+    # Keep the temporary file adjacent to .env so os.replace remains atomic.
+    # Its name is explicitly ignored and it is removed even if replacement
+    # fails, because it contains the complete environment including secrets.
+    temporary = ENV_FILE.with_name(f"{ENV_FILE.name}.topics.tmp")
+    encoded = ("\n".join(output) + "\n").encode("utf-8")
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
+        os.replace(temporary, ENV_FILE)
+        try:
+            os.chmod(ENV_FILE, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _request_json(session: requests.Session, base: str, method: str,
+                  data: dict | None = None) -> tuple[requests.Response, dict]:
+    """Call Telegram without allowing the token-bearing URL into errors."""
+    try:
+        response = session.post(f"{base}/{method}", data=data or {}, timeout=20)
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            f"Telegram {method} request failed ({type(exc).__name__})"
+        ) from None
+    try:
+        payload = response.json()
+    except ValueError:
+        raise RuntimeError(
+            f"Telegram {method} returned invalid JSON (HTTP {response.status_code})"
+        ) from None
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Telegram {method} returned an invalid response") from None
+    return response, payload
 
 
 def _record_backup(chat_id: str, market_news_thread: str, stock_news_thread: str,
@@ -87,8 +129,7 @@ def main() -> int:
     base = f"https://api.telegram.org/bot{token}"
 
     def call(method: str, data: dict | None = None) -> dict:
-        response = session.post(f"{base}/{method}", data=data or {}, timeout=20)
-        payload = response.json()
+        response, payload = _request_json(session, base, method, data)
         if response.ok and payload.get("ok"):
             return payload["result"]
         description = str(payload.get("description") or method)
@@ -100,7 +141,11 @@ def main() -> int:
         chat = call("getChat", {"chat_id": chat_id})
     except RuntimeError as exc:
         # Telegram can return the replacement ID after a basic group is upgraded.
-        response = session.post(f"{base}/getChat", data={"chat_id": chat_id}, timeout=20).json()
+        try:
+            _, response = _request_json(session, base, "getChat", {"chat_id": chat_id})
+        except RuntimeError as retry_exc:
+            print(f"Could not read the configured Telegram chat: {retry_exc}")
+            return 2
         migrated = response.get("parameters", {}).get("migrate_to_chat_id")
         if not migrated:
             print(f"Could not read the configured Telegram chat: {exc}")

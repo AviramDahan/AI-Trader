@@ -8,8 +8,11 @@ into the clean topics.
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import requests
@@ -31,9 +34,72 @@ TOPICS = (
     ("TELEGRAM_TRADES_THREAD_ID", "🔔 עסקאות דמו", 16766590),
     ("TELEGRAM_PORTFOLIO_THREAD_ID", "💼 מצב תיק דמו", 16766590),
 )
+RECOVERY_FILE_NAME = "telegram-topic-reset-recovery.json"
+MAX_TELEGRAM_ATTEMPTS = 3
+MAX_RETRY_AFTER_SECONDS = 60.0
 
 
-def main() -> int:
+def _telegram_call(session: requests.Session, base: str, method: str, data: dict,
+                   *, absent_ok: bool = False):
+    """Call Telegram with bounded 429 retry and token-free exceptions."""
+    for attempt in range(MAX_TELEGRAM_ATTEMPTS):
+        try:
+            response = session.post(f"{base}/{method}", data=data, timeout=20)
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                f"Telegram {method} request failed ({type(exc).__name__})"
+            ) from None
+        try:
+            payload = response.json()
+        except ValueError:
+            raise RuntimeError(
+                f"Telegram {method} returned invalid JSON (HTTP {response.status_code})"
+            ) from None
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Telegram {method} returned an invalid response") from None
+        if response.ok and payload.get("ok"):
+            return payload.get("result")
+
+        description = str(payload.get("description") or f"HTTP {response.status_code}")
+        parameters = payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {}
+        retry_after = parameters.get("retry_after")
+        if response.status_code == 429 and retry_after is not None and attempt + 1 < MAX_TELEGRAM_ATTEMPTS:
+            try:
+                delay = max(0.0, min(float(retry_after), MAX_RETRY_AFTER_SECONDS))
+            except (TypeError, ValueError):
+                delay = 1.0
+            time.sleep(delay)
+            continue
+        absent = any(marker in description.lower() for marker in (
+            "message thread not found", "topic_id_invalid", "message_thread_id_invalid",
+        ))
+        if absent_ok and absent:
+            return None
+        raise RuntimeError(f"Telegram {method} failed: {description}") from None
+    raise RuntimeError(f"Telegram {method} failed after retry limit") from None
+
+
+def _write_recovery_state(path: Path, chat_id: str, old_ids: list[int],
+                          updates: dict[str, str], state: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "chat_id": chat_id,
+        "old_thread_ids": old_ids,
+        "new_thread_ids": {key: updates[key] for key, _, _ in TOPICS},
+        "state": state,
+    }
+    temporary = path.with_suffix(".tmp")
+    try:
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def main(*, confirm_delete: bool = False) -> int:
+    if not confirm_delete:
+        print("Refusing destructive Telegram topic reset without --confirm-delete.")
+        return 2
     values = dotenv_values(ROOT / ".env")
     token = str(values.get("TELEGRAM_BOT_TOKEN") or "").strip()
     chat_id = str(values.get("TELEGRAM_CHAT_ID") or "").strip()
@@ -45,17 +111,7 @@ def main() -> int:
     base = f"https://api.telegram.org/bot{token}"
 
     def call(method: str, data: dict, *, absent_ok: bool = False):
-        response = session.post(f"{base}/{method}", data=data, timeout=20)
-        payload = response.json()
-        if response.ok and payload.get("ok"):
-            return payload.get("result")
-        description = str(payload.get("description") or f"HTTP {response.status_code}")
-        absent = any(marker in description.lower() for marker in (
-            "message thread not found", "topic_id_invalid", "message_thread_id_invalid",
-        ))
-        if absent_ok and absent:
-            return None
-        raise RuntimeError(f"Telegram {method} failed: {description}")
+        return _telegram_call(session, base, method, data, absent_ok=absent_ok)
 
     me = call("getMe", {})
     chat = call("getChat", {"chat_id": chat_id})
@@ -70,9 +126,8 @@ def main() -> int:
         raw = str(values.get(key) or "").strip()
         if raw.isdigit() and int(raw) not in old_ids:
             old_ids.append(int(raw))
-    for thread_id in old_ids:
-        call("deleteForumTopic", {"chat_id": chat_id, "message_thread_id": thread_id}, absent_ok=True)
-
+    # Create every replacement first. Until routing is persisted, the old
+    # topics remain intact and the running service can continue using them.
     updates: dict[str, str] = {"TELEGRAM_CHAT_ID": chat_id}
     for key, name, color in TOPICS:
         topic = call("createForumTopic", {"chat_id": chat_id, "name": name, "icon_color": color})
@@ -81,7 +136,22 @@ def main() -> int:
     # deleted topic while all current event types use the explicit IDs above.
     updates["TELEGRAM_NEWS_THREAD_ID"] = updates["TELEGRAM_STOCK_NEWS_THREAD_ID"]
     updates["TELEGRAM_TRADING_THREAD_ID"] = updates["TELEGRAM_TRADES_THREAD_ID"]
+    recovery_file = ROOT / ".runtime" / RECOVERY_FILE_NAME
+    _write_recovery_state(
+        recovery_file,
+        chat_id,
+        old_ids,
+        updates,
+        "replacement_topics_created_routing_pending",
+    )
     _write_env(updates)
+    _write_recovery_state(
+        recovery_file,
+        chat_id,
+        old_ids,
+        updates,
+        "new_routing_persisted_old_topics_pending_deletion",
+    )
     _record_backup(
         chat_id,
         updates["TELEGRAM_MARKET_NEWS_THREAD_ID"],
@@ -99,13 +169,28 @@ def main() -> int:
                    WHERE status IN ('pending','retry')""")
     discarded = cur.rowcount
     conn.commit(); conn.close()
-    try:
-        os.chmod(ROOT / ".env", 0o600)
-    except OSError:
-        pass
+    deletion_errors = []
+    for thread_id in old_ids:
+        try:
+            call("deleteForumTopic", {"chat_id": chat_id, "message_thread_id": thread_id}, absent_ok=True)
+        except RuntimeError as exc:
+            deletion_errors.append(str(exc))
+    if deletion_errors:
+        print(
+            "Replacement topics are active, but some old topics could not be deleted; "
+            f"recovery state remains at {recovery_file}."
+        )
+        return 5
+    recovery_file.unlink(missing_ok=True)
     print(f"Recreated {len(TOPICS)} clean Telegram topics; discarded queued stale messages: {discarded}.")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--confirm-delete",
+        action="store_true",
+        help="confirm permanent deletion of messages in the five managed Telegram topics",
+    )
+    raise SystemExit(main(confirm_delete=parser.parse_args().confirm_delete))
