@@ -259,7 +259,8 @@ function AppRouter({
 }) {
   const location = useLocation()
   const isLanding = location.pathname === '/'
-  const isScannerRoute = location.pathname === '/market' || location.pathname.endsWith('/market')
+  const normalizedPath = location.pathname.replace(/\/+$/, '') || '/'
+  const isScannerRoute = normalizedPath === '/market' || normalizedPath.endsWith('/market')
   const canUseExperiments = hasPermission(agentInfo, 'experiment_admin')
   const canUseResearchExports = hasPermission(agentInfo, 'research_exports')
   const canUseTeamMissionAdmin = hasPermission(agentInfo, 'team_mission_admin')
