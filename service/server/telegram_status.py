@@ -404,13 +404,12 @@ def _remove_stale_signal_pages(active_page_count: int) -> dict[str, str]:
 def refresh_telegram_status_cards() -> dict[str, str]:
     enabled = os.getenv("STOCK_SCANNER_TELEGRAM_PORTFOLIO_STATUS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     if not enabled:
-        return {"portfolio": "disabled", "news_scope": "disabled"}
+        return {"portfolio": "disabled", "signals_status": "disabled"}
+    # News topics contain real deduplicated alerts only.  Explanatory cards
+    # used to be refreshed here and were perceived as repeated news.  Keep
+    # the two live operational snapshots in their dedicated topics instead.
     result = {
         "portfolio": _upsert_pinned_message("portfolio", "portfolio_status", portfolio_status_message()),
-        "news_scope": _upsert_pinned_message("news_scope", "news_status", news_scope_status_message()),
-        "market_news_scope": _upsert_pinned_message(
-            "market_news_scope", "market_news", market_news_status_message()
-        ),
     }
     signal_pages = signals_status_messages()
     for index, page in enumerate(signal_pages, 1):

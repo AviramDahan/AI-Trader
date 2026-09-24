@@ -113,7 +113,9 @@ quantity. Missing/disabled credentials safely disable delivery and never stop sc
 never send a live experimental alert. Secrets remain only in ignored `.env` and the private local backup.
 
 Forum groups separate `חדשות שוק`, `חדשות מניות`, `סיגנלים`, `עסקאות דמו`, and `מצב תיק דמו`.
-The paper-account and news-scope cards are edited in place. `TELEGRAM_PORTFOLIO_THREAD_ID` selects the account topic;
+Only the paper-account and active-position signal cards are periodically edited in place. The two news topics
+contain real deduplicated alerts only; explanatory scope/status text is never reposted as news.
+`TELEGRAM_PORTFOLIO_THREAD_ID` selects the account topic;
 `STOCK_SCANNER_TELEGRAM_PORTFOLIO_STATUS_INTERVAL` controls the periodic refresh (300 seconds by default).
 News-watchlist alerts do not require a position, but still require verified ticker attribution, minimum relevance,
 medium/high materiality and a meaningful positive/negative/mixed assessment. Broader rotating-candidate stock news
@@ -129,6 +131,7 @@ and Telegram. It distinguishes market closed, no signals, no new news, and error
 ```powershell
 .\scripts\start-ai-trader.ps1
 .\scripts\stop-ai-trader.ps1
+.\.venv\Scripts\python.exe scripts/reset_telegram_topics.py  # destructive: recreates the five managed topics
 ```
 
 The Windows backend, worker, Ollama, and HTTPS tunnel must run; GitHub Pages is only the frontend. The scheduled

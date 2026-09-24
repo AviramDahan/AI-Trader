@@ -168,6 +168,14 @@ class TelegramStatusTests(unittest.TestCase):
         self.assertEqual(row["message_id"], 77)
         self.assertIn("Temporary", row["last_error"])
 
+    def test_periodic_status_refresh_never_posts_explanatory_news_cards(self):
+        with patch.object(telegram_status, "_upsert_pinned_message", return_value="updated") as upsert, \
+                patch.object(telegram_status, "_remove_stale_signal_pages", return_value={}):
+            result = telegram_status.refresh_telegram_status_cards()
+        events = [call.args[1] for call in upsert.call_args_list]
+        self.assertEqual(events, ["portfolio_status", "signals_status"])
+        self.assertEqual(result, {"portfolio": "updated", "signals_status": "updated"})
+
     def test_stale_overflow_signal_page_is_unpinned_deleted_and_forgotten(self):
         conn = database.get_db_connection()
         conn.execute("""INSERT INTO scanner_telegram_topic_state(
