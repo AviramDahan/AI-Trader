@@ -34,7 +34,8 @@ def _write_env(updates: dict[str, str]) -> None:
     temporary.replace(ENV_FILE)
 
 
-def _record_backup(chat_id: str, news_thread: str, trading_thread: str, portfolio_thread: str) -> None:
+def _record_backup(chat_id: str, market_news_thread: str, stock_news_thread: str,
+                   signals_thread: str, trades_thread: str, portfolio_thread: str) -> None:
     if not CREDENTIALS_FILE.exists():
         return
     begin, end = "--- BEGIN TELEGRAM TOPICS ---", "--- END TELEGRAM TOPICS ---"
@@ -48,13 +49,17 @@ def _record_backup(chat_id: str, news_thread: str, trading_thread: str, portfoli
         "Password: N/A",
         "API key: Stored separately as TELEGRAM_BOT_TOKEN; value intentionally not duplicated here",
         "API secret/token: Stored in ignored .env",
-        f"Account/project ID: chat={chat_id}; news_thread={news_thread}; trading_thread={trading_thread}; portfolio_thread={portfolio_thread}",
+        (f"Account/project ID: chat={chat_id}; market_news_thread={market_news_thread}; "
+         f"stock_news_thread={stock_news_thread}; signals_thread={signals_thread}; "
+         f"trades_thread={trades_thread}; portfolio_thread={portfolio_thread}"),
         "Free plan/tier: Telegram Bot API",
-        "Environment variable name: TELEGRAM_CHAT_ID, TELEGRAM_NEWS_THREAD_ID, TELEGRAM_TRADING_THREAD_ID, TELEGRAM_PORTFOLIO_THREAD_ID",
+        ("Environment variable name: TELEGRAM_CHAT_ID, TELEGRAM_MARKET_NEWS_THREAD_ID, "
+         "TELEGRAM_STOCK_NEWS_THREAD_ID, TELEGRAM_SIGNALS_THREAD_ID, TELEGRAM_TRADES_THREAD_ID, "
+         "TELEGRAM_PORTFOLIO_THREAD_ID"),
         "Where the secret is stored: Project-root ignored .env",
         f"Date created: {datetime.now(timezone.utc).date().isoformat()}",
         "Where it is used: Server-side Telegram message and entry-chart delivery",
-        "Notes: News routes to חדשות; signals, entries, TP/SL and SELL route to סיגנלים ועסקאות דמו; the edited paper-account card routes to מצב תיק דמו.",
+        "Notes: Market news, stock news, signals, paper-trade events and the edited portfolio card use separate Forum topics.",
         end,
     ])
     text = CREDENTIALS_FILE.read_text(encoding="utf-8")
@@ -86,7 +91,10 @@ def main() -> int:
         payload = response.json()
         if response.ok and payload.get("ok"):
             return payload["result"]
-        raise RuntimeError(str(payload.get("description") or method))
+        description = str(payload.get("description") or method)
+        if method == "editForumTopic" and "not modified" in description.lower().replace("_", " "):
+            return True
+        raise RuntimeError(description)
 
     try:
         chat = call("getChat", {"chat_id": chat_id})
@@ -121,26 +129,46 @@ def main() -> int:
         print("BLOCKED: promote the bot and grant Manage Topics, then run this script again.")
         return 4
 
-    news_thread = str(values.get("TELEGRAM_NEWS_THREAD_ID") or "").strip()
-    trading_thread = str(values.get("TELEGRAM_TRADING_THREAD_ID") or "").strip()
+    old_news_thread = str(values.get("TELEGRAM_NEWS_THREAD_ID") or "").strip()
+    old_trading_thread = str(values.get("TELEGRAM_TRADING_THREAD_ID") or "").strip()
+    market_news_thread = str(values.get("TELEGRAM_MARKET_NEWS_THREAD_ID") or "").strip()
+    stock_news_thread = str(values.get("TELEGRAM_STOCK_NEWS_THREAD_ID") or old_news_thread).strip()
+    signals_thread = str(values.get("TELEGRAM_SIGNALS_THREAD_ID") or old_trading_thread).strip()
+    trades_thread = str(values.get("TELEGRAM_TRADES_THREAD_ID") or "").strip()
     portfolio_thread = str(values.get("TELEGRAM_PORTFOLIO_THREAD_ID") or "").strip()
     updates = {"TELEGRAM_CHAT_ID": chat_id}
-    if not news_thread.isdigit():
-        topic = call("createForumTopic", {"chat_id": chat_id, "name": "📰 חדשות", "icon_color": 7322096})
-        news_thread = str(topic["message_thread_id"])
-        updates["TELEGRAM_NEWS_THREAD_ID"] = news_thread
+    if not stock_news_thread.isdigit():
+        topic = call("createForumTopic", {"chat_id": chat_id, "name": "🏢 חדשות מניות", "icon_color": 7322096})
+        stock_news_thread = str(topic["message_thread_id"])
+    else:
+        call("editForumTopic", {"chat_id": chat_id, "message_thread_id": stock_news_thread,
+                                "name": "🏢 חדשות מניות"})
+    updates["TELEGRAM_STOCK_NEWS_THREAD_ID"] = stock_news_thread
+    _write_env(updates)
+    if not market_news_thread.isdigit():
+        topic = call("createForumTopic", {"chat_id": chat_id, "name": "📰 חדשות שוק", "icon_color": 16478047})
+        market_news_thread = str(topic["message_thread_id"])
+        updates["TELEGRAM_MARKET_NEWS_THREAD_ID"] = market_news_thread
         _write_env(updates)
-    if not trading_thread.isdigit():
-        topic = call("createForumTopic", {"chat_id": chat_id, "name": "📈 סיגנלים ועסקאות דמו", "icon_color": 9367192})
-        trading_thread = str(topic["message_thread_id"])
-        updates["TELEGRAM_TRADING_THREAD_ID"] = trading_thread
+    if not signals_thread.isdigit():
+        topic = call("createForumTopic", {"chat_id": chat_id, "name": "📡 סיגנלים", "icon_color": 9367192})
+        signals_thread = str(topic["message_thread_id"])
+    else:
+        call("editForumTopic", {"chat_id": chat_id, "message_thread_id": signals_thread,
+                                "name": "📡 סיגנלים"})
+    updates["TELEGRAM_SIGNALS_THREAD_ID"] = signals_thread
+    _write_env(updates)
+    if not trades_thread.isdigit():
+        topic = call("createForumTopic", {"chat_id": chat_id, "name": "🔔 עסקאות דמו", "icon_color": 16766590})
+        trades_thread = str(topic["message_thread_id"])
+        updates["TELEGRAM_TRADES_THREAD_ID"] = trades_thread
         _write_env(updates)
     if not portfolio_thread.isdigit():
         topic = call("createForumTopic", {"chat_id": chat_id, "name": "💼 מצב תיק דמו", "icon_color": 16766590})
         portfolio_thread = str(topic["message_thread_id"])
         updates["TELEGRAM_PORTFOLIO_THREAD_ID"] = portfolio_thread
     _write_env(updates)
-    _record_backup(chat_id, news_thread, trading_thread, portfolio_thread)
+    _record_backup(chat_id, market_news_thread, stock_news_thread, signals_thread, trades_thread, portfolio_thread)
     print("Telegram topic routing configured in the ignored .env. Restart AI-Trader to activate it.")
     return 0
 

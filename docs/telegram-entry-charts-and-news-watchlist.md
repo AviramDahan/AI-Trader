@@ -35,13 +35,24 @@ Removing a symbol stops future priority collection and alerts. Adding a symbol
 does not create a signal, order, position or trade, and old articles are not
 retroactively alerted. Yahoo coverage is periodic and may be delayed or limited.
 
-Telegram Forum routing uses three server-side topic IDs: `חדשות`, `סיגנלים
-ועסקאות דמו`, and `מצב תיק דמו`. The News topic contains one pinned scope card
-that lists the independently watched symbols separately from open-position
-symbols. The card is edited in place, so it does not create repeated messages.
+Telegram Forum routing uses five server-side topic IDs: `חדשות שוק`, `חדשות
+מניות`, `סיגנלים`, `עסקאות דמו`, and `מצב תיק דמו`. The stock-news topic
+contains one pinned scope card that lists the independently watched symbols,
+open positions, active signals and the size of the rotating technical-candidate
+pool. The card is edited in place, so it does not create repeated messages.
 Every material alert names the verified ticker and company, preserves the
 original publisher/title/publication time/direct URL, and labels Hebrew summary
 and interpretation as AI output. Headline-only coverage is stated explicitly.
+
+Stock news is not restricted to held positions. A verified item for any ticker
+in the priority/rotating scanner collection may be broadcast without creating a
+signal or trade, but only when Ollama marks it actually related, high
+materiality and at least 80% relevant. There is deliberately no per-ticker or
+daily hard cap: a second distinct critical event must not be hidden. Spam is
+controlled through verified attribution, strict quality gates, canonical
+cross-source/event-version deduplication and no repeat for unchanged items.
+Market-wide Telegram alerts are limited to high-materiality, high-relevance
+official Federal Reserve/BLS releases; other market news remains in the UI.
 
 The paper-portfolio topic contains one pinned mark-to-market card. It is edited
 every five minutes and after a delivered entry/TP/stop/SELL/stop-change event.
@@ -51,6 +62,15 @@ positions remain visible but are counted separately from the managed scanner
 account so their historic funding is not invented or mixed into its equity.
 The topic message ID is durable in SQLite; bot token, chat ID and forum topic IDs
 remain only in ignored local configuration/private backup.
+
+The Signals topic contains individual new strong-signal alerts plus one edited,
+pinned `active signals / open positions` card. That card includes every current
+primary open position without replaying fake signals. Hebrew labels are forced
+RTL and Latin tickers, company names, prices and percentages use Unicode bidi
+isolation so Telegram does not reorder mixed-language lines. Entry, current
+price, stop, operational target, confidence and time horizon use separate lines;
+the operational price is labeled `יעד`, while duration is labeled `טווח זמן`.
+Lifecycle events and entry charts remain in the separate paper-trades topic.
 
 Authenticated browser notifications send their token in the first WebSocket
 message, never in the WebSocket URL. This prevents browser/proxy access logs from

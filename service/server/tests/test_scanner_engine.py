@@ -342,6 +342,11 @@ class ScannerEngineTests(unittest.TestCase):
         messages = [call.args[0] for call in sender.call_args_list]
         self.assertTrue(any("פעולה: קנייה" in message for message in messages))
         self.assertTrue(any("אירוע: כניסה בוצעה" in message for message in messages))
+        signal_message = next(message for message in messages if "אות מסחר חזק חדש" in message)
+        self.assertIn("יעד 1:", signal_message)
+        self.assertNotIn("TP1:", signal_message)
+        self.assertIn("\u200f", signal_message)
+        self.assertIn("\u2066AAPL\u2069", signal_message)
 
     def test_sell_signal_closes_existing_long_and_both_alerts_are_delivered(self):
         self.record("BUY", "AAPL")

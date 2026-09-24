@@ -31,6 +31,15 @@ def _pct(value: float) -> str:
     return f"{value:+.2f}%"
 
 
+def _ltr(value: object) -> str:
+    """Keep Latin symbols/numbers stable inside Telegram Hebrew RTL text."""
+    return f"\u2066{value}\u2069"
+
+
+def _rtl(value: str) -> str:
+    return "\u200f" + value
+
+
 def _next_target(trade: dict, hit_indexes: set[int]) -> tuple[str, float]:
     if trade["strategy"] == "single":
         return "יעד תפעולי", float(trade["tp2"])
@@ -118,13 +127,16 @@ def portfolio_status_message() -> str:
 
 
 def news_scope_status_message() -> str:
-    """Explain exactly which verified stock tickers can produce Telegram news."""
+    """Explain the independent, anti-spam stock-news coverage."""
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("SELECT ticker,company FROM scanner_news_watchlist WHERE enabled=1 ORDER BY ticker")
     watched = [dict(row) for row in cur.fetchall()]
     cur.execute("SELECT DISTINCT ticker,company FROM scanner_trades WHERE status='open' AND is_shadow=0 ORDER BY ticker")
     positions = [dict(row) for row in cur.fetchall()]
-    cur.execute("SELECT value_json FROM scanner_settings WHERE key='active_exit_strategy'")
+    cur.execute("SELECT DISTINCT ticker FROM scanner_signals WHERE status IN ('ACTIVE','PENDING_ENTRY','ENTERED') ORDER BY ticker")
+    active_signals = [str(row["ticker"]) for row in cur.fetchall()]
+    cur.execute("SELECT COUNT(DISTINCT ticker) count FROM scanner_candidates WHERE status='candidate'")
+    candidate_count = int(cur.fetchone()["count"])
     conn.close()
     try:
         minimum = float(os.getenv("STOCK_SCANNER_NEWS_ALERT_MIN_RELEVANCE", ".65"))
@@ -132,17 +144,130 @@ def news_scope_status_message() -> str:
         minimum = .65
     watched_text = ", ".join(f"{row['ticker']} ({row['company']})" if row["company"] != row["ticker"] else row["ticker"] for row in watched) or "הרשימה ריקה"
     positions_text = ", ".join(row["ticker"] for row in positions) or "אין"
+    signals_text = ", ".join(active_signals) or "אין"
+    try:
+        broad_minimum = max(.80, min(1.0, float(os.getenv("STOCK_SCANNER_TELEGRAM_BROAD_NEWS_MIN_RELEVANCE", ".80"))))
+    except ValueError:
+        broad_minimum = .80
     updated = datetime.now(ISRAEL).strftime("%d/%m/%Y %H:%M:%S")
     return "\n\n".join((
-        "📰 חדשות חשובות — היקף המעקב",
-        "המעקב העצמאי אינו תלוי בפוזיציות. אפשר להוסיף או להסיר מניות ברשימת המעקב בדשבורד.",
-        f"מניות במעקב חדשות עצמאי:\n{watched_text}",
-        f"פוזיציות שמנוטרות בנוסף:\n{positions_text}",
-        ("Telegram מקבל ידיעה רק כאשר הטיקר אומת מול המקור, הרלוונטיות היא לפחות "
-         f"{minimum:.0%}, והמהותיות בינונית או גבוהה. ידיעה כללית או שיוך לא ודאי לא יישלחו."),
+        "🏢 חדשות מניות — היקף המעקב",
+        "הטופיק אינו מוגבל לפוזיציות. הוא מכסה רשימת מעקב, סיגנלים פעילים ומועמדים מתחלפים מהסורק.",
+        f"רשימת מעקב קבועה:\n{watched_text}",
+        f"פוזיציות פתוחות:\n{positions_text}",
+        f"סיגנלים פעילים:\n{signals_text}",
+        f"מועמדי סורק זמינים למעקב מתחלף: {candidate_count}",
+        ("ללא ספאם: חדשות watchlist/פוזיציות דורשות רלוונטיות של לפחות "
+         f"{minimum:.0%}; חדשות משאר מועמדי הסורק דורשות מהותיות גבוהה וסף מחמיר של {broad_minimum:.0%}. "
+         "אין מכסה לפי מניה: כל אירוע חדש ומהותי נשלח, ואותו אירוע/גרסה לא נשלחים פעמיים."),
         "בכל התראה יוצגו הסימול, שם החברה, המפרסם, זמן הפרסום, הקישור והפרדה בין עובדות המקור לפרשנות AI.",
         f"עודכן: {updated} (שעון ישראל)",
     ))[:4096]
+
+
+def market_news_status_message() -> str:
+    try:
+        relevance = max(.80, min(1.0, float(os.getenv("STOCK_SCANNER_TELEGRAM_BROAD_NEWS_MIN_RELEVANCE", ".80"))))
+    except ValueError:
+        relevance = .80
+    updated = datetime.now(ISRAEL).strftime("%d/%m/%Y %H:%M:%S")
+    return "\n\n".join((
+        "📰 חדשות שוק — סינון מחמיר",
+        "כאן נשלחים רק אירועי מאקרו מהותיים ממקורות רשמיים כגון Federal Reserve ו־BLS.",
+        (f"מניעת ספאם: מהותיות גבוהה, רלוונטיות של לפחות {relevance:.0%}, מקור רשמי ומניעת כפילות. "
+         "אין מכסה קשיחה שעלולה להסתיר אירוע חשוב מאוחר יותר."),
+        "חדשות שוק אחרות נשארות בדשבורד ואינן נשלחות אוטומטית ל־Telegram.",
+        "המידע אינו סיגנל מסחר ואינו יוצר עסקה.",
+        f"עודכן: {updated} (שעון ישראל)",
+    ))
+
+
+def signals_status_messages() -> list[str]:
+    """List every open primary paper position, paginating before Telegram's limit."""
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("""SELECT t.*,s.confidence,s.time_horizon
+        FROM scanner_trades t JOIN scanner_signals s ON s.id=t.signal_id
+        WHERE t.status='open' AND t.is_shadow=0 ORDER BY t.opened_at DESC,t.ticker""")
+    trades = [dict(row) for row in cur.fetchall()]
+    quotes: dict[str, dict] = {}
+    if trades:
+        tickers = sorted({row["ticker"] for row in trades})
+        placeholders = ",".join("?" for _ in tickers)
+        cur.execute(f"SELECT ticker,price,as_of FROM scanner_quotes WHERE ticker IN ({placeholders})", tuple(tickers))
+        quotes = {row["ticker"]: dict(row) for row in cur.fetchall()}
+        for trade in trades:
+            cur.execute("SELECT target_index FROM scanner_fills WHERE trade_id=? AND fill_type='tp'", (trade["id"],))
+            trade["hit_indexes"] = {int(row["target_index"]) for row in cur.fetchall() if row["target_index"] is not None}
+    conn.close()
+    lines: list[str] = []
+    horizon_he = {
+        "intraday": "תוך־יומי",
+        "1-5 days": "1–5 ימים",
+        "1-5 trading days": "1–5 ימי מסחר",
+        "1-4 weeks": "1–4 שבועות",
+        "1-3 months": "1–3 חודשים",
+    }
+    for trade in trades:
+        current = float(quotes.get(trade["ticker"], {}).get("price") or trade.get("last_price") or trade["entry_price"])
+        _, target = _next_target(trade, trade.get("hit_indexes", set()))
+        legacy = " (Legacy)" if trade.get("legacy_position_id") is not None else ""
+        confidence = float(trade.get("confidence") or 0)
+        raw_horizon = str(trade.get("time_horizon") or "לא זמין")
+        horizon = horizon_he.get(raw_horizon.lower(), raw_horizon)
+        entry_text = f"${float(trade['entry_price']):.2f}"
+        current_text = f"${current:.2f}"
+        stop_text = f"${float(trade['current_stop']):.2f}"
+        target_text = f"${target:.2f}"
+        confidence_text = f"{confidence:.0%}"
+        lines.append(
+            "\n".join((
+                _rtl(f"סימול: {_ltr(trade['ticker'])}{legacy}"),
+                _rtl(f"חברה: {_ltr(trade['company'])}"),
+                _rtl("פעולה: קנייה"),
+                _rtl(f"כניסה: {_ltr(entry_text)}"),
+                _rtl(f"מחיר נוכחי: {_ltr(current_text)}"),
+                _rtl(f"סטופ: {_ltr(stop_text)}"),
+                _rtl(f"יעד: {_ltr(target_text)}"),
+                _rtl(f"רמת ביטחון: {_ltr(confidence_text)}"),
+                _rtl(f"טווח זמן: {horizon}"),
+            ))
+        )
+    updated = datetime.now(ISRAEL).strftime("%d/%m/%Y %H:%M:%S")
+    if not lines:
+        lines = [_rtl("אין כרגע פוזיציות פתוחות.")]
+    # Reserve ample room for the repeated heading/footer. A single position
+    # block is bounded by database field lengths and remains far below 3200.
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    for line in lines:
+        projected = len("\n\n".join(current + [line]))
+        if current and projected > 3200:
+            chunks.append(current)
+            current = [line]
+        else:
+            current.append(line)
+    chunks.append(current)
+    pages: list[str] = []
+    page_count = len(chunks)
+    for index, chunk in enumerate(chunks, 1):
+        page_label = _rtl(f"עמוד {_ltr(index)} מתוך {_ltr(page_count)}") if page_count > 1 else ""
+        message = "\n\n".join(value for value in (
+            _rtl("📡 סיגנלים פעילים / פוזיציות פתוחות"),
+            page_label,
+            _rtl("⚠️ מסחר מדומה בלבד. זו תמונת מצב, לא המלצה או פקודת מסחר."),
+            _rtl(f"סה״כ פוזיציות פתוחות: {_ltr(len(trades))}"),
+            "\n\n".join(chunk),
+            _rtl(f"עודכן: {_ltr(updated)} (שעון ישראל)"),
+        ) if value)
+        if len(message) > 4096:
+            raise ValueError("A single Telegram signal-status page exceeds 4096 characters")
+        pages.append(message)
+    return pages
+
+
+def signals_status_message() -> str:
+    """Compatibility accessor for the first status page."""
+    return signals_status_messages()[0]
 
 
 def _call(session: requests.Session, base: str, method: str, data: dict) -> tuple[bool, dict, str]:
@@ -222,11 +347,67 @@ def _upsert_pinned_message(state_key: str, event_type: str, text: str) -> str:
     return result
 
 
+def _remove_stale_signal_pages(active_page_count: int) -> dict[str, str]:
+    """Delete overflow status pages that are no longer part of the live snapshot."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat_id:
+        return {}
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("""SELECT state_key,message_id FROM scanner_telegram_topic_state
+                   WHERE state_key LIKE 'signals_status:%' ORDER BY state_key""")
+    stale: list[dict] = []
+    for row in cur.fetchall():
+        try:
+            page_number = int(str(row["state_key"]).rsplit(":", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        if page_number > active_page_count and row["message_id"]:
+            stale.append(dict(row))
+    conn.close()
+    if not stale:
+        return {}
+
+    session = requests.Session(); session.trust_env = False
+    base = f"https://api.telegram.org/bot{token}"
+    results: dict[str, str] = {}
+    for row in stale:
+        state_key, message_id = str(row["state_key"]), int(row["message_id"])
+        # Unpin is best effort: deletion is the authoritative stale-page cleanup.
+        _call(session, base, "unpinChatMessage", {"chat_id": chat_id, "message_id": message_id})
+        deleted, _, error = _call(session, base, "deleteMessage", {
+            "chat_id": chat_id, "message_id": message_id,
+        })
+        already_absent = any(marker in error.lower() for marker in (
+            "message to delete not found", "message_id_invalid", "message identifier is not specified",
+        ))
+        conn = get_db_connection(); cur = conn.cursor()
+        if deleted or already_absent:
+            cur.execute("DELETE FROM scanner_telegram_topic_state WHERE state_key=?", (state_key,))
+            results[state_key] = "deleted"
+        else:
+            cur.execute("""UPDATE scanner_telegram_topic_state
+                           SET last_attempt_at=?,last_error=? WHERE state_key=?""",
+                        (_now_z(), f"delete:{error}"[:300], state_key))
+            results[state_key] = "failed"
+        conn.commit(); conn.close()
+    return results
+
+
 def refresh_telegram_status_cards() -> dict[str, str]:
     enabled = os.getenv("STOCK_SCANNER_TELEGRAM_PORTFOLIO_STATUS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     if not enabled:
         return {"portfolio": "disabled", "news_scope": "disabled"}
-    return {
+    result = {
         "portfolio": _upsert_pinned_message("portfolio", "portfolio_status", portfolio_status_message()),
         "news_scope": _upsert_pinned_message("news_scope", "news_status", news_scope_status_message()),
+        "market_news_scope": _upsert_pinned_message(
+            "market_news_scope", "market_news", market_news_status_message()
+        ),
     }
+    signal_pages = signals_status_messages()
+    for index, page in enumerate(signal_pages, 1):
+        key = "signals_status" if index == 1 else f"signals_status:{index}"
+        result[key] = _upsert_pinned_message(key, "signals_status", page)
+    result.update(_remove_stale_signal_pages(len(signal_pages)))
+    return result

@@ -14,24 +14,46 @@ class TelegramTopicRoutingTests(unittest.TestCase):
         with patch.dict(os.environ, {
             "TELEGRAM_NEWS_THREAD_ID": "101",
             "TELEGRAM_TRADING_THREAD_ID": "202",
+            "TELEGRAM_MARKET_NEWS_THREAD_ID": "111",
+            "TELEGRAM_STOCK_NEWS_THREAD_ID": "112",
+            "TELEGRAM_SIGNALS_THREAD_ID": "211",
+            "TELEGRAM_TRADES_THREAD_ID": "212",
             "TELEGRAM_PORTFOLIO_THREAD_ID": "303",
         }, clear=False):
-            for event in ("position_news", "watchlist_news", "watchlist_news_correction", "correction", "news_status"):
-                self.assertEqual(thread_id_for_event(event), 101)
-            for event in ("new_signal", "entry", "entry_chart", "tp", "stop", "sell", "stop_change"):
-                self.assertEqual(thread_id_for_event(event), 202)
+            self.assertEqual(thread_id_for_event("market_news"), 111)
+            for event in ("position_news", "watchlist_news", "watchlist_news_correction", "stock_news", "correction", "news_status"):
+                self.assertEqual(thread_id_for_event(event), 112)
+            self.assertEqual(thread_id_for_event("new_signal"), 211)
+            self.assertEqual(thread_id_for_event("signals_status"), 211)
+            for event in ("entry", "entry_chart", "tp", "stop", "sell", "stop_change"):
+                self.assertEqual(thread_id_for_event(event), 212)
             self.assertEqual(thread_id_for_event("portfolio_status"), 303)
 
     def test_missing_or_invalid_thread_falls_back_to_general_chat(self):
         with patch.dict(os.environ, {
             "TELEGRAM_NEWS_THREAD_ID": "invalid",
             "TELEGRAM_TRADING_THREAD_ID": "",
+            "TELEGRAM_MARKET_NEWS_THREAD_ID": "",
+            "TELEGRAM_STOCK_NEWS_THREAD_ID": "",
+            "TELEGRAM_SIGNALS_THREAD_ID": "",
+            "TELEGRAM_TRADES_THREAD_ID": "",
             "TELEGRAM_PORTFOLIO_THREAD_ID": "",
         }, clear=False):
             self.assertEqual(destination_fields("-1001", "position_news"), {"chat_id": "-1001"})
             self.assertEqual(destination_fields("-1001", "entry"), {"chat_id": "-1001"})
             self.assertEqual(destination_fields("-1001", "portfolio_status"), {"chat_id": "-1001"})
             self.assertEqual(destination_fields("-1001", None), {"chat_id": "-1001"})
+
+    def test_new_routes_fall_back_to_legacy_topic_ids_during_upgrade(self):
+        with patch.dict(os.environ, {
+            "TELEGRAM_NEWS_THREAD_ID": "101", "TELEGRAM_TRADING_THREAD_ID": "202",
+            "TELEGRAM_MARKET_NEWS_THREAD_ID": "", "TELEGRAM_STOCK_NEWS_THREAD_ID": "",
+            "TELEGRAM_SIGNALS_THREAD_ID": "", "TELEGRAM_TRADES_THREAD_ID": "",
+        }, clear=False):
+            self.assertEqual(thread_id_for_event("market_news"), 101)
+            self.assertEqual(thread_id_for_event("stock_news"), 101)
+            self.assertEqual(thread_id_for_event("new_signal"), 202)
+            self.assertEqual(thread_id_for_event("tp"), 202)
 
 
 if __name__ == "__main__":

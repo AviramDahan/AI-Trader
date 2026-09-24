@@ -107,6 +107,7 @@ def feed_settings() -> dict[str, Any]:
         # Large JSON batches can exhaust Ollama's output budget mid-object.
         "analysis_batch": _int_env("STOCK_SCANNER_NEWS_AI_BATCH_SIZE", 3, 1, 30),
         "alert_min_relevance": _float_env("STOCK_SCANNER_NEWS_ALERT_MIN_RELEVANCE", .65, 0, 1),
+        "broad_alert_min_relevance": _float_env("STOCK_SCANNER_TELEGRAM_BROAD_NEWS_MIN_RELEVANCE", .80, .80, 1),
         "sec_user_agent": os.getenv("NEWS_SEC_USER_AGENT", "").strip(),
     }
 
@@ -652,6 +653,45 @@ def _watchlist_alert_message(row: dict[str, Any]) -> str:
                          "המניה נמצאת ברשימת מעקב חדשות בלבד. לא נוצרו סיגנל או עסקה."))[:4000]
 
 
+def _stock_broadcast_alert_message(row: dict[str, Any]) -> str:
+    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
+    materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
+    source_limit = "זמינים כותרת ומטא־דאטה בלבד." if row.get("headline_only") else "זמין תקציר שסופק בפיד; הכתבה המלאה לא נותחה."
+    return "\n\n".join(("AI-Trader — חדשות מניות חשובות מהסורק | ללא עסקה",
+                         f"סימולים: {row['ticker']}\nחברות: {row.get('company') or 'לא זמין'}\nהשפעה אפשרית: {impact}\nמהותיות: {materiality}",
+                         f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {row['published_at']}\n{source_limit}",
+                         f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
+                         f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",
+                         f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
+                         "הידיעה עברה סינון מחמיר של הסורק. היא אינה סיגנל ואינה יוצרת עסקה."))[:4000]
+
+
+def _market_broadcast_alert_message(row: dict[str, Any]) -> str:
+    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
+    return "\n\n".join(("AI-Trader — חדשות שוק מהותיות",
+                         f"השפעה אפשרית: {impact}\nמהותיות: גבוהה",
+                         f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {row['published_at']}",
+                         f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
+                         f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",
+                         f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
+                         "עדכון שוק בלבד — לא נוצרו סיגנל או עסקה."))[:4000]
+
+
+def _company_for_ticker(cur, ticker: str) -> str:
+    queries = (
+        "SELECT company FROM scanner_trades WHERE ticker=? AND company IS NOT NULL AND company!='' ORDER BY id DESC LIMIT 1",
+        "SELECT company FROM scanner_signals WHERE ticker=? AND company IS NOT NULL AND company!='' ORDER BY id DESC LIMIT 1",
+        "SELECT company FROM scanner_news_watchlist WHERE ticker=? AND company IS NOT NULL AND company!='' ORDER BY updated_at DESC LIMIT 1",
+        "SELECT company FROM scanner_candidates WHERE ticker=? AND company IS NOT NULL AND company!='' ORDER BY id DESC LIMIT 1",
+    )
+    for query in queries:
+        cur.execute(query, (ticker,))
+        row = cur.fetchone()
+        if row and row["company"]:
+            return str(row["company"])
+    return ticker
+
+
 def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
     """Upgrade legacy translated rows after they gain a priority relationship.
 
@@ -798,16 +838,19 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
             # A watched open position already receives the position alert above;
             # never send a second notification for the same news/version.
             verified = {str(value).upper() for value in _loads(row.get("verified_tickers_json"), [])}
+            strict_verified = set(verified)
             # Priority-provider verified tickers are authoritative. Only fall
             # back to the legacy ticker when no verified mapping exists.
             if not verified and row.get("ticker"):
                 verified.add(str(row["ticker"]).upper())
             position_tickers = {str(trade["ticker"]).upper() for trade in trade_rows}
             watchlist_tickers = verified - position_tickers
+            watched_tickers: set[str] = set()
             if watchlist_tickers:
                 placeholders = ",".join("?" for _ in watchlist_tickers)
                 cur.execute(f"SELECT ticker,company FROM scanner_news_watchlist WHERE enabled=1 AND ticker IN ({placeholders})", tuple(sorted(watchlist_tickers)))
                 watched = [dict(value) for value in cur.fetchall()]
+                watched_tickers = {str(value["ticker"]).upper() for value in watched}
                 for watched_row in watched:
                     ticker = watched_row["ticker"]
                     version = row.get("content_hash") or "v1"
@@ -822,6 +865,52 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
                                  "summary_he": result.get("summary_he"), "interpretation_he": result.get("interpretation_he")}
                     enqueue_telegram(cur, f"watchlist-news:{row['id']}:{version}:{ticker}",
                                      "watchlist_news", _watchlist_alert_message(alert_row)); alerts += 1
+
+            # A strict broadcast tier covers important company news for
+            # the rotating scanner shortlist even when no position/watchlist
+            # exists. It never duplicates a ticker already covered above or
+            # suppresses a distinct later event merely because the ticker was busy.
+            cfg = feed_settings()
+            version = row.get("content_hash") or "v1"
+            broad_quality = materiality == "high" and relevance >= cfg["broad_alert_min_relevance"]
+            uncovered = sorted(strict_verified - position_tickers - watched_tickers)
+            if broad_quality and uncovered:
+                allowed: list[str] = []
+                for ticker in uncovered:
+                    cur.execute("""SELECT 1 FROM scanner_news_broadcast_alerts
+                                   WHERE news_id=? AND channel='stock' AND ticker=? AND event_version=? LIMIT 1""",
+                                (row["id"], ticker, version))
+                    if not cur.fetchone():
+                        allowed.append(ticker)
+                if allowed:
+                    for ticker in allowed:
+                        cur.execute("""INSERT INTO scanner_news_broadcast_alerts
+                            (news_id,channel,ticker,event_version,created_at) VALUES(?,'stock',?,?,?)
+                            ON CONFLICT(news_id,channel,ticker,event_version) DO NOTHING""",
+                            (row["id"], ticker, version, stamp))
+                    companies = [_company_for_ticker(cur, ticker) for ticker in allowed]
+                    alert_row = {**row, "ticker": ", ".join(allowed), "company": ", ".join(companies),
+                                 "impact": sentiment, "materiality": materiality,
+                                 "summary_he": result.get("summary_he"),
+                                 "interpretation_he": result.get("interpretation_he")}
+                    enqueue_telegram(cur, f"stock-news:{row['id']}:{version}:{','.join(allowed)}",
+                                     "stock_news", _stock_broadcast_alert_message(alert_row)); alerts += 1
+
+            # Market-wide Telegram news is deliberately restricted to official
+            # macro publishers. General syndicated feeds
+            # remain visible in the dashboard but cannot flood Telegram.
+            if (broad_quality and not strict_verified and row.get("scope") == "market" and
+                    row.get("provider") in {"federal_reserve", "bls"}):
+                cur.execute("""INSERT INTO scanner_news_broadcast_alerts
+                    (news_id,channel,ticker,event_version,created_at) VALUES(?,'market','',?,?)
+                    ON CONFLICT(news_id,channel,ticker,event_version) DO NOTHING""",
+                    (row["id"], version, stamp))
+                if cur.rowcount:
+                    alert_row = {**row, "impact": sentiment, "materiality": materiality,
+                                 "summary_he": result.get("summary_he"),
+                                 "interpretation_he": result.get("interpretation_he")}
+                    enqueue_telegram(cur, f"market-news:{row['id']}:{version}",
+                                     "market_news", _market_broadcast_alert_message(alert_row)); alerts += 1
     conn.commit(); conn.close()
     from scanner_engine import set_service_status
     set_service_status("news_ai", "ok", f"analyzed={analyzed} alerts_queued={alerts}", success=True)

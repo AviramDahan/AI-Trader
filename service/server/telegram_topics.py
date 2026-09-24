@@ -5,27 +5,39 @@ from __future__ import annotations
 import os
 
 
-NEWS_EVENT_TYPES = {
-    "position_news", "watchlist_news", "watchlist_news_correction", "correction", "news_status",
+MARKET_NEWS_EVENT_TYPES = {"market_news"}
+STOCK_NEWS_EVENT_TYPES = {
+    "position_news", "watchlist_news", "watchlist_news_correction", "stock_news", "correction", "news_status",
 }
+SIGNAL_EVENT_TYPES = {"new_signal", "signals_status"}
+TRADE_EVENT_TYPES = {"entry", "entry_chart", "tp", "stop", "sell", "stop_change"}
 PORTFOLIO_EVENT_TYPES = {"portfolio_status"}
 
 
 def thread_id_for_event(event_type: str | None) -> int | None:
     if not event_type:
         return None
-    if event_type in NEWS_EVENT_TYPES:
-        name = "TELEGRAM_NEWS_THREAD_ID"
+    if event_type in MARKET_NEWS_EVENT_TYPES:
+        names = ("TELEGRAM_MARKET_NEWS_THREAD_ID", "TELEGRAM_NEWS_THREAD_ID")
+    elif event_type in STOCK_NEWS_EVENT_TYPES:
+        names = ("TELEGRAM_STOCK_NEWS_THREAD_ID", "TELEGRAM_NEWS_THREAD_ID")
+    elif event_type in SIGNAL_EVENT_TYPES:
+        names = ("TELEGRAM_SIGNALS_THREAD_ID", "TELEGRAM_TRADING_THREAD_ID")
+    elif event_type in TRADE_EVENT_TYPES:
+        names = ("TELEGRAM_TRADES_THREAD_ID", "TELEGRAM_TRADING_THREAD_ID")
     elif event_type in PORTFOLIO_EVENT_TYPES:
-        name = "TELEGRAM_PORTFOLIO_THREAD_ID"
+        names = ("TELEGRAM_PORTFOLIO_THREAD_ID",)
     else:
-        name = "TELEGRAM_TRADING_THREAD_ID"
-    value = os.getenv(name, "").strip()
-    try:
-        thread_id = int(value)
-        return thread_id if thread_id > 0 else None
-    except (TypeError, ValueError):
-        return None
+        names = ("TELEGRAM_TRADING_THREAD_ID",)
+    for name in names:
+        value = os.getenv(name, "").strip()
+        try:
+            thread_id = int(value)
+            if thread_id > 0:
+                return thread_id
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def destination_fields(chat_id: str, event_type: str | None) -> dict[str, str | int]:

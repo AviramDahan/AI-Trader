@@ -276,6 +276,14 @@ def enqueue_telegram(cursor, dedupe_key: str, event_type: str, message: str) -> 
                    (dedupe_key, event_type, message[:4000], "pending", stamp, stamp))
 
 
+def _telegram_ltr(value: object) -> str:
+    return f"\u2066{value}\u2069"
+
+
+def _telegram_rtl(value: str) -> str:
+    return "\u200f" + value
+
+
 def _signal_telegram_message(signal: dict[str, Any]) -> str:
     reason = str(signal.get("reason_he") or "הסיבה נבדקה על ידי הסורק.").strip()
     reason = "\n\n".join(part.strip() for part in re.split(r"(?<=[.!?])\s+", reason) if part.strip())
@@ -283,14 +291,34 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
     titles = [str(item.get("title_he") or item.get("title") or "").strip() for item in news[:3]]
     news_text = "\n\n".join(f"• {title}" for title in titles if title) or "אין"
     action = {"BUY": "קנייה", "SELL": "מכירה", "HOLD": "החזקה"}.get(signal["action"], signal["action"])
+    prices = {
+        "entry": f"${float(signal['planned_entry']):.2f}",
+        "stop": f"${float(signal['original_stop']):.2f}",
+        "tp1": f"${float(signal['tp1']):.2f}",
+        "tp2": f"${float(signal['tp2']):.2f}",
+        "tp3": f"${float(signal['tp3']):.2f}",
+    }
+    confidence = f"{float(signal['confidence']):.0%}"
     return "\n\n".join([
-        "AI-Trader — מסחר מדומה בלבד | אות מסחר חזק חדש",
-        f"סימול: {signal['ticker']}\nחברה: {signal['company']}\nפעולה: {action}",
-        f"כניסה מתוכננת: ${signal['planned_entry']:.2f}\nסטופ מקורי: ${signal['original_stop']:.2f}\n"
-        f"TP1: ${signal['tp1']:.2f}\nTP2: ${signal['tp2']:.2f}\nTP3: ${signal['tp3']:.2f}",
-        f"ציון מודל לא־מכויל: {signal['confidence']:.0%}\nתוקף: {signal['valid_until']}",
-        f"סיבה:\n{reason}",
-        f"חדשות רלוונטיות:\n{news_text}",
+        _telegram_rtl(f"{_telegram_ltr('AI-Trader')} — מסחר מדומה בלבד | אות מסחר חזק חדש"),
+        "\n".join((
+            _telegram_rtl(f"סימול: {_telegram_ltr(signal['ticker'])}"),
+            _telegram_rtl(f"חברה: {_telegram_ltr(signal['company'])}"),
+            _telegram_rtl(f"פעולה: {action}"),
+        )),
+        "\n".join((
+            _telegram_rtl(f"כניסה מתוכננת: {_telegram_ltr(prices['entry'])}"),
+            _telegram_rtl(f"סטופ מקורי: {_telegram_ltr(prices['stop'])}"),
+            _telegram_rtl(f"יעד 1: {_telegram_ltr(prices['tp1'])}"),
+            _telegram_rtl(f"יעד 2: {_telegram_ltr(prices['tp2'])}"),
+            _telegram_rtl(f"יעד 3: {_telegram_ltr(prices['tp3'])}"),
+        )),
+        "\n".join((
+            _telegram_rtl(f"ציון מודל לא־מכויל: {_telegram_ltr(confidence)}"),
+            _telegram_rtl(f"תוקף: {_telegram_ltr(signal['valid_until'])}"),
+        )),
+        _telegram_rtl(f"סיבה:\n{reason}"),
+        _telegram_rtl(f"חדשות רלוונטיות:\n{news_text}"),
     ])[:4000]
 
 

@@ -13,8 +13,10 @@ SPEC.loader.exec_module(topics_setup)
 
 
 def response(result):
-    value = Mock(ok=True)
-    value.json.return_value = {"ok": True, "result": result}
+    is_error = isinstance(result, dict) and "__error__" in result
+    value = Mock(ok=not is_error)
+    value.json.return_value = ({"ok": False, "description": result["__error__"]}
+                               if is_error else {"ok": True, "result": result})
     return value
 
 
@@ -50,10 +52,26 @@ class ConfigureTelegramTopicsTests(unittest.TestCase):
         code, session = self.run_with(
             {"TELEGRAM_BOT_TOKEN": "test", "TELEGRAM_CHAT_ID": "-1001",
              "TELEGRAM_NEWS_THREAD_ID": "101", "TELEGRAM_TRADING_THREAD_ID": "202",
+             "TELEGRAM_MARKET_NEWS_THREAD_ID": "111", "TELEGRAM_STOCK_NEWS_THREAD_ID": "112",
+             "TELEGRAM_SIGNALS_THREAD_ID": "211", "TELEGRAM_TRADES_THREAD_ID": "212",
              "TELEGRAM_PORTFOLIO_THREAD_ID": "303"},
             {"getChat": {"type": "supergroup", "is_forum": True},
              "getMe": {"id": 7},
-             "getChatMember": {"status": "administrator", "can_manage_topics": True}},
+             "getChatMember": {"status": "administrator", "can_manage_topics": True},
+             "editForumTopic": True},
+        )
+        self.assertEqual(code, 0)
+        self.assertFalse(any(call.args[0].endswith("/createForumTopic") for call in session.post.call_args_list))
+
+    def test_already_named_topics_are_idempotent(self):
+        code, session = self.run_with(
+            {"TELEGRAM_BOT_TOKEN": "test", "TELEGRAM_CHAT_ID": "-1001",
+             "TELEGRAM_MARKET_NEWS_THREAD_ID": "111", "TELEGRAM_STOCK_NEWS_THREAD_ID": "112",
+             "TELEGRAM_SIGNALS_THREAD_ID": "211", "TELEGRAM_TRADES_THREAD_ID": "212",
+             "TELEGRAM_PORTFOLIO_THREAD_ID": "303"},
+            {"getChat": {"type": "supergroup", "is_forum": True}, "getMe": {"id": 7},
+             "getChatMember": {"status": "administrator", "can_manage_topics": True},
+             "editForumTopic": {"__error__": "Bad Request: TOPIC_NOT_MODIFIED"}},
         )
         self.assertEqual(code, 0)
         self.assertFalse(any(call.args[0].endswith("/createForumTopic") for call in session.post.call_args_list))

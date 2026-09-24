@@ -1577,6 +1577,17 @@ def init_database():
         )
     """)
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_news_broadcast_alerts (
+            news_id INTEGER NOT NULL,
+            channel TEXT NOT NULL,
+            ticker TEXT NOT NULL DEFAULT '',
+            event_version TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(news_id, channel, ticker, event_version),
+            FOREIGN KEY (news_id) REFERENCES scanner_news(id)
+        )
+    """)
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS scanner_trade_news (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             trade_id INTEGER NOT NULL,

@@ -105,11 +105,14 @@ entry, every TP, stop changes, stop/final exits, and material position news. Par
 quantity. Missing/disabled credentials safely disable delivery and never stop scanning. Tests mock delivery and
 never send a live experimental alert. Secrets remain only in ignored `.env` and the private local backup.
 
-Forum groups also receive an edited, pinned paper-account card under `מצב תיק דמו` and an edited, pinned news
-scope card under `חדשות`. `TELEGRAM_PORTFOLIO_THREAD_ID` selects the account topic;
+Forum groups separate `חדשות שוק`, `חדשות מניות`, `סיגנלים`, `עסקאות דמו`, and `מצב תיק דמו`.
+The paper-account and news-scope cards are edited in place. `TELEGRAM_PORTFOLIO_THREAD_ID` selects the account topic;
 `STOCK_SCANNER_TELEGRAM_PORTFOLIO_STATUS_INTERVAL` controls the periodic refresh (300 seconds by default).
 News-watchlist alerts do not require a position, but still require verified ticker attribution, minimum relevance,
-medium/high materiality and a meaningful positive/negative/mixed assessment.
+medium/high materiality and a meaningful positive/negative/mixed assessment. Broader rotating-candidate stock news
+requires high materiality and at least 80% relevance. It has no hard daily/per-ticker cap; distinct important events
+all pass, while the same canonical event/version is deduplicated. Market-topic alerts accept only strict official
+Federal Reserve/BLS events. Topic IDs remain server-side only.
 
 Scanner status reports separate last attempt/success for prices, news, Ollama, scan, price monitor, position-news,
 and Telegram. It distinguishes market closed, no signals, no new news, and errors.

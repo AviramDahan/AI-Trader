@@ -182,6 +182,96 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(len(watched), 1)
         self.assertIn("NVDA", watched[0]["message"])
 
+    def test_distinct_high_quality_stock_news_all_alert_without_position_or_watchlist(self):
+        news_pipeline.ingest_items([self.item("yahoo_priority", "https://example.test/nvda-broad", "NVDA")], self.clock)
+
+        def analyzer(rows):
+            return [{"id": row["id"], "related": True, "title_he": "עדכון מהותי",
+                     "summary_he": "עדכון חשוב למניה.", "sentiment": "positive",
+                     "materiality": "high", "thesis_effect": "unchanged",
+                     "interpretation_he": "ייתכן אפקט חיובי, אך קיימת אי־ודאות.", "relevance": .95}
+                    for row in rows]
+
+        with patch.dict(os.environ, {
+            "STOCK_SCANNER_TELEGRAM_BROAD_NEWS_MIN_RELEVANCE": ".80",
+        }, clear=False):
+            first = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
+            later = {**self.item("yahoo_priority", "https://example.test/nvda-broad-2", "NVDA"),
+                     "title": "A second material NVDA update"}
+            news_pipeline.ingest_items([later], self.clock + timedelta(hours=1))
+            second = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock + timedelta(hours=1))
+        self.assertEqual(first["alerts"], 1)
+        self.assertEqual(second["alerts"], 1)
+        alerts = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='stock_news'")
+        self.assertEqual(len(alerts), 2)
+        self.assertIn("NVDA", alerts[0]["message"])
+        self.assertIn("אינה סיגנל", alerts[0]["message"])
+
+    def test_broad_stock_news_requires_high_materiality_and_strict_relevance(self):
+        items = []
+        for index, ticker in enumerate(("NVDA", "AMD"), 1):
+            item = self.item("yahoo_priority", f"https://example.test/weak-{index}", ticker)
+            item["title"] = f"Candidate update {index}"
+            items.append(item)
+        news_pipeline.ingest_items(items, self.clock)
+
+        def analyzer(rows):
+            output = []
+            for index, row in enumerate(rows):
+                output.append({"id": row["id"], "related": True, "summary_he": "עדכון.",
+                               "sentiment": "positive", "materiality": "medium" if index == 0 else "high",
+                               "thesis_effect": "unchanged", "interpretation_he": "לא ברור.",
+                               "relevance": .95 if index == 0 else .70})
+            return output
+
+        news_pipeline.analyze_news_jobs(limit=10, analyzer=analyzer, at=self.clock)
+        self.assertFalse(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='stock_news'"))
+
+    def test_broad_stock_news_requires_strict_provider_verified_ticker(self):
+        conn = database.get_db_connection()
+        conn.execute("""INSERT INTO scanner_news(
+            fingerprint,ticker,scope,title,publisher,url,published_at,analysis_status,fetched_at,
+            verified_tickers_json,content_hash,provider,updated_at)
+            VALUES('unverified-nvda','NVDA','universe','Unverified ticker claim','Publisher',
+                   'https://example.test/unverified',?,'pending_analysis',?,'[]','v1','legacy',?)""",
+                     (self.clock.isoformat(), self.clock.isoformat(), self.clock.isoformat()))
+        news_id = conn.execute("SELECT id FROM scanner_news WHERE fingerprint='unverified-nvda'").fetchone()[0]
+        conn.execute("""INSERT INTO scanner_news_jobs(news_id,priority,status,next_attempt_at,created_at,updated_at)
+                      VALUES(?,70,'pending',?,?,?)""", (news_id, self.clock.isoformat(), self.clock.isoformat(), self.clock.isoformat()))
+        conn.commit(); conn.close()
+        result = news_pipeline.analyze_news_jobs(analyzer=lambda rows: [{
+            "id": rows[0]["id"], "related": True, "summary_he": "טענה לא מאומתת.",
+            "sentiment": "positive", "materiality": "high", "thesis_effect": "unchanged",
+            "interpretation_he": "אין אימות טיקר.", "relevance": .99,
+        }], at=self.clock)
+        self.assertEqual(result["alerts"], 0)
+        self.assertFalse(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='stock_news'"))
+
+    def test_broad_news_relevance_floor_cannot_be_lowered_below_eighty_percent(self):
+        with patch.dict(os.environ, {"STOCK_SCANNER_TELEGRAM_BROAD_NEWS_MIN_RELEVANCE": ".65"}, clear=False):
+            self.assertEqual(news_pipeline.feed_settings()["broad_alert_min_relevance"], .80)
+
+    def test_all_distinct_official_high_quality_market_news_alert(self):
+        items = []
+        for index in range(3):
+            item = self.item("federal_reserve", f"https://example.test/fed-{index}")
+            item["title"] = f"Federal Reserve material release {index}"
+            items.append(item)
+        news_pipeline.ingest_items(items, self.clock)
+
+        def analyzer(rows):
+            return [{"id": row["id"], "related": True, "title_he": "עדכון מאקרו",
+                     "summary_he": "הפדרל ריזרב פרסם עדכון.", "sentiment": "mixed",
+                     "materiality": "high", "thesis_effect": "unchanged",
+                     "interpretation_he": "עשויה להיות השפעה רחבה, אך קיימת אי־ודאות.", "relevance": .95}
+                    for row in rows]
+
+        result = news_pipeline.analyze_news_jobs(limit=10, analyzer=analyzer, at=self.clock)
+        self.assertEqual(result["alerts"], 3)
+        alerts = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='market_news'")
+        self.assertEqual(len(alerts), 3)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_news_broadcast_alerts WHERE channel='market'")), 3)
+
     def test_legacy_translated_item_is_fully_analyzed_after_verified_watchlist_upgrade(self):
         scanner_engine.set_news_watchlist("INTC", "Intel")
         conn = database.get_db_connection()
@@ -299,7 +389,11 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
                                     "materiality": "high", "thesis_effect": "weakens",
                                     "interpretation_he": "השפעה אפשרית שלילית.", "relevance": .9}],
             at=self.clock + timedelta(minutes=10))
-        self.assertEqual(result["alerts"], 0)
+        # Closing the trade stops dedicated position alerts. The same verified,
+        # high-quality item may still qualify for the independent stock-news topic.
+        self.assertEqual(result["alerts"], 1)
+        self.assertFalse(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news'"))
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='stock_news'")), 1)
 
     def test_six_hour_review_reuses_cache_and_partial_position_remains_scheduled(self):
         self.open_trade()
