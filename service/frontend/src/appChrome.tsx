@@ -3,22 +3,7 @@ import { discoverBackend, runtimeOrigin } from './runtimeConfig'
 
 import { Link, useLocation } from 'react-router-dom'
 
-import { API_ORIGIN, type AgentInfo, useLanguage, useTheme } from './appShared'
-
-export function Toast({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) {
-  useEffect(() => {
-    const timer = setTimeout(onClose, 3000)
-    return () => clearTimeout(timer)
-  }, [onClose])
-
-  return <div className={`toast ${type}`}>{message}</div>
-}
-
-export type NotificationCounts = {
-  discussion: number
-  strategy: number
-  experiment: number
-}
+import { API_ORIGIN, useLanguage, useTheme } from './appShared'
 
 function LanguageSwitcher() {
   const { language, setLanguage } = useLanguage()
@@ -154,27 +139,10 @@ export function BackendStatusBanner() {
   )
 }
 
-export function Sidebar({
-  token,
-  agentInfo,
-  onLogout,
-  notificationCounts,
-  onMarkCategoryRead
-}: {
-  token: string | null
-  agentInfo: AgentInfo | null
-  onLogout: () => void
-  notificationCounts: NotificationCounts
-  onMarkCategoryRead: (category: 'discussion' | 'strategy' | 'experiment') => void
-}) {
+export function Sidebar() {
   const location = useLocation()
   const { language } = useLanguage()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  void token
-  void agentInfo
-  void onLogout
-  void notificationCounts
-  void onMarkCategoryRead
 
   const navItems = [
     { path: '/market?tab=signals', icon: '📊', label: language === 'he' ? 'סיגנלים' : 'Signals' },
