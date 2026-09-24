@@ -259,6 +259,7 @@ function AppRouter({
 }) {
   const location = useLocation()
   const isLanding = location.pathname === '/'
+  const isScannerRoute = location.pathname === '/market' || location.pathname.endsWith('/market')
   const canUseExperiments = hasPermission(agentInfo, 'experiment_admin')
   const canUseResearchExports = hasPermission(agentInfo, 'research_exports')
   const canUseTeamMissionAdmin = hasPermission(agentInfo, 'team_mission_admin')
@@ -285,7 +286,7 @@ function AppRouter({
       />
 
       <main className="main-content" style={{ display: 'flex', gap: '24px' }}>
-        <div style={{ flex: 1 }}>
+        <div className="app-main-column">
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
             <TopbarControls />
           </div>
@@ -315,7 +316,7 @@ function AppRouter({
           </Routes>
         </div>
 
-        {location.pathname !== '/market' && <TrendingSidebar />}
+        {!isScannerRoute && <TrendingSidebar />}
       </main>
     </div>
   )

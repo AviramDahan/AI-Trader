@@ -95,6 +95,17 @@ class ScannerEngineTests(unittest.TestCase):
         other_id = cur.lastrowid
         cur.execute("UPDATE scanner_signals SET agent_id=? WHERE ticker='AAPL'", (other_id,))
         cur.execute("UPDATE scanner_trades SET agent_id=? WHERE ticker='AAPL'", (other_id,))
+        rogue_signal_id = cur.execute("SELECT id FROM scanner_signals WHERE ticker='AAPL' LIMIT 1").fetchone()[0]
+        rogue_trade_id = cur.execute("SELECT id FROM scanner_trades WHERE ticker='AAPL' AND is_shadow=0").fetchone()[0]
+        stamp = scanner_engine.now_z()
+        cur.execute("""INSERT INTO scanner_news(
+            fingerprint,signal_id,ticker,scope,title,publisher,url,published_at,analysis_status,fetched_at)
+            VALUES('other-agent-news',?,'AAPL','universe','Other agent news','Wire',
+                   'https://example.test/other-agent-news',?,'analyzed',?)""",
+                    (rogue_signal_id, stamp, stamp))
+        rogue_news_id = cur.lastrowid
+        cur.execute("INSERT INTO scanner_trade_news(trade_id,news_id,linked_at) VALUES(?,?,?)",
+                    (rogue_trade_id, rogue_news_id, stamp))
         conn.commit(); conn.close()
 
         self.record(ticker="MSFT")
@@ -108,6 +119,9 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertEqual({row["ticker"] for row in dashboard["trades"]}, {"MSFT"})
         self.assertEqual(dashboard["main_portfolio"]["open_position_count"], 1)
         self.assertEqual(dashboard["account"]["owner_agent_id"], dashboard["primary_user"]["agent_id"])
+        rogue_news = next(row for row in dashboard["news"] if row["fingerprint"] == "other-agent-news")
+        self.assertIsNone(rogue_news["signal_id"])
+        self.assertEqual(rogue_news["trade_ids"], [])
         conn = database.get_db_connection(); cur = conn.cursor()
         self.assertEqual(scanner_engine._tracked_quote_tickers(cur), ["MSFT"])
         conn.close()

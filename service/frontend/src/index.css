@@ -341,6 +341,12 @@ a {
   max-width: calc(100% - 260px);
 }
 
+.app-main-column {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+}
+
 html[dir='rtl'] .sidebar {
   right: 0;
   left: auto;

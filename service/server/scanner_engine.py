@@ -1268,7 +1268,13 @@ def dashboard_payload() -> dict[str, Any]:
         item["source_facts"] = _loads(item.pop("source_facts_json", None), {})
         item["verified_tickers"] = _loads(item.pop("verified_tickers_json", None), [])
         item["alternate_sources"] = _loads(item.pop("alternate_sources_json", None), [])
-        cur.execute("SELECT trade_id FROM scanner_trade_news WHERE news_id=? ORDER BY trade_id", (item["id"],))
+        if item.get("signal_id") is not None:
+            cur.execute("SELECT 1 FROM scanner_signals WHERE id=? AND agent_id=?", (item["signal_id"], agent_id))
+            if not cur.fetchone():
+                item["signal_id"] = None
+        cur.execute("""SELECT l.trade_id FROM scanner_trade_news l
+                       JOIN scanner_trades t ON t.id=l.trade_id
+                       WHERE l.news_id=? AND t.agent_id=? ORDER BY l.trade_id""", (item["id"], agent_id))
         item["trade_ids"] = [int(row["trade_id"]) for row in cur.fetchall()]
     cur.execute("SELECT * FROM scanner_news_schedule ORDER BY ticker"); schedules = [dict(row) for row in cur.fetchall()]
     cur.execute("SELECT * FROM scanner_service_status ORDER BY component"); services = [dict(row) for row in cur.fetchall()]
