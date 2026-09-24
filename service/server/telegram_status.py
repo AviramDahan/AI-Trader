@@ -292,6 +292,14 @@ def _call(session: requests.Session, base: str, method: str, data: dict) -> tupl
 
 
 def _upsert_pinned_message(state_key: str, event_type: str, text: str) -> str:
+    """Create one status card and edit it in place without repeated pin events.
+
+    Telegram emits a visible service message every time ``pinChatMessage`` is
+    called, even with notifications disabled.  The status topics are already
+    dedicated to these cards, so pinning adds clutter and repeated pinning on
+    every refresh looks like duplicate alerts.  Keep the historical function
+    name for compatibility, but deliberately never pin the card.
+    """
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     thread_id = thread_id_for_event(event_type)
@@ -333,12 +341,6 @@ def _upsert_pinned_message(state_key: str, event_type: str, text: str) -> str:
             result = "created"
         else:
             result = "failed"
-    if result in {"created", "updated"} and message_id:
-        pinned, _, pin_error = _call(session, base, "pinChatMessage", {
-            "chat_id": chat_id, "message_id": message_id, "disable_notification": True,
-        })
-        if not pinned:
-            result, error = "failed", f"pin:{pin_error}"[:300]
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("""INSERT INTO scanner_telegram_topic_state
         (state_key,chat_id,thread_id,message_id,content_hash,last_attempt_at,last_success_at,last_error)

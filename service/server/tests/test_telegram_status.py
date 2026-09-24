@@ -133,29 +133,26 @@ class TelegramStatusTests(unittest.TestCase):
         for index in range(1, 31):
             self.assertIn(f"T{index:03d}", combined)
 
-    def test_status_message_is_created_pinned_then_edited(self):
+    def test_status_message_is_created_then_edited_without_pin_noise(self):
         session = Mock()
         create = Mock(ok=True); create.json.return_value = {"ok": True, "result": {"message_id": 77}}
-        pin = Mock(ok=True); pin.json.return_value = {"ok": True, "result": True}
         edit = Mock(ok=True); edit.json.return_value = {"ok": True, "result": {"message_id": 77}}
-        repin = Mock(ok=True); repin.json.return_value = {"ok": True, "result": True}
-        session.post.side_effect = [create, pin, edit, repin]
+        session.post.side_effect = [create, edit]
         env = {"TELEGRAM_BOT_TOKEN": "test", "TELEGRAM_CHAT_ID": "-1001", "TELEGRAM_PORTFOLIO_THREAD_ID": "303"}
         with patch.dict(os.environ, env, clear=False), patch.object(telegram_status.requests, "Session", return_value=session):
             self.assertEqual(telegram_status._upsert_pinned_message("portfolio", "portfolio_status", "first"), "created")
             self.assertEqual(telegram_status._upsert_pinned_message("portfolio", "portfolio_status", "second"), "updated")
         calls = [call.args[0].rsplit("/", 1)[-1] for call in session.post.call_args_list]
-        self.assertEqual(calls, ["sendMessage", "pinChatMessage", "editMessageText", "pinChatMessage"])
+        self.assertEqual(calls, ["sendMessage", "editMessageText"])
         sent_data = session.post.call_args_list[0].kwargs["data"]
         self.assertEqual(sent_data["message_thread_id"], 303)
 
     def test_transient_edit_failure_never_creates_a_second_message(self):
         session = Mock()
         create = Mock(ok=True); create.json.return_value = {"ok": True, "result": {"message_id": 77}}
-        pin = Mock(ok=True); pin.json.return_value = {"ok": True, "result": True}
         failed_edit = Mock(ok=False, status_code=503)
         failed_edit.json.return_value = {"ok": False, "description": "Temporary upstream failure"}
-        session.post.side_effect = [create, pin, failed_edit]
+        session.post.side_effect = [create, failed_edit]
         env = {"TELEGRAM_BOT_TOKEN": "test", "TELEGRAM_CHAT_ID": "-1001", "TELEGRAM_PORTFOLIO_THREAD_ID": "303"}
         with patch.dict(os.environ, env, clear=False), patch.object(telegram_status.requests, "Session", return_value=session):
             self.assertEqual(telegram_status._upsert_pinned_message("portfolio", "portfolio_status", "first"), "created")
@@ -197,21 +194,21 @@ class TelegramStatusTests(unittest.TestCase):
         conn.close()
         self.assertIsNone(row)
 
-    def test_pin_failure_is_reported_and_existing_message_is_retained(self):
+    def test_status_card_does_not_require_pin_permission(self):
         session = Mock()
         create = Mock(ok=True); create.json.return_value = {"ok": True, "result": {"message_id": 88}}
-        failed_pin = Mock(ok=False, status_code=403)
-        failed_pin.json.return_value = {"ok": False, "description": "Not enough rights to pin a message"}
-        session.post.side_effect = [create, failed_pin]
+        session.post.side_effect = [create]
         env = {"TELEGRAM_BOT_TOKEN": "test", "TELEGRAM_CHAT_ID": "-1001", "TELEGRAM_PORTFOLIO_THREAD_ID": "303"}
         with patch.dict(os.environ, env, clear=False), patch.object(telegram_status.requests, "Session", return_value=session):
-            self.assertEqual(telegram_status._upsert_pinned_message("portfolio", "portfolio_status", "first"), "failed")
+            self.assertEqual(telegram_status._upsert_pinned_message("portfolio", "portfolio_status", "first"), "created")
+        methods = [call.args[0].rsplit("/", 1)[-1] for call in session.post.call_args_list]
+        self.assertEqual(methods, ["sendMessage"])
         conn = database.get_db_connection()
         row = conn.execute("SELECT message_id,last_success_at,last_error FROM scanner_telegram_topic_state WHERE state_key='portfolio'").fetchone()
         conn.close()
         self.assertEqual(row["message_id"], 88)
-        self.assertIsNone(row["last_success_at"])
-        self.assertIn("pin:", row["last_error"])
+        self.assertIsNotNone(row["last_success_at"])
+        self.assertIsNone(row["last_error"])
 
 
 if __name__ == "__main__":
