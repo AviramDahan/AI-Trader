@@ -141,6 +141,23 @@ def _normal_title(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
+def _headline_verifies_ticker(ticker: str, company: str, title: str) -> bool:
+    """Fail closed when a headline-only Yahoo result names another company."""
+    title_normalized = _normal_title(title)
+    words = set(title_normalized.split())
+    normalized_ticker = ticker.lower().replace("-", " ")
+    if normalized_ticker in words or f" {normalized_ticker} " in f" {title_normalized} ":
+        return True
+    generic = {"inc", "corp", "corporation", "company", "co", "common", "stock", "class",
+               "holdings", "holding", "group", "plc", "ltd", "limited", "technologies", "technology"}
+    company_words = [word for word in _normal_title(company).split()
+                     if word not in generic and len(word) >= 4]
+    if not company_words:
+        return False
+    phrase = " ".join(company_words[:2])
+    return phrase in title_normalized or company_words[0] in words
+
+
 def _sha(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -336,6 +353,8 @@ def _fetch_yahoo_priority(state: dict[str, Any], at: datetime) -> dict[str, Any]
     for ticker, company in selected:
         try:
             for item in fetch_recent_news(ticker, company, 168):
+                if not _headline_verifies_ticker(ticker, company, str(item.get("title") or "")):
+                    continue
                 output.append({**item, "provider": "yahoo_priority", "tickers": [ticker], "scope": "universe",
                                "source_excerpt": "", "source_kind": "headline_metadata", "headline_only": True})
         except Exception as exc:

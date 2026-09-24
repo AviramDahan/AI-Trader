@@ -88,6 +88,21 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertFalse(recovered["errors"])
         self.assertEqual(self.rows("SELECT status FROM scanner_news_providers WHERE provider='federal_reserve'")[0]["status"], "ok")
 
+    def test_headline_only_yahoo_feed_rejects_wrong_company_assignment(self):
+        fetched = [
+            {"title": "Fortinet benefits from expanding cybersecurity demand", "publisher": "Wire",
+             "url": "https://example.test/fortinet", "published_at": self.clock.isoformat()},
+            {"title": "MSTR expands its bitcoin treasury", "publisher": "Wire",
+             "url": "https://example.test/mstr", "published_at": self.clock.isoformat()},
+        ]
+        with patch.object(news_pipeline, "_priority_tickers",
+                          return_value=([("MSTR", "Strategy Inc Common Stock Class A")], {}, "test")), \
+             patch("stock_scanner.fetch_recent_news", return_value=fetched):
+            result = news_pipeline._fetch_yahoo_priority({}, self.clock)
+
+        self.assertEqual([item["title"] for item in result["items"]], ["MSTR expands its bitcoin treasury"])
+        self.assertEqual(result["items"][0]["tickers"], ["MSTR"])
+
     def test_changed_source_version_requeues_once_without_losing_other_sources(self):
         first = self.item()
         news_pipeline.ingest_items([first], self.clock)
