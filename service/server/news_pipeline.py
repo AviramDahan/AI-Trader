@@ -162,8 +162,11 @@ def _canonical_key(item: dict[str, Any]) -> str:
 
 
 def _event_version(item: dict[str, Any]) -> str:
-    return _sha("|".join((item["title"], str(item.get("source_excerpt") or ""),
-                          str(item.get("published_at") or ""))))[:20]
+    # Provider feeds routinely correct publication timestamps without changing
+    # the story.  A timestamp-only change must not create another Telegram
+    # alert for the same article.
+    return _sha("|".join((_normal_title(item["title"]),
+                          _normal_title(str(item.get("source_excerpt") or "")))))[:20]
 
 
 def _request(url: str, state: dict[str, Any], user_agent: str) -> tuple[bytes | None, dict[str, str]]:
@@ -439,7 +442,14 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
             # Same direct URL with revised source metadata is a new version of
             # the same event. Keep the original row/source links, but requeue
             # only when the published facts have actually changed.
-            if old_version and old_version != version and _canonical_url(existing["url"]) == item["url"]:
+            old_facts = _loads(existing["source_facts_json"], {})
+            same_published_content = (
+                _normal_title(str(old_facts.get("title") or existing["title"] or "")) == _normal_title(item["title"])
+                and _normal_title(str(old_facts.get("source_excerpt") or "")) ==
+                _normal_title(str(item.get("source_excerpt") or ""))
+            )
+            if (old_version and old_version != version and not same_published_content
+                    and _canonical_url(existing["url"]) == item["url"]):
                 facts = {"title": item["title"], "source_excerpt": item.get("source_excerpt") or "",
                          "publisher": item["publisher"], "published_at": item["published_at"],
                          "content_available": "headline_and_feed_summary" if item.get("source_excerpt") else "headline_only"}
@@ -692,6 +702,19 @@ def _company_for_ticker(cur, ticker: str) -> str:
     return ticker
 
 
+def _same_event_filter(alias: str, row: dict[str, Any]) -> tuple[str, list[Any]]:
+    """Match the same published event even when legacy ingestion made two rows."""
+    clauses = [f"{alias}.id=?"]
+    values: list[Any] = [row["id"]]
+    if row.get("url"):
+        clauses.append(f"{alias}.url=?")
+        values.append(row["url"])
+    if row.get("canonical_key"):
+        clauses.append(f"{alias}.canonical_key=?")
+        values.append(row["canonical_key"])
+    return " OR ".join(clauses), values
+
+
 def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
     """Upgrade legacy translated rows after they gain a priority relationship.
 
@@ -820,10 +843,13 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
                            WHERE l.news_id=? AND t.status='open' AND t.is_shadow=0 ORDER BY t.id""", (row["id"],))
             trade_rows = [dict(value) for value in cur.fetchall()]
             newly_alerted = False
+            event_filter, event_values = _same_event_filter("seen", row)
             for trade in trade_rows:
                 trade_id = int(trade["id"])
-                cur.execute("SELECT id FROM scanner_news_alerts WHERE news_id=? AND trade_id=? AND alert_kind='material_update' AND event_version=?",
-                            (row["id"], trade_id, row.get("content_hash") or "v1"))
+                cur.execute(f"""SELECT a.id FROM scanner_news_alerts a
+                    JOIN scanner_news seen ON seen.id=a.news_id
+                    WHERE a.trade_id=? AND a.alert_kind='material_update'
+                      AND ({event_filter}) LIMIT 1""", (trade_id, *event_values))
                 if not cur.fetchone():
                     cur.execute("INSERT INTO scanner_news_alerts(news_id,trade_id,alert_kind,event_version,created_at) VALUES(?,?,'material_update',?,?)",
                                 (row["id"], trade_id, row.get("content_hash") or "v1", stamp)); newly_alerted = True
@@ -854,8 +880,10 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
                 for watched_row in watched:
                     ticker = watched_row["ticker"]
                     version = row.get("content_hash") or "v1"
-                    cur.execute("SELECT 1 FROM scanner_news_watchlist_alerts WHERE news_id=? AND ticker=? AND event_version=?",
-                                (row["id"], ticker, version))
+                    cur.execute(f"""SELECT 1 FROM scanner_news_watchlist_alerts a
+                        JOIN scanner_news seen ON seen.id=a.news_id
+                        WHERE a.ticker=? AND ({event_filter}) LIMIT 1""",
+                                (ticker, *event_values))
                     if cur.fetchone():
                         continue
                     cur.execute("INSERT INTO scanner_news_watchlist_alerts(news_id,ticker,event_version,created_at) VALUES(?,?,?,?)",
@@ -877,9 +905,10 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
             if broad_quality and uncovered:
                 allowed: list[str] = []
                 for ticker in uncovered:
-                    cur.execute("""SELECT 1 FROM scanner_news_broadcast_alerts
-                                   WHERE news_id=? AND channel='stock' AND ticker=? AND event_version=? LIMIT 1""",
-                                (row["id"], ticker, version))
+                    cur.execute(f"""SELECT 1 FROM scanner_news_broadcast_alerts a
+                        JOIN scanner_news seen ON seen.id=a.news_id
+                        WHERE a.channel='stock' AND a.ticker=? AND ({event_filter}) LIMIT 1""",
+                                (ticker, *event_values))
                     if not cur.fetchone():
                         allowed.append(ticker)
                 if allowed:
@@ -901,11 +930,17 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
             # remain visible in the dashboard but cannot flood Telegram.
             if (broad_quality and not strict_verified and row.get("scope") == "market" and
                     row.get("provider") in {"federal_reserve", "bls"}):
-                cur.execute("""INSERT INTO scanner_news_broadcast_alerts
-                    (news_id,channel,ticker,event_version,created_at) VALUES(?,'market','',?,?)
-                    ON CONFLICT(news_id,channel,ticker,event_version) DO NOTHING""",
-                    (row["id"], version, stamp))
-                if cur.rowcount:
+                cur.execute(f"""SELECT 1 FROM scanner_news_broadcast_alerts a
+                    JOIN scanner_news seen ON seen.id=a.news_id
+                    WHERE a.channel='market' AND a.ticker='' AND ({event_filter}) LIMIT 1""",
+                            tuple(event_values))
+                already_sent = cur.fetchone() is not None
+                if not already_sent:
+                    cur.execute("""INSERT INTO scanner_news_broadcast_alerts
+                        (news_id,channel,ticker,event_version,created_at) VALUES(?,'market','',?,?)
+                        ON CONFLICT(news_id,channel,ticker,event_version) DO NOTHING""",
+                        (row["id"], version, stamp))
+                if not already_sent and cur.rowcount:
                     alert_row = {**row, "impact": sentiment, "materiality": materiality,
                                  "summary_he": result.get("summary_he"),
                                  "interpretation_he": result.get("interpretation_he")}

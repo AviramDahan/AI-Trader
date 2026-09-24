@@ -366,6 +366,21 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertGreaterEqual(result["failed"], 1)
         self.assertTrue(self.fetchall("SELECT * FROM scanner_telegram_outbox WHERE status='retry'"))
 
+    def test_telegram_outbox_lease_blocks_parallel_duplicate_dispatch(self):
+        stamp = "2099-09-24T12:00:00Z"
+        conn = database.get_db_connection(); cur = conn.cursor()
+        scanner_engine.enqueue_telegram(cur, "lease-test", "position_news", "news")
+        conn.commit(); conn.close()
+
+        with patch.object(scanner_engine, "now_z", return_value=stamp):
+            first = scanner_engine._claim_telegram_outbox(limit=1, lease_seconds=300)
+            second = scanner_engine._claim_telegram_outbox(limit=1, lease_seconds=300)
+
+        self.assertEqual([row["dedupe_key"] for row in first], ["lease-test"])
+        self.assertEqual(second, [])
+        self.assertEqual(self.fetchall("SELECT status FROM scanner_telegram_outbox WHERE dedupe_key='lease-test'")[0]["status"],
+                         "sending")
+
     def test_buy_signal_and_executed_entry_are_delivered_to_telegram(self):
         self.record("BUY", "AAPL")
         scanner_engine.process_bar("AAPL", self.bar(1, 100, 101, 99, 100))

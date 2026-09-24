@@ -131,6 +131,27 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(len(self.rows("SELECT * FROM scanner_trade_news")), 1)
         self.assertEqual(len(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news'")), 1)
 
+    def test_timestamp_correction_never_resends_the_same_article(self):
+        self.open_trade()
+        item = self.item("yahoo_priority", "https://example.test/aapl-corrected-time", "AAPL")
+        news_pipeline.ingest_items([item], self.clock)
+
+        def analyzer(rows):
+            return [{"id": row["id"], "related": True, "summary_he": "עדכון מהותי.",
+                     "sentiment": "positive", "materiality": "high", "thesis_effect": "supports",
+                     "interpretation_he": "המידע עשוי לתמוך בתזה, עם אי־ודאות.", "relevance": .98}
+                    for row in rows]
+
+        first = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
+        corrected = {**item, "published_at": (self.clock + timedelta(minutes=3)).isoformat()}
+        news_pipeline.ingest_items([corrected], self.clock + timedelta(minutes=4))
+        second = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock + timedelta(minutes=4))
+
+        self.assertEqual(first["alerts"], 1)
+        self.assertEqual(second["alerts"], 0)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_news")), 1)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news'")), 1)
+
     def test_watchlist_collects_and_alerts_without_signal_or_position(self):
         scanner_engine.set_news_watchlist("NVDA", "NVIDIA")
         selected, _, coverage = news_pipeline._priority_tickers(20, {})

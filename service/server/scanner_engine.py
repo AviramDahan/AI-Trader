@@ -1013,12 +1013,31 @@ def translate_pending_news(limit: int = 5) -> int:
     return count
 
 
+def _claim_telegram_outbox(limit: int = 20, lease_seconds: int = 300) -> list[dict[str, Any]]:
+    """Atomically lease due messages so concurrent workers cannot double-send."""
+    stamp = now_z()
+    lease_until = (parse_time(stamp) + timedelta(seconds=lease_seconds)).isoformat().replace("+00:00", "Z")
+    conn = get_db_connection(); cur = conn.cursor(); begin_write_transaction(cur)
+    cur.execute("""UPDATE scanner_telegram_outbox
+        SET status='retry',next_attempt_at=?,last_error='stale_dispatch_lease_recovered'
+        WHERE status='sending' AND next_attempt_at<=?""", (stamp, stamp))
+    cur.execute("""SELECT * FROM scanner_telegram_outbox
+        WHERE status IN ('pending','retry') AND next_attempt_at<=?
+        ORDER BY id LIMIT ?""", (stamp, limit))
+    rows = [dict(row) for row in cur.fetchall()]
+    if rows:
+        placeholders = ",".join("?" for _ in rows)
+        cur.execute(f"""UPDATE scanner_telegram_outbox
+            SET status='sending',next_attempt_at=?,last_error=NULL
+            WHERE id IN ({placeholders}) AND status IN ('pending','retry')""",
+                    (lease_until, *(row["id"] for row in rows)))
+    conn.commit(); conn.close()
+    return rows
+
+
 def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
     from stock_scanner import send_telegram, settings
-    conn = get_db_connection(); cur = conn.cursor()
-    cur.execute("SELECT * FROM scanner_telegram_outbox WHERE status IN ('pending','retry') AND next_attempt_at<=? ORDER BY id LIMIT ?",
-                (now_z(), limit))
-    rows = [dict(row) for row in cur.fetchall()]; conn.close()
+    rows = _claim_telegram_outbox(limit)
     sent = failed = 0
     portfolio_changed = False
     for row in rows:
@@ -1030,7 +1049,7 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             enabled = enabled and bool(cfg.get("telegram_level_alerts"))
         if not enabled:
             conn = get_db_connection(); cur = conn.cursor()
-            cur.execute("UPDATE scanner_telegram_outbox SET status='disabled',last_error='disabled_by_configuration' WHERE id=?", (row["id"],))
+            cur.execute("UPDATE scanner_telegram_outbox SET status='disabled',last_error='disabled_by_configuration' WHERE id=? AND status='sending'", (row["id"],))
             conn.commit(); conn.close()
             continue
         if row["event_type"] == "entry_chart":
@@ -1040,7 +1059,7 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             result = send_telegram(row["message"], cfg, row["event_type"])
         conn = get_db_connection(); cur = conn.cursor()
         if result == "sent":
-            cur.execute("UPDATE scanner_telegram_outbox SET status='sent',attempts=attempts+1,sent_at=?,last_error=NULL WHERE id=?",
+            cur.execute("UPDATE scanner_telegram_outbox SET status='sent',attempts=attempts+1,sent_at=?,last_error=NULL WHERE id=? AND status='sending'",
                         (now_z(), row["id"])); sent += 1
             portfolio_changed = portfolio_changed or row["event_type"] in {"entry", "tp", "stop", "sell", "stop_change"}
             if row["event_type"] == "entry":
@@ -1050,15 +1069,15 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
                 if primary:
                     enqueue_telegram(cur, f"entry-chart:{primary['id']}", "entry_chart", _json({"trade_id": primary["id"]}))
         elif result == "missing_credentials":
-            cur.execute("UPDATE scanner_telegram_outbox SET status='disabled',attempts=attempts+1,last_error='missing_credentials' WHERE id=?", (row["id"],))
+            cur.execute("UPDATE scanner_telegram_outbox SET status='disabled',attempts=attempts+1,last_error='missing_credentials' WHERE id=? AND status='sending'", (row["id"],))
         elif row["event_type"] == "entry_chart" and (int(row["attempts"]) >= 4 or result == "chart_unavailable"):
-            cur.execute("UPDATE scanner_telegram_outbox SET status='failed',attempts=attempts+1,last_error='entry_chart_unavailable' WHERE id=?", (row["id"],))
+            cur.execute("UPDATE scanner_telegram_outbox SET status='failed',attempts=attempts+1,last_error='entry_chart_unavailable' WHERE id=? AND status='sending'", (row["id"],))
             failed += 1
         else:
             attempts = int(row["attempts"]) + 1
             delay = min(3600, 30 * (2 ** min(attempts, 7)))
             due = (datetime.now(UTC) + timedelta(seconds=delay)).isoformat().replace("+00:00", "Z")
-            cur.execute("UPDATE scanner_telegram_outbox SET status='retry',attempts=?,next_attempt_at=?,last_error=? WHERE id=?",
+            cur.execute("UPDATE scanner_telegram_outbox SET status='retry',attempts=?,next_attempt_at=?,last_error=? WHERE id=? AND status='sending'",
                         (attempts, due, result, row["id"])); failed += 1
         conn.commit(); conn.close()
     _service("telegram", "error" if failed else "ok", f"sent={sent} retry={failed}", success=not failed)
