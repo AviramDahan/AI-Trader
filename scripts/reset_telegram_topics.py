@@ -36,7 +36,19 @@ TOPICS = (
 )
 RECOVERY_FILE_NAME = "telegram-topic-reset-recovery.json"
 MAX_TELEGRAM_ATTEMPTS = 3
-MAX_RETRY_AFTER_SECONDS = 60.0
+MAX_RETRY_SLEEP_CHUNK_SECONDS = 60.0
+
+
+def _sleep_retry_after(retry_after) -> None:
+    """Honor Telegram's full delay without one unresponsive long sleep."""
+    try:
+        remaining = max(0.0, float(retry_after))
+    except (TypeError, ValueError):
+        remaining = 1.0
+    while remaining > 0:
+        chunk = min(remaining, MAX_RETRY_SLEEP_CHUNK_SECONDS)
+        time.sleep(chunk)
+        remaining -= chunk
 
 
 def _telegram_call(session: requests.Session, base: str, method: str, data: dict,
@@ -64,11 +76,7 @@ def _telegram_call(session: requests.Session, base: str, method: str, data: dict
         parameters = payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {}
         retry_after = parameters.get("retry_after")
         if response.status_code == 429 and retry_after is not None and attempt + 1 < MAX_TELEGRAM_ATTEMPTS:
-            try:
-                delay = max(0.0, min(float(retry_after), MAX_RETRY_AFTER_SECONDS))
-            except (TypeError, ValueError):
-                delay = 1.0
-            time.sleep(delay)
+            _sleep_retry_after(retry_after)
             continue
         absent = any(marker in description.lower() for marker in (
             "message thread not found", "topic_id_invalid", "message_thread_id_invalid",
@@ -85,7 +93,11 @@ def _write_recovery_state(path: Path, chat_id: str, old_ids: list[int],
     payload = {
         "chat_id": chat_id,
         "old_thread_ids": old_ids,
-        "new_thread_ids": {key: updates[key] for key, _, _ in TOPICS},
+        "new_thread_ids": {
+            key: updates[key]
+            for key, _, _ in TOPICS
+            if key in updates
+        },
         "state": state,
     }
     temporary = path.with_suffix(".tmp")
@@ -129,14 +141,28 @@ def main(*, confirm_delete: bool = False) -> int:
     # Create every replacement first. Until routing is persisted, the old
     # topics remain intact and the running service can continue using them.
     updates: dict[str, str] = {"TELEGRAM_CHAT_ID": chat_id}
+    recovery_file = ROOT / ".runtime" / RECOVERY_FILE_NAME
+    _write_recovery_state(
+        recovery_file,
+        chat_id,
+        old_ids,
+        updates,
+        "replacement_topic_creation_started",
+    )
     for key, name, color in TOPICS:
         topic = call("createForumTopic", {"chat_id": chat_id, "name": name, "icon_color": color})
         updates[key] = str(topic["message_thread_id"])
+        _write_recovery_state(
+            recovery_file,
+            chat_id,
+            old_ids,
+            updates,
+            "replacement_topics_partially_created",
+        )
     # Keep the legacy fallbacks aligned so an old event type cannot target a
     # deleted topic while all current event types use the explicit IDs above.
     updates["TELEGRAM_NEWS_THREAD_ID"] = updates["TELEGRAM_STOCK_NEWS_THREAD_ID"]
     updates["TELEGRAM_TRADING_THREAD_ID"] = updates["TELEGRAM_TRADES_THREAD_ID"]
-    recovery_file = ROOT / ".runtime" / RECOVERY_FILE_NAME
     _write_recovery_state(
         recovery_file,
         chat_id,

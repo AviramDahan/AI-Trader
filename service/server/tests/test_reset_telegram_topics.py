@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import tempfile
 import types
@@ -62,7 +63,7 @@ class ResetTelegramTopicsTests(unittest.TestCase):
     def test_rate_limit_retries_with_bounded_retry_after(self):
         session = Mock()
         session.post.side_effect = [
-            telegram_response(status_code=429, error="Too Many Requests", retry_after=999),
+            telegram_response(status_code=429, error="Too Many Requests", retry_after=121),
             telegram_response({"id": 7}),
         ]
         with patch.object(reset_topics.time, "sleep") as sleep:
@@ -70,7 +71,10 @@ class ResetTelegramTopicsTests(unittest.TestCase):
                 session, "https://api.telegram.org/botSECRET", "getMe", {}
             )
         self.assertEqual(result, {"id": 7})
-        sleep.assert_called_once_with(reset_topics.MAX_RETRY_AFTER_SECONDS)
+        self.assertEqual(
+            [call.args[0] for call in sleep.call_args_list],
+            [60.0, 60.0, 1.0],
+        )
         self.assertEqual(session.post.call_count, 2)
 
     def test_network_error_does_not_expose_bot_token(self):
@@ -142,6 +146,56 @@ class ResetTelegramTopicsTests(unittest.TestCase):
             self.assertLess(max(create_positions), persisted)
             self.assertLess(persisted, min(delete_positions))
             self.assertFalse((root / ".runtime" / reset_topics.RECOVERY_FILE_NAME).exists())
+
+    def test_partial_topic_creation_is_recorded_for_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text(
+                "TELEGRAM_BOT_TOKEN=secret\n"
+                "TELEGRAM_CHAT_ID=-1001\n"
+                "TELEGRAM_MARKET_NEWS_THREAD_ID=11\n"
+                "TELEGRAM_STOCK_NEWS_THREAD_ID=12\n",
+                encoding="utf-8",
+            )
+            session = Mock()
+            created = iter((101, 102))
+            create_count = 0
+
+            def post(url, **_kwargs):
+                nonlocal create_count
+                method = url.rsplit("/", 1)[-1]
+                if method == "getMe":
+                    return telegram_response({"id": 7})
+                if method == "getChat":
+                    return telegram_response({"type": "supergroup", "is_forum": True})
+                if method == "getChatMember":
+                    return telegram_response({"status": "administrator", "can_manage_topics": True})
+                if method == "createForumTopic":
+                    create_count += 1
+                    if create_count <= 2:
+                        return telegram_response({"message_thread_id": next(created)})
+                    return telegram_response(status_code=500, error="creation failed")
+                raise AssertionError(method)
+
+            session.post.side_effect = post
+            with patch.object(reset_topics, "ROOT", root), \
+                 patch.object(reset_topics.requests, "Session", return_value=session), \
+                 patch.object(reset_topics, "_write_env") as write_env, \
+                 patch.object(reset_topics, "_record_backup"):
+                with self.assertRaisesRegex(RuntimeError, "creation failed"):
+                    reset_topics.main(confirm_delete=True)
+
+            recovery_file = root / ".runtime" / reset_topics.RECOVERY_FILE_NAME
+            recovery = json.loads(recovery_file.read_text(encoding="utf-8"))
+            self.assertEqual(recovery["state"], "replacement_topics_partially_created")
+            self.assertEqual(
+                recovery["new_thread_ids"],
+                {
+                    "TELEGRAM_MARKET_NEWS_THREAD_ID": "101",
+                    "TELEGRAM_STOCK_NEWS_THREAD_ID": "102",
+                },
+            )
+            write_env.assert_not_called()
 
 
 if __name__ == "__main__":
