@@ -351,6 +351,44 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(len(alerts), 3)
         self.assertEqual(len(self.rows("SELECT * FROM scanner_news_broadcast_alerts WHERE channel='market'")), 3)
 
+    def test_general_neutral_bulletin_is_short_and_deduplicated(self):
+        news_pipeline.ingest_items([self.item('existing_market')], self.clock)
+        def analyze(rows):
+            return [dict(id=r['id'], related=True, title_he='נתוני הכלכלה פורסמו',
+                         summary_he='תקציר', sentiment='neutral', materiality='medium', relevance=.8) for r in rows]
+        result = news_pipeline.analyze_news_jobs(analyzer=analyze, at=self.clock)
+        self.assertEqual(result['alerts'], 1)
+        conn = database.get_db_connection()
+        conn.execute("UPDATE scanner_news_jobs SET status='pending'")
+        conn.commit(); conn.close()
+        self.assertEqual(news_pipeline.analyze_news_jobs(analyzer=analyze, at=self.clock)['alerts'], 0)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='market_news'")), 1)
+
+    def test_general_bulletin_rejects_stale_low_quality_and_disabled(self):
+        news_pipeline.ingest_items([self.item('existing_market')], self.clock)
+        row = self.rows('SELECT * FROM scanner_news')[0]
+        result = dict(related=True, title_he='עדכון כלכלי', materiality='medium', relevance=.8)
+        conn = database.get_db_connection(); cur = conn.cursor()
+        self.assertFalse(news_pipeline._queue_general_bulletin(cur, row, result,
+                         self.clock + timedelta(hours=7), self.clock.isoformat()))
+        self.assertFalse(news_pipeline._queue_general_bulletin(cur, row, {**result, 'materiality':'low'},
+                         self.clock, self.clock.isoformat()))
+        with patch.dict(os.environ, {'STOCK_SCANNER_GENERAL_NEWS_ENABLED':'false'}):
+            self.assertFalse(news_pipeline._queue_general_bulletin(cur, row, result, self.clock, self.clock.isoformat()))
+        conn.close()
+
+    def test_fresh_translated_market_item_gets_one_general_analysis(self):
+        news_pipeline.ingest_items([self.item('existing_market')], self.clock)
+        conn = database.get_db_connection()
+        conn.execute("UPDATE scanner_news SET analysis_status='translated'")
+        conn.execute("UPDATE scanner_news_jobs SET status='done'")
+        conn.commit(); conn.close()
+        def analyze(rows):
+            return [dict(id=r['id'], related=True, title_he='עדכון כלכלה',
+                         sentiment='neutral', materiality='medium', relevance=.8) for r in rows]
+        self.assertEqual(news_pipeline.analyze_news_jobs(analyzer=analyze, at=self.clock)['alerts'], 1)
+        self.assertEqual(news_pipeline.analyze_news_jobs(analyzer=analyze, at=self.clock)['analyzed'], 0)
+
     def test_legacy_translated_item_is_fully_analyzed_after_verified_watchlist_upgrade(self):
         scanner_engine.set_news_watchlist("INTC", "Intel")
         conn = database.get_db_connection()
@@ -632,7 +670,7 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         checkpoint = json.loads(provider["checkpoint_json"])
         self.assertEqual(checkpoint["submissions"][cik]["last_accession"], "0000320193-26-000002")
 
-    def test_new_official_sources_are_dashboard_only_and_registered(self):
+    def test_official_industry_news_can_reach_general_bulletins(self):
         self.assertTrue({"fda", "ftc", "doj", "eia"}.issubset(news_pipeline.PROVIDERS))
         official = {**self.item("fda", "https://www.fda.gov/news-events/press-announcements/example"),
                     "news_category": "industry"}
@@ -643,8 +681,8 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
             "thesis_effect": "unchanged", "interpretation_he": "השפעה אפשרית לא ברורה.",
             "relevance": .99,
         }], at=self.clock)
-        self.assertEqual(result["alerts"], 0)
-        self.assertFalse(self.rows("SELECT * FROM scanner_telegram_outbox"))
+        self.assertEqual(result["alerts"], 1)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='market_news'")), 1)
         self.assertEqual(self.rows("SELECT news_category FROM scanner_news")[0]["news_category"], "industry")
 
     def test_malformed_ai_batch_retries_without_publishing_or_losing_news(self):

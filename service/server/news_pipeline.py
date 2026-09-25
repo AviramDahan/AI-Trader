@@ -983,6 +983,9 @@ def _default_analyzer(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
               "materiality:low|medium|high,thesis_effect:supports|weakens|unchanged,interpretation_he:string,relevance:number}]}. "
               "title_he is a short faithful Hebrew translation of the source title. Hebrew summary must summarize "
               "source_facts only. interpretation_he must explicitly be cautious AI interpretation.")
+    system += (" For scope=market, related means relevant to general economic, business, sector, "
+               "geopolitical or financial-market news, not related to a held company. Neutral factual "
+               "economic releases can be relevant; do not invent a directional market impact.")
     result = _ollama_json(system, payload, 2200)
     return result.get("items") if isinstance(result, dict) and isinstance(result.get("items"), list) else []
 
@@ -1038,6 +1041,48 @@ def _market_broadcast_alert_message(row: dict[str, Any]) -> str:
                          "עדכון שוק בלבד — לא נוצרו סיגנל או עסקה."))[:4000]
 
 
+def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
+    """General news is separate from trade-impact alerts; never replay old backlog."""
+    if os.getenv("STOCK_SCANNER_GENERAL_NEWS_ENABLED", "true").lower() != "true":
+        return False
+    title = str(result.get("title_he") or "").strip()
+    age = (current - _parse_time(row["published_at"])).total_seconds()
+    if (row.get("scope") != "market" or _loads(row.get("verified_tickers_json"), []) or
+            row.get("provider") not in PROVIDERS or result.get("related") is not True or
+            result.get("materiality") not in {"medium", "high"} or
+            not re.search(r"[\u0590-\u05ff]", title) or
+            not 0 <= age <= _int_env("STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS", 6, 1, 24) * 3600):
+        return False
+    try:
+        if float(result.get("relevance", 0)) < .65:
+            return False
+    except (TypeError, ValueError):
+        return False
+    event_filter, values = _same_event_filter("seen", row)
+    cur.execute(f"""SELECT 1 FROM scanner_news_broadcast_alerts a
+        JOIN scanner_news seen ON seen.id=a.news_id
+        WHERE a.channel='market' AND ({event_filter}) LIMIT 1""", tuple(values))
+    if cur.fetchone():
+        return False
+    version = row.get("content_hash") or "v1"
+    cur.execute("""INSERT INTO scanner_news_broadcast_alerts
+        (news_id,channel,ticker,event_version,created_at) VALUES(?,'market','',?,?)
+        ON CONFLICT(news_id,channel,ticker,event_version) DO NOTHING""", (row["id"], version, stamp))
+    if not cur.rowcount:
+        return False
+    # Short source translation, not an investment recommendation or AI opinion.
+    parts = ["📰 " + title[:350]]
+    summary = str(result.get("summary_he") or "").strip()
+    if not row.get("headline_only") and summary and summary != title:
+        parts.append(summary[:450])
+    parts.append("תרגום AI · " + ("כותרת בלבד" if row.get("headline_only") else "תקציר הפיד"))
+    parts.append(f"מקור: {row.get('original_publisher') or row['publisher']}\n"
+                 f"פורסם: {row['published_at']}\n{row['url']}")
+    from scanner_engine import enqueue_telegram
+    enqueue_telegram(cur, f"market-news:{row['id']}:{version}", "market_news", "\n\n".join(parts))
+    return True
+
+
 def _company_for_ticker(cur, ticker: str) -> str:
     queries = (
         "SELECT company FROM scanner_trades WHERE ticker=? AND company IS NOT NULL AND company!='' ORDER BY id DESC LIMIT 1",
@@ -1079,13 +1124,17 @@ def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
             w.enabled watch_enabled,w.created_at watch_created
         FROM scanner_news n LEFT JOIN scanner_news_watchlist w ON w.ticker=n.ticker
         WHERE n.analysis_status IN ('pending_translation','translated')
-          AND n.scope IN ('open_position','active_signal','watchlist')""")
+          AND n.scope IN ('open_position','active_signal','watchlist','market')""")
     queued = 0
     for row in cur.fetchall():
         published = _parse_time(row["published_at"])
         if published < cutoff:
             continue
-        if row["scope"] == "watchlist":
+        if row["scope"] == "market":
+            if (os.getenv("STOCK_SCANNER_GENERAL_NEWS_ENABLED", "true").lower() != "true" or
+                    published < current - timedelta(hours=_int_env("STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS", 6, 1, 24))):
+                continue
+        elif row["scope"] == "watchlist":
             verified = {str(value).upper() for value in _loads(row["verified_tickers_json"], [])}
             ticker = str(row["ticker"] or "").upper()
             if (not row["watch_enabled"] or not row["watch_created"] or
@@ -1101,7 +1150,7 @@ def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
                 AND status IN ('ACTIVE','PENDING_ENTRY','ENTERED') LIMIT 1""", (row["signal_id"],))
             if not cur.fetchone():
                 continue
-        priority = 100 if row["scope"] == "open_position" else 80 if row["scope"] == "watchlist" else 70
+        priority = 100 if row["scope"] == "open_position" else 80 if row["scope"] == "watchlist" else 30 if row["scope"] == "market" else 70
         cur.execute("UPDATE scanner_news SET analysis_status='pending_analysis',analysis_error=NULL,updated_at=? WHERE id=?",
                     (stamp, row["id"]))
         cur.execute("SELECT id FROM scanner_news_jobs WHERE news_id=?", (row["id"],))
@@ -1188,6 +1237,7 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
              stamp, stamp, row["id"]))
         cur.execute("UPDATE scanner_news_jobs SET status='done',attempts=attempts+1,last_error=NULL,updated_at=? WHERE id=?", (stamp, row["job_id"]))
         analyzed += 1
+        alerts += int(_queue_general_bulletin(cur, row, result, current, stamp))
         if (related and relevance >= feed_settings()["alert_min_relevance"] and
                 materiality in {"medium", "high"} and sentiment in {"positive", "negative", "mixed"}):
             cur.execute("""SELECT t.id,t.ticker,t.company FROM scanner_trade_news l JOIN scanner_trades t ON t.id=l.trade_id
@@ -1276,27 +1326,6 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
                     enqueue_telegram(cur, f"stock-news:{row['id']}:{version}:{','.join(allowed)}",
                                      "stock_news", _stock_broadcast_alert_message(alert_row)); alerts += 1
 
-            # Market-wide Telegram news is deliberately restricted to official
-            # macro publishers. General syndicated feeds
-            # remain visible in the dashboard but cannot flood Telegram.
-            if (broad_quality and not strict_verified and row.get("scope") == "market" and
-                    row.get("provider") in {"federal_reserve", "bls"}):
-                cur.execute(f"""SELECT 1 FROM scanner_news_broadcast_alerts a
-                    JOIN scanner_news seen ON seen.id=a.news_id
-                    WHERE a.channel='market' AND a.ticker='' AND ({event_filter}) LIMIT 1""",
-                            tuple(event_values))
-                already_sent = cur.fetchone() is not None
-                if not already_sent:
-                    cur.execute("""INSERT INTO scanner_news_broadcast_alerts
-                        (news_id,channel,ticker,event_version,created_at) VALUES(?,'market','',?,?)
-                        ON CONFLICT(news_id,channel,ticker,event_version) DO NOTHING""",
-                        (row["id"], version, stamp))
-                if not already_sent and cur.rowcount:
-                    alert_row = {**row, "impact": sentiment, "materiality": materiality,
-                                 "summary_he": result.get("summary_he"),
-                                 "interpretation_he": result.get("interpretation_he")}
-                    enqueue_telegram(cur, f"market-news:{row['id']}:{version}",
-                                     "market_news", _market_broadcast_alert_message(alert_row)); alerts += 1
     conn.commit(); conn.close()
     from scanner_engine import set_service_status
     set_service_status("news_ai", "ok", f"analyzed={analyzed} alerts_queued={alerts}", success=True)
