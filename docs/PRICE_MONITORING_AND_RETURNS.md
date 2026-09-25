@@ -10,8 +10,14 @@ prices depend on Yahoo coverage and symbol liquidity. Quote timestamps and stale
 visible in the API; a screen refresh is not a new market observation. Known calendar limitations
 include exceptional unscheduled closures and early-close sessions.
 
-Execution policy is unchanged: paper TP/SL and entries use complete regular-session 5-minute
-OHLC bars with existing conservative ordering. Extended-hours display quotes do not create fills.
+Paper TP/SL can also execute from complete extended-session 5-minute OHLC bars after the
+persisted STOCK_SCANNER_EXTENDED_EXITS_FROM timestamp (set once by
+`scripts/enable_extended_paper_exits.py`). Existing positions and shadow positions use the same
+forward-only policy; older extended bars are ignored and cursors are never rewound. Entries
+and discretionary SELL orders remain regular-session only. The supported extended window
+is 04:00–20:00 New York on trading days. Existing conservative stop-first ambiguity, slippage,
+fees, partial targets and restart deduplication apply; illiquid bars are not guaranteed fills
+in a real market. Display-only minute quotes never create fills.
 The scanner, news/AI work, and price workers remain independent. No real orders are enabled.
 
 Telegram account return = (cash + marked remaining native positions - initial capital) /

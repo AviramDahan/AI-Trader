@@ -17,6 +17,47 @@ UTC = timezone.utc
 
 
 class ScannerEngineTests(unittest.TestCase):
+    def _extended_exit_case(self, hour, stop=False):
+        self.record()
+        scanner_engine.process_bar('AAPL', self.bar(1, 100, 101, 99, 100))
+        trade = self.fetchall('SELECT * FROM scanner_trades WHERE is_shadow=0')[0]
+        at = (datetime.now(scanner_engine.ET) + timedelta(days=1)).replace(hour=hour, minute=0, second=0, microsecond=0)
+        level = trade['current_stop'] if stop else trade['tp2']
+        bar = dict(at=at.astimezone(UTC).isoformat(), open=level, high=level+.1,
+                   low=level-.1, close=level, execution_session='extended')
+        with patch.dict(os.environ, STOCK_SCANNER_EXTENDED_EXITS_FROM=datetime.now(UTC).isoformat()):
+            scanner_engine.process_bar('AAPL', bar)
+            count = len(self.fetchall('SELECT * FROM scanner_fills'))
+            scanner_engine.initialize_runtime()
+            scanner_engine.process_bar('AAPL', bar)
+            self.assertEqual(len(self.fetchall('SELECT * FROM scanner_fills')), count)
+        closed = self.fetchall('SELECT * FROM scanner_trades WHERE is_shadow=0')[0]
+        self.assertEqual(closed['status'], 'closed')
+        self.assertEqual(closed['outcome'], 'LOSS' if stop else 'WIN')
+        self.assertTrue(scanner_engine.dashboard_payload()['lifecycle_verification']['accounting_ok'])
+
+    def test_premarket_take_profit_and_restart_do_not_duplicate_fill(self):
+        self._extended_exit_case(8)
+
+    def test_aftermarket_stop_updates_cash_and_closes_trade(self):
+        self._extended_exit_case(17, stop=True)
+
+    def test_extended_bar_never_opens_pending_entry(self):
+        self.record()
+        at = (datetime.now(scanner_engine.ET)+timedelta(days=1)).replace(hour=8, minute=0)
+        bar = dict(at=at.isoformat(), open=100, high=101, low=99, close=100, execution_session='extended')
+        with patch.dict(os.environ, STOCK_SCANNER_EXTENDED_EXITS_FROM=datetime.now(UTC).isoformat()):
+            scanner_engine.process_bar('AAPL', bar)
+        self.assertFalse(self.fetchall('SELECT * FROM scanner_trades'))
+
+    def test_extended_bars_before_activation_leave_cursor_and_positions_untouched(self):
+        self.record()
+        bar = {**self.bar(1,100,120,80,100), 'execution_session':'extended'}
+        with patch.dict(os.environ, STOCK_SCANNER_EXTENDED_EXITS_FROM=(datetime.now(UTC)+timedelta(days=2)).isoformat()):
+            scanner_engine.process_bar('AAPL', bar)
+        self.assertFalse(self.fetchall('SELECT * FROM scanner_price_cursors'))
+        self.assertFalse(self.fetchall('SELECT * FROM scanner_trades'))
+
     def test_weekend_and_holiday_skip_provider_and_keep_price_cursors(self):
         self.record()
         for reason in ('weekend', 'holiday'):
@@ -41,6 +82,9 @@ class ScannerEngineTests(unittest.TestCase):
             execute.assert_not_called()
 
     def setUp(self):
+        self.extended_config = patch.dict(os.environ, STOCK_SCANNER_EXTENDED_EXITS_FROM='')
+        self.extended_config.start()
+        self.addCleanup(self.extended_config.stop)
         self.market_clock = patch.object(scanner_engine, 'market_session_state', return_value={
             'is_trading_day': True, 'is_open': False, 'reason': 'closed_hours'})
         self.market_clock.start()

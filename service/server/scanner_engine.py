@@ -500,7 +500,8 @@ def _bar_dicts(ticker: str, since: datetime) -> list[dict[str, Any]]:
     if age_days > 59:
         raise RuntimeError("Intraday recovery gap exceeds Yahoo 5-minute retention")
     period = "60d" if age_days > 4 else "5d"
-    frame = yf.Ticker(ticker).history(period=period, interval="5m", prepost=False, auto_adjust=True, timeout=20)
+    extended_since = os.getenv('STOCK_SCANNER_EXTENDED_EXITS_FROM', '').strip()
+    frame = yf.Ticker(ticker).history(period=period, interval="5m", prepost=bool(extended_since), auto_adjust=True, timeout=20)
     if frame is None or frame.empty:
         return []
     rows = []
@@ -512,9 +513,17 @@ def _bar_dicts(ticker: str, since: datetime) -> list[dict[str, Any]]:
         at = stamp.to_pydatetime().astimezone(UTC)
         if at <= since or at + timedelta(minutes=5) > observed_at:
             continue
+        session = 'regular'
+        if extended_since:
+            state = market_session_state(at)
+            if not state['is_open']:
+                local = at.astimezone(ET)
+                if not state['is_trading_day'] or not 240 <= local.hour * 60 + local.minute < 1200 or at < parse_time(extended_since):
+                    continue
+                session = 'extended'
         values = [float(row[name]) for name in ("Open", "High", "Low", "Close")]
         if all(math.isfinite(value) and value > 0 for value in values):
-            rows.append(dict(zip(("open", "high", "low", "close"), values), at=at.isoformat().replace("+00:00", "Z")))
+            rows.append(dict(zip(("open", "high", "low", "close"), values), at=at.isoformat().replace("+00:00", "Z"), execution_session=session))
     return rows
 
 
@@ -721,6 +730,14 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
             bar["low"] <= min(bar["open"], bar["close"]) <= max(bar["open"], bar["close"]) <= bar["high"]):
         raise ValueError("Invalid OHLC bar")
     bar_at = parse_time(bar["at"])
+    extended = bar.get('execution_session') == 'extended'
+    if extended:
+        enabled_from = os.getenv('STOCK_SCANNER_EXTENDED_EXITS_FROM', '').strip()
+        local = bar_at.astimezone(ET)
+        if (not enabled_from or bar_at < parse_time(enabled_from)
+                or not market_session_state(bar_at)['is_trading_day']
+                or not 240 <= local.hour * 60 + local.minute < 1200):
+            return
     conn = get_db_connection()
     cur = conn.cursor()
     begin_write_transaction(cur)
@@ -736,6 +753,10 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
     orders = [dict(row) for row in cur.fetchall()]
     entered_ids: set[int] = set()
     for order in orders:
+        if extended:
+            # Extended hours enable protective/target exits only, not new
+            # entries or discretionary SELL-order fills.
+            continue
         order_id = int(order["id"])
         # Yahoo labels candles by their opening time. The entire candle must
         # follow order creation; a low reached before creation cannot fill it.
@@ -844,7 +865,9 @@ def monitor_prices() -> dict[str, Any]:
         except Exception as exc:
             errors.append(f"{ticker}:{type(exc).__name__}")
     market = market_session_state()
-    status = "error" if errors else "market_closed" if not market["is_open"] else "idle" if not tickers else "ok"
+    local_now = datetime.now(ET)
+    extended_active = bool(os.getenv('STOCK_SCANNER_EXTENDED_EXITS_FROM', '').strip()) and market['is_trading_day'] and 240 <= local_now.hour * 60 + local_now.minute < 1200
+    status = "error" if errors else "market_closed" if not (market["is_open"] or extended_active) else "idle" if not tickers else "ok"
     _service("prices", status, f"tickers={len(tickers)} bars={processed} errors={','.join(errors[:5])}", success=not errors)
     _service("monitor", status, f"Processed {processed} complete 5-minute bars; market={market['reason']}", success=not errors)
     return {"tickers": len(tickers), "bars": processed, "errors": errors, "market": market}
