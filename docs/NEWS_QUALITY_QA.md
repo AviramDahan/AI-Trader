@@ -43,6 +43,33 @@ manual restart. This does not guarantee provider availability. Live browser QA
 still found older malformed translations and pending current-story analysis;
 the overall quality/recovery goal is not yet complete.
 
+### Final scoped audit (after user-requested news-chat cleanup)
+
+- The user chose clearing the news topics instead of further editing old
+  messages and explicitly excluded news queue optimization. The cleanup removed
+  and verified 114 messages from the three configured news topics only. Original
+  message records were archived under ignored `.runtime`; topic IDs, trading
+  history and status/signal topics were preserved.
+- The syndicated-URL regression now uses the source ledger when a relay changes
+  its headline, preventing a second article for the already known source URL.
+  The focused news suite passed 50 tests plus 8 subtests after that change.
+- The full local suite before that final regression passed 308 tests plus 10
+  subtests; CI for commit `9c83670` passed including the additional regression.
+- A read-only live Ollama regression translated the previously failing durable
+  goods headline correctly as מוצרים בני קיימא and consensus as תחזית האנליסטים,
+  preserving the -0.4% forecast. No news row or Telegram message was created.
+- Controlled backend and tunnel termination passed automatic recovery: new owned
+  processes, one API listener, healthy public HTTPS, automatic Pages deployment
+  and changed runtime-config. The already-open browser displayed a connection
+  failure during the outage and recovered without reload or Retry click.
+- Final public health returned HTTP 200/ok, SEC status was ok without error,
+  and there were zero unsent Telegram retries. Pages and CI both passed.
+
+Known limitations are not proof of a remaining identified regression: source
+availability and model translation quality cannot be guaranteed for all future
+news. Real SELL/SL events were not fabricated; their lifecycle paths are covered
+by isolated tests, not claimed as new live executions.
+
 Tests cover schema rejection, isolation of one bad story, bounded correction, source/thesis separation, invented price/time rejection, duplicate-versus-new-fact behavior, source-link retention, bounded retries, and visible unresolved status. Existing integration coverage covers paper lifecycle, shadow isolation, news collection/retries, material position alerts and Telegram failures. Tests block real Telegram network access.
 
 Live verification must separately check health/CORS, scanner/monitor freshness, accounting reconciliation, real topic receipts and browser rendering. Mocked delivery does not prove a new real fill occurred. Historical evidence restoration does not masquerade as a new trade.
