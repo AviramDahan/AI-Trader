@@ -1227,7 +1227,10 @@ from stock_scanner import (stock_news_ai_loop, stock_news_feed_loop, stock_news_
                            stock_quote_refresh_loop, stock_scanner_loop, stock_signal_monitor_loop,
                            stock_telegram_outbox_loop, stock_telegram_status_loop)
 
+from telegram_news_reader import telegram_news_stream_loop
+
 BACKGROUND_TASK_REGISTRY = {
+    "telegram_news_stream": telegram_news_stream_loop,
     "stock_scanner": stock_scanner_loop,
     "stock_signal_monitor": stock_signal_monitor_loop,
     "stock_quote_refresh": stock_quote_refresh_loop,

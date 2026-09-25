@@ -10,6 +10,82 @@ ROOT = Path(__file__).resolve().parents[2]
 SESSION = ROOT / '.runtime/telegram-reader.session'
 
 
+def streaming_enabled():
+    return (os.getenv('TELEGRAM_NEWS_STREAM_ENABLED', 'false').lower() == 'true'
+            and os.getenv('TELEGRAM_NEWS_READER_ENABLED', 'false').lower() == 'true')
+
+
+def stream_item(message, allowed, current):
+    name = allowed.get(getattr(getattr(message, 'peer_id', None), 'channel_id', None))
+    return message_item(message, name, current) if name else None
+
+
+async def telegram_news_stream_loop():
+    """Allowlisted updates plus durable catch-up; never join/send.
+
+    Live events do not advance the catch-up cursor: an out-of-order event must
+    not cause missing history after reconnect. Ingestion is idempotent.
+    """
+    if not streaming_enabled() or os.getenv('STOCK_SCANNER_ENABLED','false').lower() != 'true':
+        return
+    from telethon import TelegramClient, events
+    from news_pipeline import ingest_items, run_feed_cycle, initialize_providers
+    from database import get_db_connection
+    from scanner_engine import set_service_status
+    while True:
+        client = None
+        retry = 60
+        try:
+            names = channel_names()
+            if not SESSION.exists():
+                raise ValueError('Reader login required')
+            client = TelegramClient(str(SESSION), int(os.environ['TELEGRAM_API_ID']),
+                                    os.environ['TELEGRAM_API_HASH'], receive_updates=True,
+                                    flood_sleep_threshold=0, request_retries=0,
+                                    connection_retries=1, timeout=10)
+            await asyncio.wait_for(client.connect(), timeout=30)
+            if not await client.is_user_authorized():
+                raise ValueError('Reader login expired')
+            allowed = {}
+            for name in names:
+                entity = await client.get_entity(name)
+                if not getattr(entity,'broadcast',False) or not getattr(entity,'username',None):
+                    raise ValueError('Not a public broadcast channel')
+                allowed[entity.id] = name
+
+            async def on_message(event):
+                item = stream_item(event.message, allowed, datetime.now(timezone.utc))
+                if item:
+                    try:
+                        await asyncio.to_thread(ingest_items, [item])
+                        set_service_status('news_stream','ok','Public allowlisted update ingested',success=True)
+                    except Exception as exc:
+                        set_service_status('news_stream','error',type(exc).__name__)
+
+            client.add_event_handler(on_message, events.NewMessage())
+            client.add_event_handler(on_message, events.MessageEdited())
+            await asyncio.to_thread(initialize_providers)
+            while client.is_connected():
+                conn = get_db_connection()
+                state = dict(conn.execute("SELECT * FROM scanner_news_providers WHERE provider='telegram_channels'").fetchone())
+                conn.close()
+                current = datetime.now(timezone.utc)
+                result = await asyncio.wait_for(collect(client,state,current,names),timeout=60)
+                await asyncio.to_thread(run_feed_cycle, {'telegram_channels':lambda *_: result}, current, True)
+                set_service_status('news_stream','degraded' if result['errors'] else 'ok',
+                                   'Live updates with 60-second cursor catch-up',success=not result['errors'])
+                await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            retry = max(60, int(getattr(exc,'seconds',0) or 0))
+            set_service_status('news_stream','error',type(exc).__name__)
+        finally:
+            if client:
+                await client.disconnect()
+        await asyncio.sleep(retry)
+
+
 def channel_names():
     names = list(dict.fromkeys(x.strip().lstrip('@').lower() for x in
                               os.getenv('TELEGRAM_NEWS_SOURCE_CHANNELS', '').split(',') if x.strip()))

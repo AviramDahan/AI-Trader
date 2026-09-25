@@ -907,12 +907,16 @@ async def stock_news_ai_loop() -> None:
     from news_pipeline import analyze_news_jobs, feed_settings
     await asyncio.sleep(25)
     while True:
+        result = {}
         try:
-            await asyncio.to_thread(analyze_news_jobs)
+            result = await asyncio.to_thread(analyze_news_jobs)
         except Exception as exc:
             from scanner_engine import set_service_status
             set_service_status("news_ai", "error", type(exc).__name__)
-        await asyncio.sleep(feed_settings()["analysis_interval"])
+        # Drain ready work without adding thirty seconds to every story.
+        # Idle/error backoff remains bounded and does not busy-spin.
+        await asyncio.sleep(0.1 if result.get('analyzed') or result.get('errors')
+                            else feed_settings()["analysis_interval"])
 
 
 async def stock_news_translation_loop() -> None:

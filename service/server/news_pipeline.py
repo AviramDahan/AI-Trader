@@ -132,7 +132,7 @@ def feed_settings() -> dict[str, Any]:
         "cadence": cadence,
         "yahoo_cadence": _int_env("STOCK_SCANNER_YAHOO_NEWS_INTERVAL_SECONDS", 900, 300, 21600),
         "yahoo_tickers": _int_env("STOCK_SCANNER_YAHOO_NEWS_TICKERS_PER_CYCLE", 10, 1, 50),
-        "analysis_interval": _int_env("STOCK_SCANNER_NEWS_AI_INTERVAL_SECONDS", 30, 10, 3600),
+        "analysis_interval": _int_env("STOCK_SCANNER_NEWS_AI_INTERVAL_SECONDS", 2, 1, 3600),
         # Large JSON batches can exhaust Ollama's output budget mid-object.
         "analysis_batch": _int_env("STOCK_SCANNER_NEWS_AI_BATCH_SIZE", 3, 1, 30),
         "alert_min_relevance": _float_env("STOCK_SCANNER_NEWS_ALERT_MIN_RELEVANCE", .65, 0, 1),
@@ -712,6 +712,10 @@ PROVIDERS: dict[str, Callable[[dict[str, Any], datetime], dict[str, Any]]] = {
 
 def _provider_cadence(name: str) -> int:
     cfg = feed_settings()
+    if name == 'telegram_channels':
+        from telegram_news_reader import streaming_enabled
+        if streaming_enabled():
+            return 60
     return cfg["yahoo_cadence"] if name == "yahoo_priority" else cfg["cadence"]
 
 
@@ -943,6 +947,10 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
     summary = {"providers_checked": 0, "providers_skipped_backoff": 0, "items_inserted": 0,
                "sources_added": 0, "errors": [], "providers": {}}
     for name, fetcher in fetchers.items():
+        if provider_fetchers is None and name == 'telegram_channels':
+            from telegram_news_reader import streaming_enabled
+            if streaming_enabled():
+                continue  # Single session owner: stream plus cursor catch-up.
         conn = get_db_connection(); cur = conn.cursor()
         cur.execute("SELECT * FROM scanner_news_providers WHERE provider=?", (name,)); row = cur.fetchone(); conn.close()
         if not row:
@@ -1244,7 +1252,10 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
          JOIN scanner_signals s ON s.id=t.signal_id
          WHERE l.news_id=n.id AND t.status='open' AND t.is_shadow=0 ORDER BY t.id LIMIT 1) thesis
         FROM scanner_news_jobs j JOIN scanner_news n ON n.id=j.news_id
-        WHERE j.status IN ('pending','retry') AND j.next_attempt_at<=? ORDER BY j.priority DESC,j.id LIMIT ?""", (stamp, limit))
+        WHERE j.status IN ('pending','retry') AND j.next_attempt_at<=?
+        ORDER BY (CASE WHEN n.scope='market' THEN 90 ELSE j.priority END
+          + MIN(120, MAX(0, (julianday(?) - julianday(j.created_at))*1440))) DESC,
+          j.id LIMIT ?""", (stamp, stamp, limit))
     rows = [dict(row) for row in cur.fetchall()]; conn.close()
     if not rows:
         from scanner_engine import set_service_status
@@ -1325,6 +1336,8 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
         cur.execute("UPDATE scanner_news_jobs SET status='done',attempts=attempts+1,last_error=NULL,updated_at=? WHERE id=?", (stamp, row["job_id"]))
         cur.execute("UPDATE scanner_news SET quality_version=?,duplicate_of=? WHERE id=?",
                     (result.get('quality_version', 0), result.get('duplicate_of') or None, row['id']))
+        cur.execute("UPDATE scanner_news SET analysis_seconds=?,analysis_finished_at=? WHERE id=?",
+                    (result.get('analysis_seconds'), _z() if at is None else stamp, row['id']))
         analyzed += 1
         if result.get('duplicate_of'):
             cur.execute("UPDATE scanner_news SET analysis_status='duplicate_event' WHERE id=?", (row['id'],))

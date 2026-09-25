@@ -127,7 +127,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       existing_market: 'צילומי החדשות האחרונים ממנגנון חדשות השוק הקיים.',
       ecb: 'הודעות מדיניות מוניטרית וסטטיסטיקה מהבנק המרכזי האירופי; חלון RSS אחרון, לא שידור בזמן אמת.',
       global_voices: 'עד 15 כותרות חדשות עולם מהפיד האחרון; עם ייחוס למחבר וברישיון CC BY 3.0.',
-      telegram_channels: 'ערוצים ציבוריים מאושרים בלבד. איסוף מחזורי מוגבל של הודעות חדשות; ללא צאטים פרטיים וללא אימות מול מקור ראשוני.',
+      telegram_channels: 'ערוצים ציבוריים מאושרים בלבד; ללא צאטים פרטיים וללא אימות מול מקור ראשוני. מצב הקליטה הרציפה מוצג בנפרד במצב הסורק.',
     }
     if (provider.provider === 'yahoo_priority') {
       const counts = String(provider.coverage || '').match(/(\d+) open-position, (\d+) watchlist, (\d+) active-signal and (\d+) rotating candidate/)
@@ -137,7 +137,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   }
   const serviceName = (component: string) => he ? ({
     monitor: 'ניטור עסקאות', news: 'תרגום חדשות', news_ai: 'ניתוח חדשות ב־AI',
-    news_feed: 'איסוף חדשות', ollama: 'Ollama', position_news: 'חדשות לפוזיציות',
+    news_feed: 'איסוף חדשות', news_stream: 'קליטת Telegram רציפה', ollama: 'Ollama', position_news: 'חדשות לפוזיציות',
     prices: 'נתוני מחיר', quotes: 'מחיר נוכחי', scan: 'סריקת מניות',
     telegram: 'שליחת Telegram', telegram_status: 'עדכון נושאי Telegram',
   } as Record<string, string>)[component] || component : component
@@ -150,6 +150,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const serviceDetail = (service: Record<string, any>) => {
     const detail = String(service.detail || '')
     if (!he) return detail || '—'
+    if (service.component === 'news_stream' && service.status === 'ok') return 'חיבור לקבלת הודעות חדשות, עם השלמת פערים לפי סמן שמור כל 60 שניות.'
     if (service.component === 'news_ai') {
       const unresolved = detail.match(/(?:Unresolved analysis jobs: |unresolved=)(\d+)/)?.[1]
       if (unresolved && Number(unresolved)) return `${unresolved} ידיעות לא עברו ניתוח או בקרת איכות. הן לא יישלחו עד לתיקון; ניסיונות חוזרים מוגבלים.`
@@ -365,6 +366,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       <p className="scanner-note">{text(`איסוף מחזורי, לא זרם בזמן אמת. פידים רשמיים משותפים נבדקים כל ${Math.round(Number(data?.news_meta?.requested_refresh_seconds || 300) / 60)} דקות; Yahoo מכסה בעדיפות עסקאות פתוחות, סיגנלים פעילים ומדגם מתחלף של מועמדים — לא את כל ${activity.universe_count || 0} המניות בכל מחזור.`, `Periodic collection, not a real-time wire. Shared official feeds are checked every ${Math.round(Number(data?.news_meta?.requested_refresh_seconds || 300) / 60)} minutes; Yahoo prioritizes open positions, active signals and a rotating candidate sample—not all ${activity.universe_count || 0} stocks each cycle.`)}</p>
       <p className="scanner-news-meta">{text('רענון תצוגה', 'Screen refresh')}: {stamp(data?.news_meta?.screen_generated_at)} · {text('בדיקת ספק אחרונה', 'Last provider check')}: {stamp(data?.news_meta?.last_collected_at)} · {text('ידיעה אחרונה שנאספה', 'Latest collected item')}: {stamp(data?.news_meta?.latest_item_collected_at)}</p>
       <div className="scanner-status-grid">{(data?.news_providers || []).map(provider => <article key={provider.provider} className={`scanner-status ${provider.status}`}><h3>{providerName(provider.provider)}</h3><strong>{providerStatus(provider.status)}</strong><p>{providerCoverage(provider)}</p><small>{providerCounters(provider)}<br/>{text('הצלחה אחרונה', 'Last success')}: {stamp(provider.last_success_at)}<br/>{text('בדיקה הבאה', 'Next check')}: {stamp(provider.next_check_at)}</small></article>)}</div>
+      {!!data?.news_meta?.latency?.samples && <p className="scanner-news-meta">{text('מדידת חדשות אחרונות', 'Recent news measurements')}: {data.news_meta.latency.samples} · {text('ניתוח ממוצע', 'Mean analysis')}: {Math.round(data.news_meta.latency.model_seconds || 0)}s · {text('קליטה עד סיום ניתוח, כולל המתנה', 'Ingest to analysis completion, including wait')}: {Math.round(data.news_meta.latency.processing_seconds || 0)}s · {text('קליטה עד Telegram', 'Ingest to Telegram')}: {data.news_meta.delivery_latency?.samples ? `${Math.round(data.news_meta.delivery_latency.seconds)}s (${data.news_meta.delivery_latency.samples})` : text('טרם נמדד', 'Not measured yet')}</p>}
       {!!data?.news_meta?.historical_reviews_pending && <p>{text(`תקצירים היסטוריים שממתינים לבדיקה מחדש: ${data.news_meta.historical_reviews_pending}. מקורותיהם נשמרו; לא יישלחו מחדש כהתראות חדשות.`, `Historical summaries awaiting review: ${data.news_meta.historical_reviews_pending}. Sources are retained; no replay as new alerts.`)}</p>}
       {(['market', 'watchlist', 'active_signal', 'universe', 'open_position'] as const).map(scope => {
         const rows = filteredNews.filter(item => item.scope === scope)

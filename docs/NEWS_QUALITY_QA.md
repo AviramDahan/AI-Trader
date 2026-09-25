@@ -1,5 +1,9 @@
 # News quality repair — September 25, 2026
 
+The later opt-in market fast path and delivery measurements are described in
+[FAST_NEWS_FEED.md](FAST_NEWS_FEED.md). The strict editorial path below remains
+in use for position analysis and suspicious market output.
+
 ## Findings and safeguards
 
 - A malformed multi-story Ollama response previously retried the whole batch, sometimes more than 90 times. Production now processes and commits one story at a time with an explicit JSON schema, type validation and a finite retry budget. One failed story cannot poison other stories.

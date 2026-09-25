@@ -12,6 +12,8 @@ def isolate_telegram(monkeypatch):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.setenv("STOCK_SCANNER_TELEGRAM_PORTFOLIO_STATUS_ENABLED", "false")
+    monkeypatch.setenv("STOCK_SCANNER_NEWS_FAST_MARKET", "false")
+    monkeypatch.setenv("TELEGRAM_NEWS_STREAM_ENABLED", "false")
     original = requests.sessions.Session.request
 
     def guarded_request(session, method, url, *args, **kwargs):

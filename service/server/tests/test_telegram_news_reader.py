@@ -79,3 +79,64 @@ def test_private_or_group_entity_never_read():
 def test_disabled_needs_no_session_or_dependency():
     with patch.dict(os.environ, TELEGRAM_NEWS_READER_ENABLED='false'):
         assert reader.fetch_telegram_news({}, NOW)['items'] == []
+
+
+def test_stream_ignores_non_allowlisted_chats_and_does_not_advance_cursor():
+    msg=message();msg.peer_id=SimpleNamespace(channel_id=123)
+    allowed={123:'channel'}
+    assert reader.stream_item(msg,allowed,NOW)['url']=='https://t.me/channel/10'
+    assert allowed=={123:'channel'}
+    msg.peer_id=SimpleNamespace(channel_id=999)
+    assert reader.stream_item(msg,allowed,NOW) is None
+    msg.peer_id=SimpleNamespace(user_id=123)
+    assert reader.stream_item(msg,allowed,NOW) is None
+
+
+def test_stream_disabled_has_no_client_or_session_access(monkeypatch):
+    monkeypatch.setenv('TELEGRAM_NEWS_STREAM_ENABLED','false')
+    asyncio.run(reader.telegram_news_stream_loop())
+
+
+def test_stream_ingests_live_event_catches_up_and_disconnects(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+    import news_pipeline
+    import database
+    import scanner_engine
+    for key in ('TELEGRAM_NEWS_STREAM_ENABLED','TELEGRAM_NEWS_READER_ENABLED','STOCK_SCANNER_ENABLED'):
+        monkeypatch.setenv(key,'true')
+    monkeypatch.setenv('TELEGRAM_API_ID','123')
+    monkeypatch.setenv('TELEGRAM_API_HASH','test-only')
+    monkeypatch.setenv('TELEGRAM_NEWS_SOURCE_CHANNELS','channel')
+    session=tmp_path/'test.session';session.touch()
+    monkeypatch.setattr(reader,'SESSION',session)
+    fake=client()
+    fake.connect=AsyncMock();fake.disconnect=AsyncMock()
+    fake.is_user_authorized=AsyncMock(return_value=True)
+    fake.get_entity.return_value=SimpleNamespace(id=123,broadcast=True,username='channel')
+    fake.is_connected=Mock(return_value=True)
+    handlers=[]
+    fake.add_event_handler=lambda handler,event: handlers.append(handler)
+    monkeypatch.setitem(sys.modules,'telethon',SimpleNamespace(
+        TelegramClient=Mock(return_value=fake),
+        events=SimpleNamespace(NewMessage=lambda:None,MessageEdited=lambda:None)))
+    connection=Mock()
+    connection.execute.return_value.fetchone.return_value={'checkpoint_json':'{}'}
+    monkeypatch.setattr(database,'get_db_connection',lambda:connection)
+    ingest=Mock();cycle=Mock();status=Mock()
+    monkeypatch.setattr(news_pipeline,'ingest_items',ingest)
+    monkeypatch.setattr(news_pipeline,'initialize_providers',Mock())
+    monkeypatch.setattr(news_pipeline,'run_feed_cycle',cycle)
+    monkeypatch.setattr(scanner_engine,'set_service_status',status)
+    async def stop_after_event(seconds):
+        msg=message();msg.date=datetime.now(timezone.utc)
+        msg.peer_id=SimpleNamespace(channel_id=123)
+        await handlers[0](SimpleNamespace(message=msg))
+        raise asyncio.CancelledError()
+    monkeypatch.setattr(reader.asyncio,'sleep',stop_after_event)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(reader.telegram_news_stream_loop())
+    assert len(handlers)==2
+    assert ingest.call_args.args[0][0]['url']=='https://t.me/channel/10'
+    assert cycle.call_count==1
+    fake.disconnect.assert_awaited_once()
+    assert status.call_args.args[1]=='ok'

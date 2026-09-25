@@ -1416,6 +1416,19 @@ def dashboard_payload() -> dict[str, Any]:
     news_queue = {row['status']: row['n'] for row in cur.fetchall()}
     cur.execute("SELECT COUNT(*) n FROM scanner_news WHERE quality_version=-2")
     historical_reviews = cur.fetchone()['n']
+    cur.execute("""SELECT COUNT(*) samples, AVG(analysis_seconds) model_seconds,
+        AVG(MAX(0,(julianday(analysis_finished_at)-julianday(collected_at))*86400)) processing_seconds
+        FROM (SELECT analysis_seconds,analysis_finished_at,collected_at FROM scanner_news
+          WHERE analysis_seconds IS NOT NULL AND analysis_finished_at IS NOT NULL
+          ORDER BY analysis_finished_at DESC LIMIT 100)""")
+    news_latency = dict(cur.fetchone())
+    cur.execute("""SELECT COUNT(*) samples,AVG(seconds) seconds FROM (
+        SELECT MAX(0,(julianday(o.sent_at)-julianday(n.collected_at))*86400) seconds
+        FROM scanner_telegram_outbox o JOIN scanner_news n
+          ON o.dedupe_key LIKE 'market-news:' || n.id || ':%'
+        WHERE o.status='sent' AND n.analysis_seconds IS NOT NULL
+        ORDER BY o.sent_at DESC LIMIT 100)""")
+    news_delivery_latency = dict(cur.fetchone())
     cur.execute("SELECT * FROM scanner_news_schedule ORDER BY ticker"); schedules = [dict(row) for row in cur.fetchall()]
     cur.execute("SELECT * FROM scanner_service_status ORDER BY component"); services = [dict(row) for row in cur.fetchall()]
     try:
@@ -1511,6 +1524,8 @@ def dashboard_payload() -> dict[str, Any]:
             "services": services, "news_providers": news_providers,
             "news_meta": {"screen_generated_at": now_z(),
                           "analysis_queue": news_queue,
+                          "latency": news_latency,
+                          "delivery_latency": news_delivery_latency,
                           "historical_reviews_pending": historical_reviews,
                           "last_collected_at": max(provider_success_times) if provider_success_times else None,
                           "latest_item_collected_at": max(collected_times) if collected_times else None,

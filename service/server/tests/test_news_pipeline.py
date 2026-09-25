@@ -104,6 +104,24 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(len(self.rows('SELECT * FROM scanner_news')), 1)
         self.assertEqual(len(self.rows('SELECT * FROM scanner_news_sources')), 2)
 
+    def test_market_lane_beats_fresh_bulk_and_aging_prevents_starvation(self):
+        bulk={**self.item('sec_edgar','https://example.test/bulk','MSFT'), 'title':'Routine filing'}
+        market={**self.item('telegram_channels','https://t.me/channel/1'), 'title':'Central bank decision'}
+        news_pipeline.ingest_items([bulk,market],self.clock)
+        seen=[]
+        def analyzer(rows):
+            seen.extend(r['title'] for r in rows)
+            return [dict(id=r['id'],related=False,analysis_seconds=2.5) for r in rows]
+        news_pipeline.analyze_news_jobs(limit=1,analyzer=analyzer,at=self.clock)
+        self.assertEqual(seen,['Central bank decision'])
+        later=self.clock+timedelta(hours=2)
+        news_pipeline.ingest_items([{**market,'title':'Another central bank decision','url':'https://t.me/channel/2','published_at':later.isoformat()}],later)
+        news_pipeline.analyze_news_jobs(limit=1,analyzer=analyzer,at=later)
+        self.assertEqual(seen[-1],'Routine filing')
+        saved=self.rows("SELECT analysis_seconds,analysis_finished_at FROM scanner_news WHERE title='Routine filing'")[0]
+        self.assertEqual(saved['analysis_seconds'],2.5)
+        self.assertEqual(saved['analysis_finished_at'],later.isoformat().replace('+00:00','Z'))
+
     def test_provider_cadence_rate_limit_backoff_and_recovery(self):
         calls = []
 

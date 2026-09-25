@@ -1493,6 +1493,8 @@ def init_database():
         "updated_at TEXT",
         "news_category TEXT NOT NULL DEFAULT 'company'",
         "quality_version INTEGER NOT NULL DEFAULT 0",
+        "analysis_seconds REAL",
+        "analysis_finished_at TEXT",
         "duplicate_of INTEGER",
     ):
         try:
