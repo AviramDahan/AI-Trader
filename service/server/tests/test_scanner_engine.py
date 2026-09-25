@@ -352,7 +352,7 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertEqual(matching[0]["scope"], "market")
         self.assertEqual(matching[0]["news_category"], "macro")
         self.assertTrue(matching[0]["publication_time_corrected"])
-        self.assertEqual(len(matching[0]["alternate_sources"]), 2)
+        self.assertEqual(matching[0]["alternate_sources"], [])
 
     def test_position_news_runs_once_per_ticker_dedupes_and_does_not_change_trade(self):
         self.record()

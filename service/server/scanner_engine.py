@@ -1261,18 +1261,19 @@ def _dedupe_dashboard_news(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if row.get("ticker") and row.get("scope") in {"open_position", "watchlist", "active_signal"}:
                 verified_tickers.append(str(row["ticker"]))
         verified_tickers = sorted(set(verified_tickers))
-        sources: dict[tuple[str, str], dict[str, Any]] = {}
+        sources: dict[str, dict[str, Any]] = {}
         for row in rows:
             direct = {"provider": row.get("provider"),
                       "publisher": row.get("original_publisher") or row.get("publisher"),
                       "url": row.get("url"), "published_at": row.get("published_at")}
             for source in [direct, *(row.get("alternate_sources") or [])]:
-                key = (str(source.get("provider") or ""), str(source.get("url") or ""))
-                if key[1]:
+                key = str(source.get("url") or "").strip().lower().rstrip("/")
+                if key:
                     sources[key] = source
         base["verified_tickers"] = verified_tickers
         base["ticker"] = verified_tickers[0] if verified_tickers else None
-        base["alternate_sources"] = list(sources.values())
+        primary_url = str(base.get("url") or "").strip().lower().rstrip("/")
+        base["alternate_sources"] = [source for key, source in sources.items() if key != primary_url]
         base["trade_ids"] = sorted({int(trade_id) for row in rows for trade_id in row.get("trade_ids") or []})
         base["signal_id"] = next((row.get("signal_id") for row in rows if row.get("signal_id") is not None), None)
         if verified_tickers:
