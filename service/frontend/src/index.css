@@ -3641,14 +3641,14 @@ html[dir='rtl'] .main-content {
 .scanner-dashboard .scanner-hero p { margin: 6px 0; }
 .signal-scan-details { margin: 10px 0; color: var(--text-secondary); font-size: 13px; }
 .signal-scan-details summary, .signal-history summary, .signal-secondary summary { cursor: pointer; padding: 10px 0; }
-.signal-list { display: grid; gap: 12px; }
+.signal-list { display: grid; gap: 20px; }
 .signal-group { margin: 18px 0 26px; }
 .signal-group h3 { display: flex; align-items: center; gap: 10px; font-size: 16px; }
 .signal-group h3 small { color: var(--text-secondary); font-weight: 400; }
 .signal-empty { color: var(--text-secondary); font-size: 14px; }
 .signal-history { border-top: 1px solid var(--border-color); padding-top: 8px; }
-.signal-focused .scanner-signal-summary { display: grid; grid-template-columns: minmax(140px,1fr) minmax(300px,2fr) auto; gap: 20px; }
-.signal-summary-levels { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; }
+.signal-focused .scanner-signal-summary { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 20px; }
+.signal-summary-levels { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; margin-top: 16px; }
 .signal-summary-levels small { display: block; color: var(--text-secondary); font-size: 11px; margin-bottom: 5px; }
 .signal-summary-levels b { display: inline-block; font-variant-numeric: tabular-nums; font-size: 16px; }
 .signal-status-label { display: inline-block; font-style: normal; font-size: 11px; margin-top: 8px; color: var(--text-secondary); border: 1px solid var(--border-color); padding: 3px 8px; border-radius: 5px; }
