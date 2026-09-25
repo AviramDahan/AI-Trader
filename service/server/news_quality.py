@@ -75,6 +75,18 @@ def numbers_grounded(result, facts):
     return translated <= source
 
 
+def terminology_grounded(result, facts):
+    """Reject known material mistranslations even when an LLM approves them."""
+    source = (str(facts.get('title') or '')+' '+str(facts.get('source_excerpt') or '')).lower()
+    hebrew = result['title_he']+' '+result['summary_he']
+    if re.search(r'\bdurables?\b|durable goods', source):
+        if 'מכשירי חשמל' in hebrew and not re.search(r'appliance|electrical', source):
+            return False  # Durable goods include more than home appliances.
+        if 'consensus' in source and 'הערכה מקדימה' in hebrew:
+            return False  # Analyst consensus is not a previous official estimate.
+    return True
+
+
 def recent_events(row):
     """Bound comparison by publication window and subject, not a news quota."""
     published = datetime.fromisoformat(row['published_at'].replace('Z', '+00:00'))
@@ -113,7 +125,11 @@ def analyze_one(row):
         'even when no ticker or portfolio position is involved. '
         'Use full Hebrew words, not abbreviations containing quotation marks (write איגרות חוב, not אגח). '
         'Financial glossary: yen=ין (Japanese currency, never יין/wine), futures=חוזים עתידיים, '
-        'bond yields=תשואות איגרות חוב, billion=מיליארד, trillion=טריליון, volatile=תנודתי. '
+        'bond yields=תשואות איגרות חוב, billion=מיליארד, trillion=טריליון, volatile=תנודתי, '
+        'durable goods/durables=מוצרים בני קיימא (NOT electrical appliances), '
+        'core durable goods=מוצרי ליבה בני קיימא, consensus=תחזית האנליסטים '
+        '(NOT a previous/preliminary official estimate), preferred stock=מניות בכורה, '
+        'SEC filing=דיווח לרשות ניירות הערך (NOT a lawsuit). '
         'Return the requested JSON object. Write fluent concise Hebrew, preserving names, roles, dates, '
         'quantities and uncertainty exactly. title_he translates the title; summary_he summarizes only the '
         'source excerpt, or repeats the title translation if no excerpt. Never infer article contents from '
@@ -141,7 +157,7 @@ def analyze_one(row):
         {'source': facts, 'draft': result, 'previous_sources': []},
         1400, schema=REVIEW_SCHEMA)
     validate_object(review, REVIEW_SCHEMA)
-    if not review['faithful'] or not review['fluent_hebrew'] or review['unsupported_claims'] or not numbers_grounded(result, facts):
+    if not review['faithful'] or not review['fluent_hebrew'] or review['unsupported_claims'] or not numbers_grounded(result, facts) or not terminology_grounded(result, facts):
         # One bounded editorial correction, then fail closed. Never accept the
         # first draft merely to increase the number of published messages.
         result = _ollama_json(system + ' Correct the rejected draft using the editor feedback. '
@@ -158,7 +174,7 @@ def analyze_one(row):
             {'source': facts, 'draft': result, 'previous_sources': []},
             1400, schema=REVIEW_SCHEMA)
         validate_object(review, REVIEW_SCHEMA)
-        if not review['faithful'] or not review['fluent_hebrew'] or review['unsupported_claims'] or not numbers_grounded(result, facts):
+        if not review['faithful'] or not review['fluent_hebrew'] or review['unsupported_claims'] or not numbers_grounded(result, facts) or not terminology_grounded(result, facts):
             raise ValueError('news_quality_rejected')
     # Previous headlines belong only in event comparison, never in the factual
     # translation review where they could contaminate names/prices themselves.

@@ -25,6 +25,16 @@ def row():
                 source_facts_json=json.dumps({'source_excerpt':'Official update only'}))
 
 
+def test_durable_goods_does_not_become_appliances_or_previous_estimate():
+    facts={'title':'US AUG DURABLES ORDERS UNCHANGED (CONSENSUS -0.4%)'}
+    value=draft() | {'title_he':'הזמנות מכשירי חשמל עמידים ללא שינוי'}
+    assert not quality.terminology_grounded(value,facts)
+    value['title_he']='הזמנות מוצרים בני קיימא ללא שינוי (הערכה מקדימה)'
+    assert not quality.terminology_grounded(value,facts)
+    value['title_he']='הזמנות מוצרים בני קיימא ללא שינוי, לעומת תחזית האנליסטים'
+    assert quality.terminology_grounded(value,facts)
+
+
 def test_source_translation_cannot_see_thesis_or_previous_generated_text():
     value=row() | {'summary_he':'invented previous text'}
     with patch('news_quality.recent_events',return_value=[]), patch('scanner_engine._ollama_json',

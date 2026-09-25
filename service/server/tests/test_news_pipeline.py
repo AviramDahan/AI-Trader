@@ -95,6 +95,15 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(row["analysis_status"], "pending_analysis")
         self.assertIn("headline_and_feed_summary", row["source_facts_json"])
 
+    def test_syndicated_source_title_update_does_not_create_second_article(self):
+        primary = self.item()
+        relay = self.item('bls', 'https://second.example.test/release')
+        news_pipeline.ingest_items([primary, relay], self.clock)
+        relay['title'] += ' - CNBC'
+        news_pipeline.ingest_items([relay], self.clock + timedelta(minutes=1))
+        self.assertEqual(len(self.rows('SELECT * FROM scanner_news')), 1)
+        self.assertEqual(len(self.rows('SELECT * FROM scanner_news_sources')), 2)
+
     def test_provider_cadence_rate_limit_backoff_and_recovery(self):
         calls = []
 

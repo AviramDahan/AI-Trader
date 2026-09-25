@@ -23,6 +23,26 @@
 
 ## Validation
 
+### 2026-09-25 follow-up
+
+`scripts/review_historical_headlines.py` completed 364 quarantined records as
+source-only Hebrew headline summaries, clearing the historical review backlog.
+It checks source identity against the original backup and creates a fresh SQLite
+backup before writing. It never emits alerts or rewrites trade history. A live
+before/after comparison confirmed accounts, orders, fills and trades unchanged.
+SEC summaries identify the form and issuer only; metadata is not evidence of
+price impact. Form names with spaces and hyphens have offline regression tests.
+
+Two additional Telegram messages (685/686) were corrected in place after a
+durable-goods mistranslation; original text is archived privately. A deterministic
+terminology guard now rejects narrowing durable goods to electrical appliances
+and confusing analyst consensus with a preliminary official estimate.
+
+SEC recovered from one ReadTimeout on its next scheduled attempt without a
+manual restart. This does not guarantee provider availability. Live browser QA
+still found older malformed translations and pending current-story analysis;
+the overall quality/recovery goal is not yet complete.
+
 Tests cover schema rejection, isolation of one bad story, bounded correction, source/thesis separation, invented price/time rejection, duplicate-versus-new-fact behavior, source-link retention, bounded retries, and visible unresolved status. Existing integration coverage covers paper lifecycle, shadow isolation, news collection/retries, material position alerts and Telegram failures. Tests block real Telegram network access.
 
 Live verification must separately check health/CORS, scanner/monitor freshness, accounting reconciliation, real topic receipts and browser rendering. Mocked delivery does not prove a new real fill occurred. Historical evidence restoration does not masquerade as a new trade.

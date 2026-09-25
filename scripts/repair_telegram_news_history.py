@@ -23,6 +23,8 @@ from telegram_topics import with_news_community_link
 
 # Reviewed against the stored original headline, not the former AI summary.
 CORRECTIONS={
+    685: (5378,'נתון מוצרי הליבה בני הקיימא בארצות הברית: עלייה של 0.3%, לעומת תחזית לעלייה של 0.6% ונתון קודם של 0.4%.'),
+    686: (5381,'ההזמנות למוצרים בני קיימא בארצות הברית נותרו ללא שינוי באוגוסט, לעומת תחזית האנליסטים לירידה של 0.4%.'),
     587: (5035,'Strategy הגדילה את החזקות הביטקוין שלה ב־950 מטבעות. הכותרת עוסקת גם במניית MSTR.'),
     590: (None,'השוואה בין Astera Labs לבין Marvell: איזו מניית טכנולוגיה עדיפה לרכישה ב־2026?'),
     591: (5052,'השוואה בין CrowdStrike לבין Palo Alto: איזו מניית אבטחת סייבר ובינה מלאכותית מצדיקה יותר את שווייה?'),
@@ -44,7 +46,7 @@ CORRECTIONS={
 }
 
 
-async def main(apply=False, merge_only=False):
+async def main(apply=False, merge_only=False, message_ids=None):
     cfg=dotenv_values(ROOT/'.env')
     http=requests.Session();http.trust_env=False
     base='https://api.telegram.org/bot'+cfg['TELEGRAM_BOT_TOKEN']
@@ -95,7 +97,9 @@ async def main(apply=False, merge_only=False):
                 print('Merged repeated bot message',m['id'])
             print('Original-message archive:',archive)
             return
-        messages=await client.get_messages(chat,ids=list(CORRECTIONS))
+        selected=message_ids or list(CORRECTIONS)
+        if any(i not in CORRECTIONS for i in selected):raise ValueError('Unreviewed message ID')
+        messages=await client.get_messages(chat,ids=selected)
         plan=[]
         conn=database.get_db_connection()
         for m in messages:
@@ -141,6 +145,7 @@ async def main(apply=False, merge_only=False):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--apply',action='store_true');parser.add_argument('--merge-only',action='store_true')
+    parser.add_argument('--message-ids',type=int,nargs='+')
     args=parser.parse_args()
-    try:asyncio.run(main(args.apply,args.merge_only))
+    try:asyncio.run(main(args.apply,args.merge_only,args.message_ids))
     except Exception as exc:raise SystemExit(type(exc).__name__+': history repair stopped; no secrets logged')

@@ -774,7 +774,12 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
             continue
         canonical, source_key, version = _canonical_key(item), _source_key(item), _event_version(item)
         scope, signal_id, trade_ids = _scope_context(item["tickers"], item["published_at"])
-        cur.execute("SELECT * FROM scanner_news WHERE canonical_key=? OR url=? ORDER BY id LIMIT 1", (canonical, item["url"]))
+        # A syndicated source URL can belong to a canonical article whose
+        # primary URL differs. Look in the source ledger as well, otherwise a
+        # provider changing its headline creates a second visible article.
+        cur.execute("""SELECT * FROM scanner_news WHERE canonical_key=? OR url=?
+            OR id IN (SELECT news_id FROM scanner_news_sources WHERE url=?)
+            ORDER BY id LIMIT 1""", (canonical, item["url"], item["url"]))
         existing = cur.fetchone()
         if existing:
             duplicates += 1
