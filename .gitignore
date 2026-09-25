@@ -14,6 +14,9 @@ PRIVATE_SETUP_CREDENTIALS.txt
 PRIVATE_SETUP_CREDENTIALS.encrypted
 .local-tools/
 .runtime/
+*.session
+*.session-journal
+*.session.encrypted
 
 # ====================
 # Build outputs

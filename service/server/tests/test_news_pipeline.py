@@ -18,6 +18,22 @@ UTC = timezone.utc
 
 
 class NewsPipelineIntegrationTests(unittest.TestCase):
+    def test_telegram_post_feed_to_translated_outbox_and_replay_dedup(self):
+        item = {**self.item('telegram_channels', 'https://t.me/financialjuice/123'),
+                'source_kind': 'telegram_post', 'source_excerpt': 'Economic release details.'}
+        fetch = lambda state, at: {'items': [item], 'checkpoint': {'channels': {'financialjuice': {'last_id': 123}}}}
+        news_pipeline.run_feed_cycle({'telegram_channels': fetch}, self.clock, force=True)
+        analyzer = lambda rows: [dict(id=r['id'], related=True, title_he='עדכון כלכלי',
+            summary_he='פורסמו נתונים כלכליים חדשים.', sentiment='neutral', materiality='medium',
+            thesis_effect='unchanged', interpretation_he='ההשפעה אינה ודאית.', relevance=.9) for r in rows]
+        news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
+        news_pipeline.run_feed_cycle({'telegram_channels': fetch}, self.clock, force=True)
+        news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
+        alerts = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='market_news'")
+        self.assertEqual(len(alerts), 1)
+        self.assertIn('לא אומת מול מקור ראשוני', alerts[0]['message'])
+        self.assertIn(item['url'], alerts[0]['message'])
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.original_path = database._SQLITE_DB_PATH

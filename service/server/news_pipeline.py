@@ -22,6 +22,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
+from telegram_news_reader import fetch_telegram_news
 
 from database import begin_write_transaction, get_db_connection
 
@@ -680,6 +681,7 @@ def _fetch_existing_market(state: dict[str, Any], at: datetime) -> dict[str, Any
 
 
 PROVIDERS: dict[str, Callable[[dict[str, Any], datetime], dict[str, Any]]] = {
+    "telegram_channels": fetch_telegram_news,
     "ecb": _fetch_ecb,
     "global_voices": _fetch_global_voices,
     "sec_edgar": _fetch_sec,
@@ -964,7 +966,7 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
             _update_provider(name, "rate_limited", current, cadence, state["coverage"], state,
                              error=str(exc), retry_seconds=max(cadence, exc.retry_after))
         except ValueError as exc:
-            status = "config_required" if name == "sec_edgar" else "error"
+            status = "config_required" if name in {"sec_edgar", "telegram_channels"} else "error"
             summary["errors"].append(f"{name}:{status}")
             summary["providers"][name] = {"status": status}
             _update_provider(name, status, current, cadence, state["coverage"], state,
@@ -1015,14 +1017,15 @@ def _default_analyzer(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
               "{items:[{id:int,related:bool,title_he:string,summary_he:string,sentiment:positive|negative|mixed|neutral|unclear,"
               "materiality:low|medium|high,thesis_effect:supports|weakens|unchanged,interpretation_he:string,relevance:number}]}. "
               "title_he is a short faithful Hebrew translation of the source title. Hebrew summary must summarize "
-              "source_facts only. interpretation_he must explicitly be cautious AI interpretation.")
+              "source_facts only. Keep each summary under 45 words and interpretation under 25 words. "
+              "interpretation_he must explicitly be cautious AI interpretation.")
     system += (" For scope=market, related means relevant to general economic, business, sector, "
                "geopolitical or financial-market news, not related to a held company. Neutral factual "
                "economic releases can be relevant; do not invent a directional market impact. "
                "Routine factual updates on international affairs, technology, companies and energy are "
                "also related even with low market materiality. Exclude ads, lifestyle advice, celebrity "
                "gossip and promotional investment opinions. Relevance is topical fit, not price impact.")
-    result = _ollama_json(system, payload, 2200)
+    result = _ollama_json(system, payload, min(6000, max(2200, 1600 * len(payload))))
     return result.get("items") if isinstance(result, dict) and isinstance(result.get("items"), list) else []
 
 
@@ -1108,9 +1111,13 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
     # Short source translation, not an investment recommendation or AI opinion.
     parts = ["📰 " + title[:350]]
     summary = str(result.get("summary_he") or "").strip()
-    if not row.get("headline_only") and summary and summary != title:
+    telegram_post = row.get("source_kind") == "telegram_post"
+    if (telegram_post or not row.get("headline_only")) and summary and summary != title:
         parts.append(summary[:450])
-    parts.append("תרגום AI · " + ("כותרת בלבד" if row.get("headline_only") else "תקציר הפיד"))
+    if telegram_post:
+        parts.append("תרגום/תקציר AI של הודעת Telegram · לא אומת מול מקור ראשוני")
+    else:
+        parts.append("תרגום AI · " + ("כותרת בלבד" if row.get("headline_only") else "תקציר הפיד"))
     parts.append(f"מקור: {row.get('original_publisher') or row['publisher']}\n"
                  f"פורסם: {row['published_at']}\n{row['url']}")
     if row.get('provider') == 'global_voices':
