@@ -23,17 +23,20 @@ async def main(apply=False):
         current = await client(GetForumTopicsRequest(chat, None, 0, 0, 100))
         print('Pin limit:', limit)
         print('Topics:', [(t.id, getattr(t, 'title', ''), getattr(t, 'pinned', False)) for t in current.topics])
-        keys = ['TELEGRAM_SIGNALS_THREAD_ID', 'TELEGRAM_PORTFOLIO_THREAD_ID', 'TELEGRAM_TRADES_THREAD_ID',
-                'TELEGRAM_PERSONAL_NEWS_THREAD_ID', 'TELEGRAM_STOCK_NEWS_THREAD_ID', 'TELEGRAM_MARKET_NEWS_THREAD_ID']
-        desired = [int(env[k]) for k in keys]
-        unrelated = [t.id for t in current.topics if getattr(t, 'pinned', False) and t.id not in desired and t.id != 1]
+        keys = ['TELEGRAM_MARKET_NEWS_THREAD_ID', 'TELEGRAM_PERSONAL_NEWS_THREAD_ID',
+                'TELEGRAM_STOCK_NEWS_THREAD_ID', 'TELEGRAM_PORTFOLIO_THREAD_ID']
+        desired = [1] + [int(env[k]) for k in keys]
+        managed = set(desired) | {int(env[k]) for k in ('TELEGRAM_SIGNALS_THREAD_ID', 'TELEGRAM_TRADES_THREAD_ID')}
+        unrelated = [t.id for t in current.topics if getattr(t, 'pinned', False) and t.id not in managed]
         if unrelated:
             raise RuntimeError('Unrelated pinned topics found; not changing their order')
-        order = desired[:limit]
+        if len(desired) > limit:
+            raise RuntimeError('Requested order exceeds the server pin limit')
+        order = desired
         if apply:
             await client(ReorderPinnedForumTopicsRequest(chat, order, force=True))
             result = await client(GetForumTopicsRequest(chat, None, 0, 0, 100))
-            actual = [t.id for t in result.topics if getattr(t, 'pinned', False) and t.id != 1]
+            actual = [t.id for t in result.topics if getattr(t, 'pinned', False)]
             if actual != order:
                 raise RuntimeError('Pinned order verification failed')
             print('Verified pinned order:', actual)
