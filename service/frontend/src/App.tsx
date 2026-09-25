@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
-import { BackendStatusBanner, Sidebar, TopbarControls } from './appChrome'
+import { BackendStatusBanner, Sidebar } from './appChrome'
 import { LanguageContext, ThemeContext, type ThemeMode } from './appShared'
 import { ScannerDashboard } from './ScannerDashboard'
 import { type Language, getT } from './i18n'
@@ -41,10 +41,6 @@ function App() {
 
             <main className="main-content" style={{ display: 'flex', gap: '24px' }}>
               <div className="app-main-column">
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
-                  <TopbarControls />
-                </div>
-
                 <BackendStatusBanner />
 
                 <Routes>

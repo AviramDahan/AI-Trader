@@ -191,6 +191,10 @@ export function Sidebar() {
         ))}
       </nav>
 
+      <div className="sidebar-settings">
+        <TopbarControls />
+      </div>
+
       <div className="sidebar-account" style={{ marginTop: 'auto' }}>
         <div className="scanner-sidebar-notice">
           <strong>{language === 'he' ? 'מסחר מדומה בלבד' : 'PAPER TRADING ONLY'}</strong>
