@@ -18,6 +18,9 @@ UTC = timezone.utc
 
 class ScannerEngineTests(unittest.TestCase):
     def setUp(self):
+        self.status_refresh = patch("telegram_status.refresh_telegram_status_cards", return_value={"portfolio": "updated", "signals_status": "updated"})
+        self.status_refresh.start()
+        self.addCleanup(self.status_refresh.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.original_path = database._SQLITE_DB_PATH
         database._SQLITE_DB_PATH = str(Path(self.directory.name) / "scanner.db")
