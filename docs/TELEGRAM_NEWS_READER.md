@@ -26,3 +26,14 @@ Existing URL/title deduplication applies; differently worded reports of the same
 be distinct. Edits/deletions and media-only posts are not synchronized. This is periodic coverage,
 not a complete real-time feed. AI summaries are interpretations of post text, not verification.
 Disable TELEGRAM_NEWS_READER_ENABLED to stop collection. No trading behavior is changed.
+
+## News topic routing
+
+- TELEGRAM_MARKET_NEWS_THREAD_ID: general market/economic news, including channel reader posts.
+- TELEGRAM_PERSONAL_NEWS_THREAD_ID: material open-position and manually watched ticker news.
+- TELEGRAM_STOCK_NEWS_THREAD_ID: high-materiality news for other verified scanner stocks.
+
+`scripts/split_telegram_news_topics.py` creates the personal topic once and renames the stock topic,
+without deleting/moving prior messages or replaying news. Restart the backend after configuration.
+Legacy deployments without a personal topic retain the former shared stock-topic fallback.
+Position/watchlist exclusion in news_pipeline prevents duplicate same-ticker broad alerts.

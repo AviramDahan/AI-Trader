@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 
 MARKET_NEWS_EVENT_TYPES = {"market_news"}
+PERSONAL_NEWS_EVENT_TYPES = {"position_news", "watchlist_news", "watchlist_news_correction"}
 STOCK_NEWS_EVENT_TYPES = {
     "position_news", "watchlist_news", "watchlist_news_correction", "stock_news", "correction", "news_status",
 }
@@ -40,6 +41,8 @@ def thread_id_for_event(event_type: str | None) -> int | None:
         return None
     if event_type in MARKET_NEWS_EVENT_TYPES:
         names = ("TELEGRAM_MARKET_NEWS_THREAD_ID", "TELEGRAM_NEWS_THREAD_ID")
+    elif event_type in PERSONAL_NEWS_EVENT_TYPES:
+        names = ("TELEGRAM_PERSONAL_NEWS_THREAD_ID", "TELEGRAM_STOCK_NEWS_THREAD_ID", "TELEGRAM_NEWS_THREAD_ID")
     elif event_type in STOCK_NEWS_EVENT_TYPES:
         names = ("TELEGRAM_STOCK_NEWS_THREAD_ID", "TELEGRAM_NEWS_THREAD_ID")
     elif event_type in SIGNAL_EVENT_TYPES:

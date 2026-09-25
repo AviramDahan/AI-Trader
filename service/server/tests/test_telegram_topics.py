@@ -10,6 +10,16 @@ from telegram_topics import destination_fields, thread_id_for_event, with_news_c
 
 
 class TelegramTopicRoutingTests(unittest.TestCase):
+    def test_personal_news_split_keeps_market_signals_and_trades_separate(self):
+        with patch.dict(os.environ, {'TELEGRAM_PERSONAL_NEWS_THREAD_ID':'114',
+                'TELEGRAM_STOCK_NEWS_THREAD_ID':'112', 'TELEGRAM_MARKET_NEWS_THREAD_ID':'111'}, clear=True):
+            for event in ('position_news', 'watchlist_news', 'watchlist_news_correction'):
+                self.assertEqual(thread_id_for_event(event), 114)
+            self.assertEqual(thread_id_for_event('stock_news'), 112)
+            self.assertEqual(thread_id_for_event('market_news'), 111)
+            self.assertIsNone(thread_id_for_event('entry'))
+            self.assertIsNone(thread_id_for_event('new_signal'))
+
     def test_news_sender_includes_footer_in_mocked_telegram_payload(self):
         import stock_scanner
         session = Mock()
@@ -40,6 +50,7 @@ class TelegramTopicRoutingTests(unittest.TestCase):
     def test_news_and_trading_events_route_to_separate_threads(self):
         with patch.dict(os.environ, {
             "TELEGRAM_NEWS_THREAD_ID": "101",
+            "TELEGRAM_PERSONAL_NEWS_THREAD_ID": "",
             "TELEGRAM_TRADING_THREAD_ID": "202",
             "TELEGRAM_MARKET_NEWS_THREAD_ID": "111",
             "TELEGRAM_STOCK_NEWS_THREAD_ID": "112",
@@ -59,6 +70,7 @@ class TelegramTopicRoutingTests(unittest.TestCase):
     def test_missing_or_invalid_thread_falls_back_to_general_chat(self):
         with patch.dict(os.environ, {
             "TELEGRAM_NEWS_THREAD_ID": "invalid",
+            "TELEGRAM_PERSONAL_NEWS_THREAD_ID": "",
             "TELEGRAM_TRADING_THREAD_ID": "",
             "TELEGRAM_MARKET_NEWS_THREAD_ID": "",
             "TELEGRAM_STOCK_NEWS_THREAD_ID": "",

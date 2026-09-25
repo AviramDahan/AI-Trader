@@ -183,11 +183,11 @@ def main() -> int:
     portfolio_thread = str(values.get("TELEGRAM_PORTFOLIO_THREAD_ID") or "").strip()
     updates = {"TELEGRAM_CHAT_ID": chat_id}
     if not stock_news_thread.isdigit():
-        topic = call("createForumTopic", {"chat_id": chat_id, "name": "🏢 חדשות מניות", "icon_color": 7322096})
+        topic = call("createForumTopic", {"chat_id": chat_id, "name": "🔎 חדשות מניות חשובות", "icon_color": 7322096})
         stock_news_thread = str(topic["message_thread_id"])
     else:
         call("editForumTopic", {"chat_id": chat_id, "message_thread_id": stock_news_thread,
-                                "name": "🏢 חדשות מניות"})
+                                "name": "🔎 חדשות מניות חשובות"})
     updates["TELEGRAM_STOCK_NEWS_THREAD_ID"] = stock_news_thread
     _write_env(updates)
     if not market_news_thread.isdigit():
