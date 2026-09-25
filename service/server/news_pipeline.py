@@ -20,6 +20,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from zoneinfo import ZoneInfo
 
 import requests
 from telegram_news_reader import fetch_telegram_news
@@ -62,6 +63,16 @@ def _now(at: datetime | None = None) -> datetime:
 
 def _z(at: datetime | None = None) -> str:
     return _now(at).isoformat().replace("+00:00", "Z")
+
+
+def _publication_time_he(value: str) -> str:
+    try:
+        stamp = datetime.fromisoformat(_normal_iso(str(value)))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=UTC)
+        return stamp.astimezone(ZoneInfo("Asia/Jerusalem")).strftime("%d/%m/%Y %H:%M") + " (שעון ישראל)"
+    except (TypeError, ValueError):
+        return "זמן לא זמין"
 
 
 def _normal_iso(value: str) -> str:
@@ -1120,10 +1131,10 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
         parts.append("תרגום AI · " + ("כותרת בלבד" if row.get("headline_only") else "תקציר הפיד"))
     if telegram_post:
         # Keep provenance in storage, but omit channel promotion from the bulletin.
-        parts.append(f"פורסם: {row['published_at']}")
+        parts.append(f"פורסם: {_publication_time_he(row['published_at'])}")
     else:
         parts.append(f"מקור: {row.get('original_publisher') or row['publisher']}\n"
-                     f"פורסם: {row['published_at']}\n{row['url']}")
+                     f"פורסם: {_publication_time_he(row['published_at'])}\n{row['url']}")
     if row.get('provider') == 'global_voices':
         parts.insert(0, f"{row.get('original_publisher') or row['publisher']}\n{row['url']}")
         parts.append("CC BY 3.0 · כותרת בתרגום אוטומטי\nhttps://creativecommons.org/licenses/by/3.0/")

@@ -18,6 +18,13 @@ UTC = timezone.utc
 
 
 class NewsPipelineIntegrationTests(unittest.TestCase):
+    def test_publication_time_is_readable_israel_time_summer_and_winter(self):
+        self.assertEqual(news_pipeline._publication_time_he('2026-09-25T10:54:41Z'),
+                         '25/09/2026 13:54 (שעון ישראל)')
+        self.assertEqual(news_pipeline._publication_time_he('2026-01-01T23:30:00+00:00'),
+                         '02/01/2026 01:30 (שעון ישראל)')
+        self.assertEqual(news_pipeline._publication_time_he('invalid'), 'זמן לא זמין')
+
     def test_telegram_post_feed_to_translated_outbox_and_replay_dedup(self):
         item = {**self.item('telegram_channels', 'https://t.me/financialjuice/123'),
                 'source_kind': 'telegram_post', 'source_excerpt': 'Economic release details.'}
