@@ -1134,10 +1134,8 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
     parts = ["📰 " + title[:350]]
     if (telegram_post or not row.get("headline_only")) and summary and summary != title:
         parts.append(summary[:450])
-    if telegram_post:
-        parts.append("תרגום/תקציר AI · לא אומת מול מקור ראשוני")
-    else:
-        parts.append("תרגום AI · " + ("כותרת בלבד" if row.get("headline_only") else "תקציר הפיד"))
+    # General translation/source limitations live in the pinned topic notice.
+    # Never remove attribution or uncertainty from the actual reported facts.
     if telegram_post:
         # Keep provenance in storage, but omit channel promotion from the bulletin.
         parts.append(f"פורסם: {_publication_time_he(row['published_at'])}")
