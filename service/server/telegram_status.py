@@ -251,9 +251,10 @@ def signals_status_messages() -> list[str]:
     # Reserve ample room for the repeated heading/footer. A single position
     # block is bounded by database field lengths and remains far below 3200.
     chunks: list[list[str]] = []
+    separator = "\n\n" + "─" * 18 + "\n\n"
     current: list[str] = []
     for line in lines:
-        projected = len("\n\n".join(current + [line]))
+        projected = len(separator.join(current + [line]))
         if current and projected > 3200:
             chunks.append(current)
             current = [line]
@@ -269,7 +270,7 @@ def signals_status_messages() -> list[str]:
             page_label,
             _rtl("⚠️ מסחר מדומה בלבד. זו תמונת מצב, לא המלצה או פקודת מסחר."),
             _rtl(f"סה״כ פוזיציות פתוחות: {_ltr(len(trades))}"),
-            "\n\n".join(chunk),
+            separator.join(chunk),
             _rtl(f"עודכן: {_ltr(updated)} (שעון ישראל)"),
         ) if value)
         if len(message) > 4096:

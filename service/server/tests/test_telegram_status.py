@@ -141,6 +141,9 @@ class TelegramStatusTests(unittest.TestCase):
                        '{}','2026-01-01T00:00:00Z',102,'2026-01-01T00:00:00Z')""",
                         (signal_id, index, agent_id, ticker, f"Company {index}"))
         conn.commit(); conn.close()
+        separated_pages = telegram_status.signals_status_messages()
+        self.assertIn("\n\n" + "─" * 18 + "\n\n", separated_pages[0])
+        self.assertTrue(all(len(page) <= 4096 for page in separated_pages))
         pages = telegram_status.signals_status_messages()
         combined = "\n".join(pages)
         self.assertGreater(len(pages), 1)
