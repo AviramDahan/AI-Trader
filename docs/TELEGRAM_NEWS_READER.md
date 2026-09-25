@@ -13,8 +13,9 @@ or messages sent by the reader account. Only public broadcast allowlist entries 
 The existing bot/outbox publishes qualifying translated economic news to the general-news topic.
 
 Sources: https://t.me/financialjuice and https://t.me/WalterBloomberg.
-These are relay channels, not independently verified primary publishers. Attribution links to
-the actual Telegram post, not an invented original article. Republication permission is supplied
+These are relay channels, not independently verified primary publishers. Internal provenance links to
+the actual Telegram post, not an invented original article. Outgoing Telegram bulletins omit the
+source channel name/link by operator preference; database provenance is retained. Republication permission is supplied
 by the operator; access does not itself establish a license. Telegram API use is free, subject to
 https://core.telegram.org/api/terms and dynamic flood limits.
 

@@ -1118,8 +1118,12 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
         parts.append("תרגום/תקציר AI של הודעת Telegram · לא אומת מול מקור ראשוני")
     else:
         parts.append("תרגום AI · " + ("כותרת בלבד" if row.get("headline_only") else "תקציר הפיד"))
-    parts.append(f"מקור: {row.get('original_publisher') or row['publisher']}\n"
-                 f"פורסם: {row['published_at']}\n{row['url']}")
+    if telegram_post:
+        # Keep provenance in storage, but omit channel promotion from the bulletin.
+        parts.append(f"פורסם: {row['published_at']}")
+    else:
+        parts.append(f"מקור: {row.get('original_publisher') or row['publisher']}\n"
+                     f"פורסם: {row['published_at']}\n{row['url']}")
     if row.get('provider') == 'global_voices':
         parts.insert(0, f"{row.get('original_publisher') or row['publisher']}\n{row['url']}")
         parts.append("CC BY 3.0 · כותרת בתרגום אוטומטי\nhttps://creativecommons.org/licenses/by/3.0/")

@@ -32,7 +32,9 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         alerts = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='market_news'")
         self.assertEqual(len(alerts), 1)
         self.assertIn('לא אומת מול מקור ראשוני', alerts[0]['message'])
-        self.assertIn(item['url'], alerts[0]['message'])
+        self.assertNotIn(item['url'], alerts[0]['message'])
+        self.assertNotIn('מקור:', alerts[0]['message'])
+        self.assertEqual(self.rows('SELECT url FROM scanner_news')[0]['url'], item['url'])
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
