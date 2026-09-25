@@ -80,6 +80,8 @@ def terminology_grounded(result, facts):
     """Reject known material mistranslations even when an LLM approves them."""
     source = (str(facts.get('title') or '')+' '+str(facts.get('source_excerpt') or '')).lower()
     hebrew = result['title_he']+' '+result['summary_he']
+    if len(str(facts.get('title') or '').split()) >= 6 and len(result['title_he'].split()) < 3:
+        return False  # Schema-valid but visibly truncated headline (e.g. תנודתיות אג).
     if re.search(r'[\u0400-\u052f\u0600-\u06ff]', hebrew):
         return False  # Observed model corruption into Cyrillic/Arabic text.
     if re.search(r'[\u0590-\u05ff][A-Za-z]|[A-Za-z][\u0590-\u05ff]', hebrew):

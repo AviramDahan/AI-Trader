@@ -117,7 +117,12 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         later=self.clock+timedelta(hours=2)
         news_pipeline.ingest_items([{**market,'title':'Another central bank decision','url':'https://t.me/channel/2','published_at':later.isoformat()}],later)
         news_pipeline.analyze_news_jobs(limit=1,analyzer=analyzer,at=later)
-        self.assertEqual(seen[-1],'Routine filing')
+        self.assertEqual(seen[-1],'Another central bank decision')
+        for index in range(3,6):
+            news_pipeline.ingest_items([{**market,'title':f'Fresh policy event {index}',
+                'url':f'https://t.me/channel/{index}','published_at':later.isoformat()}],later)
+            news_pipeline.analyze_news_jobs(limit=1,analyzer=analyzer,at=later)
+        self.assertEqual(seen[-1],'Routine filing')  # Reserved fifth completion.
         saved=self.rows("SELECT analysis_seconds,analysis_finished_at FROM scanner_news WHERE title='Routine filing'")[0]
         self.assertEqual(saved['analysis_seconds'],2.5)
         self.assertEqual(saved['analysis_finished_at'],later.isoformat().replace('+00:00','Z'))

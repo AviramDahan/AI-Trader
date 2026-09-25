@@ -7,7 +7,10 @@ This is a news delivery change, not a new trading strategy.
 
 - Ready analysis jobs drain continuously; the configured AI interval applies only
   when idle. Market stories get scheduling priority 90; position news retains 100.
-  Waiting time adds up to 120 priority points so lower-priority work is not starved.
+  Market stories published within ten minutes receive a freshness bonus. Waiting
+  adds up to 30 priority points; every fifth completion reserves a catch-up slot
+  for work waiting over ten minutes. New market news does not sit behind all old
+  filings, while old work still progresses. The counter persists in job storage.
 - Exact URL/source-ledger duplicates are merged at ingestion. Potential semantic
   duplicates still receive a separate source-only comparison; material new facts
   are not suppressed and there is no per-ticker quota.

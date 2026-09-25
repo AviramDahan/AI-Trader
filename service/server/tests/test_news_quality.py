@@ -96,6 +96,7 @@ def test_foreign_script_corruption_rejected():
     assert not quality.terminology_grounded(draft() | {'title_he':'קטayama'}, {'title':'Katayama'})
     assert not quality.terminology_grounded(draft() | {'title_he':'התחזקות הין'}, {'title':'yen depreciation'})
     assert not quality.terminology_grounded(draft() | {'title_he':'יין יפני'}, {'title':'Japanese yen'})
+    assert not quality.terminology_grounded(draft() | {'title_he':'תנודתיות אג'}, {'title':'TREASURY VOLATILITY SURGES AS FED BETS SHIFT'})
 
 
 def test_auction_imbalance_keeps_strict_review(monkeypatch):

@@ -1247,6 +1247,9 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
     conn = get_db_connection(); cur = conn.cursor()
     _queue_legacy_priority_news(cur, current, stamp)
     conn.commit()
+    cur.execute("SELECT COUNT(*) n FROM scanner_news_jobs WHERE status='done'")
+    catchup_slot = int(cur.fetchone()['n']) % 5 == 4
+    fresh_cutoff = (current - timedelta(minutes=10)).isoformat().replace('+00:00','Z')
     cur.execute("""SELECT n.*,j.id job_id,j.attempts,
         (SELECT s.reason FROM scanner_trade_news l JOIN scanner_trades t ON t.id=l.trade_id
          JOIN scanner_signals s ON s.id=t.signal_id
@@ -1254,8 +1257,10 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
         FROM scanner_news_jobs j JOIN scanner_news n ON n.id=j.news_id
         WHERE j.status IN ('pending','retry') AND j.next_attempt_at<=?
         ORDER BY (CASE WHEN n.scope='market' THEN 90 ELSE j.priority END
-          + MIN(120, MAX(0, (julianday(?) - julianday(j.created_at))*1440))) DESC,
-          j.id LIMIT ?""", (stamp, stamp, limit))
+          + MIN(30, MAX(0, (julianday(?) - julianday(j.created_at))*1440))
+          + CASE WHEN n.scope='market' AND n.published_at>=? THEN 100 ELSE 0 END
+          + CASE WHEN ? AND j.created_at<? THEN 300 ELSE 0 END) DESC,
+          j.id LIMIT ?""", (stamp, stamp, fresh_cutoff, catchup_slot, fresh_cutoff, limit))
     rows = [dict(row) for row in cur.fetchall()]; conn.close()
     if not rows:
         from scanner_engine import set_service_status
