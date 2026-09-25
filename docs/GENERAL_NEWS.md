@@ -20,6 +20,11 @@ stock-news path. The trade/signal quality thresholds are unchanged.
 - STOCK_SCANNER_GENERAL_NEWS_ENABLED: true by default; false disables bulletins.
 - STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS: 6 by default (1–24).
 - TELEGRAM_MARKET_NEWS_THREAD_ID: existing destination; secrets remain server-side.
+- TELEGRAM_COMMUNITY_URL: public Telegram join link configured in the local .env.
+  The shared sender appends it to every news event (general, stock, position,
+  watchlist and corrections), including queued retries. Trade and signal alerts
+  are unchanged. Missing/invalid links omit the footer safely. Existing Telegram
+  messages are not edited or resent.
 
 Messages contain a Hebrew AI translation, original publisher, publication time
 and original link. Headline-only inputs are explicitly marked, without a generated

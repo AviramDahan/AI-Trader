@@ -2,14 +2,41 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from telegram_topics import destination_fields, thread_id_for_event
+from telegram_topics import destination_fields, thread_id_for_event, with_news_community_link
 
 
 class TelegramTopicRoutingTests(unittest.TestCase):
+    def test_news_sender_includes_footer_in_mocked_telegram_payload(self):
+        import stock_scanner
+        session = Mock()
+        with patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN':'test', 'TELEGRAM_CHAT_ID':'-123',
+                                    'TELEGRAM_COMMUNITY_URL':'https://t.me/+testInvite'}), \
+                patch.object(stock_scanner.requests, 'Session', return_value=session):
+            self.assertEqual(stock_scanner.send_telegram('news', {'telegram_enabled':True}, 'market_news'), 'sent')
+        self.assertIn('https://t.me/+testInvite', session.post.call_args.kwargs['data']['text'])
+
+    def test_community_footer_covers_every_news_route_only_once(self):
+        with patch.dict(os.environ, {'TELEGRAM_COMMUNITY_URL':'https://t.me/+testInvite'}):
+            for event in ('market_news','position_news','watchlist_news','watchlist_news_correction','stock_news','correction','news_status'):
+                message = with_news_community_link('חדשות', event)
+                self.assertIn('https://t.me/+testInvite', message)
+                self.assertEqual(with_news_community_link(message, event), message)
+            for event in ('new_signal','entry','tp','stop','portfolio_status',None):
+                self.assertEqual(with_news_community_link('message', event), 'message')
+
+    def test_community_footer_handles_missing_invalid_link_and_unicode_limit(self):
+        for link in ('', 'http://t.me/test', 'https://t.me/c/123/4', 'https://evil.test/join'):
+            with patch.dict(os.environ, {'TELEGRAM_COMMUNITY_URL':link}):
+                self.assertEqual(with_news_community_link('news','market_news'), 'news')
+        with patch.dict(os.environ, {'TELEGRAM_COMMUNITY_URL':'https://t.me/+testInvite'}):
+            message = with_news_community_link('📰' * 4000,'market_news')
+            self.assertLessEqual(len(message.encode('utf-16-le')) // 2, 4096)
+            self.assertTrue(message.endswith('https://t.me/+testInvite'))
+
     def test_news_and_trading_events_route_to_separate_threads(self):
         with patch.dict(os.environ, {
             "TELEGRAM_NEWS_THREAD_ID": "101",
