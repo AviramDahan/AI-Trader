@@ -371,10 +371,48 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         conn = database.get_db_connection(); cur = conn.cursor()
         self.assertFalse(news_pipeline._queue_general_bulletin(cur, row, result,
                          self.clock + timedelta(hours=7), self.clock.isoformat()))
-        self.assertFalse(news_pipeline._queue_general_bulletin(cur, row, {**result, 'materiality':'low'},
+        self.assertFalse(news_pipeline._queue_general_bulletin(cur, row, {**result, 'related':False},
                          self.clock, self.clock.isoformat()))
         with patch.dict(os.environ, {'STOCK_SCANNER_GENERAL_NEWS_ENABLED':'false'}):
             self.assertFalse(news_pipeline._queue_general_bulletin(cur, row, result, self.clock, self.clock.isoformat()))
+        conn.close()
+
+    def test_general_routine_low_materiality_neutral_news_is_allowed(self):
+        news_pipeline.ingest_items([self.item('ecb')], self.clock)
+        result = news_pipeline.analyze_news_jobs(analyzer=lambda rows: [dict(
+            id=r['id'], related=True, title_he='פורסמו נתוני הלוואות', sentiment='neutral',
+            materiality='low', relevance=.6) for r in rows], at=self.clock)
+        self.assertEqual(result['alerts'], 1)
+        self.assertEqual(self.rows('SELECT event_type FROM scanner_telegram_outbox')[0]['event_type'], 'market_news')
+        self.assertFalse(self.rows('SELECT * FROM scanner_signals'))
+
+    def test_global_voices_attributes_author_and_license_and_uses_conditional_fetch(self):
+        xml = b'''<rss xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><item>
+        <title>Technology policy update</title><link>https://globalvoices.org/example/</link>
+        <pubDate>Mon, 14 Sep 2026 12:00:00 GMT</pubDate><dc:creator>Test Author</dc:creator>
+        <description>Do not copy the article</description></item></channel></rss>'''
+        with patch.object(news_pipeline, '_request', return_value=(xml, {'etag':'v1'})):
+            fetched = news_pipeline._fetch_global_voices({}, self.clock)
+        self.assertEqual(fetched['items'][0]['publisher'], 'Global Voices — Test Author')
+        self.assertEqual(fetched['items'][0]['source_excerpt'], '')
+        news_pipeline.ingest_items(fetched['items'], self.clock)
+        news_pipeline.analyze_news_jobs(analyzer=lambda rows: [dict(id=r['id'], related=True,
+            title_he='עדכון טכנולוגיה', sentiment='neutral', materiality='low', relevance=.7)
+            for r in rows], at=self.clock)
+        message = self.rows('SELECT message FROM scanner_telegram_outbox')[0]['message']
+        self.assertTrue(message.startswith('Global Voices — Test Author'))
+        self.assertIn('https://creativecommons.org/licenses/by/3.0/', message)
+        with patch.object(news_pipeline, '_request', return_value=(None, {})) as request:
+            unchanged = news_pipeline._fetch_global_voices({'etag':'v1'}, self.clock)
+        self.assertEqual(unchanged['status'], 'not_modified')
+        self.assertEqual(request.call_args.args[1]['etag'], 'v1')
+
+    def test_general_relevance_floor_and_verified_stock_separation(self):
+        news_pipeline.ingest_items([self.item('existing_market', ticker='AAPL')], self.clock)
+        row = self.rows('SELECT * FROM scanner_news')[0]
+        conn = database.get_db_connection()
+        self.assertFalse(news_pipeline._queue_general_bulletin(conn.cursor(), row,
+            dict(related=True,title_he='עדכון',relevance=.9), self.clock, self.clock.isoformat()))
         conn.close()
 
     def test_fresh_translated_market_item_gets_one_general_analysis(self):

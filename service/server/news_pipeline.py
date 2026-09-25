@@ -316,6 +316,31 @@ def _fetch_bls(state: dict[str, Any], at: datetime) -> dict[str, Any]:
                                  "Official BLS Employment, CPI and JOLTS release RSS metadata", "macro")
 
 
+def _fetch_ecb(state: dict[str, Any], at: datetime) -> dict[str, Any]:
+    return _fetch_rss_collection(state, "ecb", (
+        ("https://www.ecb.europa.eu/rss/press.html", "European Central Bank"),
+        ("https://www.ecb.europa.eu/rss/statpress.html", "European Central Bank — Statistics"),
+    ), OFFICIAL_USER_AGENT, at,
+        "ECB official monetary-policy and statistical releases; latest RSS window, not a live wire", "macro")
+
+
+def _fetch_global_voices(state: dict[str, Any], at: datetime) -> dict[str, Any]:
+    content, meta = _request("https://globalvoices.org/feed/", state, OFFICIAL_USER_AGENT)
+    items = []
+    if content is not None:
+        items = _rss_items(content, "global_voices", "Global Voices", "market", news_category="world")
+        authors = {_canonical_url(node.findtext("link", "")):
+                   _strip_markup(node.findtext("{http://purl.org/dc/elements/1.1/}creator", ""))
+                   for node in ET.fromstring(content).findall('.//item')}
+        # Attribution is required by this publisher's CC BY republication policy.
+        items = [item for item in items if authors.get(item['url'])]
+        for item in items:
+            item['publisher'] = 'Global Voices — ' + authors[item['url']]
+            item['source_excerpt'] = ''  # Translate only the headline, no article/media copying.
+    return {"items": items, **meta, "status": "not_modified" if content is None else "ok",
+            "coverage": "Global Voices latest 15 world-news RSS headlines; author attributed, CC BY 3.0"}
+
+
 def _fetch_rss_collection(state: dict[str, Any], provider: str, feeds: tuple[tuple[str, str], ...],
                           user_agent: str, at: datetime, coverage: str, news_category: str) -> dict[str, Any]:
     """Fetch independent RSS endpoints without letting one failure discard the rest."""
@@ -655,6 +680,8 @@ def _fetch_existing_market(state: dict[str, Any], at: datetime) -> dict[str, Any
 
 
 PROVIDERS: dict[str, Callable[[dict[str, Any], datetime], dict[str, Any]]] = {
+    "ecb": _fetch_ecb,
+    "global_voices": _fetch_global_voices,
     "sec_edgar": _fetch_sec,
     "federal_reserve": _fetch_federal_reserve,
     "bls": _fetch_bls,
@@ -991,7 +1018,10 @@ def _default_analyzer(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
               "source_facts only. interpretation_he must explicitly be cautious AI interpretation.")
     system += (" For scope=market, related means relevant to general economic, business, sector, "
                "geopolitical or financial-market news, not related to a held company. Neutral factual "
-               "economic releases can be relevant; do not invent a directional market impact.")
+               "economic releases can be relevant; do not invent a directional market impact. "
+               "Routine factual updates on international affairs, technology, companies and energy are "
+               "also related even with low market materiality. Exclude ads, lifestyle advice, celebrity "
+               "gossip and promotional investment opinions. Relevance is topical fit, not price impact.")
     result = _ollama_json(system, payload, 2200)
     return result.get("items") if isinstance(result, dict) and isinstance(result.get("items"), list) else []
 
@@ -1055,12 +1085,11 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
     age = (current - _parse_time(row["published_at"])).total_seconds()
     if (row.get("scope") != "market" or _loads(row.get("verified_tickers_json"), []) or
             row.get("provider") not in PROVIDERS or result.get("related") is not True or
-            result.get("materiality") not in {"medium", "high"} or
             not re.search(r"[\u0590-\u05ff]", title) or
             not 0 <= age <= _int_env("STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS", 6, 1, 24) * 3600):
         return False
     try:
-        if float(result.get("relevance", 0)) < .65:
+        if float(result.get("relevance", 0)) < _float_env("STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE", .5, .5, 1):
             return False
     except (TypeError, ValueError):
         return False
@@ -1084,6 +1113,9 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
     parts.append("תרגום AI · " + ("כותרת בלבד" if row.get("headline_only") else "תקציר הפיד"))
     parts.append(f"מקור: {row.get('original_publisher') or row['publisher']}\n"
                  f"פורסם: {row['published_at']}\n{row['url']}")
+    if row.get('provider') == 'global_voices':
+        parts.insert(0, f"{row.get('original_publisher') or row['publisher']}\n{row['url']}")
+        parts.append("CC BY 3.0 · כותרת בתרגום אוטומטי\nhttps://creativecommons.org/licenses/by/3.0/")
     from scanner_engine import enqueue_telegram
     enqueue_telegram(cur, f"market-news:{row['id']}:{version}", "market_news", "\n\n".join(parts))
     return True
