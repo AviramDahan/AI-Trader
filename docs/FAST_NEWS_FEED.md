@@ -13,7 +13,8 @@ This is a news delivery change, not a new trading strategy.
   filings, while old work still progresses. The counter persists in job storage.
 - Exact URL/source-ledger duplicates are merged at ingestion. Potential semantic
   duplicates still receive a separate source-only comparison; material new facts
-  are not suppressed and there is no per-ticker quota.
+  are not suppressed and there is no per-ticker quota. A model duplicate verdict
+  cannot suppress a release with numerical facts absent from the referenced source.
 - With `STOCK_SCANNER_NEWS_FAST_MARKET=true`, ordinary market news uses one
   source-only translation/classification call. Schema, Hebrew, numerical and
   known terminology checks remain mandatory. Uncertain/suspicious drafts fall
@@ -61,3 +62,21 @@ Parallel GPU generation is not enabled: the smaller-model trial did not establis
 a benefit, and serial committing keeps semantic deduplication deterministic.
 The 30–60 second end-to-end target remains an operational measurement target,
 not a guarantee under bursts, outages or strict fallback.
+
+## Verification on 2026-09-25
+
+- Full local backend suite: 316 passed plus 10 subtests before the final guards;
+  subsequent focused quality/scheduler tests passed; final full suite runs in CI.
+- Frontend production build passed. Public Pages news view checked in a real
+  browser at desktop and 390px, Hebrew RTL and English LTR, without horizontal overflow.
+- Public HTTPS health returned 200; browser recovered after the supervised restart.
+- Telegram market topic received real source news; no synthetic news/test alerts.
+- Initial live burst during catch-up/restarts: three delivered stories measured
+  78, 93 and 136 seconds from ingestion. This does NOT establish the 30–60 second
+  target. Historical backlog makes the dashboard's rolling aggregate larger.
+- Rejected translations remain visible as failures/retries, never as no-news.
+  Model translation is not infallible; known truncated/mixed-script/currency and
+  auction-imbalance failures now trigger strict review or rejection.
+- Existing source records and paper-trade accounting were preserved. Narrow
+  re-evaluation of items misclassified during rollout uses the same dedupe ledger;
+  already-sent alerts are not replayed.

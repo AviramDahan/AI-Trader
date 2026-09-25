@@ -124,6 +124,22 @@ def recent_events(row):
     return [r for score, r in sorted(scored, key=lambda v: v[0], reverse=True)[:6] if score >= 2]
 
 
+def checked_duplicate(duplicate, facts, peers):
+    if not duplicate:
+        return 0
+    previous = next((p for p in peers if p['id']==duplicate),None)
+    if previous is None:
+        raise ValueError('news_invalid_duplicate_reference')
+    def numbers(source):
+        text=re.sub(r'https?://\S+','',source['title']+' '+source['source_excerpt'])
+        return {v.replace(',','') for v in re.findall(r'\d+(?:[.,]\d+)*',text)}
+    # Different releases in the same report (e.g. sentiment vs inflation)
+    # contain different factual values: a semantic guess must not suppress them.
+    if numbers(facts)-numbers(source_facts(previous)):
+        return 0
+    return duplicate
+
+
 def analyze_one(row):
     started = time.perf_counter()
     facts = source_facts(row)
@@ -195,8 +211,7 @@ def analyze_market_fast(row):
             300,schema=dedup_schema,model=os.getenv('OLLAMA_NEWS_MODEL') or None)
         validate_object(verdict,dedup_schema)
         duplicate = 0 if verdict['material_new_fact'] else verdict['duplicate_of']
-        if duplicate and duplicate not in {p['id'] for p in peers}:
-            raise ValueError('news_invalid_duplicate_reference')
+        duplicate = checked_duplicate(duplicate,facts,peers)
     return {**result, 'id':row['id'], 'thesis_effect':'unchanged', 'quality_version':3, 'duplicate_of':duplicate}
 
 
@@ -279,8 +294,7 @@ def analyze_strict(row):
             500,schema=schema)
         validate_object(verdict,schema)
         duplicate = 0 if verdict['material_new_fact'] else verdict['duplicate_of']
-    if duplicate and duplicate not in {p['id'] for p in peers}:
-        raise ValueError('news_invalid_duplicate_reference')
+    duplicate = checked_duplicate(duplicate,facts,peers)
     # Thesis comparison is a separate pass so trading context cannot become
     # fictional news. It has no access to execution or target-setting tools.
     effect = 'unchanged'

@@ -106,6 +106,13 @@ def test_auction_imbalance_keeps_strict_review(monkeypatch):
     strict.assert_called_once()
 
 
+def test_dedup_cannot_discard_distinct_numeric_releases():
+    old=row() | {'id':3,'title':'Michigan conditions 50.9','source_facts_json':'{}'}
+    new=quality.source_facts(row() | {'title':'Michigan inflation 4.6%','source_facts_json':'{}'})
+    assert quality.checked_duplicate(3,new,[old])==0
+    assert quality.checked_duplicate(3,quality.source_facts(old),[old])==3
+
+
 def test_routine_sec_metadata_uses_no_model_but_material_excerpt_does():
     value=row() | {'provider':'sec_edgar','title':'424B2 - Example Inc',
                    'source_facts_json':json.dumps({'source_excerpt':'Filed: 2026-09-25 AccNo: 0001234567-26-000001 Size: 12 KB'})}
