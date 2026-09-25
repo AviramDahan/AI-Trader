@@ -101,6 +101,16 @@ class TelegramStatusTests(unittest.TestCase):
         self.assertNotIn('$', text)
         self.assertNotIn('-0.0000%', telegram_status._account_pct(-.0000001))
 
+    def test_portfolio_separates_positions_without_dollar_amounts(self):
+        self._seed_open_trade()
+        self._seed_open_trade(ticker='MSFT', company='Microsoft', order_id=2, external_signal_id='s2')
+        text = telegram_status.portfolio_status_message()
+        self.assertEqual(text.count('─' * 18), 1)
+        self.assertIn('\n\n' + '─' * 18 + '\n\n', text)
+        self.assertIn('1. AAPL', text)
+        self.assertIn('2. MSFT', text)
+        self.assertNotIn('$', text)
+
     def test_market_news_card_documents_official_sources_without_a_hard_cap(self):
         message = telegram_status.market_news_status_message()
         self.assertIn("Federal Reserve", message)

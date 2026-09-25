@@ -122,10 +122,11 @@ def portfolio_status_message() -> str:
         return lines
 
     managed_lines = position_lines(managed)
-    blocks.append("פוזיציות מאומתות בתיק הראשי:\n\n" + ("\n\n".join(managed_lines) if managed_lines else "אין פוזיציות מאומתות פתוחות."))
+    separator = "\n\n" + "─" * 18 + "\n\n"
+    blocks.append("פוזיציות מאומתות בתיק הראשי:\n\n" + (separator.join(managed_lines) if managed_lines else "אין פוזיציות מאומתות פתוחות."))
     if legacy:
         legacy_lines = position_lines(legacy, len(managed) + 1)
-        blocks.append("פוזיציות Legacy — מנוטרות, אך אינן נכללות בתשואה המאומתת:\n\n" + "\n\n".join(legacy_lines))
+        blocks.append("פוזיציות Legacy — מנוטרות, אך אינן נכללות בתשואה המאומתת:\n\n" + separator.join(legacy_lines))
     if recent_closed:
         closed_lines = []
         for trade in recent_closed:
