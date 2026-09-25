@@ -85,48 +85,36 @@ def portfolio_status_message() -> str:
                         for row in managed)
     equity = float(account["cash"]) + managed_value
     net = equity - float(account["initial_cash"])
-    unrealized = sum(
-        (float(quotes.get(row["ticker"], {}).get("price") or row["last_price"] or row["entry_price"])
-         - float(row["entry_price"])) * float(row["remaining_quantity"])
-        for row in managed
-    )
-    exposure = managed_value
     updated = datetime.now(ISRAEL).strftime("%d/%m/%Y %H:%M:%S")
 
     blocks = [
         f"💼 תיק דמו ראשי — {SCANNER_DISPLAY_NAME_HE}",
         "⚠️ מסחר מדומה בלבד. אין כאן פקודות ברוקר או כסף אמיתי.",
-        "\n".join((
-            f"שווי חשבון מנוהל: {_money(equity)}",
-            f"מזומן זמין: {_money(float(account['cash']))}",
-            f"חשיפה פתוחה: {_money(exposure)}",
-            f"רווח/הפסד כולל נטו: {_money(net)}",
-            f"רווח/הפסד ממומש ברוטו: {_money(float(account.get('realized_pnl') or 0))}",
-            f"רווח/הפסד לא ממומש: {_money(unrealized)}",
-            f"עמלות שנרשמו: {_money(float(account.get('fees_paid') or 0))}",
-        )),
+        f"תשואת החשבון המאומת נטו: {_pct(net / float(account['initial_cash']) * 100) if float(account['initial_cash']) > 0 else 'לא זמינה'}",
         f"סה״כ פוזיציות בתיק הראשי: {len(trades)} | מאומתות חשבונאית: {len(managed)} | Legacy: {len(legacy)}",
     ]
-    def position_lines(rows: list[dict]) -> list[str]:
+    def position_lines(rows: list[dict], start: int = 1) -> list[str]:
         lines: list[str] = []
-        for trade in rows:
+        for number, trade in enumerate(rows, start):
             quote = quotes.get(trade["ticker"], {})
             current = float(quote.get("price") or trade.get("last_price") or trade["entry_price"])
             change = (current / float(trade["entry_price"]) - 1) * 100
             target_name, target = _next_target(trade, trade["hit_indexes"])
+            target_change = (target / float(trade['entry_price']) - 1) * 100
+            stop_change = (float(trade['current_stop']) / float(trade['entry_price']) - 1) * 100
             lines.append(
-                f"{trade['ticker']}\n"
-                f"כמות: {float(trade['remaining_quantity']):.6g} | כניסה: ${float(trade['entry_price']):.2f}\n"
-                f"מחיר נוכחי: ${current:.2f} ({_pct(change)})\n"
-                f"סטופ: ${float(trade['current_stop']):.2f} | {target_name}: ${target:.2f}"
+                f"{number}. {trade['ticker']}\n"
+                f"שינוי מהכניסה: {_ltr(_pct(change))}\n"
+                f"סטופ: {_ltr(_pct(stop_change))} | {target_name}: {_ltr(_pct(target_change))}\n"
+                "היעד והסטופ באחוזים ביחס למחיר הכניסה."
             )
         return lines
 
     managed_lines = position_lines(managed)
     blocks.append("פוזיציות מאומתות בתיק הראשי:\n\n" + ("\n\n".join(managed_lines) if managed_lines else "אין פוזיציות מאומתות פתוחות."))
     if legacy:
-        legacy_lines = position_lines(legacy)
-        blocks.append("פוזיציות Legacy בתיק הראשי — מנוטרות, אך אינן נכללות בשווי ובסטטיסטיקה המאומתים:\n\n" + "\n\n".join(legacy_lines))
+        legacy_lines = position_lines(legacy, len(managed) + 1)
+        blocks.append("פוזיציות Legacy — מנוטרות, אך אינן נכללות בתשואה המאומתת:\n\n" + "\n\n".join(legacy_lines))
     blocks.append(f"עודכן: {updated} (שעון ישראל)\nהמחירים מגיעים מ־Yahoo ועשויים להיות מושהים.")
     return "\n\n".join(blocks)[:4096]
 
