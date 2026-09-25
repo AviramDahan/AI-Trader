@@ -65,10 +65,10 @@ class TelegramStatusTests(unittest.TestCase):
         news = telegram_status.news_scope_status_message()
         self.assertIn("תיק דמו ראשי — סיגנלים פעילים", portfolio)
         self.assertIn("סה״כ פוזיציות בתיק הראשי: 1", portfolio)
-        self.assertIn("תשואת החשבון המאומת נטו:", portfolio)
+        self.assertIn("תשואת החשבון המאומת נטו: \u2066+0.0020%\u2069", portfolio)
         self.assertNotIn("$", portfolio)
         self.assertNotIn("כמות:", portfolio)
-        self.assertNotIn("מזומן", portfolio)
+        self.assertNotIn("מזומן זמין:", portfolio)
         self.assertIn("1. AAPL", portfolio)
         self.assertIn("AAPL", portfolio)
         self.assertIn("שינוי מהכניסה: \u2066+2.00%\u2069", portfolio)
@@ -88,6 +88,18 @@ class TelegramStatusTests(unittest.TestCase):
         self.assertNotIn("אופק:", signals)
         self.assertIn("\u200f", signals)
         self.assertIn("\u2066", signals)
+
+    def test_small_negative_return_and_closed_winner_are_not_hidden(self):
+        trade_id = self._seed_open_trade(ticker='TMO')
+        conn = database.get_db_connection()
+        conn.execute("UPDATE scanner_trades SET status='closed',remaining_quantity=0,realized_pnl=5,fees=.5,outcome='WIN' WHERE id=?", (trade_id,))
+        conn.execute('UPDATE scanner_accounts SET cash=99999,realized_pnl=5,fees_paid=.5')
+        conn.commit(); conn.close()
+        text = telegram_status.portfolio_status_message()
+        self.assertIn('-0.0010%', text)
+        self.assertIn('TMO: \u2066+4.50%\u2069', text)
+        self.assertNotIn('$', text)
+        self.assertNotIn('-0.0000%', telegram_status._account_pct(-.0000001))
 
     def test_market_news_card_documents_official_sources_without_a_hard_cap(self):
         message = telegram_status.market_news_status_message()

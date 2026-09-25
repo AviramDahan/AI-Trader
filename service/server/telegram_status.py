@@ -33,6 +33,12 @@ def _pct(value: float) -> str:
     return f"{value:+.2f}%"
 
 
+def _account_pct(value: float) -> str:
+    if value != 0 and abs(value) < .0001:
+        return ('שלילית' if value < 0 else 'חיובית') + ' — פחות מ־0.0001%'
+    return f"{value:+.4f}%"
+
+
 def _ltr(value: object) -> str:
     """Keep Latin symbols/numbers stable inside Telegram Hebrew RTL text."""
     return f"\u2066{value}\u2069"
@@ -65,6 +71,10 @@ def portfolio_status_message() -> str:
     agent_id = _scanner_agent_id(cur)
     cur.execute("SELECT * FROM scanner_accounts WHERE agent_id=?", (agent_id,))
     account = dict(cur.fetchone())
+    cur.execute("""SELECT ticker,realized_pnl,fees,entry_price,original_quantity,outcome FROM scanner_trades
+        WHERE agent_id=? AND status='closed' AND is_shadow=0 AND legacy_position_id IS NULL
+        ORDER BY closed_at DESC,id DESC LIMIT 3""", (agent_id,))
+    recent_closed = [dict(row) for row in cur.fetchall()]
     cur.execute("""SELECT * FROM scanner_trades
                    WHERE agent_id=? AND status='open' AND is_shadow=0 ORDER BY ticker""", (agent_id,))
     trades = [dict(row) for row in cur.fetchall()]
@@ -90,7 +100,8 @@ def portfolio_status_message() -> str:
     blocks = [
         f"💼 תיק דמו ראשי — {SCANNER_DISPLAY_NAME_HE}",
         "⚠️ מסחר מדומה בלבד. אין כאן פקודות ברוקר או כסף אמיתי.",
-        f"תשואת החשבון המאומת נטו: {_pct(net / float(account['initial_cash']) * 100) if float(account['initial_cash']) > 0 else 'לא זמינה'}",
+        f"תשואת החשבון המאומת נטו: {_ltr(_account_pct(net / float(account['initial_cash']) * 100)) if float(account['initial_cash']) > 0 else 'לא זמינה'}",
+        "כוללת רווח/הפסד סגור ופתוח ועמלות, ביחס לכל ההון ההתחלתי — כולל המזומן.",
         f"סה״כ פוזיציות בתיק הראשי: {len(trades)} | מאומתות חשבונאית: {len(managed)} | Legacy: {len(legacy)}",
     ]
     def position_lines(rows: list[dict], start: int = 1) -> list[str]:
@@ -115,6 +126,13 @@ def portfolio_status_message() -> str:
     if legacy:
         legacy_lines = position_lines(legacy, len(managed) + 1)
         blocks.append("פוזיציות Legacy — מנוטרות, אך אינן נכללות בתשואה המאומתת:\n\n" + "\n\n".join(legacy_lines))
+    if recent_closed:
+        closed_lines = []
+        for trade in recent_closed:
+            cost = float(trade['entry_price']) * float(trade['original_quantity'])
+            percent = (float(trade['realized_pnl']) - float(trade['fees'])) / cost * 100 if cost > 0 else None
+            closed_lines.append(f"{trade['ticker']}: {_ltr(_pct(percent)) if percent is not None else 'לא זמין'}")
+        blocks.append('עסקאות מאומתות שנסגרו לאחרונה — נטו ביחס לעלות הכניסה:\n' + '\n'.join(closed_lines))
     blocks.append(f"עודכן: {updated} (שעון ישראל)\nהמחירים מגיעים מ־Yahoo ועשויים להיות מושהים.")
     return "\n\n".join(blocks)[:4096]
 

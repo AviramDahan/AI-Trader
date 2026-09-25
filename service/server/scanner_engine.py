@@ -813,6 +813,10 @@ def monitor_prices() -> dict[str, Any]:
     conn.commit()
     conn.close()
     processed, errors = 0, []
+    market = market_session_state()
+    if not market['is_trading_day']:
+        _service('monitor', 'market_closed', 'Weekend/holiday; cursors retained for next trading day', success=True)
+        return {'tickers': len(tickers), 'bars': 0, 'errors': [], 'market': market}
     for ticker in tickers:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -1167,6 +1171,10 @@ def _quote_series(frame: pd.DataFrame, ticker: str):
 
 def refresh_current_quotes() -> dict[str, Any]:
     """Refresh display-only 1-minute quotes in one batch; never execute trades from them."""
+    market = market_session_state()
+    if not market['is_trading_day']:
+        _service('quotes', 'market_closed', 'Weekend/holiday; retained last timestamped prices', success=True)
+        return {'requested': 0, 'updated': 0, 'missing': [], 'market': market}
     conn = get_db_connection(); cur = conn.cursor()
     tickers = _tracked_quote_tickers(cur)
     conn.close()
@@ -1175,7 +1183,7 @@ def refresh_current_quotes() -> dict[str, Any]:
         return {"requested": 0, "updated": 0, "missing": [], "market": market_session_state()}
     try:
         frame = yf.download(tickers, period="5d", interval="1m", group_by="ticker", auto_adjust=True,
-                            prepost=False, progress=False, threads=True, timeout=20)
+                            prepost=True, progress=False, threads=True, timeout=20)
     except Exception as exc:
         _service("quotes", "error", f"Batch quote provider failed; retained prior quotes ({type(exc).__name__})")
         return {"requested": len(tickers), "updated": 0, "missing": tickers, "error": type(exc).__name__,
@@ -1193,7 +1201,7 @@ def refresh_current_quotes() -> dict[str, Any]:
             as_of = stamp.to_pydatetime().astimezone(UTC)
             if not math.isfinite(price) or price <= 0 or as_of > datetime.now(UTC) + timedelta(minutes=2):
                 raise ValueError("Invalid quote")
-            store_quote(cur, ticker, price, as_of.isoformat(), "Yahoo 1m batch quote (may be delayed)")
+            store_quote(cur, ticker, price, as_of.isoformat(), "Yahoo 1m batch quote including pre/post market (may be delayed)")
             updated += 1
         except (KeyError, TypeError, ValueError, IndexError, OverflowError):
             missing.append(ticker)

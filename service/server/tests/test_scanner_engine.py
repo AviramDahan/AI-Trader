@@ -17,7 +17,34 @@ UTC = timezone.utc
 
 
 class ScannerEngineTests(unittest.TestCase):
+    def test_weekend_and_holiday_skip_provider_and_keep_price_cursors(self):
+        self.record()
+        for reason in ('weekend', 'holiday'):
+            with patch.object(scanner_engine, 'market_session_state', return_value={
+                    'is_trading_day': False, 'is_open': False, 'reason': reason}), \
+                    patch.object(scanner_engine.yf, 'download') as quotes, \
+                    patch.object(scanner_engine, '_bar_dicts') as bars:
+                self.assertEqual(scanner_engine.refresh_current_quotes()['updated'], 0)
+                self.assertEqual(scanner_engine.monitor_prices()['bars'], 0)
+                quotes.assert_not_called()
+                bars.assert_not_called()
+
+    def test_weekday_overnight_quotes_include_extended_hours_without_fills(self):
+        self.record()
+        frame = pd.DataFrame({'Close': [102.]}, index=pd.DatetimeIndex([datetime.now(UTC)-timedelta(minutes=1)]))
+        with patch.object(scanner_engine, 'market_session_state', return_value={
+                'is_trading_day': True, 'is_open': False, 'reason': 'closed_hours'}), \
+                patch.object(scanner_engine.yf, 'download', return_value=frame) as download, \
+                patch.object(scanner_engine, 'process_bar') as execute:
+            self.assertEqual(scanner_engine.refresh_current_quotes()['updated'], 1)
+            self.assertTrue(download.call_args.kwargs['prepost'])
+            execute.assert_not_called()
+
     def setUp(self):
+        self.market_clock = patch.object(scanner_engine, 'market_session_state', return_value={
+            'is_trading_day': True, 'is_open': False, 'reason': 'closed_hours'})
+        self.market_clock.start()
+        self.addCleanup(self.market_clock.stop)
         self.status_refresh = patch("telegram_status.refresh_telegram_status_cards", return_value={"portfolio": "updated", "signals_status": "updated"})
         self.status_refresh.start()
         self.addCleanup(self.status_refresh.stop)
