@@ -187,6 +187,7 @@ class StockScannerTests(unittest.TestCase):
             "TELEGRAM_BOT_TOKEN": "test-token", "TELEGRAM_CHAT_ID": "-1001",
             "TELEGRAM_NEWS_THREAD_ID": "101", "TELEGRAM_TRADING_THREAD_ID": "202",
             "TELEGRAM_STOCK_NEWS_THREAD_ID": "",
+            "TELEGRAM_PERSONAL_NEWS_THREAD_ID": "",
         }, clear=False), patch.object(stock_scanner.requests, "Session", return_value=session):
             self.assertEqual(stock_scanner.send_telegram("חדשות", cfg, "position_news"), "sent")
         payload = session.post.call_args.kwargs["data"]

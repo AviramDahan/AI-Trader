@@ -1492,6 +1492,8 @@ def init_database():
         "analysis_error TEXT",
         "updated_at TEXT",
         "news_category TEXT NOT NULL DEFAULT 'company'",
+        "quality_version INTEGER NOT NULL DEFAULT 0",
+        "duplicate_of INTEGER",
     ):
         try:
             cursor.execute(f"ALTER TABLE scanner_news ADD COLUMN {column_sql}")

@@ -457,9 +457,59 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
             news_pipeline._default_analyzer([dict(id=1, scope='market', title='Original headline',
                 publisher='Publisher', url='https://example.test', published_at=self.clock.isoformat(),
                 summary_he='AI text is not source evidence')])
-        facts = model.call_args.args[1][0]['source_facts']
+        facts = model.call_args.args[1]['source']
         self.assertEqual(facts['title'], 'Original headline')
         self.assertNotIn('AI text', json.dumps(facts))
+
+    def test_quality_failure_bounded_and_idle_does_not_hide_it(self):
+        news_pipeline.ingest_items([self.item()], self.clock)
+        analyzer = lambda rows: [{'id': r['id'], '_error': 'news_quality_rejected'} for r in rows]
+        with patch.dict(os.environ, {'STOCK_SCANNER_NEWS_ANALYSIS_MAX_ATTEMPTS':'1'}):
+            news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
+        self.assertEqual(self.rows('SELECT status FROM scanner_news_jobs')[0]['status'], 'failed')
+        news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock + timedelta(hours=1))
+        self.assertEqual(self.rows("SELECT status FROM scanner_service_status WHERE component='news_ai'")[0]['status'], 'error')
+        self.assertFalse(self.rows('SELECT * FROM scanner_telegram_outbox'))
+
+    def test_semantic_duplicate_keeps_source_link_without_second_alert(self):
+        news_pipeline.ingest_items([self.item()], self.clock)
+        def analyzer(rows):
+            return [dict(id=r['id'],related=True,title_he='עדכון רשמי',sentiment='neutral',
+                         materiality='low',relevance=.9,quality_version=2) for r in rows]
+        news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
+        first = self.rows('SELECT id FROM scanner_news')[0]['id']
+        news_pipeline.ingest_items([self.item(url='https://example.test/second') | {'title':'Second report on same event'}], self.clock)
+        news_pipeline.analyze_news_jobs(analyzer=lambda rows:[dict(r,duplicate_of=first) for r in analyzer(rows)],at=self.clock)
+        self.assertEqual(len(self.rows('SELECT * FROM scanner_telegram_outbox')),1)
+        self.assertEqual(self.rows('SELECT analysis_status FROM scanner_news WHERE id!=?',(first,))[0]['analysis_status'],'duplicate_event')
+        self.assertIn('https://example.test/second',self.rows('SELECT alternate_sources_json FROM scanner_news WHERE id=?',(first,))[0]['alternate_sources_json'])
+
+    def test_relay_suffix_is_not_a_new_event(self):
+        first=self.item('telegram_channels','https://t.me/financialjuice/1') | {'title':'Fed changes bank oversight thresholds|FJ'}
+        second=self.item('telegram_channels','https://t.me/walterbloomberg/2') | {'title':'FED CHANGES BANK OVERSIGHT THRESHOLDS'}
+        news_pipeline.ingest_items([first,second],self.clock)
+        self.assertEqual(len(self.rows('SELECT * FROM scanner_news')),1)
+        self.assertEqual(len(self.rows('SELECT * FROM scanner_news_sources')),2)
+
+    def test_out_of_order_source_compares_already_alerted_newer_publication(self):
+        import news_quality
+        news_pipeline.ingest_items([self.item()],self.clock)
+        analyzer=lambda rows:[dict(id=r['id'],related=True,title_he='עדכון רשמי',sentiment='neutral',materiality='low',relevance=.9) for r in rows]
+        news_pipeline.analyze_news_jobs(analyzer=analyzer,at=self.clock)
+        first=self.rows('SELECT id FROM scanner_news')[0]['id']
+        news_pipeline.ingest_items([self.item(url='https://example.test/late') | {
+            'title':'Company reports a material update','published_at':(self.clock-timedelta(minutes=1)).isoformat()}],self.clock)
+        late=self.rows('SELECT * FROM scanner_news WHERE id!=?',(first,))[0]
+        self.assertIn(first,[r['id'] for r in news_quality.recent_events(late)])
+
+    def test_historical_quality_repair_does_not_replay_alert(self):
+        news_pipeline.ingest_items([self.item()],self.clock)
+        conn=database.get_db_connection();conn.execute('UPDATE scanner_news SET quality_version=-2');conn.commit();conn.close()
+        result=news_pipeline.analyze_news_jobs(analyzer=lambda rows:[dict(id=r['id'],related=True,title_he='עדכון',
+            sentiment='positive',materiality='high',relevance=.99,quality_version=2) for r in rows],at=self.clock)
+        self.assertEqual(result['analyzed'],1)
+        self.assertEqual(result['alerts'],0)
+        self.assertFalse(self.rows('SELECT * FROM scanner_telegram_outbox'))
 
     def test_legacy_translated_item_is_fully_analyzed_after_verified_watchlist_upgrade(self):
         scanner_engine.set_news_watchlist("INTC", "Intel")
@@ -789,7 +839,7 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         conn.commit(); conn.close()
         batch_sizes = []
 
-        def translate(_system, rows, _predict):
+        def translate(_system, rows, _predict, **_options):
             batch_sizes.append(len(rows))
             return {"items": [{"id": row["id"], "summary_he": "כותרת בעברית"} for row in rows]}
 
