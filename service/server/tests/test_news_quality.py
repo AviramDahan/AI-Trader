@@ -93,6 +93,16 @@ def test_fast_mode_does_not_change_position_analysis(monkeypatch):
 
 def test_foreign_script_corruption_rejected():
     assert not quality.terminology_grounded(draft() | {'title_he':'מחיר الهدف'}, {'title':'price target'})
+    assert not quality.terminology_grounded(draft() | {'title_he':'קטayama'}, {'title':'Katayama'})
+    assert not quality.terminology_grounded(draft() | {'title_he':'התחזקות הין'}, {'title':'yen depreciation'})
+    assert not quality.terminology_grounded(draft() | {'title_he':'יין יפני'}, {'title':'Japanese yen'})
+
+
+def test_auction_imbalance_keeps_strict_review(monkeypatch):
+    monkeypatch.setenv('STOCK_SCANNER_NEWS_FAST_MARKET','true')
+    with patch('news_quality.analyze_strict',return_value=draft()) as strict:
+        quality.analyze_one(row() | {'thesis':None,'title':'MOO IMBALANCE'})
+    strict.assert_called_once()
 
 
 def test_routine_sec_metadata_uses_no_model_but_material_excerpt_does():
