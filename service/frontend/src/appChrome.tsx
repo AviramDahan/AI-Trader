@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { discoverBackend, runtimeOrigin } from './runtimeConfig'
 
 import { Link, useLocation } from 'react-router-dom'
+import brandMark from './assets/ai-trader-logo.png'
 
 import { API_ORIGIN, useLanguage, useTheme } from './appShared'
 
@@ -159,10 +160,12 @@ export function Sidebar() {
   return (
     <div className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
       <div className="sidebar-header">
-        <div className="logo">
-          <div className="logo-icon">CT</div>
-          <span className="logo-text">AI-Trader</span>
-        </div>
+        <Link className="logo brand-home" to="/" dir="ltr"
+          aria-label={language === 'he' ? 'AI-Trader — לדף הבית' : 'AI-Trader — Home'}
+          onClick={() => setMobileMenuOpen(false)}>
+          <img className="brand-mark" src={brandMark} alt="" width={44} height={44} />
+          <span className="brand-wordmark">AI<span>TRADER</span></span>
+        </Link>
         <button
           type="button"
           className="mobile-nav-toggle"
