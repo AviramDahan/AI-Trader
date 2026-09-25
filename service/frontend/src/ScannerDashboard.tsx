@@ -308,15 +308,16 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     </div>}
 
     {tab === 'trades' && <div className="scanner-section">
-      <h2>{text(`תיק דמו ראשי — ${primaryName}`, `Main demo portfolio — ${primaryName}`)}</h2>
-      <div className="scanner-account-grid">
-        <Stat label={text('פוזיציות פתוחות', 'Open positions')} value={String(data?.main_portfolio?.open_position_count ?? 0)} />
-      </div>
-      <p className="scanner-note">{text('יצירת סיגנל אינה ביצוע. הוראת LIMIT נכנסת רק לאחר שנר מחיר מאומת נוגע במחיר הכניסה.', 'A signal is not a fill. A LIMIT entry fills only after a verified price bar reaches entry.')}</p>
-      {(data?.trades || []).filter(trade => !trade.is_shadow).map(trade => <TradeCard key={trade.id} trade={trade} schedules={data?.news_schedules || []} he={he} />)}
+      <h2>{text('עסקאות פתוחות', 'Open trades')} <small>{(data?.trades || []).filter(trade => !trade.is_shadow && trade.status === 'open').length}</small></h2>
+      <div className="signal-list">{(data?.trades || []).filter(trade => !trade.is_shadow && trade.status === 'open').map(trade => <TradeCard key={trade.id} trade={trade} schedules={data?.news_schedules || []} he={he} />)}</div>
+      <details className="signal-history trade-history"><summary>{text('היסטוריית עסקאות', 'Trade history')} · {(data?.trades || []).filter(trade => !trade.is_shadow && trade.status !== 'open').length}</summary>
+        <div className="signal-list">{(data?.trades || []).filter(trade => !trade.is_shadow && trade.status !== 'open').map(trade => <TradeCard key={trade.id} trade={trade} schedules={data?.news_schedules || []} he={he} />)}</div>
+      </details>
       {!(data?.trades || []).some(trade => !trade.is_shadow) && <Empty text={text('אין עדיין עסקאות דמו מאומתות.', 'No verified demo trades yet.')} />}
+      <details className="signal-secondary"><summary>{text('מידע על נתונים היסטוריים', 'Historical data information')}</summary>
       {!!data?.legacy_unverified_count && <p className="scanner-warning">{text(`${data.legacy_unverified_count} רשומות ישנות נשמרו בנפרד ואינן נכללות בסטטיסטיקה המאומתת.`, `${data.legacy_unverified_count} legacy records are preserved separately and excluded from verified statistics.`)}</p>}
       {!!data?.legacy_positions?.adopted_count && <p className="scanner-note">{text(`כל ${data.main_portfolio.open_position_count} הפוזיציות מוצגות בתיק הראשי של “${primaryName}”. מתוכן ${data.main_portfolio.verified_position_count} מאומתות חשבונאית ו־${data.main_portfolio.legacy_position_count} מסומנות Legacy ומנוטרות מההעברה ואילך. ל־Legacy לא משוחזרת היסטוריה חסרה, ולכן היא אינה מעורבבת במזומן ובסטטיסטיקה המאומתים.`, `All ${data.main_portfolio.open_position_count} positions appear in the “${primaryName}” main portfolio. ${data.main_portfolio.verified_position_count} are accounting-verified and ${data.main_portfolio.legacy_position_count} are marked Legacy and monitored from adoption onward. Missing Legacy history is not reconstructed, so it remains excluded from verified cash and statistics.`)}</p>}
+      </details>
       {!!data?.legacy_positions?.unmanaged_count && <p className="scanner-warning">{text(`${data.legacy_positions.unmanaged_count} פוזיציות ישנות עדיין דורשות טיפול ואינן מנוהלות.`, `${data.legacy_positions.unmanaged_count} legacy positions still require attention and are unmanaged.`)}</p>}
     </div>}
 
@@ -445,26 +446,40 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
 }
 
 function TradeCard({ trade, schedules, he }: { trade: Record<string, any>, schedules: Record<string, any>[], he: boolean }) {
+  const [opened, setOpened] = useState(false)
+  const activeTargets = [1,2,3].filter(i => Number(trade[`operational_tp${i}_pct`] ?? trade[`tp${i}_pct`] ?? 0) > 0)
   const schedule = schedules.find(item => item.ticker === trade.ticker)
   const plan = trade.settings?.target_plan
   const currentPrice = trade.current_price ?? trade.last_price
   const currentPriceAt = trade.price_as_of ?? trade.last_bar_at
   const stamp = (value: any) => value ? new Date(value).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
-  return <article className="scanner-trade-card" id={`trade-${trade.id}`}><header><div><b>{trade.ticker}</b> · {trade.company}</div><span>{trade.status}</span></header>
-    {!!trade.legacy_position_id && <p className="scanner-warning">{he ? 'Legacy — היסטוריה לא מאומתת; ניהול החל מ־' : 'Legacy — unverified history; managed from '}{stamp(trade.managed_from)}. {he ? 'עלויות כניסה היסטוריות אינן כלולות; לא נספר בסטטיסטיקה המאומתת.' : 'Historical entry costs excluded; not counted in verified statistics.'}</p>}
-    <p>{he ? 'כניסה' : 'Entry'}: {fmtPrice(trade.entry_price)} · {he ? 'סטופ' : 'Stop'}: {fmtPrice(trade.current_stop)}</p>
-    <p className="scanner-note">{trade.strategy === 'single'
-      ? (he ? 'אסטרטגיה פעילה: יעד יחיד. אם TP2 יבוצע, כל הכמות שנותרה תיסגר. ‏TP1 ו־TP3 הם יעדי Shadow להשוואה בלבד ואינם מוכרים מניות.' : 'Active strategy: single target. If TP2 fills, the entire remaining quantity closes. TP1 and TP3 are Shadow comparison levels and sell no shares.')
-      : (he ? 'אסטרטגיית Shadow מדורגת: מימוש חלקי ב־TP1/TP2 וסגירת היתרה ב־TP3.' : 'Staged Shadow strategy: partial exits at TP1/TP2 and final exit at TP3.')}</p>
-    <TargetRows record={trade} entry={trade.entry_price} strategy={trade.strategy} he={he} />
-    <p className={trade.price_stale ? 'scanner-warning' : 'scanner-note'}><b>{he ? (trade.price_stale ? 'מחיר אחרון ידוע — לא עדכני' : 'מחיר נוכחי אחרון') : (trade.price_stale ? 'Last known price — stale' : 'Latest current price')}: {fmtPrice(currentPrice)}</b><br/>{he ? 'זמן נתוני המחיר' : 'Price timestamp'}: {stamp(currentPriceAt)} · {trade.price_source || '—'}{trade.price_stale && <><br/>{he ? 'המחיר נשמר ומוצג, אך אינו מוצג כמחיר חי כאשר השוק סגור או שהנתון ישן.' : 'The stored price remains visible, but is not presented as live while the market is closed or the quote is old.'}</>}</p>
+  return <details className="scanner-trade-card signal-focused" id={`trade-${trade.id}`} onToggle={event => setOpened(event.currentTarget.open)}>
+    <summary className="scanner-signal-summary">
+      <span className="scanner-signal-identity"><b className="scanner-ticker" dir="ltr">{trade.ticker}</b><span>{trade.company}</span></span>
+      <span className="scanner-signal-summary-meta">{!!trade.legacy_position_id && <small className="signal-status-label">Legacy</small>}<span className="scanner-chip">{trade.status === 'open' ? (he ? 'פתוחה' : 'Open') : (he ? 'סגורה' : 'Closed')}</span><span className="scanner-signal-chevron" aria-hidden="true">⌄</span></span>
+    </summary>
+    <div className="scanner-signal-body">
+    {!!trade.legacy_position_id && <p className="signal-price-time">{he ? 'Legacy · היסטוריה לא מאומתת; לא נכללת בתוצאות המאומתות.' : 'Legacy · Unverified history; excluded from verified results.'}</p>}
+    <div className="signal-summary-levels">
+      <span><small>{he ? 'מחיר אחרון' : 'Last price'}{trade.price_stale ? (he ? ' · ישן' : ' · stale') : ''}</small><b dir="ltr">{fmtPrice(currentPrice)}</b></span>
+      <span><small>{he ? 'כניסה' : 'Entry'}</small><b dir="ltr">{fmtPrice(trade.entry_price)}</b></span>
+      <span><small>{he ? 'יעד פעיל' : 'Active target'}</small><b dir="ltr">{activeTargets.length ? fmtPrice(trade[`tp${activeTargets[0]}`]) : '—'}</b></span>
+      <span><small>{he ? 'סטופ' : 'Stop'}</small><b dir="ltr">{fmtPrice(trade.current_stop)}</b></span>
+    </div>
+    <p className="signal-price-time">{he ? 'זמן המחיר' : 'Quote time'}: {stamp(currentPriceAt)} · {he ? 'נתוני Yahoo עשויים להיות מושהים' : 'Yahoo data may be delayed'}</p>
+    {opened && trade.status === 'open' && <LevelChart record={trade} kind="trade" he={he} initiallyOpen />}
+    <h3>{he ? 'תוכנית המימוש' : 'Exit plan'}</h3>
+    <TargetRows record={trade} entry={trade.entry_price} strategy={trade.strategy} he={he} indices={activeTargets} />
+    <details className="signal-secondary"><summary>{he ? 'יעדי השוואה — Shadow' : 'Comparison targets — Shadow'}</summary><TargetRows record={trade} entry={trade.entry_price} strategy={trade.strategy} he={he} indices={[1,2,3].filter(i => !activeTargets.includes(i))} /></details>
     <TargetPlanDetails plan={plan} he={he} />
-    {trade.status === 'open' && <LevelChart record={trade} kind="trade" he={he} />}
-    <p>{he ? 'חדשות — בדיקה אחרונה' : 'News — last check'}: {stamp(schedule?.last_success_at)} · {he ? 'הבאה' : 'next'}: {stamp(schedule?.next_due_at)} · {schedule?.status || '—'}</p>
+    <details className="signal-secondary"><summary>{he ? 'חדשות העסקה' : 'Trade news'}</summary>
+    <p>{he ? 'בדיקה אחרונה' : 'Last check'}: {stamp(schedule?.last_success_at)}{trade.status === 'open' && <> · {he ? 'הבאה' : 'Next'}: {stamp(schedule?.next_due_at)}</>} · {he ? ({no_new:'אין חדשות חדשות',closed:'המעקב הסתיים',error:'תקלה',idle:'ממתין',ok:'תקין'} as Record<string,string>)[schedule?.status] || schedule?.status || '—' : schedule?.status || '—'}</p>
     {schedule?.summary_he && <p className="scanner-ai-interpretation"><b>{he ? 'סקירת חדשות אחרונה' : 'Latest news review'}:</b> {schedule.summary_he}</p>}
     {!!trade.news?.length && <details><summary>{he ? 'היסטוריית הערכות חדשות' : 'News assessment history'}</summary>{trade.news.map((item: any) => <p key={item.id}><b>{stamp(item.published_at)}</b> · {item.impact}/{item.materiality} · {item.interpretation_he}<br/><a href={item.url} target="_blank" rel="noreferrer">{item.publisher}</a></p>)}</details>}
-    <details><summary>{he ? 'אירועי עסקה' : 'Trade events'} ({trade.fills?.length || 0})</summary>{(trade.fills || []).map((fill: any) => <p key={fill.id}>{fill.fill_type}{fill.target_index ? ` TP${fill.target_index}` : ''} · {fmtPrice(fill.price)} · {stamp(fill.bar_at)}</p>)}</details>
-  </article>
+    </details>
+    <details className="signal-secondary"><summary>{he ? 'אירועי עסקה' : 'Trade events'} ({trade.fills?.length || 0})</summary>{(trade.fills || []).map((fill: any) => <p key={fill.id}>{he ? ({entry:'כניסה',tp:'מימוש יעד',stop:'יציאה בסטופ',sell:'מכירה'} as Record<string,string>)[fill.fill_type] || fill.fill_type : fill.fill_type}{fill.target_index ? ` TP${fill.target_index}` : ''} · {fmtPrice(fill.price)} · {stamp(fill.bar_at)}</p>)}</details>
+    </div>
+  </details>
 }
 
 function TargetRows({ record, entry, strategy, he, indices = [1,2,3] }: { record: Record<string, any>, entry: any, strategy: string, he: boolean, indices?: number[] }) {

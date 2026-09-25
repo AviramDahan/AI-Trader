@@ -3647,6 +3647,7 @@ html[dir='rtl'] .main-content {
 .signal-group h3 small { color: var(--text-secondary); font-weight: 400; }
 .signal-empty { color: var(--text-secondary); font-size: 14px; }
 .signal-history { border-top: 1px solid var(--border-color); padding-top: 8px; }
+.trade-history { margin-top: 24px; }
 .signal-focused .scanner-signal-summary { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 20px; }
 .signal-summary-levels { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; margin-top: 16px; }
 .signal-summary-levels small { display: block; color: var(--text-secondary); font-size: 11px; margin-bottom: 5px; }
