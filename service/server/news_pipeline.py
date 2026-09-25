@@ -974,6 +974,12 @@ def _default_analyzer(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     payload = []
     for row in rows:
         facts = _loads(row.get("source_facts_json"), {})
+        if not facts:
+            # Legacy translated snapshots still have original metadata. Never
+            # pass their generated Hebrew summary back as a source fact.
+            facts = {"title": row.get("title"), "url": row.get("url"),
+                     "publisher": row.get("original_publisher") or row.get("publisher"),
+                     "published_at": row.get("published_at"), "coverage": "headline_only"}
         payload.append({"id": row["id"], "ticker": row.get("ticker"), "scope": row.get("scope"),
                         "source_facts": facts, "verified_tickers": _loads(row.get("verified_tickers_json"), []),
                         "original_thesis": row.get("thesis") or ""})
@@ -1124,7 +1130,8 @@ def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
             w.enabled watch_enabled,w.created_at watch_created
         FROM scanner_news n LEFT JOIN scanner_news_watchlist w ON w.ticker=n.ticker
         WHERE n.analysis_status IN ('pending_translation','translated')
-          AND n.scope IN ('open_position','active_signal','watchlist','market')""")
+          AND n.scope IN ('open_position','active_signal','watchlist','market')
+          AND (n.scope!='market' OR n.provider IS NOT NULL)""")
     queued = 0
     for row in cur.fetchall():
         published = _parse_time(row["published_at"])

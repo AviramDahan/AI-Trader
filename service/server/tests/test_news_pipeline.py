@@ -389,6 +389,15 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(news_pipeline.analyze_news_jobs(analyzer=analyze, at=self.clock)['alerts'], 1)
         self.assertEqual(news_pipeline.analyze_news_jobs(analyzer=analyze, at=self.clock)['analyzed'], 0)
 
+    def test_legacy_analyzer_uses_original_headline_not_generated_summary(self):
+        with patch.object(scanner_engine, '_ollama_json', return_value={'items': []}) as model:
+            news_pipeline._default_analyzer([dict(id=1, scope='market', title='Original headline',
+                publisher='Publisher', url='https://example.test', published_at=self.clock.isoformat(),
+                summary_he='AI text is not source evidence')])
+        facts = model.call_args.args[1][0]['source_facts']
+        self.assertEqual(facts['title'], 'Original headline')
+        self.assertNotIn('AI text', json.dumps(facts))
+
     def test_legacy_translated_item_is_fully_analyzed_after_verified_watchlist_upgrade(self):
         scanner_engine.set_news_watchlist("INTC", "Intel")
         conn = database.get_db_connection()
