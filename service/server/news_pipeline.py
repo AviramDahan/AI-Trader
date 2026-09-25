@@ -1089,6 +1089,14 @@ def _market_broadcast_alert_message(row: dict[str, Any]) -> str:
                          "עדכון שוק בלבד — לא נוצרו סיגנל או עסקה."))[:4000]
 
 
+def _telegram_bulletin_text(text: str) -> str:
+    """Remove relay branding, not journalistic attribution or factual clauses."""
+    text = re.sub(r'\s*\|\s*FJ\b', '', text, flags=re.I)
+    text = re.sub(r'(?:המידע|הדיווח|הידיעה)\s+(?:פורסם|פורסמה)\s+בערוץ\s+(?:Telegram|טלגרם)\s+@[A-Za-z0-9_]+\s*[.]?', '', text, flags=re.I)
+    text = re.sub(r'(?<!\w)@[A-Za-z0-9_]+', '', text)
+    return re.sub(r'[ \t]{2,}', ' ', text).strip()
+
+
 def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
     """General news is separate from trade-impact alerts; never replay old backlog."""
     if os.getenv("STOCK_SCANNER_GENERAL_NEWS_ENABLED", "true").lower() != "true":
@@ -1118,13 +1126,16 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
     if not cur.rowcount:
         return False
     # Short source translation, not an investment recommendation or AI opinion.
-    parts = ["📰 " + title[:350]]
     summary = str(result.get("summary_he") or "").strip()
     telegram_post = row.get("source_kind") == "telegram_post"
+    if telegram_post:
+        title = _telegram_bulletin_text(title)
+        summary = _telegram_bulletin_text(summary)
+    parts = ["📰 " + title[:350]]
     if (telegram_post or not row.get("headline_only")) and summary and summary != title:
         parts.append(summary[:450])
     if telegram_post:
-        parts.append("תרגום/תקציר AI של הודעת Telegram · לא אומת מול מקור ראשוני")
+        parts.append("תרגום/תקציר AI · לא אומת מול מקור ראשוני")
     else:
         parts.append("תרגום AI · " + ("כותרת בלבד" if row.get("headline_only") else "תקציר הפיד"))
     if telegram_post:

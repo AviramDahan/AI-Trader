@@ -18,6 +18,13 @@ UTC = timezone.utc
 
 
 class NewsPipelineIntegrationTests(unittest.TestCase):
+    def test_relay_branding_removed_without_losing_original_attribution(self):
+        text = 'לפי Axios|FJ, טראמפ ביקש משי לעצור את התמיכה באיראן. המידע פורסם בערוץ Telegram @financialjuice.'
+        self.assertEqual(news_pipeline._telegram_bulletin_text(text),
+                         'לפי Axios, טראמפ ביקש משי לעצור את התמיכה באיראן.')
+        self.assertEqual(news_pipeline._telegram_bulletin_text('טראמפ ביקש משי - Axios|FJ'),
+                         'טראמפ ביקש משי - Axios')
+
     def test_publication_time_is_readable_israel_time_summer_and_winter(self):
         self.assertEqual(news_pipeline._publication_time_he('2026-09-25T10:54:41Z'),
                          '25/09/2026 13:54 (שעון ישראל)')
@@ -41,6 +48,7 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertIn('לא אומת מול מקור ראשוני', alerts[0]['message'])
         self.assertNotIn(item['url'], alerts[0]['message'])
         self.assertNotIn('מקור:', alerts[0]['message'])
+        self.assertNotIn('Telegram', alerts[0]['message'])
         self.assertEqual(self.rows('SELECT url FROM scanner_news')[0]['url'], item['url'])
 
     def setUp(self):
