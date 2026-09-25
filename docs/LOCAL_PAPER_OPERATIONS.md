@@ -30,7 +30,9 @@ reviews, and approved signals. Zero approved signals is valid. A signal requires
 Yahoo is a free unofficial delayed/no-SLA source, and the UI states this limitation.
 
 The durable server-side news feed also polls a small set of complementary primary sources even when the
-dashboard is closed: the [SEC EDGAR latest-filings Atom feed](https://www.sec.gov/about/rss-feeds), the
+dashboard is closed: the [SEC EDGAR latest-filings Atom feed](https://www.sec.gov/about/rss-feeds), bounded
+[SEC Submissions API](https://www.sec.gov/search-filings/edgar-application-programming-interfaces) catch-up,
+official FDA, FTC, DOJ and EIA releases, the
 [Federal Reserve Board press-release RSS feed](https://www.federalreserve.gov/feeds/feeds.htm), and the
 [BLS Employment, CPI and JOLTS RSS feeds](https://www.bls.gov/feed/). These public feeds require no paid
 plan or API key. SEC access declares the configured operator contact and stays far below the official
@@ -44,6 +46,10 @@ deduplication protect quotas and restart recovery. Feed items older than seven d
 events; a changed source URL/title/excerpt is reanalyzed as a new version of the same event. The official RSS
 sites do not publish a numeric polling quota, so five minutes is a conservative configurable default and 429
 responses trigger provider-specific backoff.
+
+Endpoint, coverage, attribution and rate-limit details for every official source are recorded in
+[`official-news-sources.md`](official-news-sources.md). FDA/FTC/DOJ/EIA start as dashboard-only industry or
+regulatory sources without automatic Telegram alerts or forced ticker assignment.
 
 Only provider metadata (original title/feed excerpt, publisher, direct URL and publication time) is recorded as
 source fact. Because full article bodies are not downloaded, the UI labels these items as headline/feed-summary

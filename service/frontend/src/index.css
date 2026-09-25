@@ -3698,8 +3698,10 @@ html[dir='rtl'] .main-content {
 .scanner-watchlist-items button { padding: 0 5px; min-width: 26px; min-height: 26px; }
 .scanner-status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .scanner-status.ok { border-inline-start: 4px solid #12b76a; }
+.scanner-status.not_modified { border-inline-start: 4px solid #12b76a; }
 .scanner-status.error { border-inline-start: 4px solid #f04438; }
-.scanner-status.waiting, .scanner-status.no_new { border-inline-start: 4px solid #f79009; }
+.scanner-status.rate_limited, .scanner-status.config_required { border-inline-start: 4px solid #f04438; }
+.scanner-status.waiting, .scanner-status.no_new, .scanner-status.degraded, .scanner-status.backoff_not_checked { border-inline-start: 4px solid #f79009; }
 .scanner-sidebar-notice { display: grid; gap: 6px; padding: 14px; border: 1px solid #b42318; border-radius: 12px; background: var(--bg-tertiary); }
 .scanner-sidebar-notice strong { color: #f97066; font-size: 12px; }
 .scanner-sidebar-notice span { color: var(--text-secondary); font-size: 12px; line-height: 1.45; }

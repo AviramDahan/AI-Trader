@@ -1491,6 +1491,7 @@ def init_database():
         "analyzed_at TEXT",
         "analysis_error TEXT",
         "updated_at TEXT",
+        "news_category TEXT NOT NULL DEFAULT 'company'",
     ):
         try:
             cursor.execute(f"ALTER TABLE scanner_news ADD COLUMN {column_sql}")
@@ -1565,6 +1566,22 @@ def init_database():
             updated_at TEXT NOT NULL
         )
     """)
+    for column_sql in (
+        "last_received_count INTEGER NOT NULL DEFAULT 0",
+        "last_ingested_count INTEGER NOT NULL DEFAULT 0",
+        "last_duplicate_count INTEGER NOT NULL DEFAULT 0",
+        "last_rejected_assignment_count INTEGER NOT NULL DEFAULT 0",
+        "last_rejected_date_count INTEGER NOT NULL DEFAULT 0",
+        "total_failures INTEGER NOT NULL DEFAULT 0",
+    ):
+        try:
+            cursor.execute(f"ALTER TABLE scanner_news_providers ADD COLUMN {column_sql}")
+        except Exception:
+            pass
+    cursor.execute("""UPDATE scanner_news SET news_category='macro'
+                      WHERE provider IN ('federal_reserve','bls','existing_market')""")
+    cursor.execute("""UPDATE scanner_news SET news_category='industry'
+                      WHERE provider IN ('fda','ftc','doj','eia')""")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scanner_news_watchlist_alerts (
             news_id INTEGER NOT NULL,

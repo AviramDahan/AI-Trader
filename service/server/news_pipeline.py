@@ -12,6 +12,7 @@ import html
 import json
 import os
 import re
+import threading
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -30,6 +31,21 @@ ROOT = Path(__file__).resolve().parents[2]
 SEC_MAP_CACHE = ROOT / ".runtime" / "sec-ticker-map.json"
 DEFAULT_INTERVAL = 300
 TRACKING_PARAMS = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "source"}
+OFFICIAL_USER_AGENT = "AI-Trader/1.0 AviramDahan/AI-Trader"
+SEC_REQUEST_LOCK = threading.Lock()
+SEC_LAST_REQUEST_AT = 0.0
+
+# Yahoo's ``relatedTickers`` is useful for discovery but is not authoritative
+# enough to turn common English words into a company identity.  These aliases
+# are deliberately small and reviewed.  The normalised full legal name is also
+# considered below, after legal suffixes have been removed.
+VERIFIED_COMPANY_ALIASES: dict[str, tuple[str, ...]] = {
+    "A": ("agilent", "agilent technologies"),
+    "IT": ("gartner", "gartner inc"),
+    "ON": ("on semiconductor", "onsemi"),
+    "UAL": ("united airlines", "united airlines holdings"),
+}
+AMBIGUOUS_TICKER_WORDS = {"A", "AI", "ALL", "ARE", "CAN", "FOR", "IT", "ON", "OR", "SO", "TO"}
 
 
 class ProviderRateLimited(RuntimeError):
@@ -130,7 +146,7 @@ def _strip_markup(value: str) -> str:
 
 def _canonical_url(value: str) -> str:
     parts = urlsplit(str(value or "").strip())
-    if parts.scheme != "https" or not parts.netloc:
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
         return ""
     query = [(key, val) for key, val in parse_qsl(parts.query, keep_blank_values=True)
              if not key.lower().startswith("utm_") and key.lower() not in TRACKING_PARAMS]
@@ -142,20 +158,41 @@ def _normal_title(value: str) -> str:
 
 
 def _headline_verifies_ticker(ticker: str, company: str, title: str) -> bool:
-    """Fail closed when a headline-only Yahoo result names another company."""
+    """Verify a headline using an exact ticker or a controlled company alias.
+
+    A short/common ticker is never accepted merely because its letters appear
+    as an ordinary word.  Company matching uses a reviewed alias or the full
+    company identity, never just the first word of a legal name.
+    """
     title_normalized = _normal_title(title)
     words = set(title_normalized.split())
-    normalized_ticker = ticker.lower().replace("-", " ")
-    if normalized_ticker in words or f" {normalized_ticker} " in f" {title_normalized} ":
+    symbol = ticker.upper().replace(".", "-")
+    normalized_ticker = symbol.lower().replace("-", " ")
+    if symbol not in AMBIGUOUS_TICKER_WORDS and normalized_ticker in words:
         return True
-    generic = {"inc", "corp", "corporation", "company", "co", "common", "stock", "class",
-               "holdings", "holding", "group", "plc", "ltd", "limited", "technologies", "technology"}
-    company_words = [word for word in _normal_title(company).split()
-                     if word not in generic and len(word) >= 4]
-    if not company_words:
-        return False
-    phrase = " ".join(company_words[:2])
-    return phrase in title_normalized or company_words[0] in words
+    suffixes = {"inc", "incorporated", "corp", "corporation", "company", "co", "common", "stock", "class",
+                "holdings", "holding", "group", "plc", "ltd", "limited"}
+    legal_name = _normal_title(company)
+    identity_words = [word for word in legal_name.split() if word not in suffixes]
+    aliases = set(VERIFIED_COMPANY_ALIASES.get(symbol, ()))
+    if legal_name:
+        aliases.add(legal_name)
+    if identity_words:
+        aliases.add(" ".join(identity_words))
+    # Single-word aliases are allowed only when explicitly reviewed or when the
+    # legal identity itself has one distinctive word (e.g. Gartner, Microsoft).
+    reviewed = set(VERIFIED_COMPANY_ALIASES.get(symbol, ()))
+    for alias in sorted(aliases, key=len, reverse=True):
+        normalized = _normal_title(alias)
+        if not normalized:
+            continue
+        if " " in normalized and f" {normalized} " in f" {title_normalized} ":
+            return True
+        if normalized in reviewed and normalized in words:
+            return True
+        if len(identity_words) == 1 and normalized == identity_words[0] and len(normalized) >= 5 and normalized in words:
+            return True
+    return False
 
 
 def _sha(value: str) -> str:
@@ -167,6 +204,9 @@ def _source_key(item: dict[str, Any]) -> str:
 
 
 def _canonical_key(item: dict[str, Any]) -> str:
+    explicit_accession = str(item.get("accession_number") or "").strip()
+    if re.fullmatch(r"\d{10}-\d{2}-\d{6}", explicit_accession):
+        return "sec:" + explicit_accession
     url = _canonical_url(item["url"])
     accession = re.search(r"\b\d{10}-\d{2}-\d{6}\b", url)
     if accession:
@@ -186,7 +226,7 @@ def _event_version(item: dict[str, Any]) -> str:
                           _normal_title(str(item.get("source_excerpt") or "")))))[:20]
 
 
-def _request(url: str, state: dict[str, Any], user_agent: str) -> tuple[bytes | None, dict[str, str]]:
+def _request(url: str, state: dict[str, Any], user_agent: str) -> tuple[bytes | None, dict[str, Any]]:
     headers = {"User-Agent": user_agent, "Accept": "application/rss+xml, application/atom+xml, application/json, application/xml;q=0.9, */*;q=0.1"}
     if state.get("etag"):
         headers["If-None-Match"] = state["etag"]
@@ -196,20 +236,36 @@ def _request(url: str, state: dict[str, Any], user_agent: str) -> tuple[bytes | 
     session.trust_env = False
     response = session.get(url, headers=headers, timeout=25)
     if response.status_code == 304:
-        return None, {"etag": state.get("etag") or "", "last_modified": state.get("last_modified") or ""}
+        return None, {"etag": state.get("etag") or "", "last_modified": state.get("last_modified") or "",
+                      "not_modified": True}
     if response.status_code == 429:
         try:
             retry = int(response.headers.get("Retry-After", "900"))
         except ValueError:
-            retry = 900
+            retry_at = _published_time(response.headers.get("Retry-After"))
+            retry = max(1, int((retry_at - _now()).total_seconds())) if retry_at else 900
         raise ProviderRateLimited("HTTP 429", retry)
     response.raise_for_status()
     return response.content, {"etag": response.headers.get("ETag", ""),
-                              "last_modified": response.headers.get("Last-Modified", "")}
+                              "last_modified": response.headers.get("Last-Modified", ""),
+                              "not_modified": False}
+
+
+def _sec_request(url: str, state: dict[str, Any], user_agent: str) -> tuple[bytes | None, dict[str, Any]]:
+    """Apply one shared SEC request cadence across map, feed and submissions."""
+    global SEC_LAST_REQUEST_AT
+    minimum_gap = _float_env("STOCK_SCANNER_SEC_REQUEST_GAP_SECONDS", .12, 0, 1)
+    with SEC_REQUEST_LOCK:
+        wait = minimum_gap - (time.monotonic() - SEC_LAST_REQUEST_AT)
+        if wait > 0:
+            time.sleep(wait)
+        result = _request(url, state, user_agent)
+        SEC_LAST_REQUEST_AT = time.monotonic()
+        return result
 
 
 def _rss_items(content: bytes, provider: str, publisher: str, scope: str,
-               source_kind: str = "headline_summary") -> list[dict[str, Any]]:
+               source_kind: str = "headline_summary", news_category: str = "macro") -> list[dict[str, Any]]:
     root = ET.fromstring(content)
     nodes = list(root.findall(".//item")) or list(root.findall(".//{http://www.w3.org/2005/Atom}entry"))
     output: list[dict[str, Any]] = []
@@ -236,7 +292,8 @@ def _rss_items(content: bytes, provider: str, publisher: str, scope: str,
             output.append({"provider": provider, "publisher": publisher, "title": title[:500], "url": url,
                            "published_at": _z(published), "source_excerpt": excerpt[:1500],
                            "tickers": [], "scope": scope, "source_kind": source_kind,
-                           "headline_only": True})
+                           # Feed excerpts are not the full article body.
+                           "headline_only": True, "news_category": news_category})
     return output
 
 
@@ -244,7 +301,8 @@ def _fetch_federal_reserve(state: dict[str, Any], at: datetime) -> dict[str, Any
     content, meta = _request("https://www.federalreserve.gov/feeds/press_all.xml", state,
                              "AI-Trader paper scanner (https://github.com/AviramDahan/AI-Trader)")
     items = [] if content is None else _rss_items(content, "federal_reserve", "Federal Reserve Board", "market")
-    return {"items": items, **meta, "coverage": "All Federal Reserve Board press releases; shared official RSS metadata, not full articles"}
+    return {"items": items, **meta, "status": "not_modified" if content is None else "ok",
+            "coverage": "All Federal Reserve Board press releases; shared official RSS metadata, not full articles"}
 
 
 def _fetch_bls(state: dict[str, Any], at: datetime) -> dict[str, Any]:
@@ -254,44 +312,214 @@ def _fetch_bls(state: dict[str, Any], at: datetime) -> dict[str, Any]:
         ("https://www.bls.gov/feed/cpi.rss", "BLS Consumer Price Index"),
         ("https://www.bls.gov/feed/jolts.rss", "BLS Job Openings and Labor Turnover"),
     )
+    return _fetch_rss_collection(state, "bls", feeds, user_agent, at,
+                                 "Official BLS Employment, CPI and JOLTS release RSS metadata", "macro")
+
+
+def _fetch_rss_collection(state: dict[str, Any], provider: str, feeds: tuple[tuple[str, str], ...],
+                          user_agent: str, at: datetime, coverage: str, news_category: str) -> dict[str, Any]:
+    """Fetch independent RSS endpoints without letting one failure discard the rest."""
+    checkpoint = _loads(state.get("checkpoint_json"), {})
+    feed_states = checkpoint.setdefault("feeds", {})
     output: list[dict[str, Any]] = []
+    errors: list[str] = []
+    not_modified = 0
+    successes = 0
+    retry_seconds = 0
     for url, label in feeds:
-        content, _ = _request(url, {}, user_agent)
-        if content is not None:
-            output.extend(_rss_items(content, "bls", f"U.S. Bureau of Labor Statistics — {label}", "market"))
-    return {"items": output, "coverage": "Official BLS Employment, CPI and JOLTS release RSS metadata"}
+        feed_state = dict(feed_states.get(url) or {})
+        try:
+            content, meta = _request(url, feed_state, user_agent)
+            feed_states[url] = {"etag": meta.get("etag") or "",
+                                "last_modified": meta.get("last_modified") or "",
+                                "last_success_at": _z(at), "error": None}
+            successes += 1
+            if content is None:
+                not_modified += 1
+            else:
+                output.extend(_rss_items(content, provider, label, "market",
+                                         news_category=news_category))
+        except ProviderRateLimited as exc:
+            feed_states[url] = {**feed_state, "error": "rate_limited",
+                                "retry_after": exc.retry_after, "last_attempt_at": _z(at)}
+            retry_seconds = max(retry_seconds, exc.retry_after)
+            errors.append(f"{url}:rate_limited")
+        except Exception as exc:
+            feed_states[url] = {**feed_state, "error": type(exc).__name__, "last_attempt_at": _z(at)}
+            errors.append(f"{url}:{type(exc).__name__}")
+    if not successes and errors:
+        if retry_seconds:
+            raise ProviderRateLimited("all provider endpoints rate limited", retry_seconds)
+        raise RuntimeError(";".join(errors[:5]))
+    return {"items": output, "checkpoint": checkpoint, "coverage": coverage,
+            "errors": errors, "not_modified_count": not_modified,
+            "retry_seconds": retry_seconds or None,
+            "status": "degraded" if errors else ("not_modified" if not_modified == len(feeds) else "ok")}
+
+
+def _fetch_fda(state: dict[str, Any], at: datetime) -> dict[str, Any]:
+    feeds = (("https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml",
+              "U.S. Food and Drug Administration (FDA)"),)
+    return _fetch_rss_collection(state, "fda", feeds,
+                                 "AI-Trader paper scanner (https://github.com/AviramDahan/AI-Trader)",
+                                 at,
+                                 "Official FDA press-release RSS metadata; no forced ticker assignment", "industry")
+
+
+def _fetch_ftc(state: dict[str, Any], at: datetime) -> dict[str, Any]:
+    feeds = (
+        ("https://www.ftc.gov/feeds/press-release.xml", "U.S. Federal Trade Commission (FTC)"),
+        ("https://www.ftc.gov/feeds/press-release-consumer-protection.xml", "FTC Consumer Protection"),
+        ("https://www.ftc.gov/feeds/press-release-competition.xml", "FTC Competition"),
+    )
+    return _fetch_rss_collection(state, "ftc", feeds,
+                                 OFFICIAL_USER_AGENT,
+                                 at,
+                                 "Official FTC press-release RSS metadata; no forced ticker assignment", "industry")
+
+
+def _fetch_eia(state: dict[str, Any], at: datetime) -> dict[str, Any]:
+    feeds = (
+        ("https://www.eia.gov/rss/todayinenergy.xml", "U.S. Energy Information Administration — Today in Energy"),
+        ("https://www.eia.gov/rss/press_rss.xml", "U.S. Energy Information Administration — Press Releases"),
+    )
+    return _fetch_rss_collection(state, "eia", feeds,
+                                 "AI-Trader paper scanner (https://github.com/AviramDahan/AI-Trader)",
+                                 at,
+                                 "Official EIA energy analysis and press-release RSS metadata", "industry")
+
+
+def _fetch_doj(state: dict[str, Any], at: datetime) -> dict[str, Any]:
+    url = ("https://www.justice.gov/api/v1/press_releases.json?sort=created&direction=DESC&pagesize=50"
+           "&fields=uuid,title,url,date,teaser")
+    content, meta = _request(url, state,
+                             "AI-Trader paper scanner (https://github.com/AviramDahan/AI-Trader)")
+    if content is None:
+        return {"items": [], **meta, "status": "not_modified",
+                "coverage": "Latest 50 official DOJ press releases per request; no forced ticker assignment"}
+    payload = json.loads(content)
+    output: list[dict[str, Any]] = []
+    for raw in payload.get("results") or []:
+        published = None
+        try:
+            published = datetime.fromtimestamp(float(raw.get("date")), UTC)
+        except (TypeError, ValueError, OSError):
+            published = _published_time(raw.get("date"))
+        title = _strip_markup(raw.get("title", ""))
+        url_value = _canonical_url(raw.get("url", ""))
+        if title and url_value and published:
+            output.append({"provider": "doj", "publisher": "U.S. Department of Justice",
+                           "title": title[:500], "url": url_value, "published_at": _z(published),
+                           "source_excerpt": _strip_markup(raw.get("teaser", ""))[:1500],
+                           "tickers": [], "scope": "market", "source_kind": "official_api_summary",
+                           "headline_only": not bool(raw.get("teaser")), "news_category": "industry"})
+    return {"items": output, **meta,
+            "coverage": "Latest 50 official DOJ press releases per request; no forced ticker assignment"}
 
 
 def _sec_ticker_map(user_agent: str, at: datetime) -> dict[str, list[str]]:
+    allowed: set[str] = set()
+    try:
+        from stock_scanner import load_universe
+        allowed.update(load_universe())
+    except Exception:
+        pass
+    try:
+        conn = get_db_connection(); cur = conn.cursor()
+        cur.execute("SELECT DISTINCT ticker FROM scanner_trades WHERE status='open' AND is_shadow=0")
+        allowed.update(row["ticker"] for row in cur.fetchall())
+        cur.execute("SELECT ticker FROM scanner_news_watchlist WHERE enabled=1")
+        allowed.update(row["ticker"] for row in cur.fetchall()); conn.close()
+    except Exception:
+        pass
     try:
         cached = json.loads(SEC_MAP_CACHE.read_text(encoding="utf-8"))
-        if (_now(at).timestamp() - float(cached["fetched_at"]) < 86400 and cached.get("cik_to_tickers")):
-            return cached["cik_to_tickers"]
+        all_mapping = cached.get("all_cik_to_tickers")
+        if (_now(at).timestamp() - float(cached["fetched_at"]) < 86400 and all_mapping):
+            return {cik: [ticker for ticker in tickers if not allowed or ticker in allowed]
+                    for cik, tickers in all_mapping.items()
+                    if any(not allowed or ticker in allowed for ticker in tickers)}
     except (OSError, ValueError, KeyError, TypeError):
         pass
-    content, _ = _request("https://www.sec.gov/files/company_tickers_exchange.json", {}, user_agent)
+    content, _ = _sec_request("https://www.sec.gov/files/company_tickers_exchange.json", {}, user_agent)
     if content is None:
         raise RuntimeError("SEC ticker map returned no body")
     payload = json.loads(content)
     fields = payload.get("fields") or []
     data = payload.get("data") or []
     cik_index, ticker_index = fields.index("cik"), fields.index("ticker")
-    universe: set[str] = set()
-    try:
-        from stock_scanner import load_universe
-        universe = set(load_universe())
-    except Exception:
-        pass
-    mapping: dict[str, list[str]] = {}
+    all_mapping: dict[str, list[str]] = {}
     for row in data:
         ticker = str(row[ticker_index]).upper().replace(".", "-")
-        if not universe or ticker in universe:
-            mapping.setdefault(str(row[cik_index]).zfill(10), []).append(ticker)
+        all_mapping.setdefault(str(row[cik_index]).zfill(10), []).append(ticker)
     SEC_MAP_CACHE.parent.mkdir(exist_ok=True)
     temporary = SEC_MAP_CACHE.with_suffix(".tmp")
-    temporary.write_text(_json({"fetched_at": _now(at).timestamp(), "cik_to_tickers": mapping}), encoding="utf-8")
+    temporary.write_text(_json({"fetched_at": _now(at).timestamp(), "all_cik_to_tickers": all_mapping}), encoding="utf-8")
     temporary.replace(SEC_MAP_CACHE)
-    return mapping
+    return {cik: [ticker for ticker in tickers if not allowed or ticker in allowed]
+            for cik, tickers in all_mapping.items()
+            if any(not allowed or ticker in allowed for ticker in tickers)}
+
+
+def _sec_priority_ciks(mapping: dict[str, list[str]], checkpoint: dict[str, Any], limit: int) -> tuple[list[str], int]:
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("SELECT DISTINCT ticker FROM scanner_trades WHERE status='open' AND is_shadow=0 ORDER BY ticker")
+    open_symbols = [row["ticker"] for row in cur.fetchall()]
+    cur.execute("SELECT ticker FROM scanner_news_watchlist WHERE enabled=1 ORDER BY created_at")
+    watch_symbols = [row["ticker"] for row in cur.fetchall()]
+    conn.close()
+    reverse = {ticker: cik for cik, tickers in mapping.items() for ticker in tickers}
+    priority: list[str] = []
+    for ticker in open_symbols + watch_symbols:
+        cik = reverse.get(ticker)
+        if cik and cik not in priority:
+            priority.append(cik)
+    remainder = [cik for cik in sorted(mapping) if cik not in priority]
+    if not priority and not remainder:
+        return [], 0
+    offset = int(checkpoint.get("cik_offset") or 0)
+    if len(priority) >= limit:
+        index = offset % len(priority)
+        rotated_priority = priority[index:] + priority[:index]
+        return rotated_priority[:limit], (index + limit) % len(priority)
+    selected = list(priority)
+    if remainder:
+        index = offset % len(remainder)
+        rotated = remainder[index:] + remainder[:index]
+        capacity = limit - len(selected)
+        selected.extend(rotated[:capacity])
+        return selected, (index + max(capacity, 1)) % len(remainder)
+    return selected, 0
+
+
+def _sec_submission_items(payload: dict[str, Any], cik: str, tickers: list[str], at: datetime) -> list[dict[str, Any]]:
+    recent = ((payload.get("filings") or {}).get("recent") or {})
+    accessions = recent.get("accessionNumber") or []
+    output: list[dict[str, Any]] = []
+    age = timedelta(hours=_int_env("STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS", 168, 24, 720) + 48)
+    company = str(payload.get("name") or "SEC EDGAR filer").strip()
+    for index, accession in enumerate(accessions[:250]):
+        def field(name: str) -> str:
+            values = recent.get(name) or []
+            return str(values[index] or "").strip() if index < len(values) else ""
+        published = _published_time(field("acceptanceDateTime")) or _published_time(field("filingDate"))
+        if not published or published < at - age or published > at + timedelta(minutes=10):
+            continue
+        accession = str(accession or "").strip()
+        document = field("primaryDocument")
+        if not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession) or not document:
+            continue
+        archive_cik = str(int(cik))
+        url = f"https://www.sec.gov/Archives/edgar/data/{archive_cik}/{accession.replace('-', '')}/{document}"
+        form = field("form") or "filing"
+        description = _strip_markup(field("primaryDocDescription"))
+        output.append({"provider": "sec_edgar", "publisher": company + " (SEC EDGAR filer)",
+                       "title": f"{company} — SEC {form}"[:500], "url": url,
+                       "published_at": _z(published), "source_excerpt": description[:1500],
+                       "tickers": tickers, "scope": "universe", "source_kind": "filing_metadata",
+                       "headline_only": not bool(description), "news_category": "company",
+                       "accession_number": accession})
+    return output
 
 
 def _fetch_sec(state: dict[str, Any], at: datetime) -> dict[str, Any]:
@@ -300,10 +528,9 @@ def _fetch_sec(state: dict[str, Any], at: datetime) -> dict[str, Any]:
         raise ValueError("NEWS_SEC_USER_AGENT must identify the operator and contact email")
     mapping = _sec_ticker_map(user_agent, at)
     url = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&output=atom&count=100"
-    content, meta = _request(url, state, user_agent)
-    if content is None:
-        return {"items": [], **meta, "coverage": "Latest 100 EDGAR filings; only verified scanner-universe CIK/ticker matches"}
-    raw = _rss_items(content, "sec_edgar", "U.S. Securities and Exchange Commission (SEC)", "universe", "filing_metadata")
+    content, meta = _sec_request(url, state, user_agent)
+    raw = [] if content is None else _rss_items(content, "sec_edgar", "U.S. Securities and Exchange Commission (SEC)",
+                                                 "universe", "filing_metadata", "company")
     output = []
     for item in raw:
         match = re.search(r"\((\d{10})\)", item["title"] + " " + item.get("source_excerpt", ""))
@@ -315,7 +542,40 @@ def _fetch_sec(state: dict[str, Any], at: datetime) -> dict[str, Any]:
         if filer:
             item["publisher"] = filer.group(1).strip() + " (SEC EDGAR filer)"
         output.append(item)
-    return {"items": output, **meta, "coverage": "Latest 100 EDGAR filings; only verified scanner-universe CIK/ticker matches"}
+    checkpoint = _loads(state.get("checkpoint_json"), {})
+    submissions = checkpoint.setdefault("submissions", {})
+    request_limit = _int_env("STOCK_SCANNER_SEC_SUBMISSIONS_PER_CYCLE", 4, 1, 20)
+    selected, next_offset = _sec_priority_ciks(mapping, checkpoint, request_limit)
+    partial_errors: list[str] = []
+    submission_304 = 0
+    for cik in selected:
+        cik_state = dict(submissions.get(cik) or {})
+        try:
+            body, cik_meta = _sec_request(f"https://data.sec.gov/submissions/CIK{cik}.json", cik_state, user_agent)
+            submissions[cik] = {"etag": cik_meta.get("etag") or "",
+                                "last_modified": cik_meta.get("last_modified") or "",
+                                "last_checked_at": _z(at), "error": None,
+                                "last_accession": cik_state.get("last_accession")}
+            if body is None:
+                submission_304 += 1
+                continue
+            payload = json.loads(body)
+            items = _sec_submission_items(payload, cik, mapping.get(cik, []), at)
+            output.extend(items)
+            recent_accessions = ((payload.get("filings") or {}).get("recent") or {}).get("accessionNumber") or []
+            if recent_accessions:
+                submissions[cik]["last_accession"] = recent_accessions[0]
+        except ProviderRateLimited:
+            raise
+        except Exception as exc:
+            submissions[cik] = {**cik_state, "last_checked_at": _z(at), "error": type(exc).__name__}
+            partial_errors.append(f"CIK{cik}:{type(exc).__name__}")
+    checkpoint["cik_offset"] = next_offset
+    coverage = (f"Latest 100 EDGAR feed plus {len(selected)} bounded company Submissions API checks; "
+                "open positions/watchlist prioritized; verified CIK/ticker mapping")
+    status = "degraded" if partial_errors else ("not_modified" if content is None and submission_304 == len(selected) else "ok")
+    return {"items": output, **meta, "checkpoint": checkpoint, "coverage": coverage,
+            "errors": partial_errors, "not_modified_count": submission_304 + int(content is None), "status": status}
 
 
 def _priority_tickers(limit: int, checkpoint: dict[str, Any]) -> tuple[list[tuple[str, str]], dict[str, Any], str]:
@@ -350,13 +610,17 @@ def _fetch_yahoo_priority(state: dict[str, Any], at: datetime) -> dict[str, Any]
                                                        _loads(state.get("checkpoint_json"), {}))
     output: list[dict[str, Any]] = []
     errors: list[str] = []
+    received = rejected_assignment = 0
     for ticker, company in selected:
         try:
             for item in fetch_recent_news(ticker, company, 168):
+                received += 1
                 if not _headline_verifies_ticker(ticker, company, str(item.get("title") or "")):
+                    rejected_assignment += 1
                     continue
                 output.append({**item, "provider": "yahoo_priority", "tickers": [ticker], "scope": "universe",
-                               "source_excerpt": "", "source_kind": "headline_metadata", "headline_only": True})
+                               "source_excerpt": "", "source_kind": "headline_metadata", "headline_only": True,
+                               "news_category": "company"})
         except Exception as exc:
             if "429" in str(exc):
                 raise ProviderRateLimited("Yahoo HTTP 429", 1800) from exc
@@ -364,6 +628,8 @@ def _fetch_yahoo_priority(state: dict[str, Any], at: datetime) -> dict[str, Any]
     if errors and not output:
         raise RuntimeError(";".join(errors[:5]))
     return {"items": output, "checkpoint": checkpoint,
+            "metrics": {"received": received, "rejected_assignment": rejected_assignment},
+            "errors": errors, "status": "degraded" if errors else "ok",
             "coverage": coverage + (f"; partial errors={len(errors)}" if errors else "")}
 
 
@@ -376,12 +642,15 @@ def _fetch_existing_market(state: dict[str, Any], at: datetime) -> dict[str, Any
     for row in rows:
         for item in _loads(row["items_json"], []):
             url, title = _canonical_url(item.get("url", "")), _strip_markup(item.get("title", ""))
-            if title and url:
+            published = (_published_time(item.get("time_published")) or
+                         _published_time(item.get("published_at")))
+            if title and url and published:
                 output.append({"provider": "existing_market", "publisher": str(item.get("source") or row["category"]),
                                "title": title[:500], "url": url,
-                               "published_at": _z(_parse_time(item.get("time_published"), _parse_time(row["created_at"]))),
+                               "published_at": _z(published),
                                "source_excerpt": "", "tickers": [], "scope": "market",
-                               "source_kind": "headline_metadata", "headline_only": True})
+                               "source_kind": "headline_metadata", "headline_only": True,
+                               "news_category": "macro"})
     return {"items": output, "coverage": "Latest cached broad-market snapshots from the existing AI-Trader feed"}
 
 
@@ -389,6 +658,10 @@ PROVIDERS: dict[str, Callable[[dict[str, Any], datetime], dict[str, Any]]] = {
     "sec_edgar": _fetch_sec,
     "federal_reserve": _fetch_federal_reserve,
     "bls": _fetch_bls,
+    "fda": _fetch_fda,
+    "ftc": _fetch_ftc,
+    "doj": _fetch_doj,
+    "eia": _fetch_eia,
     "yahoo_priority": _fetch_yahoo_priority,
     "existing_market": _fetch_existing_market,
 }
@@ -436,7 +709,7 @@ def _scope_context(tickers: list[str], published_at: str) -> tuple[str, int | No
 
 def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dict[str, int]:
     current, stamp = _now(at), _z(at)
-    inserted = sources = linked = 0
+    inserted = sources = linked = duplicates = rejected_invalid = rejected_date = 0
     conn = get_db_connection(); cur = conn.cursor(); begin_write_transaction(cur)
     for raw in items:
         item = dict(raw)
@@ -445,17 +718,23 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
         item["tickers"] = sorted({str(value).upper().replace(".", "-") for value in item.get("tickers") or []
                                     if re.fullmatch(r"[A-Za-z][A-Za-z0-9.-]{0,9}", str(value))})
         if not item["title"] or not item["url"] or not item.get("provider") or not item.get("publisher"):
+            rejected_invalid += 1
             continue
-        item["published_at"] = _z(_parse_time(item.get("published_at"), _now(at)))
-        published = _parse_time(item["published_at"])
+        published = _published_time(item.get("published_at"))
+        if published is None:
+            rejected_date += 1
+            continue
+        item["published_at"] = _z(published)
         max_age = timedelta(hours=_int_env("STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS", 168, 24, 720))
         if published < current - max_age or published > current + timedelta(minutes=10):
+            rejected_date += 1
             continue
         canonical, source_key, version = _canonical_key(item), _source_key(item), _event_version(item)
         scope, signal_id, trade_ids = _scope_context(item["tickers"], item["published_at"])
         cur.execute("SELECT * FROM scanner_news WHERE canonical_key=? OR url=? ORDER BY id LIMIT 1", (canonical, item["url"]))
         existing = cur.fetchone()
         if existing:
+            duplicates += 1
             news_id = int(existing["id"])
             old_version = existing["content_hash"]
             # Same direct URL with revised source metadata is a new version of
@@ -471,6 +750,7 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
                     and _canonical_url(existing["url"]) == item["url"]):
                 facts = {"title": item["title"], "source_excerpt": item.get("source_excerpt") or "",
                          "publisher": item["publisher"], "published_at": item["published_at"],
+                         "news_category": item.get("news_category") or "company",
                          "content_available": "headline_and_feed_summary" if item.get("source_excerpt") else "headline_only"}
                 cur.execute("""UPDATE scanner_news SET title=?,source_facts_json=?,content_hash=?,
                     analysis_status='pending_analysis',title_he=NULL,summary_he=NULL,sentiment=NULL,materiality=NULL,
@@ -487,6 +767,7 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
                     (canonical, item["provider"], item.get("source_kind") or "headline_metadata",
                      _json({"title": existing["title"], "source_excerpt": item.get("source_excerpt") or "",
                             "publisher": existing["publisher"], "published_at": existing["published_at"],
+                            "news_category": item.get("news_category") or "company",
                             "content_available": "headline_and_feed_summary" if item.get("source_excerpt") else "headline_only"}),
                      _json(item["tickers"]), version, news_id))
         else:
@@ -494,15 +775,17 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
             fingerprint = _sha(f"news|{canonical}")
             facts = {"title": item["title"], "source_excerpt": item.get("source_excerpt") or "",
                      "publisher": item["publisher"], "published_at": item["published_at"],
+                     "news_category": item.get("news_category") or "company",
                      "content_available": "headline_and_feed_summary" if item.get("source_excerpt") else "headline_only"}
             cur.execute("""INSERT INTO scanner_news(fingerprint,signal_id,ticker,scope,title,publisher,url,published_at,
                 analysis_status,fetched_at,provider,canonical_key,original_publisher,collected_at,source_kind,headline_only,
-                source_facts_json,verified_tickers_json,alternate_sources_json,content_hash,updated_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                source_facts_json,verified_tickers_json,alternate_sources_json,content_hash,updated_at,news_category)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (fingerprint, signal_id, ticker, scope, item["title"], item["publisher"], item["url"], item["published_at"],
                  "pending_analysis", stamp, item["provider"], canonical, item["publisher"], stamp,
                  item.get("source_kind") or "headline_metadata", 1 if item.get("headline_only", True) else 0,
-                 _json(facts), _json(item["tickers"]), "[]", version, stamp))
+                 _json(facts), _json(item["tickers"]), "[]", version, stamp,
+                 item.get("news_category") or ("macro" if not item["tickers"] else "company")))
             news_id = int(cur.lastrowid); inserted += 1
             priority = 100 if scope == "open_position" else 80 if scope == "watchlist" else 70 if scope == "active_signal" else 20 if scope == "market" else 40
             cur.execute("""INSERT INTO scanner_news_jobs(news_id,priority,status,next_attempt_at,created_at,updated_at)
@@ -533,7 +816,8 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
         cur.execute("UPDATE scanner_news SET scope=?,signal_id=COALESCE(signal_id,?),alternate_sources_json=?,updated_at=? WHERE id=?",
                     (final_scope, signal_id, _json(alternates), stamp, news_id))
     conn.commit(); conn.close()
-    return {"inserted": inserted, "sources": sources, "linked": linked}
+    return {"received": len(items), "inserted": inserted, "sources": sources, "linked": linked,
+            "duplicates": duplicates, "rejected_invalid": rejected_invalid, "rejected_date": rejected_date}
 
 
 def _update_provider(name: str, status: str, at: datetime, cadence: int, coverage: str,
@@ -542,17 +826,27 @@ def _update_provider(name: str, status: str, at: datetime, cadence: int, coverag
     result = result or {}
     delay = retry_seconds or cadence
     next_check = _z(at + timedelta(seconds=delay))
-    success = status == "ok"
+    success = status in {"ok", "no_new", "not_modified", "degraded"}
     checkpoint = result.get("checkpoint") or _loads(state.get("checkpoint_json"), {})
+    metrics = result.get("metrics") or {}
+    received = int(metrics.get("received", result.get("received", 0)) or 0)
+    ingested = int(metrics.get("ingested", result.get("inserted", 0)) or 0)
+    duplicates = int(metrics.get("duplicates", result.get("duplicates", 0)) or 0)
+    rejected_assignment = int(metrics.get("rejected_assignment", 0) or 0)
+    rejected_date = int(metrics.get("rejected_date", result.get("rejected_date", 0)) or 0)
+    failed = status in {"error", "rate_limited", "config_required", "degraded"}
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("""UPDATE scanner_news_providers SET status=?,last_attempt_at=?,last_success_at=?,next_check_at=?,
         cadence_seconds=?,coverage=?,checkpoint_json=?,etag=?,last_modified=?,consecutive_failures=?,rate_limit_until=?,error=?
+        ,last_received_count=?,last_ingested_count=?,last_duplicate_count=?,last_rejected_assignment_count=?,
+        last_rejected_date_count=?,total_failures=COALESCE(total_failures,0)+?
         WHERE provider=?""",
         (status, _z(at), _z(at) if success else state.get("last_success_at"), next_check, cadence,
          coverage[:500], _json(checkpoint), result.get("etag") or state.get("etag"),
          result.get("last_modified") or state.get("last_modified"),
-         0 if success else int(state.get("consecutive_failures") or 0) + 1,
-         next_check if status == "rate_limited" else None, error[:500] if error else None, name))
+         0 if success and status != "degraded" else int(state.get("consecutive_failures") or 0) + 1,
+         next_check if status == "rate_limited" else None, error[:500] if error else None,
+         received, ingested, duplicates, rejected_assignment, rejected_date, int(failed), name))
     conn.commit(); conn.close()
 
 
@@ -598,7 +892,8 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
     current = _now(at)
     initialize_providers(current)
     fetchers = provider_fetchers or PROVIDERS
-    summary = {"providers_checked": 0, "items_inserted": 0, "sources_added": 0, "errors": []}
+    summary = {"providers_checked": 0, "providers_skipped_backoff": 0, "items_inserted": 0,
+               "sources_added": 0, "errors": [], "providers": {}}
     for name, fetcher in fetchers.items():
         conn = get_db_connection(); cur = conn.cursor()
         cur.execute("SELECT * FROM scanner_news_providers WHERE provider=?", (name,)); row = cur.fetchone(); conn.close()
@@ -606,34 +901,71 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
             continue
         state = dict(row); cadence = _provider_cadence(name)
         if not force and _parse_time(state["next_check_at"]) > current:
+            summary["providers_skipped_backoff"] += 1
+            summary["providers"][name] = {"status": "backoff_not_checked"}
             continue
         summary["providers_checked"] += 1
         try:
             result = fetcher(state, current)
             _reconcile_source_publication_times(name, result.get("items") or [], current)
             counts = ingest_items(result.get("items") or [], current)
+            metrics = dict(result.get("metrics") or {})
+            metrics.setdefault("received", counts["received"])
+            metrics.update({"ingested": counts["inserted"], "duplicates": counts["duplicates"],
+                            "rejected_date": counts["rejected_date"],
+                            "rejected_invalid": counts["rejected_invalid"]})
+            result["metrics"] = metrics
             summary["items_inserted"] += counts["inserted"]
             summary["sources_added"] += counts["sources"]
-            _update_provider(name, "ok", current, cadence, result.get("coverage") or state["coverage"], state, result)
+            partial_errors = list(result.get("errors") or [])
+            status = str(result.get("status") or "")
+            if partial_errors:
+                status = "degraded"
+                summary["errors"].append(f"{name}:degraded")
+            elif status not in {"degraded", "not_modified", "no_new"}:
+                status = "ok" if counts["inserted"] else "no_new"
+            if status == "not_modified":
+                summary["providers"][name] = {"status": status, **metrics}
+            else:
+                summary["providers"][name] = {"status": status, **metrics}
+            _update_provider(name, status, current, cadence, result.get("coverage") or state["coverage"], state,
+                             result, error=";".join(partial_errors[:5]) if partial_errors else None,
+                             retry_seconds=max(cadence, int(result.get("retry_seconds") or 0)) or None)
         except ProviderRateLimited as exc:
             summary["errors"].append(f"{name}:rate_limited")
+            summary["providers"][name] = {"status": "rate_limited"}
             _update_provider(name, "rate_limited", current, cadence, state["coverage"], state,
                              error=str(exc), retry_seconds=max(cadence, exc.retry_after))
         except ValueError as exc:
             status = "config_required" if name == "sec_edgar" else "error"
             summary["errors"].append(f"{name}:{status}")
+            summary["providers"][name] = {"status": status}
             _update_provider(name, status, current, cadence, state["coverage"], state,
                              error=str(exc), retry_seconds=3600 if status == "config_required" else cadence)
         except Exception as exc:
             failures = int(state.get("consecutive_failures") or 0) + 1
             retry = min(3600, cadence * (2 ** min(failures, 4)))
             summary["errors"].append(f"{name}:{type(exc).__name__}")
+            summary["providers"][name] = {"status": "error"}
             _update_provider(name, "error", current, cadence, state["coverage"], state,
                              error=type(exc).__name__, retry_seconds=retry)
     from scanner_engine import set_service_status
-    set_service_status("news_feed", "error" if summary["errors"] and summary["providers_checked"] == len(summary["errors"]) else "ok",
+    if summary["providers_checked"] == 0:
+        service_status = "backoff"
+    elif summary["errors"] and all(item.get("status") in {"error", "rate_limited", "config_required"}
+                                   for item in summary["providers"].values() if item.get("status") != "backoff_not_checked"):
+        service_status = "error"
+    elif summary["errors"]:
+        service_status = "degraded"
+    elif summary["items_inserted"] == 0 and any(item.get("status") == "not_modified" for item in summary["providers"].values()):
+        service_status = "not_modified"
+    elif summary["items_inserted"] == 0:
+        service_status = "no_new"
+    else:
+        service_status = "ok"
+    set_service_status("news_feed", service_status,
                        f"checked={summary['providers_checked']} inserted={summary['items_inserted']} errors={','.join(summary['errors'])}",
-                       success=summary["providers_checked"] > len(summary["errors"]))
+                       success=service_status in {"ok", "no_new", "not_modified", "degraded"})
     return summary
 
 

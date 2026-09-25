@@ -86,7 +86,7 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(skipped["providers_checked"], 0)
         recovered = news_pipeline.run_feed_cycle({"federal_reserve": limited}, self.clock + timedelta(minutes=11))
         self.assertFalse(recovered["errors"])
-        self.assertEqual(self.rows("SELECT status FROM scanner_news_providers WHERE provider='federal_reserve'")[0]["status"], "ok")
+        self.assertEqual(self.rows("SELECT status FROM scanner_news_providers WHERE provider='federal_reserve'")[0]["status"], "no_new")
 
     def test_headline_only_yahoo_feed_rejects_wrong_company_assignment(self):
         fetched = [
@@ -102,6 +102,49 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
 
         self.assertEqual([item["title"] for item in result["items"]], ["MSTR expands its bitcoin treasury"])
         self.assertEqual(result["items"][0]["tickers"], ["MSTR"])
+        self.assertEqual(result["metrics"], {"received": 2, "rejected_assignment": 1})
+
+    def test_ambiguous_tickers_require_verified_company_identity(self):
+        rejected = (
+            ("A", "Agilent Technologies Inc", "A new product from Microsoft"),
+            ("IT", "Gartner Inc", "Microsoft increases IT spending"),
+            ("ON", "ON Semiconductor Corporation", "Apple shares rise on new product launch"),
+            ("UAL", "United Airlines Holdings Inc", "United Parcel Service reports earnings"),
+        )
+        accepted = (
+            ("A", "Agilent Technologies Inc", "Agilent Technologies launches a new analyzer"),
+            ("IT", "Gartner Inc", "Gartner publishes its latest technology outlook"),
+            ("ON", "ON Semiconductor Corporation", "onsemi announces new power platform"),
+            ("UAL", "United Airlines Holdings Inc", "United Airlines reports quarterly results"),
+        )
+        for ticker, company, title in rejected:
+            with self.subTest(title=title):
+                self.assertFalse(news_pipeline._headline_verifies_ticker(ticker, company, title))
+        for ticker, company, title in accepted:
+            with self.subTest(title=title):
+                self.assertTrue(news_pipeline._headline_verifies_ticker(ticker, company, title))
+
+    def test_missing_invalid_old_and_future_publication_times_are_rejected(self):
+        items = []
+        for index, value in enumerate((None, "not-a-date", (self.clock - timedelta(days=10)).isoformat(),
+                                       (self.clock + timedelta(hours=1)).isoformat())):
+            item = self.item(url=f"https://example.test/date-{index}")
+            item["published_at"] = value
+            items.append(item)
+        result = news_pipeline.ingest_items(items, self.clock)
+        self.assertEqual(result["inserted"], 0)
+        self.assertEqual(result["rejected_date"], 4)
+        self.assertFalse(self.rows("SELECT * FROM scanner_news"))
+
+    def test_existing_market_never_uses_snapshot_collection_time_as_publication_time(self):
+        conn = database.get_db_connection()
+        conn.execute("""INSERT INTO market_news_snapshots(category,snapshot_key,items_json,summary_json,created_at)
+                      VALUES('macro','undated-test',?,'{}',?)""",
+                     (json.dumps([{"title": "Undated archive", "url": "https://example.test/undated"}]),
+                      self.clock.isoformat()))
+        conn.commit(); conn.close()
+        result = news_pipeline._fetch_existing_market({}, self.clock)
+        self.assertEqual(result["items"], [])
 
     def test_changed_source_version_requeues_once_without_losing_other_sources(self):
         first = self.item()
@@ -506,6 +549,103 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         row = self.rows("SELECT * FROM scanner_news")[0]
         self.assertEqual(row["analysis_status"], "stale_skipped")
         self.assertEqual(self.rows("SELECT status FROM scanner_news_jobs")[0]["status"], "stale_skipped")
+
+    def test_bls_tracks_each_feed_cache_and_reports_partial_failure_as_degraded(self):
+        xml = b"""<rss><channel><item><title>Official CPI release</title>
+        <link>https://bls.example.test/cpi</link><pubDate>Mon, 14 Sep 2026 12:00:00 GMT</pubDate>
+        </item></channel></rss>"""
+
+        def request(url, state, user_agent):
+            if "empsit" in url:
+                return None, {"etag": "employment-v1", "last_modified": "", "not_modified": True}
+            if "cpi" in url:
+                raise TimeoutError("timed out")
+            return xml, {"etag": "jolts-v2", "last_modified": "Mon, 14 Sep 2026 11:00:00 GMT",
+                         "not_modified": False}
+
+        with patch.object(news_pipeline, "_request", side_effect=request):
+            result = news_pipeline.run_feed_cycle({"bls": news_pipeline._fetch_bls}, self.clock, force=True)
+        self.assertEqual(result["providers"]["bls"]["status"], "degraded")
+        provider = self.rows("SELECT * FROM scanner_news_providers WHERE provider='bls'")[0]
+        checkpoint = json.loads(provider["checkpoint_json"])
+        self.assertEqual(provider["status"], "degraded")
+        self.assertEqual(provider["last_received_count"], 1)
+        self.assertEqual(provider["last_ingested_count"], 1)
+        self.assertIn("empsit.rss", " ".join(checkpoint["feeds"]))
+        self.assertIn("cpi.rss", " ".join(checkpoint["feeds"]))
+        self.assertEqual(checkpoint["feeds"]["https://www.bls.gov/feed/cpi.rss"]["error"], "TimeoutError")
+
+    def test_malformed_rss_endpoint_does_not_discard_a_valid_sibling_feed(self):
+        valid = b"""<rss><channel><item><title>Valid release</title>
+        <link>https://official.test/valid</link><pubDate>Mon, 14 Sep 2026 12:00:00 GMT</pubDate>
+        </item></channel></rss>"""
+        feeds = (("https://official.test/broken.xml", "Broken"),
+                 ("https://official.test/valid.xml", "Valid"))
+
+        def request(url, state, user_agent):
+            body = b"<not-closed" if "broken" in url else valid
+            return body, {"etag": url, "last_modified": "", "not_modified": False}
+
+        with patch.object(news_pipeline, "_request", side_effect=request):
+            result = news_pipeline._fetch_rss_collection({}, "test_official", feeds, "test-agent",
+                                                         self.clock, "test coverage", "macro")
+        self.assertEqual(result["status"], "degraded")
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(len(result["errors"]), 1)
+
+    def test_sec_submissions_checkpoint_overlap_and_accession_dedupe_survive_cycles(self):
+        cik = "0000320193"
+        filings = [{"accession": "0000320193-26-000001", "minute": "00"}]
+
+        def sec_request(url, state, user_agent):
+            if "getcurrent" in url:
+                return b'<feed xmlns="http://www.w3.org/2005/Atom"></feed>', {
+                    "etag": "feed-v1", "last_modified": "", "not_modified": False}
+            recent = {
+                "accessionNumber": [item["accession"] for item in filings],
+                "acceptanceDateTime": [f"2026-09-14T12:{item['minute']}:00Z" for item in filings],
+                "filingDate": ["2026-09-14" for _ in filings],
+                "primaryDocument": ["report.htm" for _ in filings],
+                "primaryDocDescription": ["Current report" for _ in filings],
+                "form": ["8-K" for _ in filings],
+            }
+            return json.dumps({"name": "Apple Inc.", "filings": {"recent": recent}}).encode(), {
+                "etag": f"cik-v{len(filings)}", "last_modified": "", "not_modified": False}
+
+        with patch.dict(os.environ, {"NEWS_SEC_USER_AGENT": "AI-Trader test test@example.com",
+                                     "STOCK_SCANNER_SEC_REQUEST_GAP_SECONDS": "0"}, clear=False), \
+             patch.object(news_pipeline, "_sec_ticker_map", return_value={cik: ["AAPL"]}), \
+             patch.object(news_pipeline, "_sec_priority_ciks",
+                          side_effect=lambda mapping, checkpoint, limit: ([cik], 0)), \
+             patch.object(news_pipeline, "_sec_request", side_effect=sec_request):
+            first = news_pipeline.run_feed_cycle({"sec_edgar": news_pipeline._fetch_sec}, self.clock, force=True)
+            second = news_pipeline.run_feed_cycle({"sec_edgar": news_pipeline._fetch_sec},
+                                                  self.clock + timedelta(minutes=5), force=True)
+            filings.insert(0, {"accession": "0000320193-26-000002", "minute": "06"})
+            third = news_pipeline.run_feed_cycle({"sec_edgar": news_pipeline._fetch_sec},
+                                                 self.clock + timedelta(minutes=7), force=True)
+        self.assertEqual(first["items_inserted"], 1)
+        self.assertEqual(second["items_inserted"], 0)
+        self.assertEqual(third["items_inserted"], 1)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_news WHERE provider='sec_edgar'")), 2)
+        provider = self.rows("SELECT checkpoint_json FROM scanner_news_providers WHERE provider='sec_edgar'")[0]
+        checkpoint = json.loads(provider["checkpoint_json"])
+        self.assertEqual(checkpoint["submissions"][cik]["last_accession"], "0000320193-26-000002")
+
+    def test_new_official_sources_are_dashboard_only_and_registered(self):
+        self.assertTrue({"fda", "ftc", "doj", "eia"}.issubset(news_pipeline.PROVIDERS))
+        official = {**self.item("fda", "https://www.fda.gov/news-events/press-announcements/example"),
+                    "news_category": "industry"}
+        news_pipeline.ingest_items([official], self.clock)
+        result = news_pipeline.analyze_news_jobs(analyzer=lambda rows: [{
+            "id": rows[0]["id"], "related": True, "title_he": "עדכון FDA",
+            "summary_he": "פורסם עדכון רשמי.", "sentiment": "mixed", "materiality": "high",
+            "thesis_effect": "unchanged", "interpretation_he": "השפעה אפשרית לא ברורה.",
+            "relevance": .99,
+        }], at=self.clock)
+        self.assertEqual(result["alerts"], 0)
+        self.assertFalse(self.rows("SELECT * FROM scanner_telegram_outbox"))
+        self.assertEqual(self.rows("SELECT news_category FROM scanner_news")[0]["news_category"], "industry")
 
     def test_malformed_ai_batch_retries_without_publishing_or_losing_news(self):
         news_pipeline.ingest_items([self.item()], self.clock)

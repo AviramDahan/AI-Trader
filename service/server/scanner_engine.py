@@ -1277,7 +1277,7 @@ def dashboard_payload() -> dict[str, Any]:
     news_by_id = {int(row["id"]): dict(row) for row in cur.fetchall()}
     # Reserve a small slot for primary-source releases that a high-volume
     # Yahoo/legacy stream might otherwise push out of the 500 most recent.
-    for provider in ("bls", "sec_edgar", "federal_reserve"):
+    for provider in ("bls", "sec_edgar", "federal_reserve", "fda", "ftc", "doj", "eia"):
         cur.execute("""SELECT * FROM scanner_news WHERE provider=? AND analysis_status!='stale_skipped'
                        ORDER BY published_at DESC LIMIT 20""", (provider,))
         for row in cur.fetchall():
