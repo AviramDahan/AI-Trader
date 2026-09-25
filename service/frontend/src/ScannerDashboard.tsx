@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { API_ORIGIN, useLanguage } from './appShared'
 
 type Dashboard = {
+  market: { is_open: boolean }
   paper_only: boolean
   scanner_name: string
   primary_user: Record<string, any>
@@ -27,7 +28,7 @@ type Dashboard = {
   lifecycle_verification: Record<string, any>
 }
 
-const fmtPrice = (value: any) => Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '—'
+const fmtPrice = (value: any) => value != null && value !== '' && Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '—'
 const fmtPct = (value: any) => Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : '—'
 const fmtMove = (entry: any, target: any) => {
   const from = Number(entry)
@@ -266,14 +267,16 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     <header className="scanner-hero">
       <div>
         <p className="scanner-kicker">{text('סורק מניות ארה״ב', 'US STOCK SCANNER')}</p>
-        <h1>{primaryName}</h1>
-        <p>{text('המשתמש הראשי והיחיד בדשבורד, והוא גם הבעלים של תיק הדמו הראשי. סריקה אוטומטית של S&P 500 ו־Nasdaq 100 — ללא בחירת משתמש או הזנת סימול.', 'The dashboard’s only visible primary user and owner of the main demo portfolio. Automatic S&P 500 + Nasdaq 100 scan—no user or ticker input required.')}</p>
+        <h1>{tabs.find(([key]) => key === tab)?.[1] || primaryName}</h1>
+        <p>{text('S&P 500 + Nasdaq 100 · סריקה אוטומטית', 'S&P 500 + Nasdaq 100 · Automatic scanner')}</p>
+        <small className="signal-price-time">{data?.market ? text(data.market.is_open ? 'השוק פתוח' : 'השוק סגור', data.market.is_open ? 'Market open' : 'Market closed') : text('מצב שוק לא זמין', 'Market status unavailable')} · {text('סריקה אחרונה', 'Last scan')}: {activity.last_scan_at ? stamp(activity.last_scan_at * 1000) : '—'}</small>
       </div>
       <strong className="paper-only">{text('מסחר מדומה בלבד', 'PAPER TRADING ONLY')}</strong>
     </header>
 
     {error && <div className="scanner-inline-error">{text('נתוני הסורק אינם זמינים כרגע', 'Scanner data is temporarily unavailable')}: {error} <button onClick={() => void load()}>{text('בדיקה מחדש', 'Retry')}</button></div>}
 
+    <details className="signal-scan-details" open={tab === 'status'}><summary>{text('פרטי הסריקה האחרונה', 'Latest scan details')}</summary>
     <div className="scanner-stage-grid" aria-label={text('שלבי הסריקה האחרונה', 'Latest scan stages')}>
       {[
         [text('יקום', 'Universe'), activity.universe_count],
@@ -285,6 +288,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       ].map(([label, value]) => <div className="scanner-stat" key={String(label)}><span>{label}</span><strong>{Number(value || 0).toLocaleString()}</strong></div>)}
     </div>
 
+    </details>
     <nav className="scanner-tabs" aria-label={text('ניווט בדשבורד', 'Dashboard navigation')}>
       {tabs.map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => navigate(`/market?tab=${key}`)}>{label}</button>)}
     </nav>
@@ -292,11 +296,15 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     {tab === 'signals' && <div className="scanner-section">
       <h2>{text('סיגנלים פעילים', 'Active signals')} <small>{activeSignals.length}</small></h2>
       {!activeSignals.length && <Empty text={text('אין כרגע סיגנלים חזקים פעילים — זה מצב תקין והמסננים לא הוחלשו.', 'No strong active signals right now — this is normal and filters were not weakened.')} />}
-      <div className="scanner-card-grid">{activeSignals.map(signal => <SignalCard key={signal.id} signal={signal} he={he} />)}</div>
-      <h2>{text('היסטוריית סיגנלים', 'Signal history')} <small>{historicSignals.length}</small></h2>
-      <div className="scanner-card-grid">{historicSignals.map(signal => <SignalCard key={signal.id} signal={signal} he={he} />)}</div>
-      <details className="scanner-rejected"><summary>{text('מועמדים שנדחו', 'Rejected candidates')} ({data?.rejected?.length || 0})</summary>
-        {(data?.rejected || []).map(item => <p key={item.id}><b>{item.ticker}</b> · {item.reason || text('לא עבר את כל התנאים', 'Did not pass all conditions')} · {stamp(item.created_at)}</p>)}
+      {[['pending', text('ממתינים לכניסה', 'Awaiting entry')], ['entered', text('כניסה בוצעה', 'Entry filled')]].map(([group, label]) => {
+        const signals = activeSignals.filter(signal => (signal.status === 'ENTERED') === (group === 'entered'))
+        return <section className="signal-group" key={group}><h3>{label} <small>{signals.length}</small></h3>
+          {!signals.length && <p className="signal-empty">{text('אין סיגנלים בקבוצה זו כרגע.', 'No signals in this group right now.')}</p>}
+          <div className="signal-list">{signals.map(signal => <SignalCard key={signal.id} signal={signal} he={he} />)}</div>
+        </section>
+      })}
+      <details className="signal-history"><summary>{text('היסטוריה', 'History')} · {historicSignals.length}</summary>
+        <div className="signal-list">{historicSignals.map(signal => <SignalCard key={signal.id} signal={signal} he={he} />)}</div>
       </details>
     </div>}
 
@@ -373,6 +381,9 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     </div>}
 
     {tab === 'status' && <div className="scanner-section">
+      <details className="scanner-rejected"><summary>{text('מועמדים שנדחו', 'Rejected candidates')} ({data?.rejected?.length || 0})</summary>
+        {(data?.rejected || []).map(item => <p key={item.id}><b>{item.ticker}</b> · {item.reason || text('לא עבר את כל התנאים', 'Did not pass all conditions')} · {stamp(item.created_at)}</p>)}
+      </details>
       <h2>{text('מצב רכיבי הסורק', 'Scanner component health')}</h2>
       <h3>{text('אימות מחזור עסקה חי', 'Live lifecycle verification')}</h3>
       <p>{text('עסקאות חדשות בלבד; Legacy ו־Shadow אינם הוכחה למחזור חי חדש. אפס פירושו שטרם נצפה האירוע.', 'Native trades only; legacy and shadow are not proof of a new live lifecycle. Zero means not yet observed.')}</p>
@@ -400,24 +411,44 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
   const basis = signal.confidence_basis || {}
   const plan = signal.technical_json?.target_plan
   const movementEntry = signal.actual_entry ?? signal.planned_entry
+  const [opened, setOpened] = useState(false)
+  const activeTargets = [1, 2, 3].filter(i => Number(signal[`operational_tp${i}_pct`] ?? signal[`tp${i}_pct`] ?? 0) > 0)
+  const statusLabels: Record<string, string> = he ? {ENTERED:'כניסה בוצעה', ACTIVE:'ממתין לכניסה', PENDING_ENTRY:'ממתין לכניסה', EXPIRED:'פג תוקף', CLOSED:'נסגר', RISK_BLOCKED:'נחסם בסיכון', DUPLICATE_BLOCKED:'כפילות נחסמה', BEARISH_ONLY:'איתות דובי', COMPLETED:'הושלם'} : {ENTERED:'Entry filled', ACTIVE:'Awaiting entry', PENDING_ENTRY:'Awaiting entry', EXPIRED:'Expired', CLOSED:'Closed', RISK_BLOCKED:'Risk blocked', DUPLICATE_BLOCKED:'Duplicate blocked', BEARISH_ONLY:'Bearish signal', COMPLETED:'Completed'}
+  const horizon = he ? String(signal.time_horizon || '—').replace(/weeks?/gi, 'שבועות').replace(/days?/gi, 'ימים').replace(/hours?/gi, 'שעות') : signal.time_horizon
   const stamp = (value: any) => value ? new Date(value).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
-  return <details className="scanner-signal-card" id={`signal-${signal.id}`}>
+  return <details className="scanner-signal-card signal-focused" id={`signal-${signal.id}`} onToggle={event => setOpened(event.currentTarget.open)}>
     <summary className="scanner-signal-summary">
-      <span className="scanner-signal-identity"><b className="scanner-ticker">{signal.ticker}</b><span>{signal.company}</span></span>
-      <span className="scanner-signal-summary-meta"><b>{fmtPrice(signal.current_price)}</b><span className={`scanner-action ${String(signal.action).toLowerCase()}`}>{signal.action}</span><span className="scanner-signal-chevron" aria-hidden="true">⌄</span></span>
+      <span className="scanner-signal-identity"><b className="scanner-ticker" dir="ltr">{signal.ticker}</b><span>{signal.company}</span><em className="signal-status-label">{statusLabels[signal.status] || signal.status}</em></span>
+      <span className="signal-summary-levels">
+        <span><small>{he ? 'מחיר אחרון' : 'Last price'}{signal.price_stale ? (he ? ' · ישן' : ' · stale') : ''}</small><b dir="ltr">{fmtPrice(signal.current_price)}</b></span>
+        <span><small>{he ? 'כניסה' : 'Entry'}</small><b dir="ltr">{fmtPrice(movementEntry)}</b></span>
+        <span><small>{he ? 'יעד פעיל' : 'Active target'}</small><b dir="ltr">{activeTargets.length ? fmtPrice(signal[`tp${activeTargets[0]}`]) : '—'}</b></span>
+        <span><small>{he ? 'סטופ' : 'Stop'}</small><b dir="ltr">{fmtPrice(signal.current_stop)}</b></span>
+      </span>
+      <span className="scanner-signal-summary-meta"><span className={`scanner-action ${String(signal.action).toLowerCase()}`}>{he ? ({BUY:'קנייה',SELL:'מכירה',HOLD:'המתנה'} as Record<string,string>)[signal.action] || signal.action : signal.action}</span><span className="scanner-signal-chevron" aria-hidden="true">⌄</span></span>
     </summary>
     <div className="scanner-signal-body">
-    <p><b>{he ? (signal.price_stale ? 'מחיר אחרון ידוע — לא עדכני' : 'מחיר דקה אחרון') : (signal.price_stale ? 'Last known price — stale' : 'Latest 1-minute quote')}: {fmtPrice(signal.current_price)}</b><br/>{he ? 'זמן נתוני המחיר' : 'Price timestamp'}: {stamp(signal.price_as_of)} · {signal.price_source || '—'}<br/>{he ? 'מתרענן בנפרד מניטור העסקאות; Yahoo עשוי להשהות נתונים וזה אינו פיד בורסה מובטח בזמן אמת.' : 'Refreshes independently from trade monitoring; Yahoo may delay data and this is not guaranteed exchange real-time.'}</p>
+    <p className="signal-price-time">{he ? 'זמן המחיר' : 'Quote time'}: {stamp(signal.price_as_of)} · {he ? 'נתוני Yahoo עשויים להיות מושהים' : 'Yahoo data may be delayed'}</p>
+    {opened && <LevelChart record={signal} kind="signal" he={he} initiallyOpen />}
+    <h3>{he ? 'תוכנית המימוש הפעילה' : 'Active exit plan'}</h3>
+    <TargetRows record={signal} entry={movementEntry} strategy={signal.operational_strategy || 'single'} he={he} indices={activeTargets} />
+    <details className="signal-secondary"><summary>{he ? 'יעדי השוואה — Shadow' : 'Comparison targets — Shadow'}</summary>
+      <TargetRows record={signal} entry={movementEntry} strategy={signal.operational_strategy || 'single'} he={he} indices={[1,2,3].filter(i => !activeTargets.includes(i))} />
+      <p>{he ? 'יעדי השוואה בלבד; אינם מבצעים מימוש בתיק.' : 'Comparison levels only; they do not execute portfolio exits.'}</p>
+    </details>
+    <details className="signal-secondary"><summary>{he ? 'פרטי כניסה וחישוב יעדים' : 'Entry and target calculation'}</summary>
     <div className="scanner-levels"><span>{he ? 'כניסה מתוכננת' : 'Planned entry'}<b>{fmtPrice(signal.planned_entry)}</b></span><span>{he ? 'כניסה בפועל' : 'Actual entry'}<b>{fmtPrice(signal.actual_entry)}</b></span><span>{he ? 'סטופ מקורי' : 'Original stop'}<b>{fmtPrice(signal.original_stop)}</b></span><span>{he ? 'סטופ נוכחי' : 'Current stop'}<b>{fmtPrice(signal.current_stop)}</b></span></div>
-    <TargetRows record={signal} entry={movementEntry} strategy={signal.operational_strategy || 'single'} he={he} />
     <p>{he ? `התשואה ליעד מחושבת מ${signal.actual_entry != null ? 'מחיר הכניסה שבוצע בפועל' : 'מחיר הכניסה המתוכנן'}. יעד Shadow מוצג להשוואה בלבד ואינו מבצע מימוש.` : `Target return uses the ${signal.actual_entry != null ? 'actual filled entry' : 'planned entry'}. A Shadow level is shown for comparison and performs no exit.`}</p>
     <TargetPlanDetails plan={plan} he={he} />
-    <LevelChart record={signal} kind="signal" he={he} />
+    </details>
     <p><b>{he ? 'ציון איכות מודל לא־מכויל' : 'Uncalibrated model quality score'}:</b> {fmtPct(signal.confidence)} · {he ? 'תוכנית משוקללת' : 'Weighted plan'} {Number(signal.weighted_rr).toFixed(1)}R</p>
-    <details><summary>{he ? 'פירוט מקור הציון' : 'Score basis'}</summary><pre>{JSON.stringify(basis, null, 2)}</pre></details>
-    <p><b>{he ? 'סיבה' : 'Reason'}:</b> {(he && signal.reason_he) || signal.reason}</p>
-    {!!news.length && <ul>{news.map((item: any, index: number) => <li key={`${item.url}-${index}`}><a href={item.url} target="_blank" rel="noreferrer">{(he && item.title_he) || item.title}</a> · {item.publisher} · {stamp(item.published_at)}</li>)}</ul>}
-      <footer>{signal.status} · {he ? 'אופק' : 'Horizon'}: {signal.time_horizon} · {he ? 'בתוקף עד' : 'Valid until'}: {stamp(signal.valid_until)} · {he ? 'עודכן' : 'Updated'}: {stamp(signal.updated_at)}</footer>
+    <details className="signal-secondary"><summary>{he ? 'מקור הציון — אינו הסתברות להצלחה' : 'Score basis — not a probability of success'}</summary><dl>{Object.entries(basis).filter(([key,value]) => key !== 'label' && value != null && typeof value !== 'object').map(([key,value]) => <div key={key}><dt>{he ? ({model:'ציון המודל', calibrated:'מכויל', source:'מקור', technical_score:'ציון טכני', combined_rank_score:'דירוג משולב', news_sentiment:'סנטימנט חדשות', news_relevance:'רלוונטיות חדשות', model_confidence:'ציון המודל'} as Record<string,string>)[key] || key.replace(/_/g,' ') : key.replace(/_/g,' ')}</dt><dd>{typeof value === 'boolean' ? (value ? (he ? 'כן' : 'Yes') : (he ? 'לא' : 'No')) : String(value)}</dd></div>)}</dl></details>
+    <p className="signal-reason-preview">{(he && signal.reason_he) || signal.reason}</p>
+    <details className="signal-secondary"><summary>{he ? 'הניתוח המלא וחדשות המקור' : 'Full analysis and source news'}</summary>
+      <p>{(he && signal.reason_he) || signal.reason}</p>
+      {!!news.length && <ul>{news.map((item: any, index: number) => <li key={`${item.url}-${index}`}><a href={item.url} target="_blank" rel="noreferrer">{(he && item.title_he) || item.title}</a> · {item.publisher} · {stamp(item.published_at)}</li>)}</ul>}
+    </details>
+      <footer>{he ? 'טווח זמן' : 'Horizon'}: {horizon} · {he ? (signal.actual_entry != null ? 'תוקף הוראת הכניסה המקורית' : 'כניסה אפשרית עד') : 'Entry order validity'}: {stamp(signal.valid_until)} · {he ? 'עודכן' : 'Updated'}: {stamp(signal.updated_at)}</footer>
     </div>
   </details>
 }
@@ -447,8 +478,8 @@ function TradeCard({ trade, schedules, he }: { trade: Record<string, any>, sched
   </article>
 }
 
-function TargetRows({ record, entry, strategy, he }: { record: Record<string, any>, entry: any, strategy: string, he: boolean }) {
-  return <div className="scanner-targets">{[1, 2, 3].map(index => {
+function TargetRows({ record, entry, strategy, he, indices = [1,2,3] }: { record: Record<string, any>, entry: any, strategy: string, he: boolean, indices?: number[] }) {
+  return <div className="scanner-targets">{indices.map(index => {
     const allocation = Number(record[`operational_tp${index}_pct`] ?? record[`tp${index}_pct`] ?? 0)
     const rr = Number(record[`rr${index}`])
     const execution = allocation > 0
@@ -460,8 +491,8 @@ function TargetRows({ record, entry, strategy, he }: { record: Record<string, an
   })}</div>
 }
 
-function LevelChart({ record, kind, he }: { record: Record<string, any>, kind: 'signal' | 'trade', he: boolean }) {
-  const [open, setOpen] = useState(false)
+function LevelChart({ record, kind, he, initiallyOpen = false }: { record: Record<string, any>, kind: 'signal' | 'trade', he: boolean, initiallyOpen?: boolean }) {
+  const [open, setOpen] = useState(initiallyOpen)
   const [expanded, setExpanded] = useState(false)
   const isSignal = kind === 'signal'
   const version = encodeURIComponent([
@@ -485,7 +516,7 @@ function LevelChart({ record, kind, he }: { record: Record<string, any>, kind: '
       window.removeEventListener('keydown', closeOnEscape)
     }
   }, [expanded])
-  return <details className="scanner-position-chart" onToggle={event => setOpen(event.currentTarget.open)}>
+  return <details className="scanner-position-chart" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>{he ? 'גרף כניסה, סטופ ויעדים' : 'Entry, stop and target chart'}</summary>
     {open && <>
       <button type="button" className="scanner-chart-preview" onClick={() => setExpanded(true)} aria-label={he ? `פתח גרף מוגדל של ${record.ticker}` : `Open enlarged ${record.ticker} chart`}>
