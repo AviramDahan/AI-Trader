@@ -44,6 +44,9 @@ fallback, not a guarantee of exchange-style real-time delivery.
 - `STOCK_SCANNER_NEWS_FAST_MARKET`: defaults false; enabled locally after testing.
 - `TELEGRAM_NEWS_STREAM_ENABLED`: defaults false; enabled locally after testing.
 - `STOCK_SCANNER_NEWS_AI_INTERVAL_SECONDS`: idle wait, default/local 2 seconds.
+- `STOCK_SCANNER_TELEGRAM_OUTBOX_INTERVAL_SECONDS`: ready-delivery check, default
+  5 seconds (bounded 2–60). Empty checks do not call Telegram; existing provider
+  retry/backoff and persistent deduplication are unchanged.
 - `OLLAMA_NEWS_MODEL`: existing `gemma3:12b`, unchanged from before this update.
 
 News rows persist actual `analysis_seconds` and `analysis_finished_at`. News UI

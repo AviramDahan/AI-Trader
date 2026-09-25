@@ -945,7 +945,7 @@ async def stock_telegram_outbox_loop() -> None:
         except Exception as exc:
             from scanner_engine import set_service_status
             set_service_status("telegram", "error", type(exc).__name__)
-        await asyncio.sleep(30)
+        await asyncio.sleep(_int_env('STOCK_SCANNER_TELEGRAM_OUTBOX_INTERVAL_SECONDS', 5, 2, 60))
 
 
 async def stock_telegram_status_loop() -> None:
