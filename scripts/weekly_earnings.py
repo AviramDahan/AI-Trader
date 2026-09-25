@@ -6,6 +6,8 @@ Permission to redistribute the chart was confirmed by the owner on 2026-09-25.
 from __future__ import annotations
 
 import argparse
+import base64
+import os
 from datetime import datetime, timedelta, date
 from io import BytesIO
 import json
@@ -98,7 +100,7 @@ def caption(item: dict, community: str='') -> str:
     return text
 
 
-def send_once(item, image, text, values, session, state=STATE):
+def send_once(item, image, text, values, session, state=STATE, persist=None):
     token = values.get('TELEGRAM_BOT_TOKEN')
     chat = values.get('TELEGRAM_CHAT_ID')
     topic = int(values.get('TELEGRAM_EARNINGS_THREAD_ID') or 0)
@@ -115,6 +117,8 @@ def send_once(item, image, text, values, session, state=STATE):
             raise ValueError('Previous send outcome uncertain; inspect topic before retrying')
         db.execute('INSERT INTO deliveries VALUES (?,?,?,NULL)',(item['week'],'sending',item['source_url']))
         db.commit()
+        if persist:
+            persist('sending')  # Durable cloud claim BEFORE contacting Telegram.
         try:
             response = session.post(f'https://api.telegram.org/bot{token}/sendPhoto',
                 data={'chat_id':chat,'message_thread_id':topic,'caption':text},
@@ -126,25 +130,83 @@ def send_once(item, image, text, values, session, state=STATE):
         if not result.get('ok'):
             if 400<=response.status_code<500:
                 db.execute('DELETE FROM deliveries WHERE week=?',(item['week'],));db.commit()
+                if persist:
+                    persist('retryable')
             raise ValueError(f'Telegram refused delivery: HTTP {response.status_code}')
         mid=int(result['result']['message_id'])
         db.execute("UPDATE deliveries SET status='sent',message_id=? WHERE week=?",(mid,item['week']));db.commit()
+        if persist:
+            persist('sent')
         return {'status':'sent','week':item['week'],'message_id':mid,'topic_id':topic}
+
+
+class GitHubDelivery:
+    """Public non-secret weekly status with Contents API SHA compare-and-swap.
+
+    A missing/failed completion write leaves 'sending', preventing blind retries.
+    Only status/week are published; no Telegram credentials or destination IDs.
+    """
+    def __init__(self, week, session):
+        self.week = week
+        self.session = session
+        repo = os.environ['GITHUB_REPOSITORY']
+        if not re.fullmatch(r'[\w.-]+/[\w.-]+', repo):
+            raise ValueError('Invalid repository')
+        self.url = f'https://api.github.com/repos/{repo}/contents/earnings/{week}.json'
+        self.headers = {'Authorization': 'Bearer '+os.environ['GH_TOKEN'],
+                        'Accept': 'application/vnd.github+json'}
+        self.sha = None
+
+    def read(self):
+        r = self.session.get(self.url, headers=self.headers,
+                             params={'ref':'earnings-state'}, timeout=30)
+        if r.status_code == 404:
+            return None
+        if r.status_code != 200:
+            raise ValueError(f'Cloud state read failed: HTTP {r.status_code}')
+        payload = r.json()
+        self.sha = payload['sha']
+        record = json.loads(base64.b64decode(payload['content']))
+        if record.get('week') != self.week or record.get('status') not in ('sent','sending','retryable'):
+            raise ValueError('Invalid cloud delivery state')
+        return record['status']
+
+    def write(self, status):
+        record = json.dumps({'week':self.week,'status':status})+'\n'
+        payload = {'message':f'Earnings {self.week}: {status}', 'branch':'earnings-state',
+                   'content':base64.b64encode(record.encode()).decode()}
+        if self.sha:
+            payload['sha'] = self.sha
+        r = self.session.put(self.url, headers=self.headers, json=payload, timeout=30)
+        if r.status_code not in (200,201):
+            raise ValueError(f'Cloud state write failed: HTTP {r.status_code}; no blind retry')
+        self.sha = r.json()['content']['sha']
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--send',action='store_true')
+    parser.add_argument('--github',action='store_true',help='Use durable GitHub delivery state')
     args=parser.parse_args()
     now=datetime.now(ZoneInfo('Asia/Jerusalem'))
     if args.send and now.weekday()!=4:
         raise ValueError('Automatic delivery is Friday-only in Asia/Jerusalem')
     with requests.Session() as session:
-        item=fetch_calendar(next_monday(now.date()),session)
+        week=next_monday(now.date())
+        cloud=GitHubDelivery(week.isoformat(),session) if args.github and args.send else None
+        if cloud:
+            prior=cloud.read()
+            if prior=='sent':
+                print(json.dumps({'status':'already_sent','week':week.isoformat()}))
+                return
+            if prior=='sending':
+                raise ValueError('Cloud delivery uncertain; inspect topic before retrying')
+        item=fetch_calendar(week,session)
         image=photo_bytes(item['image_url'],session)
         if args.send:
-            values=dotenv_values(ROOT/'.env')
-            result=send_once(item,image,caption(item,values.get('TELEGRAM_COMMUNITY_URL') or ''),values,session)
+            values={**dotenv_values(ROOT/'.env'), **os.environ}
+            result=send_once(item,image,caption(item,values.get('TELEGRAM_COMMUNITY_URL') or ''),values,session,
+                             persist=cloud.write if cloud else None)
         else:
             result={**item,'status':'preview','image_bytes':len(image)}
     print(json.dumps(result,ensure_ascii=True))

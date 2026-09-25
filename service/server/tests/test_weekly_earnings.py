@@ -77,3 +77,45 @@ def test_untrusted_image_rejected_before_network():
     with pytest.raises(ValueError):
         w.photo_bytes('https://example.com/a.png',session)
     session.get.assert_not_called()
+
+
+def test_cloud_claim_failure_prevents_telegram(tmp_path):
+    item,values=inputs(); session=Mock()
+    persist=Mock(side_effect=ValueError('Cloud unavailable'))
+    with pytest.raises(ValueError,match='Cloud unavailable'):
+        w.send_once(item,b'image','caption',values,session,tmp_path/'state.sqlite',persist)
+    session.post.assert_not_called()
+
+
+def test_cloud_status_wraps_send(tmp_path):
+    item,values=inputs(); session=Mock(); events=[]
+    def post(*args,**kwargs):
+        events.append('telegram')
+        return Mock(json=lambda:{'ok':True,'result':{'message_id':12}})
+    session.post.side_effect=post
+    w.send_once(item,b'image','caption',values,session,tmp_path/'state.sqlite',events.append)
+    assert events==['sending','telegram','sent']
+
+
+def test_cloud_state_compare_and_swap(monkeypatch):
+    monkeypatch.setenv('GITHUB_REPOSITORY','owner/repo')
+    monkeypatch.setenv('GH_TOKEN','dummy')
+    session=Mock()
+    record=w.base64.b64encode(b'{"week":"2026-09-28","status":"retryable"}').decode()
+    session.get.return_value=Mock(status_code=200,json=lambda:{'sha':'old','content':record})
+    session.put.return_value=Mock(status_code=200,json=lambda:{'content':{'sha':'new'}})
+    cloud=w.GitHubDelivery('2026-09-28',session)
+    assert cloud.read()=='retryable'
+    cloud.write('sending')
+    payload=session.put.call_args.kwargs['json']
+    assert payload['sha']=='old'
+    assert payload['branch']=='earnings-state'
+    assert cloud.sha=='new'
+
+
+def test_cloud_read_error_fails_closed(monkeypatch):
+    monkeypatch.setenv('GITHUB_REPOSITORY','owner/repo')
+    monkeypatch.setenv('GH_TOKEN','dummy')
+    session=Mock(); session.get.return_value.status_code=503
+    with pytest.raises(ValueError,match='Cloud state read failed'):
+        w.GitHubDelivery('2026-09-28',session).read()

@@ -1,0 +1,51 @@
+name: Weekly earnings calendar
+on:
+  schedule:
+    # UTC windows cover both Israel standard and daylight-saving time.
+    - cron: '7 15-20 * * 5'
+  workflow_dispatch:
+    inputs:
+      preview:
+        description: Fetch source only, without sending a message
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+concurrency:
+  group: weekly-earnings-delivery
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests==2.32.5 beautifulsoup4==4.14.3 python-dotenv==1.2.1 Pillow==11.3.0 tzdata==2025.2
+      - name: Publish once per week, or preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.EARNINGS_TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.EARNINGS_TELEGRAM_CHAT_ID }}
+          TELEGRAM_EARNINGS_THREAD_ID: ${{ secrets.EARNINGS_TELEGRAM_THREAD_ID }}
+          TELEGRAM_COMMUNITY_URL: ${{ secrets.EARNINGS_TELEGRAM_COMMUNITY_URL }}
+          PREVIEW: ${{ github.event_name == 'workflow_dispatch' && inputs.preview }}
+          SCHEDULED: ${{ github.event_name == 'schedule' }}
+        run: |
+          python - <<'PY'
+          import os, subprocess, sys
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          now = datetime.now(ZoneInfo('Asia/Jerusalem'))
+          if os.environ['SCHEDULED'] == 'true' and (now.weekday() != 4 or not 18 <= now.hour <= 22):
+              print('Outside Israel Friday delivery window; skipped')
+              sys.exit(0)
+          command = [sys.executable, 'scripts/weekly_earnings.py']
+          if os.environ['PREVIEW'] != 'true':
+              command += ['--send', '--github']
+          subprocess.run(command, check=True)
+          PY
