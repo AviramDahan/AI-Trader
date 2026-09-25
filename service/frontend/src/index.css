@@ -3678,7 +3678,7 @@ html[dir='rtl'] .main-content {
 .scanner-signal-identity > span { display: block; margin-top: 3px; color: var(--text-secondary); }
 .scanner-signal-summary-meta { display: flex; flex: 0 0 auto; align-items: center; gap: 9px; }
 .scanner-signal-chevron { color: var(--text-secondary); font-size: 22px; line-height: 1; transition: transform .18s ease; }
-.scanner-signal-card[open] .scanner-signal-chevron { transform: rotate(180deg); }
+.scanner-signal-card[open] .scanner-signal-chevron, .scanner-trade-card[open] .scanner-signal-chevron { transform: rotate(180deg); }
 .scanner-signal-body { margin-top: 14px; border-top: 1px solid var(--border-color); padding-top: 4px; }
 .scanner-ticker { font-size: 22px; }
 .scanner-action, .scanner-chip { display: inline-block; padding: 4px 8px; border-radius: 999px; background: var(--bg-tertiary); font-size: 12px; font-weight: 800; }
