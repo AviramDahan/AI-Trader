@@ -8,7 +8,9 @@ The official Earnings Whispers account `/u/epswhispers` posts its weekly chart a
 https://www.reddit.com/r/EarningsWhisper/ . The public Atom feed at
 https://www.reddit.com/r/EarningsWhisper/new/.rss links the original image on
 `i.redd.it`. Redistribution permission was confirmed by the project owner on
-2026-09-25. Captions retain attribution and a direct link to the source post.
+2026-09-25. The original image retains its publisher branding. At the owner's
+request, captions omit the extra source/permission text and source-post URL;
+source validation and internal source metadata remain unchanged.
 
 The script requires the official author, an exact next-Monday date in the title,
 an allowed image host, a source-post link, and tickers actually in the post.

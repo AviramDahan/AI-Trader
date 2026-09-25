@@ -91,8 +91,7 @@ def caption(item: dict, community: str='') -> str:
     text = (f"דוחות השבוע הבא | {start:%d.%m.%Y}–{end:%d.%m.%Y}\n\n"
             "חברות בולטות הצפויות לדווח:\n" + ' · '.join(item['tickers'][:30]) +
             "\n\nהלוח מציג מבחר מדווחות, לא את כולן. מועדים עשויים להשתנות.\n"
-            "Before Open = לפני הפתיחה; After Close = אחרי הסגירה בארה״ב.\n\n"
-            "מקור ותמונה: Earnings Whispers — הופץ באישור\n" + item['source_url'])
+            "Before Open = לפני הפתיחה; After Close = אחרי הסגירה בארה״ב.")
     if community.startswith('https://t.me/') and len(community)<150:
         text += '\n\nלהצטרפות לקהילה:\n'+community
     if len(text.encode('utf-16-le'))//2 > 1024:
