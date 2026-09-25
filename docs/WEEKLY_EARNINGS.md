@@ -18,11 +18,17 @@ Reporting dates may change. No LLM is used.
 
 ## Schedule and operation
 
-A Codex thread heartbeat named **דוחות השבוע הבא לטלגרם** runs Fridays at 18:00
-Israel time, with additional opportunities at 20:00 and 22:00 if needed. It runs
-the command below against this local checkout. The Windows computer and Codex
-must be running; GitHub Pages does not run this schedule. The automation is
-local app configuration, not installed automatically by cloning this repository.
+GitHub Actions workflow **Weekly earnings calendar** runs on hosted Linux runners.
+Friday UTC slots 15:07–20:07 cover both Israel time offsets; a local-time guard
+permits only 18:00–22:59 Friday in Asia/Jerusalem. The first eligible attempt is
+approximately 18:07, with hourly retries until 22:07 if needed. GitHub can delay
+scheduled jobs; delivery at an exact minute is not guaranteed. Public-repository
+schedules may be disabled after 60 days of repository inactivity.
+
+Neither the Windows computer nor Codex nor the application backend is required.
+This does **not** migrate the scanner, Ollama, or other news feeds to the cloud.
+Manual workflow dispatch defaults to read-only preview. Setting preview=false
+uses the normal Friday-only send path and the same persistent deduplication.
 
 ```powershell
 # Preview: fetch and validate, no Telegram message
@@ -33,11 +39,24 @@ local app configuration, not installed automatically by cloning this repository.
 
 Private ignored `.env` supplies `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
 `TELEGRAM_EARNINGS_THREAD_ID` and optional `TELEGRAM_COMMUNITY_URL`.
-Disable the named automation in Codex to stop weekly publication.
+For hosted execution, repository Actions Secrets are
+`EARNINGS_TELEGRAM_BOT_TOKEN`, `EARNINGS_TELEGRAM_CHAT_ID`,
+`EARNINGS_TELEGRAM_THREAD_ID` and `EARNINGS_TELEGRAM_COMMUNITY_URL`.
+The workflow maps them to the server environment; none are frontend variables.
+The automatic job-scoped GitHub token writes non-secret delivery state.
+Disable `weekly-earnings.yml` in GitHub Actions to stop weekly publication.
 
 SQLite state in ignored `.runtime/weekly_earnings.sqlite` prevents multiple sends
 for the same week, including after restart or concurrent calls. Keep this file
 when migrating the installation. No production portfolio database is modified.
+
+Cloud execution (`--send --github`) additionally stores week/status JSON in the
+dedicated `earnings-state` branch. An atomic SHA-checked claim is written **before**
+the Telegram request. Completed weeks are skipped before fetching the feed.
+Concurrency is serialized in Actions. A crash or uncertain send retains the claim
+and blocks blind retries. Do not delete this branch or manually run a separate
+local scheduler: local-only sends cannot see cloud state. The already delivered
+2026-09-28 week was migrated as sent, without republishing it.
 
 When Telegram delivery times out, its outcome may be uncertain. Automatic
 resending is deliberately blocked; inspect the topic before reconciling the
