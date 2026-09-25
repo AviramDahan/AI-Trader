@@ -24,6 +24,8 @@ def test_current_official_calendar_and_caption():
     item=w.find_calendar(feed(),date(2026,9,28))
     assert item['tickers']==['MU','NKE']
     assert '28.09.2026' in w.caption(item)
+    assert w.caption(item).startswith('דוחות לשבוע 28.09.2026–02.10.2026')
+    assert 'השבוע הבא' not in w.caption(item)
     assert 'מקור ותמונה' not in w.caption(item)
     assert item['source_url'] not in w.caption(item)
     assert len(w.caption(item).encode('utf-16-le'))//2 <=1024
