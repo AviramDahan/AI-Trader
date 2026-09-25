@@ -758,10 +758,26 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
     current, stamp = _now(at), _z(at)
     inserted = sources = linked = duplicates = rejected_invalid = rejected_date = 0
     conn = get_db_connection(); cur = conn.cursor(); begin_write_transaction(cur)
+    companies = {}
+    if any(x.get('provider') == 'telegram_channels' for x in items):
+        # Local cached universe only: ingestion never waits on market data/LLM.
+        try:
+            members = json.loads((ROOT / '.runtime/stock-universe.json').read_text(encoding='utf-8'))['members']
+            companies.update({k:v.get('company','') for k,v in members.items()})
+        except (OSError,ValueError,KeyError,TypeError):
+            pass
+        for table in ('scanner_trades','scanner_signals','scanner_news_watchlist'):
+            for row in cur.execute(f'SELECT ticker,company FROM {table}').fetchall():
+                companies[row['ticker']] = row['company'] or companies.get(row['ticker'],'')
     for raw in items:
         item = dict(raw)
         item["title"] = _strip_markup(item.get("title", ""))[:500]
         item["url"] = _canonical_url(item.get("url", ""))
+        if item.get('provider') == 'telegram_channels':
+            from telegram_stock_mapping import match_stocks
+            evidence = match_stocks(item['title']+'\n'+str(item.get('source_excerpt') or ''), companies)
+            item['tickers'] = list(evidence)
+            item['ticker_evidence'] = evidence
         item["tickers"] = sorted({str(value).upper().replace(".", "-") for value in item.get("tickers") or []
                                     if re.fullmatch(r"[A-Za-z][A-Za-z0-9.-]{0,9}", str(value))})
         if not item["title"] or not item["url"] or not item.get("provider") or not item.get("publisher"):
@@ -802,6 +818,7 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
                     and _canonical_url(existing["url"]) == item["url"]):
                 facts = {"title": item["title"], "source_excerpt": item.get("source_excerpt") or "",
                          "publisher": item["publisher"], "published_at": item["published_at"],
+                         "ticker_evidence": item.get('ticker_evidence', {}),
                          "news_category": item.get("news_category") or "company",
                          "content_available": "headline_and_feed_summary" if item.get("source_excerpt") else "headline_only"}
                 cur.execute("""UPDATE scanner_news SET title=?,source_facts_json=?,content_hash=?,
@@ -827,6 +844,7 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
             fingerprint = _sha(f"news|{canonical}")
             facts = {"title": item["title"], "source_excerpt": item.get("source_excerpt") or "",
                      "publisher": item["publisher"], "published_at": item["published_at"],
+                     "ticker_evidence": item.get('ticker_evidence', {}),
                      "news_category": item.get("news_category") or "company",
                      "content_available": "headline_and_feed_summary" if item.get("source_excerpt") else "headline_only"}
             cur.execute("""INSERT INTO scanner_news(fingerprint,signal_id,ticker,scope,title,publisher,url,published_at,

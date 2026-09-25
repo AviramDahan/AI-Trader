@@ -18,6 +18,58 @@ UTC = timezone.utc
 
 
 class NewsPipelineIntegrationTests(unittest.TestCase):
+    def test_telegram_unheld_stock_routes_to_stock_topic_not_market(self):
+        from unittest.mock import Mock
+        import stock_scanner
+        item={**self.item('telegram_channels','https://t.me/watcherguru/456'),
+              'title':'Nvidia announces a new manufacturing contract','source_kind':'telegram_post'}
+        with patch.object(Path,'read_text',return_value=json.dumps({'members':{'NVDA':{'company':'NVIDIA'}}})):
+            news_pipeline.ingest_items([item],self.clock)
+        self.assertEqual(self.rows('SELECT scope FROM scanner_news')[0]['scope'],'universe')
+        def analyzer(rows):
+            return [dict(id=r['id'],related=True,title_he='חוזה ייצור חדש',summary_he='החברה הודיעה על חוזה.',
+                         sentiment='positive',materiality='high',relevance=.98,thesis_effect='unchanged',
+                         interpretation_he='עשויה להיות השפעה חיובית.') for r in rows]
+        news_pipeline.analyze_news_jobs(analyzer=analyzer,at=self.clock)
+        alerts=self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type IN ('stock_news','market_news')")
+        self.assertEqual(len(alerts),1)
+        self.assertEqual(alerts[0]['event_type'],'stock_news')
+        session=Mock()
+        with patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'test','TELEGRAM_CHAT_ID':'-123','TELEGRAM_STOCK_NEWS_THREAD_ID':'477'}), patch.object(stock_scanner.requests,'Session',return_value=session):
+            stock_scanner.send_telegram(alerts[0]['message'],{'telegram_enabled':True},'stock_news')
+            self.assertEqual(session.post.call_args.kwargs['data']['message_thread_id'],477)
+        self.assertFalse(self.rows('SELECT * FROM scanner_trades'))
+
+    def test_telegram_identity_to_personal_topics_end_to_end_without_real_send(self):
+        from unittest.mock import Mock
+        import stock_scanner
+        self.open_trade()
+        scanner_engine.set_news_watchlist('INTC','Intel Corporation')
+        before=self.rows('SELECT remaining_quantity,current_stop FROM scanner_trades WHERE is_shadow=0')
+        item={**self.item('telegram_channels','https://t.me/watcherguru/123'),
+              'title':'$AAPL and Intel announce a joint manufacturing agreement',
+              'source_kind':'telegram_post'}
+        news_pipeline.ingest_items([item],self.clock)
+        row=self.rows('SELECT * FROM scanner_news')[0]
+        self.assertEqual(set(json.loads(row['verified_tickers_json'])),{'AAPL','INTC'})
+        self.assertEqual(row['scope'],'open_position')
+        self.assertIn('ticker_evidence',json.loads(row['source_facts_json']))
+        def analyzer(rows):
+            return [dict(id=r['id'],related=True,title_he='הסכם ייצור חדש',summary_he='החברות הודיעו על הסכם.',
+                         sentiment='positive',materiality='high',relevance=.98,thesis_effect='supports',
+                         interpretation_he='עשויה להיות השפעה חיובית.') for r in rows]
+        self.assertEqual(news_pipeline.analyze_news_jobs(analyzer=analyzer,at=self.clock)['alerts'],2)
+        news_pipeline.ingest_items([item],self.clock)
+        self.assertEqual(news_pipeline.analyze_news_jobs(analyzer=analyzer,at=self.clock)['alerts'],0)
+        alerts=self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type IN ('position_news','watchlist_news','stock_news','market_news')")
+        self.assertEqual({a['event_type'] for a in alerts},{'position_news','watchlist_news'})
+        session=Mock()
+        with patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'test','TELEGRAM_CHAT_ID':'-123','TELEGRAM_PERSONAL_NEWS_THREAD_ID':'650'}), patch.object(stock_scanner.requests,'Session',return_value=session):
+            for alert in alerts:
+                self.assertEqual(stock_scanner.send_telegram(alert['message'],{'telegram_enabled':True},alert['event_type']),'sent')
+                self.assertEqual(session.post.call_args.kwargs['data']['message_thread_id'],650)
+        self.assertEqual(before,self.rows('SELECT remaining_quantity,current_stop FROM scanner_trades WHERE is_shadow=0'))
+
     def test_relay_branding_removed_without_losing_original_attribution(self):
         text = 'לפי Axios|FJ, טראמפ ביקש משי לעצור את התמיכה באיראן. המידע פורסם בערוץ Telegram @financialjuice.'
         self.assertEqual(news_pipeline._telegram_bulletin_text(text),
