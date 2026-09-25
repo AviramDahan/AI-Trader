@@ -3681,6 +3681,14 @@ html[dir='rtl'] .main-content {
 .scanner-table-wrap { overflow-x: auto; border: 1px solid var(--border-color); border-radius: 12px; }
 .scanner-table { width: 100%; border-collapse: collapse; min-width: 760px; background: var(--bg-secondary); }
 .scanner-table th, .scanner-table td { text-align: start; padding: 12px; border-bottom: 1px solid var(--border-color); }
+.scanner-comparison-cards { display: none; }
+.scanner-comparison-card { padding: 14px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-secondary); }
+.scanner-comparison-card header { display: grid; gap: 4px; margin-bottom: 12px; }
+.scanner-comparison-card header span, .scanner-comparison-card dt { color: var(--text-secondary); font-size: 12px; }
+.scanner-comparison-card dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.scanner-comparison-card dl > div { min-width: 0; padding: 10px; border-radius: 9px; background: var(--bg-tertiary); }
+.scanner-comparison-card dt, .scanner-comparison-card dd { margin: 0; }
+.scanner-comparison-card dd { margin-top: 3px; font-weight: 700; overflow-wrap: anywhere; }
 .scanner-filters, .scanner-strategy-controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
 .scanner-filters input, .scanner-filters select { min-height: 42px; padding: 8px 11px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 9px; }
 .scanner-news-card { margin-bottom: 10px; }
@@ -3701,7 +3709,7 @@ html[dir='rtl'] .main-content {
 .scanner-status.not_modified { border-inline-start: 4px solid #12b76a; }
 .scanner-status.error { border-inline-start: 4px solid #f04438; }
 .scanner-status.rate_limited, .scanner-status.config_required { border-inline-start: 4px solid #f04438; }
-.scanner-status.waiting, .scanner-status.no_new, .scanner-status.degraded, .scanner-status.backoff_not_checked { border-inline-start: 4px solid #f79009; }
+.scanner-status.waiting, .scanner-status.no_new, .scanner-status.degraded, .scanner-status.backoff, .scanner-status.backoff_not_checked { border-inline-start: 4px solid #f79009; }
 .scanner-sidebar-notice { display: grid; gap: 6px; padding: 14px; border: 1px solid #b42318; border-radius: 12px; background: var(--bg-tertiary); }
 .scanner-sidebar-notice strong { color: #f97066; font-size: 12px; }
 .scanner-sidebar-notice span { color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
@@ -3722,4 +3730,6 @@ html[dir='rtl'] .main-content {
   .scanner-inline-error { align-items: flex-start; flex-direction: column; }
   .scanner-filters input, .scanner-filters select { width: 100%; }
   .scanner-watchlist-form input, .scanner-watchlist-form button { width: 100%; }
+  .scanner-table-wrap { display: none; }
+  .scanner-comparison-cards { display: grid; gap: 10px; }
 }

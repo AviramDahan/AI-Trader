@@ -318,6 +318,42 @@ class ScannerEngineTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             scanner_engine._bar_dicts("AAPL", datetime.now(UTC) - timedelta(days=61))
 
+    def test_expired_risk_blocked_signal_without_order_moves_to_history(self):
+        self.record()
+        conn = database.get_db_connection()
+        conn.execute("UPDATE scanner_orders SET status='risk_rejected'")
+        conn.execute("UPDATE scanner_signals SET status='RISK_BLOCKED',valid_until='2000-01-01T00:00:00Z'")
+        conn.commit(); conn.close()
+
+        scanner_engine.monitor_prices()
+
+        self.assertEqual(self.fetchall("SELECT status FROM scanner_signals")[0]["status"], "EXPIRED")
+
+    def test_dashboard_merges_legacy_duplicate_news_and_marks_revised_time(self):
+        published = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        collected = (datetime.now(UTC) - timedelta(minutes=20)).isoformat().replace("+00:00", "Z")
+        conn = database.get_db_connection()
+        conn.execute("""INSERT INTO scanner_news(
+            fingerprint,scope,title,publisher,url,published_at,analysis_status,fetched_at,
+            provider,collected_at,news_category,verified_tickers_json)
+            VALUES('legacy-market','market','Same event','Wire A','https://example.test/same',?,
+                   'translated',?,'existing_market',?,'macro','[]')""", (published, collected, collected))
+        conn.execute("""INSERT INTO scanner_news(
+            fingerprint,scope,title,publisher,url,published_at,analysis_status,fetched_at,
+            provider,collected_at,news_category,verified_tickers_json)
+            VALUES('legacy-company','universe','Same event','Wire B','https://example.test/same',?,
+                   'translated',?,'yahoo_priority',?,'company','[]')""", (published, collected, collected))
+        conn.commit(); conn.close()
+
+        matching = [row for row in scanner_engine.dashboard_payload()["news"]
+                    if row["url"] == "https://example.test/same"]
+
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]["scope"], "market")
+        self.assertEqual(matching[0]["news_category"], "macro")
+        self.assertTrue(matching[0]["publication_time_corrected"])
+        self.assertEqual(len(matching[0]["alternate_sources"]), 2)
+
     def test_position_news_runs_once_per_ticker_dedupes_and_does_not_change_trade(self):
         self.record()
         scanner_engine.process_bar("AAPL", self.bar(1, 100, 101, 99, 100))

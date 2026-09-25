@@ -801,6 +801,15 @@ def monitor_prices() -> dict[str, Any]:
         placeholders = ",".join("?" for _ in expired_signal_ids)
         cur.execute(f"UPDATE scanner_signals SET status='EXPIRED',updated_at=? WHERE id IN ({placeholders})",
                     (stamp, *expired_signal_ids))
+    # Some signals never receive an order row (for example a risk-blocked
+    # signal). They still have a finite lifetime and must not remain active
+    # forever merely because the order-expiry query cannot see them.
+    cur.execute("""UPDATE scanner_signals SET status='EXPIRED',updated_at=?
+        WHERE valid_until<? AND status IN ('ACTIVE','PENDING_ENTRY','RISK_BLOCKED','DUPLICATE_BLOCKED','BEARISH_ONLY')
+          AND NOT EXISTS (
+              SELECT 1 FROM scanner_trades t
+              WHERE t.signal_id=scanner_signals.id AND t.status='open'
+          )""", (stamp, stamp))
     conn.commit()
     conn.close()
     processed, errors = 0, []
@@ -1215,6 +1224,76 @@ def quotes_payload() -> dict[str, Any]:
             "market": market_session_state(), "quotes": rows}
 
 
+def _dashboard_news_key(item: dict[str, Any]) -> str:
+    """Return a stable display key for legacy rows describing one article."""
+    url = str(item.get("url") or "").strip().lower().rstrip("/")
+    if url:
+        return "url:" + url
+    canonical = str(item.get("canonical_key") or "").strip()
+    if canonical:
+        return "canonical:" + canonical
+    return "id:" + str(item.get("id"))
+
+
+def _dedupe_dashboard_news(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge duplicate legacy rows while preserving sources and relationships."""
+    scope_rank = {"market": 0, "universe": 1, "active_signal": 2,
+                  "watchlist": 3, "open_position": 4}
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        grouped.setdefault(_dashboard_news_key(item), []).append(item)
+
+    merged: list[dict[str, Any]] = []
+    for rows in grouped.values():
+        def quality(row: dict[str, Any]) -> tuple[int, int, int, int]:
+            verified = len(row.get("verified_tickers") or []) + int(
+                bool(row.get("ticker")) and row.get("scope") in {"open_position", "watchlist", "active_signal"}
+            )
+            analyzed = int(row.get("analysis_status") == "analyzed")
+            excerpt = int(bool((row.get("source_facts") or {}).get("source_excerpt")))
+            return verified, analyzed, scope_rank.get(str(row.get("scope")), 0), excerpt
+
+        base = dict(max(rows, key=quality))
+        verified_tickers = sorted({str(ticker) for row in rows
+                                   for ticker in list(row.get("verified_tickers") or [])
+                                   if ticker})
+        for row in rows:
+            if row.get("ticker") and row.get("scope") in {"open_position", "watchlist", "active_signal"}:
+                verified_tickers.append(str(row["ticker"]))
+        verified_tickers = sorted(set(verified_tickers))
+        sources: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows:
+            direct = {"provider": row.get("provider"),
+                      "publisher": row.get("original_publisher") or row.get("publisher"),
+                      "url": row.get("url"), "published_at": row.get("published_at")}
+            for source in [direct, *(row.get("alternate_sources") or [])]:
+                key = (str(source.get("provider") or ""), str(source.get("url") or ""))
+                if key[1]:
+                    sources[key] = source
+        base["verified_tickers"] = verified_tickers
+        base["ticker"] = verified_tickers[0] if verified_tickers else None
+        base["alternate_sources"] = list(sources.values())
+        base["trade_ids"] = sorted({int(trade_id) for row in rows for trade_id in row.get("trade_ids") or []})
+        base["signal_id"] = next((row.get("signal_id") for row in rows if row.get("signal_id") is not None), None)
+        if verified_tickers:
+            base["scope"] = max(rows, key=lambda row: scope_rank.get(str(row.get("scope")), 0)).get("scope")
+            base["news_category"] = "company"
+        elif any(row.get("scope") == "market" for row in rows):
+            base["scope"] = "market"
+            categories = {str(row.get("news_category") or "") for row in rows}
+            base["news_category"] = "industry" if "industry" in categories else "macro"
+        published_values = [row.get("published_at") for row in rows if row.get("published_at")]
+        collected_values = [row.get("collected_at") or row.get("fetched_at") for row in rows
+                            if row.get("collected_at") or row.get("fetched_at")]
+        if published_values:
+            base["published_at"] = max(published_values, key=parse_time)
+        if collected_values:
+            base["collected_at"] = min(collected_values, key=parse_time)
+            base["publication_time_corrected"] = parse_time(base["published_at"]) > parse_time(base["collected_at"])
+        merged.append(base)
+    return sorted(merged, key=lambda row: parse_time(row["published_at"]), reverse=True)
+
+
 def dashboard_payload() -> dict[str, Any]:
     conn = get_db_connection(); cur = conn.cursor(); agent_id = scanner_agent_id(cur)
     identity = scanner_identity(agent_id)
@@ -1295,6 +1374,7 @@ def dashboard_payload() -> dict[str, Any]:
                        JOIN scanner_trades t ON t.id=l.trade_id
                        WHERE l.news_id=? AND t.agent_id=? ORDER BY l.trade_id""", (item["id"], agent_id))
         item["trade_ids"] = [int(row["trade_id"]) for row in cur.fetchall()]
+    news = _dedupe_dashboard_news(news)
     cur.execute("SELECT * FROM scanner_news_schedule ORDER BY ticker"); schedules = [dict(row) for row in cur.fetchall()]
     cur.execute("SELECT * FROM scanner_service_status ORDER BY component"); services = [dict(row) for row in cur.fetchall()]
     try:
