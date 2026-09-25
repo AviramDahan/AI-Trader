@@ -26,6 +26,8 @@ def client():
 def test_allowlist_normalizes_and_rejects_private_identifiers():
     with patch.dict(os.environ, TELEGRAM_NEWS_SOURCE_CHANNELS='@FinancialJuice,financialjuice,WalterBloomberg'):
         assert reader.channel_names() == ['financialjuice', 'walterbloomberg']
+    with patch.dict(os.environ, TELEGRAM_NEWS_SOURCE_CHANNELS='financialjuice,WalterBloomberg,WatcherGuru'):
+        assert reader.channel_names() == ['financialjuice','walterbloomberg','watcherguru']
     for invalid in ('', '+972123456789', 'https://t.me/channel', '-100123456'):
         with patch.dict(os.environ, TELEGRAM_NEWS_SOURCE_CHANNELS=invalid), pytest.raises(ValueError):
             reader.channel_names()
