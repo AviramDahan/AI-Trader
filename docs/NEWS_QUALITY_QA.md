@@ -13,25 +13,27 @@
 - `OLLAMA_NEWS_MODEL`: optional installed local Ollama model for Hebrew news, separate from trading review. This machine uses `gemma3:12b`; the previous smaller Qwen model mistranslated tested headlines. No new paid service or API key.
 - `STOCK_SCANNER_NEWS_ANALYSIS_MAX_ATTEMPTS`: default 6. Exhausted jobs remain visible as failures for operator investigation; they are not mislabeled “no news”.
 
-## Historical operations
+## Historical maintenance (completed)
 
-`scripts/repair_news_analysis.py` defaults to dry-run; `--apply` makes a SQLite backup in ignored `.runtime` before additive migrations and quarantining. Quality version -2 means historical repair pending, 2 means reviewed with the new pipeline or a recorded source-only manual correction.
-
-`scripts/repair_telegram_news_history.py` defaults to dry-run. Its reviewed message list is deliberately fixed; originals are archived privately before in-place corrections. The live repair corrected 18 messages and merged five reviewed duplicates, preserving additional sources. Deleted Telegram message IDs cannot be restored, but their text is archived.
-
-`scripts/restore_verified_topic_history.py --apply` queues exactly two existing historical records with durable unique keys: the original INTC watchlist headline and an already executed TMO TP event. They are explicitly labeled historical, never create fills or positions, and verify the existing personal-news and trade-topic delivery routes without fabricated signals.
+One-off repair, replay and news-chat cleanup scripts were removed after the user
+chose a clean news-chat history. They are not part of application startup or
+ongoing operation. Their source remains recoverable from Git history. Private
+database snapshots and message archives remain in ignored `.runtime`; removing
+the tools does not undo completed data repairs or restore deleted Telegram
+messages. Trading data, credentials and runtime safeguards are unchanged.
 
 ## Validation
 
 ### 2026-09-25 follow-up
 
-`scripts/review_historical_headlines.py` completed 364 quarantined records as
+The completed historical review handled 364 quarantined records as
 source-only Hebrew headline summaries, clearing the historical review backlog.
-It checks source identity against the original backup and creates a fresh SQLite
-backup before writing. It never emits alerts or rewrites trade history. A live
+It checked source identity against the original backup and created a fresh SQLite
+backup before writing. It emitted no alerts and did not rewrite trade history. A live
 before/after comparison confirmed accounts, orders, fills and trades unchanged.
 SEC summaries identify the form and issuer only; metadata is not evidence of
-price impact. Form names with spaces and hyphens have offline regression tests.
+price impact. Tests specific to the retired one-off tool were removed with it;
+ongoing news and trading regression tests remain.
 
 Two additional Telegram messages (685/686) were corrected in place after a
 durable-goods mistranslation; original text is archived privately. A deterministic
@@ -39,9 +41,8 @@ terminology guard now rejects narrowing durable goods to electrical appliances
 and confusing analyst consensus with a preliminary official estimate.
 
 SEC recovered from one ReadTimeout on its next scheduled attempt without a
-manual restart. This does not guarantee provider availability. Live browser QA
-still found older malformed translations and pending current-story analysis;
-the overall quality/recovery goal is not yet complete.
+manual restart. This does not guarantee provider availability. Older Telegram
+messages were subsequently cleared at the user's request, as recorded below.
 
 ### Final scoped audit (after user-requested news-chat cleanup)
 
