@@ -1,12 +1,15 @@
 # Backend release gate
 
 `hetzner-deploy.yml` runs only after the main-branch Cloud Readiness workflow
-succeeds and separately verifies CI success for that exact commit. The SSH key is
-restricted to a root-owned forced command: no interactive shell, forwarding or
-PTY. Host key checking is mandatory. Secrets remain in GitHub Secrets and protected
-server files; the source/image is built from the public commit archive, never from
-the live directory containing secrets. Server source scripts are installed by an
-operator, not replaced by a repository release.
+succeeds and separately verifies CI success for that exact commit. A root-owned
+systemd timer checks main and both successful workflows every five minutes via
+outbound HTTPS. It needs no GitHub credential and no public SSH access. GitHub
+then checks HTTPS build_sha and the all-role deployed_sha readiness marker.
+The source/image is built from the public commit archive, never from the live
+directory containing secrets. Server source scripts are installed by an operator,
+not replaced by a repository release. A failed commit is latched in failed-release
+to prevent deployment loops; an operator may clear the latch after diagnosis, or
+push a corrected commit. Unauthenticated GitHub API limits defer a poll safely.
 
 The server verifies the current main SHA, obtains a deployment lock, builds an image
 tagged with the full commit and runs Compose using its immutable image ID. A

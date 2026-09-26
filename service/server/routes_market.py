@@ -48,7 +48,12 @@ def register_market_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.get('/health')
     async def health_check():
-        return {'status': 'ok', 'timestamp': utc_now_iso_z()}
+        import os
+        from pathlib import Path
+        marker=Path('/app/.runtime/deployed-release')
+        return {'status': 'ok', 'timestamp': utc_now_iso_z(),
+                'build_sha':os.getenv('BUILD_SHA','unknown'),
+                'deployed_sha':marker.read_text().strip() if marker.exists() else None}
 
     @app.get('/api/market-intel/overview')
     async def market_intel_overview(authorization: str = Header(None)):

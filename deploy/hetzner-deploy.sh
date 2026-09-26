@@ -22,7 +22,7 @@ tar xzf "$work/source.tar.gz" --strip-components=1 -C "$work/source"
 old_schema=$(docker exec ai-trader-cloud-api-1 python -c 'from cloud_runtime import SCHEMA_VERSION; print(SCHEMA_VERSION)')
 new_schema=$(sed -n 's/^SCHEMA_VERSION *= *\([0-9]*\).*/\1/p' "$work/source/service/server/cloud_runtime.py")
 [[ "$old_schema" == "$new_schema" ]] || { echo 'Schema change requires operator-approved migration'; exit 66; }
-docker build --label org.opencontainers.image.revision="$sha" -t "ai-trader:$sha" "$work/source"
+docker build --build-arg BUILD_SHA="$sha" --label org.opencontainers.image.revision="$sha" -t "ai-trader:$sha" "$work/source"
 new=$(docker image inspect --format '{{.Id}}' "ai-trader:$sha")
 dc run --rm -T --no-deps backup --once --predeploy
 cp deploy/compose.yml "$work/previous-compose.yml"
@@ -52,6 +52,7 @@ dc up -d --no-deps --no-build --wait --wait-timeout 180 scanner telegram backup
 curl --fail --silent --show-error "https://$PUBLIC_API_HOST/health" >/dev/null
 docker tag "$new" ai-trader:staging
 printf '%s\n%s\n%s\n' "$sha" "$new" "$old" > deploy/last-release
+docker exec ai-trader-cloud-api-1 python -c 'from pathlib import Path; import sys; Path("/app/.runtime/deployed-release").write_text(sys.argv[1])' "$sha"
 trap - ERR
 echo "DEPLOY PASS commit=$sha image=$new"
 # Keep the previous image/release for rollback; do not prune active data or images.

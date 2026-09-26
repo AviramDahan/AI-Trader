@@ -29,15 +29,23 @@ jobs:
               await new Promise(resolve=>setTimeout(resolve,10000));
             }
             throw new Error('CI not complete; no deployment');
-      - name: Deploy immutable commit through restricted SSH
+      - name: Verify server pull-deployment and all-role readiness marker
         env:
-          DEPLOY_KEY: ${{ secrets.HETZNER_DEPLOY_KEY }}
-          KNOWN_HOSTS: ${{ secrets.HETZNER_KNOWN_HOSTS }}
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          set -euo pipefail
-          umask 077
-          mkdir -p ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -i ~/.ssh/deploy trader@2.28.100.77 "$SHA"
+          python - <<'PY'
+          import os,json,time,urllib.request
+          sha=os.environ['SHA']
+          for _ in range(90):
+              try:
+                  with urllib.request.urlopen('https://2-28-100-77.sslip.io/health',timeout=10) as r:
+                      data=json.load(r)
+                  if data.get('build_sha')==sha and data.get('deployed_sha')==sha:
+                      print('Backend deployment and all-role readiness PASS:',sha)
+                      break
+              except Exception:
+                  pass
+              time.sleep(10)
+          else:
+              raise SystemExit('Deployment not verified; inspect server deployment service. No success assumed.')
+          PY

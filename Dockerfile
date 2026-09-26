@@ -1,4 +1,6 @@
 FROM python:3.11-slim-trixie
+ARG BUILD_SHA=unknown
+ENV BUILD_SHA=$BUILD_SHA
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 MPLBACKEND=Agg MPLCONFIGDIR=/tmp/matplotlib
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata fonts-dejavu-core fonts-noto-core postgresql-client age rclone git openssh-client \
     && rm -rf /var/lib/apt/lists/* \
