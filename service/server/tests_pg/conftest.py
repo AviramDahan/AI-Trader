@@ -13,6 +13,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 
 @pytest.fixture(autouse=True)
 def no_external_requests(monkeypatch):
+    # Historical fixtures must not inherit the production cutover replay fence.
+    monkeypatch.delenv('TELEGRAM_NEWS_NOT_BEFORE',raising=False)
     monkeypatch.delenv('TELEGRAM_BOT_TOKEN',raising=False)
     monkeypatch.delenv('TELEGRAM_CHAT_ID',raising=False)
     monkeypatch.setenv('STOCK_SCANNER_TELEGRAM_PORTFOLIO_STATUS_ENABLED','false')
