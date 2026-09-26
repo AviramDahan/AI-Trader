@@ -32,6 +32,8 @@ jobs:
       TEST_POSTGRES_URL: postgresql://cloud_test:disposable-ci-only@127.0.0.1:5432/ai_trader_cloud_test
       STOCK_SCANNER_ENABLED: "false"
       TELEGRAM_NEWS_STREAM_ENABLED: "false"
+      TEST_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
+      TEST_PG_RESTORE: /usr/lib/postgresql/17/bin/pg_restore
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
