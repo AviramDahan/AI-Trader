@@ -135,7 +135,7 @@ def import_data(data, url, *, allow_defaults=False, scanner_token=None):
     validate(data)
     with psycopg.connect(url, row_factory=dict_row) as conn:
         conn.execute("SET LOCAL lock_timeout='5s'")
-        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] != 2:
+        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] not in (2,3):
             raise ValueError('unsupported_destination_schema')
         for key in ROLE_KEYS.values():
             if not conn.execute("SELECT pg_try_advisory_xact_lock(719322,%s) AS ok", (key,)).fetchone()["ok"]:
