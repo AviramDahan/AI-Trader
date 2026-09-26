@@ -51,7 +51,15 @@ p50 17.71 ms / p95 70.34 ms. Host ~1.23 GB used with regression running.
 Initial local suite: 382 passed +14 subtests. Initial PostgreSQL suite: 106 passed
 +8 subtests; one inherited disabled staging TP-alert flags. Its fixture now
 explicitly enables mocked alert scenarios, and targeted rerun passed. No live
-Telegram settings were enabled to make tests pass. Final CI is recorded in GitHub.
+Telegram settings were enabled to make tests pass.
+
+Final CI [36236607537](https://github.com/AviramDahan/AI-Trader/actions/runs/36236607537)
+PASSED: 107 PostgreSQL tests +8 subtests, 383 backend tests +14 subtests,
+frontend build and Linux container build. Final repeat restore of the GitHub
+artifact passed; dashboard accounting is consistent. Last local comparison at
+10:46:08 UTC: no discrepancies. Cloud scanner/monitor/Telegram workers are now
+explicitly stopped awaiting handover approval; API, PostgreSQL, Caddy and backup
+remain healthy. Local production was not stopped.
 
 ## Handover still requires explicit approval
 
