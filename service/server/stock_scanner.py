@@ -859,9 +859,12 @@ def run_scan() -> dict[str, Any]:
             if quote is None:
                 rejected.append({"ticker": ticker, "reason": "no_fresh_intraday_quote_or_market_closed"})
                 continue
+            from ai_budget import check as check_ai_budget
+            check_ai_budget()  # Cloud spend gate; never changes trading filters.
             signal = _paper_order(candidate, decision, news, quote, {}, cfg, api)
             if signal:
                 signal = _localize_telegram_signal(signal)
+                check_ai_budget()
                 lifecycle = record_signal(signal, candidate, decision, context, scan_id)
                 signal["lifecycle_id"] = lifecycle["id"]
                 signal["paper_execution"] = lifecycle["status"].lower()

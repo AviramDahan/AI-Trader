@@ -33,6 +33,8 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news"):
         "name": "ai_trader_" + task, "strict": True, "schema": schema}}
         if schema else {"type": "json_object"})
     for attempt in range(2):
+        from ai_budget import check
+        check()  # Outside repair handling: never retry a blocked budget.
         try:
             response = requests.post("https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": "Bearer " + key},

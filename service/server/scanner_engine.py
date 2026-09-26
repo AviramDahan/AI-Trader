@@ -287,7 +287,13 @@ def _fingerprint(ticker: str, url: str, title: str) -> str:
     return hashlib.sha256(f"{ticker.upper()}|{url.strip()}|{title.strip().lower()}".encode()).hexdigest()
 
 
-def enqueue_telegram(cursor, dedupe_key: str, event_type: str, message: str) -> None:
+def enqueue_telegram(cursor, dedupe_key: str, event_type: str, message: str, *, published_at=None) -> None:
+    # A clean-state cutover deliberately omits old news/delivery dedupe history.
+    # Retain old items for analysis, but do not broadcast them as new messages.
+    boundary = os.getenv('TELEGRAM_NEWS_NOT_BEFORE', '').strip()
+    if boundary and event_type in {'market_news','position_news','watchlist_news','stock_news'}:
+        if not published_at or parse_time(published_at) < parse_time(boundary):
+            return
     cursor.execute("SELECT id FROM scanner_telegram_outbox WHERE dedupe_key=?", (dedupe_key,))
     if cursor.fetchone():
         return
@@ -1021,7 +1027,7 @@ def monitor_position_news() -> dict[str, Any]:
                                               f"סימול: {ticker}\nהשפעה אפשרית: {direction}\nמהותיות אפשרית: {materiality}",
                                               f"הסבר: {item.get('explanation_he') or item.get('summary_he')}",
                                               f"מקור: {item.get('publisher')}\nקישור: {item.get('url')}"])
-                    enqueue_telegram(cur, f"position-news:{fp}", "position_news", message)
+                    enqueue_telegram(cur, f"position-news:{fp}", "position_news", message, published_at=item['published_at'])
             next_due = (datetime.now(UTC) + timedelta(hours=cfg["news_interval_hours"])).isoformat().replace("+00:00", "Z")
             cur.execute("UPDATE scanner_news_schedule SET last_attempt_at=?,last_success_at=?,next_due_at=?,status=?,error=NULL WHERE ticker=?",
                         (now_z(), now_z(), next_due, "new" if ticker_inserted else "no_new", ticker))

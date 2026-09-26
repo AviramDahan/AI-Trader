@@ -1164,7 +1164,7 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
         parts.insert(0, f"{row.get('original_publisher') or row['publisher']}\n{row['url']}")
         parts.append("CC BY 3.0 · כותרת בתרגום אוטומטי\nhttps://creativecommons.org/licenses/by/3.0/")
     from scanner_engine import enqueue_telegram
-    enqueue_telegram(cur, f"market-news:{row['id']}:{version}", "market_news", "\n\n".join(parts))
+    enqueue_telegram(cur, f"market-news:{row['id']}:{version}", "market_news", "\n\n".join(parts), published_at=row['published_at'])
     return True
 
 
@@ -1410,7 +1410,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                              "impact": sentiment, "materiality": materiality,
                              "summary_he": result.get("summary_he"), "interpretation_he": result.get("interpretation_he")}
                 enqueue_telegram(cur, f"news:{row['id']}:{row.get('content_hash') or 'v1'}:{','.join(linked_tickers)}",
-                                 "position_news", _news_alert_message(alert_row)); alerts += 1
+                                 "position_news", _news_alert_message(alert_row), published_at=row['published_at']); alerts += 1
             # A watched open position already receives the position alert above;
             # never send a second notification for the same news/version.
             verified = {str(value).upper() for value in _loads(row.get("verified_tickers_json"), [])}
@@ -1442,7 +1442,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                                  "impact": sentiment, "materiality": materiality,
                                  "summary_he": result.get("summary_he"), "interpretation_he": result.get("interpretation_he")}
                     enqueue_telegram(cur, f"watchlist-news:{row['id']}:{version}:{ticker}",
-                                     "watchlist_news", _watchlist_alert_message(alert_row)); alerts += 1
+                                     "watchlist_news", _watchlist_alert_message(alert_row), published_at=row['published_at']); alerts += 1
 
             # A strict broadcast tier covers important company news for
             # the rotating scanner shortlist even when no position/watchlist
@@ -1473,7 +1473,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                                  "summary_he": result.get("summary_he"),
                                  "interpretation_he": result.get("interpretation_he")}
                     enqueue_telegram(cur, f"stock-news:{row['id']}:{version}:{','.join(allowed)}",
-                                     "stock_news", _stock_broadcast_alert_message(alert_row)); alerts += 1
+                                     "stock_news", _stock_broadcast_alert_message(alert_row), published_at=row['published_at']); alerts += 1
 
     conn.commit(); conn.close()
     from scanner_engine import set_service_status

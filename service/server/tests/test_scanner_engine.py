@@ -82,7 +82,8 @@ class ScannerEngineTests(unittest.TestCase):
             execute.assert_not_called()
 
     def setUp(self):
-        self.extended_config = patch.dict(os.environ, STOCK_SCANNER_EXTENDED_EXITS_FROM='')
+        self.extended_config = patch.dict(os.environ, STOCK_SCANNER_EXTENDED_EXITS_FROM='',
+            STOCK_SCANNER_TELEGRAM_ENTRY_ALERTS='true', STOCK_SCANNER_TELEGRAM_LEVEL_ALERTS='true')
         self.extended_config.start()
         self.addCleanup(self.extended_config.stop)
         self.market_clock = patch.object(scanner_engine, 'market_session_state', return_value={

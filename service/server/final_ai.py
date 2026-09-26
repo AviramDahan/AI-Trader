@@ -104,6 +104,9 @@ def review(messages, validator):
         start = time.monotonic()
         retry = False
         try:
+            if provider == 'openrouter':
+                from ai_budget import check
+                check()
             if trace is not None:
                 trace["ai_started"] = True
             if provider == "ollama":
