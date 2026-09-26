@@ -906,6 +906,10 @@ def _update_provider(name: str, status: str, at: datetime, cadence: int, coverag
     rejected_assignment = int(metrics.get("rejected_assignment", 0) or 0)
     rejected_date = int(metrics.get("rejected_date", result.get("rejected_date", 0)) or 0)
     failed = status in {"error", "rate_limited", "config_required", "degraded"}
+    if failed:
+        import logging
+        logging.getLogger(__name__).warning('News provider=%s status=%s retry_seconds=%s detail=%s',
+                                           name,status,delay,error)
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("""UPDATE scanner_news_providers SET status=?,last_attempt_at=?,last_success_at=?,next_check_at=?,
         cadence_seconds=?,coverage=?,checkpoint_json=?,etag=?,last_modified=?,consecutive_failures=?,rate_limit_until=?,error=?

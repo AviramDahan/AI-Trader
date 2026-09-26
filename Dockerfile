@@ -1,6 +1,4 @@
 FROM python:3.11-slim-trixie
-ARG BUILD_SHA=unknown
-ENV BUILD_SHA=$BUILD_SHA
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 MPLBACKEND=Agg MPLCONFIGDIR=/tmp/matplotlib
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata fonts-dejavu-core fonts-noto-core postgresql-client age rclone git openssh-client \
     && rm -rf /var/lib/apt/lists/* \
@@ -13,6 +11,8 @@ COPY --chown=10001:10001 deploy /app/deploy
 RUN mkdir -p /backup /reader /app/.runtime /app/service/server/logs /app/service/server/data \
     && chown -R 10001:10001 /backup /reader /app/.runtime /app/service/server/logs /app/service/server/data
 USER 10001:10001
+ARG BUILD_SHA=unknown
+ENV BUILD_SHA=$BUILD_SHA
 ENV PYTHONPATH=/app/service/server
 ENTRYPOINT ["python", "/app/service/server/cloud_runtime.py"]
 CMD ["api"]

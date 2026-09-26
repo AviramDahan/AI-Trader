@@ -51,8 +51,9 @@ dc up -d --no-deps --no-build --wait --wait-timeout 180 monitor
 dc up -d --no-deps --no-build --wait --wait-timeout 180 scanner telegram backup
 curl --fail --silent --show-error "https://$PUBLIC_API_HOST/health" >/dev/null
 docker tag "$new" ai-trader:staging
-printf '%s\n%s\n%s\n' "$sha" "$new" "$old" > deploy/last-release
 docker exec ai-trader-cloud-api-1 python -c 'from pathlib import Path; import sys; Path("/app/.runtime/deployed-release").write_text(sys.argv[1])' "$sha"
+printf '%s\n%s\n%s\n' "$sha" "$new" "$old" > deploy/last-release.next
+mv deploy/last-release.next deploy/last-release
 trap - ERR
 echo "DEPLOY PASS commit=$sha image=$new"
 # Keep the previous image/release for rollback; do not prune active data or images.
