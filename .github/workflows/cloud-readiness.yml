@@ -38,7 +38,14 @@ jobs:
         with: {python-version: "3.11"}
       - run: pip install -r service/requirements.txt -r service/requirements-telegram-reader.txt
       - name: PostgreSQL client and encryption tools
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client-17 age
+        # https://www.postgresql.org/download/linux/ubuntu/ (official PGDG key)
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          printf 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt %s-pgdg main\n' "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17 age
       - name: Real PostgreSQL lifecycle, snapshot, concurrency, encrypted restore
         run: python -m pytest service/server/tests_pg -q
       - name: Backend and scanner regression
