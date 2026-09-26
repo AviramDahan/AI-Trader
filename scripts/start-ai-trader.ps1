@@ -3,6 +3,9 @@ param([switch]$Wait, [switch]$Watchdog)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $runtimeDir = Join-Path $projectRoot '.runtime'
+if (Test-Path (Join-Path $runtimeDir 'cloud-writer.lock')) {
+    throw 'Cloud handover lock: do not restart stale local state. Stop cloud writers and restore current cloud state before any rollback.'
+}
 if ($Watchdog -and (Test-Path (Join-Path $runtimeDir 'stop.request'))) { exit 0 }
 $pythonExe = Join-Path $projectRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path $pythonExe)) { throw 'Install service/requirements.txt into .venv first.' }

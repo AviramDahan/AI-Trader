@@ -219,4 +219,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if (RUNTIME / 'cloud-writer.lock').exists():
+        raise SystemExit('Cloud handover lock: local writers are disabled; controlled state restore required for rollback.')
     main()
