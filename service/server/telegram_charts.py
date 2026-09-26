@@ -1,5 +1,6 @@
 """Real OHLC charts for executed paper entries; no image-generation model."""
 import io
+import json
 import math
 import os
 from datetime import datetime, timezone
@@ -108,6 +109,15 @@ def send_entry_chart(trade_id):
             data={**destination_fields(chat, "entry_chart"), "caption":caption},
             files={"photo":("entry.png",png,"image/png")},timeout=20)
         result = response.json()
-        return "sent" if response.ok and result.get("ok") and str(result.get("result",{}).get("chat",{}).get("id")) == chat else "failed"
+        if response.ok and result.get("ok") and str(result.get("result",{}).get("chat",{}).get("id")) == chat:
+            return 'sent'
+        from retry_policy import retry_after
+        status=result.get('error_code',response.status_code)
+        delay=max(retry_after(response.headers.get('Retry-After')),float(result.get('parameters',{}).get('retry_after',0)))
+        return json.dumps({'http_status':status,'retry_after':delay,'terminal':status in {400,401,403,404}})
+    except requests.ConnectTimeout:
+        return 'connect_timeout'
+    except (requests.ReadTimeout,requests.ConnectionError):
+        return json.dumps({'terminal':True,'reason':'delivery_unknown_manual_review'})
     except Exception:
         return "failed"  # Never log a request URL containing the token.

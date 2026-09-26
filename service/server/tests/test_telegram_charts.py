@@ -8,6 +8,16 @@ import telegram_charts
 
 
 class ChartTests(unittest.TestCase):
+    def test_photo_retry_after_reaches_outbox_without_real_send(self):
+        import json
+        connection=Mock();connection.execute.return_value.fetchone.return_value=self.trade()
+        response=Mock(ok=False,status_code=429,headers={'Retry-After':'300'})
+        response.json.return_value={'ok':False,'error_code':429,'parameters':{'retry_after':600}}
+        session=Mock();session.post.return_value=response
+        with patch('database.get_db_connection',return_value=connection),patch.object(telegram_charts,'entry_chart_bytes',return_value=b'mock'),patch.dict('os.environ',{'TELEGRAM_BOT_TOKEN':'fake','TELEGRAM_CHAT_ID':'-123'}),patch.object(telegram_charts.requests,'Session',return_value=session):
+            result=json.loads(telegram_charts.send_entry_chart(1))
+        assert result['retry_after']==600 and result['terminal'] is False
+
     def trade(self):
         return dict(id=1,ticker="TEST",entry_price=100,original_stop=97,tp1=103,tp2=106,tp3=109,
                     opened_at="2026-09-22T17:00:00Z",strategy="single")
