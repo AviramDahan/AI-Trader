@@ -32,6 +32,9 @@ def record(task, model, body, started, success, failure=None, retry=False):
              number(details.get('reasoning_tokens')),number(usage.get('cost')),
              time.monotonic()-started,datetime.now(timezone.utc).isoformat(),int(success),failure,
              (body or {}).get('id')))
+    if not success and failure not in {'ValueError'}:
+        stamp=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')
+        enqueue('openrouter_failure:'+stamp,'AI-Trader Admin\nקריאת OpenRouter נכשלה או שהתגובה לא עמדה בסכמה.\nניטור הפוזיציות ו־TP/SL ממשיכים בנפרד.')
 
 
 def calculate(rows, provider, now=None):
@@ -48,11 +51,14 @@ def calculate(rows, provider, now=None):
     elapsed=(now-now.replace(day=1,hour=0,minute=0,second=0,microsecond=0)).total_seconds()/86400
     burn=usage/max(elapsed,1/24) if usage is not None else None
     remaining=max(0,cap-usage) if usage is not None else None
+    days=remaining/burn if burn else None
+    if days is not None and days>calendar.monthrange(now.year,now.month)[1]-elapsed:
+        days=None  # Monthly reset occurs first; do not forecast a cap years away.
     return dict(local_total=local,total=usage,news=totals['news_analysis']+totals['news_translation'],
                 final=totals['final_stock_review'],retry=totals['retry_repair'],missing_cost_calls=missing,
                 remaining=remaining,used_percent=usage/cap*100 if usage is not None else None,
                 average_daily_burn=burn,projected=burn*calendar.monthrange(now.year,now.month)[1] if burn is not None else None,
-                days_until_cap=remaining/burn if burn else None,
+                days_until_cap=days,
                 discrepancy=usage-local if usage is not None else None,
                 provider_limit=provider.get('limit'),provider_limit_remaining=provider.get('limit_remaining'),
                 checked_at=now.isoformat(),forecast_basis='calendar_month_elapsed_average_not_guarantee')
