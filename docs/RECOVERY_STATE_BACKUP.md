@@ -61,6 +61,9 @@ and structured logs record encrypted size, retained count and all local `.git`
 bytes. `RECOVERY_GIT_WARN_BYTES` defaults to 100 MiB; `warning:true` requires review
 before changing retention. This is a status/log warning, not an email/push alert.
 At the measured tiny sizes growth is modest, but it is not bounded by 35 files.
+This is not immutable/WORM storage: compromise of the server's write deploy key
+could alter/delete backup history. Encryption protects confidentiality, not remote
+availability. A later immutable second copy can reduce that risk if needed.
 
 ## Restore
 

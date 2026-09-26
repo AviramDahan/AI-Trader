@@ -34,6 +34,13 @@
 - **PASS:** local 377 tests + 10 subtests; full Linux/PostgreSQL 104 tests + 8
   subtests; latest recovery-specific rerun 4/4 (adds runtime-policy mismatch case).
   Frontend TypeScript/Vite build passed. Known deprecation warnings only.
+- **PASS:** GitHub CI run https://github.com/AviramDahan/AI-Trader/actions/runs/36233170195
+  on branch `codex/cloud-staging-recovery`: **105 PostgreSQL tests + 8 subtests**,
+  **377 backend tests + 10 subtests**, Linux image and frontend build. Initial CI
+  failures were missing PGDG client-17 and the runner selecting client-16; fixed
+  by official PGDG installation and explicit version-17 binary paths.
+- Latest real role probes rejected second scanner/monitor/Telegram owners.
+  Repeated stalled-AI + CPU-load synthetic monitor test: **123.18 ms**, PASS.
 - Latest post-restart load: 300/300 `/health`, concurrency 12, p50 17.46 ms,
   p95 69.53 ms, max 72.49 ms. This is a short health load, not a full-market soak.
 - Host idle after restart: 1,118 MiB used, 6,632 MiB available. During real scan +
@@ -45,6 +52,9 @@
   Baseline $10.59 + AI usage up to $20 = **$30.59/month**, excluding payment fees
   and exceptional traffic overage. No automatic top-up. Current OpenRouter key
   usage $0.00746939 (includes live staging activity, not just the 3 smoke calls).
+- Real news processing now succeeds (18 completed jobs at the observation), with
+  one separate `news_quality_rejected` job retained in retry/error state. It was
+  not published and no quality filter was bypassed; not every article is accepted.
 
 Remaining before production approval: provider/model quality on representative
 inputs, key rotation for the explicitly reauthorized chat-exposed key, independent
