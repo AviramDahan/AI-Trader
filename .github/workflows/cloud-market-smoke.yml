@@ -1,0 +1,25 @@
+name: Cloud live-market smoke (read only)
+on:
+  workflow_dispatch:
+  schedule:
+    # Ten minutes after US regular open in summer; second run also covers winter.
+    # The API's market calendar skips weekends/holidays/closed sessions.
+    - cron: '40 13,14 * * 1-5'
+permissions:
+  contents: read
+concurrency:
+  group: cloud-market-smoke
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BACKEND_URL: ${{ vars.BACKEND_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check monitor, quotes, accounting and natural lifecycle evidence
+        run: python scripts/cloud_market_smoke.py

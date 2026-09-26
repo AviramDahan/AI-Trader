@@ -26,3 +26,21 @@ def test_monitor_does_not_consult_failed_ai_budget(pg,monkeypatch):
     result=scanner_engine.monitor_prices()
     assert not result['errors']
     gate.assert_not_called()
+
+
+def test_request_pacing_reserves_across_callers_and_releases_lock_before_sleep(pg,monkeypatch):
+    import psycopg
+    monkeypatch.setenv('AI_TRADER_CLOUD','true')
+    waits=[]
+    def sleep(delay):
+        waits.append(delay)
+        # An independent connection must be able to take the slot lock while
+        # the previous caller waits. No sleeping database transaction remains.
+        with psycopg.connect(pg) as conn:
+            assert conn.execute('SELECT pg_try_advisory_xact_lock(719324,1)').fetchone()[0]
+    monkeypatch.setattr(ai_budget.time,'sleep',sleep)
+    ai_budget.acquire_request_slot()
+    ai_budget.acquire_request_slot()
+    ai_budget.acquire_request_slot()
+    assert len(waits)==2
+    assert 0 < waits[0] < waits[1] <= 6.4

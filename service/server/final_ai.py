@@ -105,8 +105,9 @@ def review(messages, validator):
         retry = False
         try:
             if provider == 'openrouter':
-                from ai_budget import check
+                from ai_budget import check, acquire_request_slot
                 check()
+                acquire_request_slot()
             if trace is not None:
                 trace["ai_started"] = True
             if provider == "ollama":
