@@ -37,7 +37,27 @@ def record(task, model, body, started, success, failure=None, retry=False):
         enqueue('openrouter_failure:'+stamp,'AI-Trader Admin\nקריאת OpenRouter נכשלה או שהתגובה לא עמדה בסכמה.\nניטור הפוזיציות ו־TP/SL ממשיכים בנפרד.')
 
 
-def calculate(rows, provider, now=None):
+def credits():
+    response=requests.get('https://openrouter.ai/api/v1/credits',
+        headers={'Authorization':'Bearer '+os.environ['OPENROUTER_API_KEY']},timeout=(3,6))
+    response.raise_for_status()
+    data=response.json()['data']
+    purchased=number(data.get('total_credits'))
+    used=number(data.get('total_usage'))
+    if purchased is None or used is None: raise ValueError('credit_balance_unavailable')
+    return dict(credit_balance=purchased-used,total_credits=purchased)
+
+
+def credit_alerts(data):
+    # A manual purchase starts a new credit cycle; restarts/balance jitter do not.
+    for threshold in (2,1):
+        if data['credit_balance'] < threshold:
+            enqueue(f"credits:{data['total_credits']:.8f}:{threshold}",
+                f"AI-Trader Admin\nיתרת הקרדיטים נמוכה מ-${threshold}: ${data['credit_balance']:.2f}\n"
+                'זו יתרת החשבון, לא יתרת התקציב החודשי. טעינה אוטומטית כבויה.')
+
+
+def calculate(rows, provider, now=None, samples=None, credit_data=None):
     now=now or datetime.now(timezone.utc)
     totals={k:0.0 for k in ('news_analysis','news_translation','final_stock_review','retry_repair')}
     missing=0
@@ -49,7 +69,22 @@ def calculate(rows, provider, now=None):
     usage=number(provider.get('usage_monthly'))
     cap=25.0
     elapsed=(now-now.replace(day=1,hour=0,minute=0,second=0,microsecond=0)).total_seconds()/86400
-    burn=usage/max(elapsed,1/24) if usage is not None else None
+    samples=samples or []
+    # Restart the observation window after a collection gap or counter reset.
+    for i in range(len(samples)-1,0,-1):
+        gap=(datetime.fromisoformat(samples[i]['timestamp'])-datetime.fromisoformat(samples[i-1]['timestamp'])).total_seconds()
+        if gap>10800 or gap<=0 or samples[i]['usage']<samples[i-1]['usage']:
+            samples=samples[i:]
+            break
+    span=0
+    burn=None
+    if len(samples)>=2 and usage is not None:
+        times=[datetime.fromisoformat(s['timestamp']) for s in samples]
+        span=(times[-1]-times[0]).total_seconds()/86400
+        valid=all(0 < (b-a).total_seconds() <= 10800 for a,b in zip(times,times[1:]))
+        valid=valid and all(b['usage']>=a['usage'] for a,b in zip(samples,samples[1:]))
+        if span>=7 and valid and (now-times[-1]).total_seconds()<=10800:
+            burn=(samples[-1]['usage']-samples[0]['usage'])/span
     remaining=max(0,cap-usage) if usage is not None else None
     days=remaining/burn if burn else None
     if days is not None and days>calendar.monthrange(now.year,now.month)[1]-elapsed:
@@ -57,11 +92,13 @@ def calculate(rows, provider, now=None):
     return dict(local_total=local,total=usage,news=totals['news_analysis']+totals['news_translation'],
                 final=totals['final_stock_review'],retry=totals['retry_repair'],missing_cost_calls=missing,
                 remaining=remaining,used_percent=usage/cap*100 if usage is not None else None,
-                average_daily_burn=burn,projected=burn*calendar.monthrange(now.year,now.month)[1] if burn is not None else None,
+                average_daily_burn=burn,projected=usage+burn*(calendar.monthrange(now.year,now.month)[1]-elapsed) if burn is not None else None,
                 days_until_cap=days,
                 discrepancy=usage-local if usage is not None else None,
                 provider_limit=provider.get('limit'),provider_limit_remaining=provider.get('limit_remaining'),
-                checked_at=now.isoformat(),forecast_basis='calendar_month_elapsed_average_not_guarantee')
+                credit_balance=(credit_data or {}).get('credit_balance'),
+                measured_days=span,checked_at=now.isoformat(),
+                forecast_basis='observed_provider_delta_minimum_7_days' if burn is not None else 'insufficient_data')
 
 
 def enqueue(key,message):
@@ -75,10 +112,12 @@ def notification(s):
     def f(k): return 'לא זמין' if s[k] is None else f'{s[k]:.2f}'
     return ('AI-Trader Admin\nAI budget: $'+f('total')+' / $25\nNews: $'+f('news')+
             '\nFinal stock: $'+f('final')+'\nRetries/repairs: $'+f('retry')+
-            '\nRemaining: $'+f('remaining')+'\nProjected month-end: $'+f('projected')+
+            '\nMonthly budget remaining: $'+f('remaining')+
+            '\nAccount credit balance: $'+f('credit_balance')+
+            '\nProjected month-end: '+('$'+f('projected') if s['projected'] is not None else 'אין מספיק נתונים')+
             '\nEstimated days until cap: '+f('days_until_cap')+
             '\nפער לא משויך מול OpenRouter: $'+f('discrepancy')+
-            '\nהתחזית מחושבת לפי ממוצע מתחילת החודש, ואינה התחייבות.')
+            '\nתחזית דורשת לפחות 7 ימי מדידה רציפה; אינה התחייבות. עלות repair נספרת רק בקטגוריית retries.')
 
 
 def reconcile():
@@ -89,10 +128,19 @@ def reconcile():
     response.raise_for_status()
     provider=response.json()['data']
     if number(provider.get('usage_monthly')) is None: raise ValueError('usage_unavailable')
+    credit_data=credits()
     with get_db_connection() as conn:
         rows=conn.execute('SELECT task,actual_cost FROM ai_call_usage WHERE timestamp>=?',
                           (now.strftime('%Y-%m-01T00:00:00+00:00'),)).fetchall()
-        s=calculate(rows,provider,now)
+        key='ai_cost_samples:'+now.strftime('%Y-%m')
+        old=conn.execute('SELECT value_json FROM scanner_settings WHERE key=?',(key,)).fetchone()
+        samples=json.loads(old['value_json']) if old else []
+        if not samples or (now-datetime.fromisoformat(samples[-1]['timestamp'])).total_seconds()>=3500:
+            samples.append(dict(timestamp=now.isoformat(),usage=provider['usage_monthly']))
+        conn.execute('''INSERT INTO scanner_settings(key,value_json,updated_at) VALUES(?,?,?)
+          ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at''',
+          (key,json.dumps(samples),now.isoformat()))
+        s=calculate(rows,provider,now,samples,credit_data)
         conn.execute('''INSERT INTO scanner_settings(key,value_json,updated_at) VALUES('ai_cost_reconciliation',?,?)
           ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at''',
           (json.dumps(s),now.isoformat()))
@@ -100,7 +148,8 @@ def reconcile():
     for fraction in (.75,.90,1):
         if s['total']>=25*fraction:
             enqueue('budget:'+month+':'+str(fraction),notification(s))
-    if s['projected']>25:
+    credit_alerts(credit_data)
+    if s['projected'] is not None and s['projected']>25:
         enqueue('projected:'+month,notification(s))
     if abs(s['discrepancy'])>.01:
         enqueue('discrepancy:'+month,notification(s))

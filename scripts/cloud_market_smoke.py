@@ -24,7 +24,8 @@ def main():
     assert monitor['last_success_at'] and age(monitor['last_success_at']) < 900, 'monitor_stale'
     assert monitor['status']!='error', 'monitor_error'
     if not data['market']['is_open']:
-        print(json.dumps({'cloud_health':'PASS','live_market':'NOT_VERIFIED_MARKET_CLOSED'}))
+        print(json.dumps({'cloud_health':'PASS','live_market':'NOT_VERIFIED_MARKET_CLOSED',
+                         'live_tp_sl':'לא נצפה אירוע בבדיקה זו; אין אישור ביצוע חי'},ensure_ascii=False))
         return
     quotes=get('/api/scanner/quotes')
     open_trades=[t for t in data['trades'] if t['status']=='open']

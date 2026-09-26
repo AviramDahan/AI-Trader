@@ -31,9 +31,28 @@ def test_admin_dedupe_and_destination_isolation(pg,monkeypatch):
 
 def test_reconciliation_uses_no_ai_and_preserves_discrepancy(pg,monkeypatch):
     monkeypatch.setenv('OPENROUTER_API_KEY','mock')
-    result=Mock();result.json.return_value={'data':{'usage_monthly':19,'limit':25,'limit_remaining':6}}
+    result=Mock();result.json.return_value={'data':{'usage_monthly':19,'limit':25,'limit_remaining':6,'total_credits':25,'total_usage':19}}
     monkeypatch.setattr(ops.requests,'get',Mock(return_value=result))
     first=ops.reconcile();ops.reconcile()
     assert first['discrepancy']==19 and first['news']==0
     with database.get_db_connection() as conn:
         assert conn.execute("SELECT count(*) n FROM admin_alerts WHERE dedupe_key LIKE 'budget:%'").fetchone()['n']==1
+
+def test_credit_thresholds_dedupe_and_manual_purchase_rearms(pg):
+    for balance in (1.9,.9,.8):
+        ops.credit_alerts(dict(total_credits=5,credit_balance=balance))
+    with database.get_db_connection() as conn:
+        assert conn.execute("SELECT count(*) n FROM admin_alerts").fetchone()['n']==2
+    ops.credit_alerts(dict(total_credits=10,credit_balance=.9))
+    with database.get_db_connection() as conn:
+        assert conn.execute("SELECT count(*) n FROM admin_alerts").fetchone()['n']==4
+
+def test_payment_latch_survives_restart_and_clears_only_purchase_or_month(pg,monkeypatch):
+    import ai_budget
+    import pytest
+    monkeypatch.setenv('AI_TRADER_CLOUD','true')
+    monkeypatch.setattr(ops,'credits',lambda:dict(total_credits=5,credit_balance=.1))
+    ai_budget.payment_rejected()
+    with pytest.raises(ai_budget.BudgetUnavailable):
+        ai_budget.check_payment_latch(dict(total_credits=5))
+    ai_budget.check_payment_latch(dict(total_credits=10))

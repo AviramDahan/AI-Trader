@@ -153,6 +153,9 @@ def review(messages, validator):
             messages = messages + [{"role":"user","content":"The previous response was not valid for the required JSON schema. Return the complete schema object only. Do not change the decision to obtain acceptance; HOLD remains valid."}]
         except requests.RequestException as exc:
             status = getattr(getattr(exc,"response",None),"status_code",None)
+            if status == 402:
+                from ai_budget import payment_rejected
+                payment_rejected()
             metrics["reject_reason"] = "http_" + str(status) if status else type(exc).__name__
             retry = attempt == 0 and (isinstance(exc,(requests.Timeout,requests.ConnectionError)) or status in {408,429,500,502,503,504})
             if not retry:

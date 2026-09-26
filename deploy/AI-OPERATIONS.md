@@ -13,10 +13,23 @@ stores provider `usage_monthly`, `limit`, `limit_remaining`, and the unassigned
 difference from the locally measured sum. A key-specific limit can be null even
 when a separate assigned guardrail applies; do not interpret null as zero.
 
-Forecast: provider month-to-date spend divided by elapsed calendar days, multiplied
-by calendar-month length. Remaining days uses the same average, not a promise.
-Sparse/partial-month operation makes this forecast unreliable; remaining credits
-are separate from the monthly cap. Budget notifications dedupe per UTC month.
+Credits: `/api/v1/credits` total_credits minus total_usage is account-wide balance,
+not the key's monthly allowance. Hourly reconciliation and each completion precheck
+check it without an AI call. Alerts below $2/$1 dedupe persistently per purchased-credit
+total; only a manual purchase starts a new credit cycle. No automatic top-up.
+
+Forecast requires seven continuous measured days of hourly provider usage samples;
+gaps over three hours or counter resets restart the measurement window. Until then
+the report says “אין מספיק נתונים”. The historical unassigned expenditure is not
+used to calculate daily burn. Forecast = actual month-to-date spend + measured burn
+times remaining calendar days. Monthly reset starts a new observation window.
+Remaining credits, monthly allowance and mutually exclusive task costs are shown
+separately. Budget notifications dedupe per UTC month.
+Zero balance or exhausted monthly allowance prevents completions before retries.
+A provider HTTP 402 creates a persistent AI-only latch: a confirmed manual credit
+purchase or new UTC month permits checking again. If the balance was unavailable
+when latched, an operator must reconcile before clearing it (or await month reset).
+No AI request is used to probe recovery. Monitor/TP/SL have no dependency on this.
 Health incidents dedupe until recovery and recurrence.
 
 `TELEGRAM_ADMIN_CHAT_ID` lives only in protected server configuration and GitHub

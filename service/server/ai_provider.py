@@ -60,6 +60,9 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news"):
             return value
         except requests.RequestException as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status == 402:
+                from ai_budget import payment_rejected
+                payment_rejected()
             if attempt or not (isinstance(exc, (requests.Timeout, requests.ConnectionError)) or status in {408,429,500,502,503,504}):
                 raise ValueError("openrouter_transport_failed") from None
         except (ValueError, KeyError, IndexError, jsonschema.ValidationError):

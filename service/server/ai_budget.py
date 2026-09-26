@@ -98,4 +98,52 @@ def check():
     except Exception:
         raise BudgetUnavailable('ai_budget_verification_failed_closed') from None
     if usage >= limit:
+        blocked_alert('monthly_budget')
         raise BudgetUnavailable('ai_monthly_budget_exhausted')
+    try:
+        from ai_operations import credits, credit_alerts
+        balance=credits()
+        credit_alerts(balance)
+    except Exception:
+        raise BudgetUnavailable('ai_credit_verification_failed_closed') from None
+    if balance['credit_balance'] <= 0:
+        blocked_alert('credit_balance')
+        raise BudgetUnavailable('ai_credit_balance_exhausted')
+    check_payment_latch(balance)
+
+
+def check_payment_latch(balance):
+    from database import get_db_connection
+    with get_db_connection() as conn:
+        row=conn.execute("SELECT value_json FROM scanner_settings WHERE key='ai_payment_block'").fetchone()
+    if row:
+        state=json.loads(row['value_json'])
+        if state['month']==datetime.now(timezone.utc).strftime('%Y-%m') and (state['total_credits'] is None or balance['total_credits']<=state['total_credits']):
+            raise BudgetUnavailable('ai_provider_payment_blocked')
+
+
+def payment_rejected():
+    if os.getenv('AI_TRADER_CLOUD') != 'true': return
+    blocked_alert('provider_payment_rejected')
+    from ai_operations import credits
+    from database import get_db_connection
+    try:
+        purchased=credits()['total_credits']
+    except Exception:
+        purchased=None  # Fail closed; operator reconciliation required when balance is unknown.
+    stamp=datetime.now(timezone.utc).isoformat()
+    with get_db_connection() as conn:
+        conn.execute('''INSERT INTO scanner_settings(key,value_json,updated_at) VALUES('ai_payment_block',?,?)
+            ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at''',
+            (json.dumps(dict(month=stamp[:7],total_credits=purchased)),stamp))
+
+
+def blocked_alert(reason):
+    # Durable dedup; never retry a model to calculate or report a budget problem.
+    try:
+        from ai_operations import enqueue
+        enqueue('ai_blocked:'+datetime.now(timezone.utc).strftime('%Y-%m')+':'+reason,
+                'AI-Trader Admin\nקריאות AI חסומות: '+reason+
+                '\nניטור הפוזיציות ו־TP/SL ממשיכים. אין טעינה אוטומטית.')
+    except Exception:
+        logging.getLogger(__name__).warning('Private AI block alert could not be queued')

@@ -10,7 +10,18 @@ def test_cost_split_does_not_assign_provider_discrepancy():
                          datetime(2026,9,11,tzinfo=timezone.utc))
     assert result['news']==3 and result['final']==4 and result['retry']==.5
     assert result['discrepancy']==2.5 and result['missing_cost_calls']==1
-    assert result['projected']==30 and result['days_until_cap']==15
+    assert result['projected'] is None and result['days_until_cap'] is None
+    assert 'אין מספיק נתונים' in ops.notification(result)
+
+def test_forecast_uses_measured_delta_not_historical_unassigned_spend():
+    from datetime import timedelta
+    start=datetime(2026,9,11,tzinfo=timezone.utc)
+    samples=[dict(timestamp=(start+timedelta(hours=i)).isoformat(),usage=10+i/24) for i in range(169)]
+    result=ops.calculate([],{'usage_monthly':17},start+timedelta(days=7),samples)
+    assert result['average_daily_burn']==1
+    assert result['projected']==30
+    assert result['discrepancy']==17
+    assert ops.calculate([],{'usage_monthly':17},start+timedelta(days=7),[samples[0],samples[-1]])['projected'] is None
 
 def test_missing_usage_is_not_zero():
     result=ops.calculate([],{},datetime(2026,9,1,tzinfo=timezone.utc))
