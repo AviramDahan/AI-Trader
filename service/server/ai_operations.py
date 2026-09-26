@@ -12,6 +12,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 import requests
+from admin_messages import timestamped
 
 
 def number(v):
@@ -103,9 +104,10 @@ def calculate(rows, provider, now=None, samples=None, credit_data=None):
 
 def enqueue(key,message):
     from database import get_db_connection
+    created_at=datetime.now(timezone.utc).isoformat()
     with get_db_connection() as conn:
         conn.execute('''INSERT INTO admin_alerts(dedupe_key,message,created_at) VALUES(?,?,?)
-            ON CONFLICT(dedupe_key) DO NOTHING''',(key,message,datetime.now(timezone.utc).isoformat()))
+            ON CONFLICT(dedupe_key) DO NOTHING''',(key,timestamped(message,created_at),created_at))
 
 
 def notification(s):
@@ -170,7 +172,7 @@ def send_one():
     if not row:return
     try:
         r=requests.post('https://api.telegram.org/bot'+token+'/sendMessage',json={
-            'chat_id':chat,'text':row['message'],'disable_web_page_preview':True},timeout=(3,10))
+            'chat_id':chat,'text':timestamped(row['message'],row['created_at']),'disable_web_page_preview':True},timeout=(3,10))
         r.raise_for_status()
         value=r.json()
         if not value.get('ok'):raise ValueError('telegram_rejected')
