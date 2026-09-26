@@ -165,7 +165,7 @@ def send_one():
     now=time.time()
     with get_db_connection() as conn:
         row=conn.execute('''UPDATE admin_alerts SET status='sending', attempts=attempts+1,next_at=?
-          WHERE dedupe_key=(SELECT dedupe_key FROM admin_alerts WHERE status!='sent' AND next_at<=?
+          WHERE dedupe_key=(SELECT dedupe_key FROM admin_alerts WHERE status IN ('pending','sending') AND next_at<=?
           ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *''',(now+120,now)).fetchone()
     if not row:return
     try:
@@ -177,10 +177,19 @@ def send_one():
         with get_db_connection() as conn:
             conn.execute("UPDATE admin_alerts SET status='sent',message_id=? WHERE dedupe_key=?",
                          (value['result']['message_id'],row['dedupe_key']))
-    except Exception:
+    except Exception as exc:
+        from retry_policy import retry_after
+        response=getattr(exc,'response',None)
+        status=getattr(response,'status_code',None)
+        delay=retry_after(response.headers.get('Retry-After')) if response is not None else 0
+        try:delay=max(delay,float(response.json().get('parameters',{}).get('retry_after',0)))
+        except (ValueError,TypeError,AttributeError):pass
+        ambiguous=isinstance(exc,(requests.ReadTimeout,requests.ConnectionError)) and not isinstance(exc,requests.ConnectTimeout)
+        terminal=row['attempts']>=6 or status in {400,401,403,404} or ambiguous
         with get_db_connection() as conn:
-            conn.execute("UPDATE admin_alerts SET status='pending',next_at=? WHERE dedupe_key=?",
-                         (now+min(3600,30*2**min(row['attempts'],6)),row['dedupe_key']))
+            conn.execute("UPDATE admin_alerts SET status=?,next_at=? WHERE dedupe_key=?",
+                         ('delivery_unknown' if ambiguous else 'failed' if terminal else 'pending',
+                          now+max(delay,min(3600,30*2**min(row['attempts'],6))),row['dedupe_key']))
 
 
 def health():

@@ -84,8 +84,10 @@ def persist(usage, limit, stamp):
 def check():
     if os.getenv('AI_TRADER_CLOUD') != 'true':
         return
+    from retry_policy import DeferredProviderError
     try:
         limit=float(os.getenv('AI_MONTHLY_BUDGET_USD','25'))
+        check_provider_cooldown()
         if not math.isfinite(limit) or not 0 < limit <= 25:
             raise ValueError()
         response=requests.get('https://openrouter.ai/api/v1/key',
@@ -95,6 +97,8 @@ def check():
         if isinstance(usage,bool) or not isinstance(usage,(int,float)) or not math.isfinite(usage) or usage < 0:
             raise ValueError()
         persist(usage,limit,datetime.now(timezone.utc).isoformat())
+    except DeferredProviderError:
+        raise
     except Exception:
         raise BudgetUnavailable('ai_budget_verification_failed_closed') from None
     if usage >= limit:
@@ -110,6 +114,15 @@ def check():
         blocked_alert('credit_balance')
         raise BudgetUnavailable('ai_credit_balance_exhausted')
     check_payment_latch(balance)
+
+
+def check_provider_cooldown():
+    from database import get_db_connection
+    from retry_policy import DeferredProviderError
+    with get_db_connection() as conn:
+        row=conn.execute("SELECT value_json FROM scanner_settings WHERE key='ai_provider_retry_after'").fetchone()
+    if row and json.loads(row['value_json'])['until']>time.time():
+        raise DeferredProviderError(429,json.loads(row['value_json'])['until']-time.time())
 
 
 def check_payment_latch(balance):

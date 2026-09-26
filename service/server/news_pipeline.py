@@ -386,7 +386,8 @@ def _fetch_rss_collection(state: dict[str, Any], provider: str, feeds: tuple[tup
             errors.append(f"{url}:rate_limited")
         except Exception as exc:
             feed_states[url] = {**feed_state, "error": type(exc).__name__, "last_attempt_at": _z(at)}
-            errors.append(f"{url}:{type(exc).__name__}")
+            from retry_policy import detail
+            errors.append(f"{label}:{detail(exc)}")
     if not successes and errors:
         if retry_seconds:
             raise ProviderRateLimited("all provider endpoints rate limited", retry_seconds)
@@ -1022,7 +1023,7 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
             summary["errors"].append(f"{name}:{type(exc).__name__}")
             summary["providers"][name] = {"status": "error"}
             _update_provider(name, "error", current, cadence, state["coverage"], state,
-                             error=type(exc).__name__, retry_seconds=retry)
+                             error=str(exc)[:1500] if isinstance(exc, RuntimeError) else __import__('retry_policy').detail(exc), retry_seconds=retry)
     from scanner_engine import set_service_status
     if summary["providers_checked"] == 0:
         service_status = "backoff"
@@ -1052,7 +1053,8 @@ def _default_analyzer(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         except Exception as exc:
             # One malformed response must never poison every item in a batch.
             output.append({'id': row['id'], '_error': type(exc).__name__ + ':' +
-                           (str(exc) if isinstance(exc, ValueError) and str(exc).startswith('news_') else 'analysis_failed')})
+                           (str(exc) if str(exc).startswith(('news_', 'openrouter_transport_failed:', 'provider_http_')) else __import__('retry_policy').detail(exc)),
+                           '_retry_after':getattr(exc,'retry_after_seconds',0)})
     return output
 
 
@@ -1292,9 +1294,9 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
     if not rows:
         from scanner_engine import set_service_status
         conn = get_db_connection()
-        outstanding = conn.execute("SELECT COUNT(*) n FROM scanner_news_jobs WHERE status IN ('retry','failed')").fetchone()['n']
+        outstanding = conn.execute("SELECT COUNT(*) n FROM scanner_news_jobs WHERE status='retry'").fetchone()['n']
         conn.close()
-        set_service_status("news_ai", "error" if outstanding else "idle",
+        set_service_status("news_ai", "backoff" if outstanding else "idle",
                            f"Unresolved analysis jobs: {outstanding}" if outstanding else "No new due analysis jobs",
                            success=False)
         return {"analyzed": 0, "alerts": 0, "errors": []}
@@ -1335,14 +1337,15 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
         result = by_id.get(int(row["id"]))
         if result and result.get('_error'):
             attempts = int(row['attempts']) + 1
-            error = result['_error'][:120]
+            error = result['_error'][:1500]
             errors.append(error)
             state = 'failed' if attempts >= _int_env('STOCK_SCANNER_NEWS_ANALYSIS_MAX_ATTEMPTS', 6, 1, 20) else 'retry'
-            due = _z(current + timedelta(seconds=min(3600, 30 * 2 ** min(attempts, 7))))
+            if 'news_quality_rejected' in error: state='quality_rejected'
+            due = _z(current + timedelta(seconds=max(min(3600, 30 * 2 ** min(attempts, 7)),float(result.get('_retry_after') or 0))))
             cur.execute("UPDATE scanner_news_jobs SET status=?,attempts=?,next_attempt_at=?,last_error=?,updated_at=? WHERE id=?",
                         (state, attempts, due, error, stamp, row['job_id']))
-            cur.execute("UPDATE scanner_news SET analysis_status='analysis_error',analysis_error=?,updated_at=? WHERE id=?",
-                        (error, stamp, row['id']))
+            cur.execute("UPDATE scanner_news SET analysis_status=?,analysis_error=?,updated_at=? WHERE id=?",
+                        ('quality_rejected' if state=='quality_rejected' else 'analysis_error',error, stamp, row['id']))
             continue
         if not result:
             state = 'failed' if int(row['attempts']) + 1 >= _int_env('STOCK_SCANNER_NEWS_ANALYSIS_MAX_ATTEMPTS', 6, 1, 20) else 'retry'
@@ -1478,7 +1481,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
     conn.commit(); conn.close()
     from scanner_engine import set_service_status
     conn = get_db_connection()
-    unresolved = conn.execute("SELECT COUNT(*) n FROM scanner_news_jobs WHERE status IN ('retry','failed')").fetchone()['n']
+    unresolved = conn.execute("SELECT COUNT(*) n FROM scanner_news_jobs WHERE status='retry'").fetchone()['n']
     conn.close()
     set_service_status("news_ai", "error" if unresolved else "ok",
                        f"analyzed={analyzed} alerts_queued={alerts} unresolved={unresolved}", success=analyzed > 0)

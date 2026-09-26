@@ -5,6 +5,10 @@ import ai_budget
 
 
 class BudgetTests(unittest.TestCase):
+    def setUp(self):
+        mock=patch('ai_budget.check_provider_cooldown')
+        mock.start()
+        self.addCleanup(mock.stop)
     def probe(self, usage):
         response=MagicMock()
         response.json.return_value={'data':{'usage_monthly':usage,'total_credits':5,'total_usage':1}}

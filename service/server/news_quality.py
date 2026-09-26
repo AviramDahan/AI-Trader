@@ -283,7 +283,11 @@ def analyze_strict(row):
             1400, schema=REVIEW_SCHEMA)
         validate_object(review, REVIEW_SCHEMA)
         if not review['faithful'] or not review['fluent_hebrew'] or review['unsupported_claims'] or not numbers_grounded(result, facts) or not terminology_grounded(result, facts):
-            raise ValueError('news_quality_rejected')
+            raise ValueError('news_quality_rejected:'+json.dumps({
+                'faithful':review['faithful'],'fluent_hebrew':review['fluent_hebrew'],
+                'unsupported_claims':review['unsupported_claims'],
+                'numbers_grounded':numbers_grounded(result,facts),
+                'terminology_grounded':terminology_grounded(result,facts)}))
     # Previous headlines belong only in event comparison, never in the factual
     # translation review where they could contaminate names/prices themselves.
     duplicate = 0

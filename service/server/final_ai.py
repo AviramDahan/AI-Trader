@@ -153,6 +153,9 @@ def review(messages, validator):
             messages = messages + [{"role":"user","content":"The previous response was not valid for the required JSON schema. Return the complete schema object only. Do not change the decision to obtain acceptance; HOLD remains valid."}]
         except requests.RequestException as exc:
             status = getattr(getattr(exc,"response",None),"status_code",None)
+            metrics["reject_reason"] = "http_" + str(status) if status else type(exc).__name__
+            from retry_policy import defer_openrouter
+            if provider=='openrouter' and exc.response is not None: defer_openrouter(exc.response)
             if status == 402:
                 from ai_budget import payment_rejected
                 payment_rejected()

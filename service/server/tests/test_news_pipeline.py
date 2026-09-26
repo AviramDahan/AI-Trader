@@ -554,14 +554,15 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(facts['title'], 'Original headline')
         self.assertNotIn('AI text', json.dumps(facts))
 
-    def test_quality_failure_bounded_and_idle_does_not_hide_it(self):
+    def test_quality_failure_terminal_without_repeating_ai_and_idle_recovers(self):
         news_pipeline.ingest_items([self.item()], self.clock)
         analyzer = lambda rows: [{'id': r['id'], '_error': 'news_quality_rejected'} for r in rows]
         with patch.dict(os.environ, {'STOCK_SCANNER_NEWS_ANALYSIS_MAX_ATTEMPTS':'1'}):
             news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
-        self.assertEqual(self.rows('SELECT status FROM scanner_news_jobs')[0]['status'], 'failed')
+        self.assertEqual(self.rows('SELECT status FROM scanner_news_jobs')[0]['status'], 'quality_rejected')
         news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock + timedelta(hours=1))
-        self.assertEqual(self.rows("SELECT status FROM scanner_service_status WHERE component='news_ai'")[0]['status'], 'error')
+        self.assertEqual(self.rows("SELECT status FROM scanner_service_status WHERE component='news_ai'")[0]['status'], 'idle')
+        self.assertEqual(self.rows('SELECT attempts FROM scanner_news_jobs')[0]['attempts'],1)
         self.assertFalse(self.rows('SELECT * FROM scanner_telegram_outbox'))
 
     def test_semantic_duplicate_keeps_source_link_without_second_alert(self):

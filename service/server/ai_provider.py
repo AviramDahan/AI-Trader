@@ -39,6 +39,7 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news"):
         started=time.monotonic()
         body=None
         success=False
+        failure='request_or_validation_failed'
         try:
             response = requests.post("https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": "Bearer " + key},
@@ -60,11 +61,14 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news"):
             return value
         except requests.RequestException as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
+            from retry_policy import detail, defer_openrouter
+            failure=detail(exc)
+            if exc.response is not None: defer_openrouter(exc.response)
             if status == 402:
                 from ai_budget import payment_rejected
                 payment_rejected()
             if attempt or not (isinstance(exc, (requests.Timeout, requests.ConnectionError)) or status in {408,429,500,502,503,504}):
-                raise ValueError("openrouter_transport_failed") from None
+                raise ValueError("openrouter_transport_failed:"+failure) from None
         except (ValueError, KeyError, IndexError, jsonschema.ValidationError):
             if attempt:
                 raise ValueError("openrouter_schema_failed") from None
@@ -72,5 +76,5 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news"):
         finally:
             from ai_operations import record
             record('news_translation' if task in {'translation','news_translation','summary'} else 'news_analysis',
-                   model,body,started,success,None if success else 'request_or_validation_failed',retry=attempt>0)
+                   model,body,started,success,None if success else failure,retry=attempt>0)
         time.sleep(.25)

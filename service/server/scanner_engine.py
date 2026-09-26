@@ -1137,10 +1137,13 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             failed += 1
         else:
             attempts = int(row["attempts"]) + 1
-            delay = min(3600, 30 * (2 ** min(attempts, 7)))
+            policy=_loads(result,{})
+            if not isinstance(policy,dict): policy={}
+            terminal=bool(policy.get('terminal')) or attempts>=6
+            delay = max(min(3600, 30 * (2 ** min(attempts, 7))),float(policy.get('retry_after') or 0))
             due = (datetime.now(UTC) + timedelta(seconds=delay)).isoformat().replace("+00:00", "Z")
-            cur.execute("UPDATE scanner_telegram_outbox SET status='retry',attempts=?,next_attempt_at=?,last_error=? WHERE id=? AND status='sending'",
-                        (attempts, due, result, row["id"])); failed += 1
+            cur.execute("UPDATE scanner_telegram_outbox SET status=?,attempts=?,next_attempt_at=?,last_error=? WHERE id=? AND status='sending'",
+                        ('failed' if terminal else 'retry',attempts, due, result, row["id"])); failed += 1
         conn.commit(); conn.close()
     _service("telegram", "error" if failed else "ok", f"sent={sent} retry={failed}", success=not failed)
     if portfolio_changed:

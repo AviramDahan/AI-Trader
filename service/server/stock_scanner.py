@@ -733,6 +733,18 @@ def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = No
                                       "disable_web_page_preview": True}, timeout=15)
         response.raise_for_status()
         return "sent"
+    except requests.HTTPError as exc:
+        from retry_policy import retry_after
+        response=exc.response
+        status=response.status_code if response is not None else None
+        delay=retry_after(response.headers.get('Retry-After')) if response is not None else 0
+        try: delay=max(delay,float(response.json().get('parameters',{}).get('retry_after',0)))
+        except (ValueError,TypeError,AttributeError):pass
+        return json.dumps({'http_status':status,'retry_after':delay,'terminal':status in {400,401,403,404}})
+    except requests.ConnectTimeout:
+        return 'connect_timeout'
+    except (requests.ReadTimeout,requests.ConnectionError):
+        return json.dumps({'terminal':True,'reason':'delivery_unknown_manual_review'})
     except Exception:
         return "failed"
 
