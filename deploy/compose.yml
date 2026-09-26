@@ -151,10 +151,10 @@ services:
     command: [telegram]
     mem_limit: 512m
     cpus: 0.25
-    secrets: [database_url, telegram_bot_token]
+    secrets: [database_url, telegram_bot_token, openrouter_key]
     environment:
       <<: *env
-      OPENROUTER_API_KEY_FILE: ""
+      OPENROUTER_API_KEY_FILE: /run/secrets/openrouter_key
       STOCK_SCANNER_TOKEN_FILE: ""
     depends_on:
       migrate: {condition: service_completed_successfully}
