@@ -91,8 +91,12 @@ async def run_role(role):
     global ACTIVE_LEASE
     assert_schema()
     ACTIVE_LEASE = RoleLease(role)
-    from ai_operations import enqueue
-    enqueue('restart:'+role+':'+str(time.time_ns()),'AI-Trader Admin\nשירות הופעל מחדש: '+role)
+    # Notification failure must never prevent a critical role from starting.
+    try:
+        from ai_operations import enqueue
+        enqueue('restart:'+role+':'+str(time.time_ns()),'AI-Trader Admin\nשירות הופעל מחדש: '+role)
+    except Exception:
+        pass
     if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
         raise RuntimeError("workers_disabled_enable_only_after_snapshot_validation")
     if role == 'scanner' and not all(os.getenv(key) for key in (
