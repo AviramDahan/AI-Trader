@@ -565,6 +565,16 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(self.rows('SELECT attempts FROM scanner_news_jobs')[0]['attempts'],1)
         self.assertFalse(self.rows('SELECT * FROM scanner_telegram_outbox'))
 
+    def test_missing_hebrew_is_terminal_quality_not_transport_retry(self):
+        news_pipeline.ingest_items([self.item()],self.clock)
+        analyzer=lambda rows:[{'id':r['id'],'_error':'ValueError:news_missing_hebrew'} for r in rows]
+        news_pipeline.analyze_news_jobs(analyzer=analyzer,at=self.clock)
+        news_pipeline.analyze_news_jobs(analyzer=analyzer,at=self.clock+timedelta(hours=2))
+        row=self.rows('SELECT status,attempts FROM scanner_news_jobs')[0]
+        self.assertEqual(row['status'],'quality_rejected')
+        self.assertEqual(row['attempts'],1)
+        self.assertFalse(self.rows('SELECT * FROM scanner_telegram_outbox'))
+
     def test_semantic_duplicate_keeps_source_link_without_second_alert(self):
         news_pipeline.ingest_items([self.item()], self.clock)
         def analyzer(rows):

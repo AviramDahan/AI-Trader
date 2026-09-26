@@ -1344,7 +1344,8 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
             error = result['_error'][:1500]
             errors.append(error)
             state = 'failed' if attempts >= _int_env('STOCK_SCANNER_NEWS_ANALYSIS_MAX_ATTEMPTS', 6, 1, 20) else 'retry'
-            if 'news_quality_rejected' in error: state='quality_rejected'
+            if any(reason in error for reason in ('news_quality_rejected','news_missing_hebrew')):
+                state='quality_rejected'
             due = _z(current + timedelta(seconds=max(min(3600, 30 * 2 ** min(attempts, 7)),float(result.get('_retry_after') or 0))))
             cur.execute("UPDATE scanner_news_jobs SET status=?,attempts=?,next_attempt_at=?,last_error=?,updated_at=? WHERE id=?",
                         (state, attempts, due, error, stamp, row['job_id']))
@@ -1487,7 +1488,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
     conn = get_db_connection()
     unresolved = conn.execute("SELECT COUNT(*) n FROM scanner_news_jobs WHERE status='retry'").fetchone()['n']
     conn.close()
-    set_service_status("news_ai", "error" if unresolved else "ok",
+    set_service_status("news_ai", ("degraded" if analyzed else "error") if unresolved else "ok",
                        f"analyzed={analyzed} alerts_queued={alerts} unresolved={unresolved}", success=analyzed > 0)
     return {"analyzed": analyzed, "alerts": alerts, "errors": errors}
 
