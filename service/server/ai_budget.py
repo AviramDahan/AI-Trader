@@ -85,8 +85,8 @@ def check():
     if os.getenv('AI_TRADER_CLOUD') != 'true':
         return
     try:
-        limit=float(os.getenv('AI_MONTHLY_BUDGET_USD','20'))
-        if not math.isfinite(limit) or not 0 < limit <= 20:
+        limit=float(os.getenv('AI_MONTHLY_BUDGET_USD','25'))
+        if not math.isfinite(limit) or not 0 < limit <= 25:
             raise ValueError()
         response=requests.get('https://openrouter.ai/api/v1/key',
             headers={'Authorization':'Bearer '+os.environ['OPENROUTER_API_KEY']},timeout=(3,6))

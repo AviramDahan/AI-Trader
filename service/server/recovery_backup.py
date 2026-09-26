@@ -74,6 +74,8 @@ def backup(predeploy=False):
                 'snapshot_id':data['snapshot_id']}
         (repo.parent/'status.json').write_text(json.dumps(status))
         Path('/tmp/backup-ok').touch()
+        from scanner_engine import set_service_status
+        set_service_status('backup','ok','Encrypted off-server recovery state verified',success=True)
         print(json.dumps(status),flush=True)
         return status
 
@@ -87,6 +89,11 @@ def main():
         try:
             backup(args.predeploy)
         except Exception as exc:
+            try:
+                from scanner_engine import set_service_status
+                set_service_status('backup','error','Recovery backup failed')
+            except Exception:
+                pass
             # Never log database URLs, SSH details, source rows or provider errors.
             print(json.dumps({'backup':'failed','error_type':type(exc).__name__}),flush=True)
             if args.once: raise SystemExit(1)

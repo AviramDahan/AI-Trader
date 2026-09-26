@@ -94,7 +94,7 @@ def export_postgres(url):
     with psycopg.connect(url,row_factory=dict_row) as conn:
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
         conn.execute("SET LOCAL statement_timeout='30000'")
-        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version']!=2:
+        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] not in (2,3):
             raise ValueError('unsupported_source_schema')
         def select(table,condition,args=()):
             rows=conn.execute(sql.SQL('SELECT * FROM {} WHERE ').format(sql.Identifier(table))+condition,args).fetchall()

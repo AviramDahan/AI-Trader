@@ -1,0 +1,30 @@
+name: Private cloud health monitor
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/10 * * * *'
+permissions:
+  contents: read
+concurrency:
+  group: private-health-monitor
+  cancel-in-progress: false
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: .admin-watch
+          key: admin-health-${{ github.run_id }}
+          restore-keys: admin-health-
+      - run: python scripts/cloud_admin_watch.py
+        env:
+          BACKEND_URL: ${{ vars.BACKEND_URL }}
+          TELEGRAM_ADMIN_BOT_TOKEN: ${{ secrets.TELEGRAM_ADMIN_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+      - uses: actions/cache/save@v4
+        with:
+          path: .admin-watch
+          key: admin-health-${{ github.run_id }}

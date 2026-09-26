@@ -103,6 +103,8 @@ def review(messages, validator):
                        estimated_cost=None, result="error", reject_reason=None)
         start = time.monotonic()
         retry = False
+        body=None
+        sent=False
         try:
             if provider == 'openrouter':
                 from ai_budget import check, acquire_request_slot
@@ -116,6 +118,7 @@ def review(messages, validator):
                     "options":{"temperature":0,"num_predict":450},"messages":messages})
             else:
                 from ai_provider import request_options
+                sent=True
                 response = requests.post("https://openrouter.ai/api/v1/chat/completions", timeout=timeout,
                     headers={"Authorization":"Bearer " + os.environ["OPENROUTER_API_KEY"]},
                     json={"model":model,"messages":messages,"max_tokens":450,
@@ -159,6 +162,10 @@ def review(messages, validator):
             raise
         finally:
             metrics["latency"] = time.monotonic() - start
+            if provider=='openrouter' and sent:
+                from ai_operations import record
+                record('final_stock_review',model,body,start,metrics['result']=='validated',
+                       metrics['reject_reason'],retry=attempt>0)
             if trace is not None:
                 trace["attempts"].append(metrics)
                 trace["result"] = "reviewing" if retry else metrics["result"]

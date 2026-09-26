@@ -36,6 +36,9 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news"):
         from ai_budget import check, acquire_request_slot
         check()  # Outside repair handling: never retry a blocked budget.
         acquire_request_slot()
+        started=time.monotonic()
+        body=None
+        success=False
         try:
             response = requests.post("https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": "Bearer " + key},
@@ -53,6 +56,7 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news"):
                 jsonschema.validate(value, schema)
             elif not isinstance(value, dict):
                 raise ValueError("ai_object_required")
+            success=True
             return value
         except requests.RequestException as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
@@ -62,4 +66,8 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news"):
             if attempt:
                 raise ValueError("openrouter_schema_failed") from None
             messages.append({"role": "user", "content": "Return valid JSON matching the required schema; do not invent missing source facts."})
+        finally:
+            from ai_operations import record
+            record('news_translation' if task in {'translation','news_translation','summary'} else 'news_analysis',
+                   model,body,started,success,None if success else 'request_or_validation_failed',retry=attempt>0)
         time.sleep(.25)

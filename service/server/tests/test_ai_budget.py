@@ -18,10 +18,10 @@ class BudgetTests(unittest.TestCase):
     def test_under_cap_persists_usage(self):
         with patch.dict(os.environ,{'AI_TRADER_CLOUD':'true','OPENROUTER_API_KEY':'test'}), patch('ai_budget.requests.get',return_value=self.probe(18)), patch('ai_budget.persist') as persist:
             ai_budget.check()
-            self.assertEqual(persist.call_args.args[:2],(18,20))
+            self.assertEqual(persist.call_args.args[:2],(18,25))
 
     def test_exhaustion_stops_ai(self):
-        with patch.dict(os.environ,{'AI_TRADER_CLOUD':'true','OPENROUTER_API_KEY':'test'}), patch('ai_budget.requests.get',return_value=self.probe(20)), patch('ai_budget.persist'):
+        with patch.dict(os.environ,{'AI_TRADER_CLOUD':'true','OPENROUTER_API_KEY':'test'}), patch('ai_budget.requests.get',return_value=self.probe(25)), patch('ai_budget.persist'):
             with self.assertRaisesRegex(ai_budget.BudgetUnavailable,'exhausted'):
                 ai_budget.check()
 

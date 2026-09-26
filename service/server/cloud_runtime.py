@@ -14,7 +14,7 @@ ROLES = {
     "telegram": "stock_telegram_outbox,stock_telegram_status",
 }
 ROLE_KEYS = {"scanner": 11, "monitor": 12, "telegram": 13}
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 ACTIVE_LEASE = None
 
 
@@ -91,6 +91,8 @@ async def run_role(role):
     global ACTIVE_LEASE
     assert_schema()
     ACTIVE_LEASE = RoleLease(role)
+    from ai_operations import enqueue
+    enqueue('restart:'+role+':'+str(time.time_ns()),'AI-Trader Admin\nשירות הופעל מחדש: '+role)
     if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
         raise RuntimeError("workers_disabled_enable_only_after_snapshot_validation")
     if role == 'scanner' and not all(os.getenv(key) for key in (
@@ -104,6 +106,9 @@ async def run_role(role):
     os.environ["AI_TRADER_BACKGROUND_TASKS"] = ','.join(names)
     from tasks import start_background_tasks
     tasks = start_background_tasks()
+    if role == 'telegram':
+        from ai_operations import operations_loop
+        tasks.append(asyncio.create_task(operations_loop()))
     started_at = time.time()
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
