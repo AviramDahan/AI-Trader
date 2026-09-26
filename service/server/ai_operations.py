@@ -166,10 +166,18 @@ async def operations_loop():
                 row=conn.execute("SELECT updated_at FROM scanner_settings WHERE key='ai_cost_reconciliation'").fetchone()
             if not row or time.time()-datetime.fromisoformat(row['updated_at']).timestamp()>=3600:
                 await asyncio.to_thread(reconcile)
-            await asyncio.to_thread(health)
-            await asyncio.to_thread(send_one)
         except Exception:
-            # Operations failures cannot stop Telegram lifecycle or price monitoring.
+            try:
+                enqueue('reconciliation_failure:'+datetime.now(timezone.utc).strftime('%Y-%m-%dT%H'),
+                        'AI-Trader Admin\nהתאמת החיוב מול OpenRouter נכשלה. אין חישוב משוער במקום נתוני הספק.')
+            except Exception:
+                pass  # External watchdog handles a wholly unavailable database/server.
             import logging
             logging.getLogger(__name__).warning('Private operations check failed; no public fallback')
+        # A failed provider reconciliation must not block existing admin messages.
+        for operation in (health,send_one):
+            try:
+                await asyncio.to_thread(operation)
+            except Exception:
+                pass
         await asyncio.sleep(30)

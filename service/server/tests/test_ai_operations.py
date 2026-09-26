@@ -20,3 +20,13 @@ def test_private_alert_never_falls_back_to_public_chat():
     with patch.dict('os.environ',{'TELEGRAM_ADMIN_CHAT_ID':'','TELEGRAM_CHAT_ID':'public'}),patch.object(ops.requests,'post') as post:
         ops.send_one()
         post.assert_not_called()
+
+def test_reconciliation_failure_does_not_block_admin_delivery():
+    import asyncio
+    from unittest.mock import MagicMock,AsyncMock
+    import pytest
+    connection=MagicMock()
+    connection.__enter__.return_value.execute.return_value.fetchone.return_value=None
+    with patch('database.get_db_connection',return_value=connection),patch.object(ops,'reconcile',side_effect=RuntimeError()),patch.object(ops,'enqueue'),patch.object(ops,'health'),patch.object(ops,'send_one') as send,patch.object(ops.asyncio,'sleep',new=AsyncMock(side_effect=RuntimeError('end-test'))):
+        with pytest.raises(RuntimeError,match='end-test'):asyncio.run(ops.operations_loop())
+        send.assert_called_once()
