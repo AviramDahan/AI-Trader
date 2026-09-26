@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SESSION = ROOT / '.runtime/telegram-reader.session'
+SESSION = Path(os.getenv('TELEGRAM_SESSION_PATH', str(ROOT / '.runtime/telegram-reader.session')))
 
 
 def streaming_enabled():

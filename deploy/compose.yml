@@ -1,0 +1,208 @@
+name: ai-trader-cloud
+
+x-app: &app
+  image: ${APP_IMAGE:-ai-trader:staging}
+  build:
+    context: ..
+  restart: unless-stopped
+  init: true
+  read_only: true
+  user: "10001:10001"
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  stop_grace_period: 30s
+  pids_limit: 192
+  tmpfs: ["/tmp:size=256m,mode=1777"]
+  env_file: [./runtime.env]
+  environment: &env
+    AI_TRADER_CLOUD: "true"
+    AI_TRADER_API_BACKGROUND_TASKS: "false"
+    DATABASE_URL_FILE: /run/secrets/database_url
+    OPENROUTER_API_KEY_FILE: /run/secrets/openrouter_key
+    STOCK_SCANNER_TOKEN_FILE: /run/secrets/scanner_token
+    TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+    AI_TRADER_INTERNAL_API_URL: http://api:8000/api
+    AI_PROVIDER: openrouter
+    STOCK_SCANNER_FINAL_AI_PROVIDER: openrouter
+    STOCK_SCANNER_AI_CANDIDATE_LIMIT: "6"
+    API_STDERR_LOG: "true"
+    REDIS_ENABLED: "false"
+    OMP_NUM_THREADS: "1"
+    OPENBLAS_NUM_THREADS: "1"
+  secrets: [database_url, openrouter_key, scanner_token, telegram_bot_token]
+  volumes: [runtime:/app/.runtime, logs:/app/service/server/logs]
+  networks: [internal, egress]
+  logging:
+    driver: local
+    options: {max-size: "10m", max-file: "3"}
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      PUBLIC_API_HOST: ${PUBLIC_API_HOST:?Set the HTTPS API hostname}
+    volumes: [./Caddyfile:/etc/caddy/Caddyfile:ro, caddy_data:/data, caddy_config:/config]
+    networks: [internal, egress]
+    mem_limit: 192m
+    cpus: 0.25
+    logging:
+      driver: local
+      options: {max-size: "10m", max-file: "3"}
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ai_trader
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password, app_password]
+    volumes: [postgres_data:/var/lib/postgresql/data, ./01-app-user.sh:/docker-entrypoint-initdb.d/01-app-user.sh:ro]
+    networks: [internal]
+    command: [postgres, -c, shared_buffers=512MB, -c, max_connections=80, -c, work_mem=4MB]
+    mem_limit: 2g
+    cpus: 1.25
+    cpu_shares: 2048
+    shm_size: 512m
+    logging:
+      driver: local
+      options: {max-size: "10m", max-file: "3"}
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U ai_trader -d ai_trader']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  migrate:
+    <<: *app
+    command: [migrate]
+    restart: "no"
+    secrets: [database_url]
+    environment:
+      <<: *env
+      OPENROUTER_API_KEY_FILE: ""
+      STOCK_SCANNER_TOKEN_FILE: ""
+      TELEGRAM_BOT_TOKEN_FILE: ""
+    mem_limit: 512m
+    cpus: 0.5
+    depends_on:
+      postgres: {condition: service_healthy}
+  api:
+    <<: *app
+    command: [api]
+    mem_limit: 768m
+    cpus: 0.5
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, /app/service/server/cloud_runtime.py, health, api]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+  scanner:
+    <<: *app
+    command: [scanner]
+    mem_limit: 2g
+    cpus: 1.0
+    cpu_shares: 512
+    environment:
+      <<: *env
+      TELEGRAM_API_ID_FILE: /run/secrets/telegram_api_id
+      TELEGRAM_API_HASH_FILE: /run/secrets/telegram_api_hash
+      TELEGRAM_SESSION_PATH: /reader/telegram-reader.session
+    secrets: [database_url, openrouter_key, scanner_token, telegram_bot_token, telegram_api_id, telegram_api_hash]
+    volumes: [runtime:/app/.runtime, logs:/app/service/server/logs, reader_session:/reader]
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, /app/service/server/cloud_runtime.py, health, scanner]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+  monitor:
+    <<: *app
+    command: [monitor]
+    mem_limit: 768m
+    cpus: 0.75
+    cpu_shares: 2048
+    secrets: [database_url]
+    environment:
+      <<: *env
+      OPENROUTER_API_KEY_FILE: ""
+      STOCK_SCANNER_TOKEN_FILE: ""
+      TELEGRAM_BOT_TOKEN_FILE: ""
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, /app/service/server/cloud_runtime.py, health, monitor]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+  telegram:
+    <<: *app
+    command: [telegram]
+    mem_limit: 512m
+    cpus: 0.25
+    secrets: [database_url, telegram_bot_token]
+    environment:
+      <<: *env
+      OPENROUTER_API_KEY_FILE: ""
+      STOCK_SCANNER_TOKEN_FILE: ""
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, /app/service/server/cloud_runtime.py, health, telegram]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+  backup:
+    <<: *app
+    profiles: [backups]
+    entrypoint: [python, /app/service/server/recovery_backup.py]
+    mem_limit: 384m
+    cpus: 0.25
+    environment:
+      RECOVERY_GITHUB_REPO: ${RECOVERY_GITHUB_REPO:-AviramDahan/AI-Trader-Recovery}
+      AGE_RECIPIENT_FILE: /run/secrets/age_recipient
+      DATABASE_URL_FILE: /run/secrets/database_url
+    secrets: [database_url, age_recipient, recovery_deploy_key, github_known_hosts]
+    volumes: [recovery_backup:/backup]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, "import pathlib,time; assert time.time()-pathlib.Path('/tmp/backup-ok').stat().st_mtime < 7500"]
+      interval: 60s
+      start_period: 120s
+      retries: 2
+
+networks:
+  internal: {internal: true}
+  egress: {}
+volumes:
+  postgres_data: {}
+  runtime: {}
+  logs: {}
+  reader_session: {}
+  caddy_data: {}
+  caddy_config: {}
+  recovery_backup: {}
+secrets:
+  postgres_password: {file: ./secrets/postgres_password}
+  app_password: {file: ./secrets/app_password}
+  database_url: {file: ./secrets/database_url}
+  openrouter_key: {file: ./secrets/openrouter_key}
+  scanner_token: {file: ./secrets/scanner_token}
+  telegram_bot_token: {file: ./secrets/telegram_bot_token}
+  telegram_api_id: {file: ./secrets/telegram_api_id}
+  telegram_api_hash: {file: ./secrets/telegram_api_hash}
+  age_recipient: {file: ./secrets/age_recipient}
+  recovery_deploy_key: {file: ./secrets/recovery_deploy_key}
+  github_known_hosts: {file: ./secrets/github_known_hosts}

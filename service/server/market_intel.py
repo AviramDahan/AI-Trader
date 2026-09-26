@@ -609,6 +609,16 @@ def _generate_stock_analysis_summary(analysis: dict[str, Any]) -> str:
         f"Risk factors: {json.dumps(analysis.get('risk_factors') or [], ensure_ascii=True)}\n"
     )
 
+    if os.getenv("AI_TRADER_CLOUD") == "true" or os.getenv("AI_PROVIDER") == "openrouter":
+        from ai_provider import json_completion
+        try:
+            result = json_completion(prompt, {}, predict=250, task="summary", schema={
+                "type":"object","properties":{"summary":{"type":"string"}},
+                "required":["summary"],"additionalProperties":False})
+            return result["summary"][:500]
+        except ValueError:
+            return fallback_summary  # Deterministic metrics, never local AI.
+
     if OPENROUTER_API_KEY and OPENROUTER_MODEL and OpenRouter is not None:
         try:
             with OpenRouter(api_key=OPENROUTER_API_KEY) as client:

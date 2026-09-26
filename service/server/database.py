@@ -57,6 +57,10 @@ def begin_write_transaction(cursor: Any) -> None:
     """Start a write transaction using syntax compatible with the active backend."""
     if using_postgres():
         cursor.execute("BEGIN")
+        # SQLite BEGIN IMMEDIATE serialized all writers. Preserve that property
+        # for existing accounting read/modify/write transactions in PostgreSQL.
+        # Transaction-scoped: never retained over AI/network calls.
+        cursor.execute("SELECT pg_advisory_xact_lock(719321, 1)")
         return
     cursor.execute("BEGIN IMMEDIATE")
 
@@ -196,6 +200,12 @@ def _adapt_sql_for_postgres(sql: str) -> str:
     adapted = _SQLITE_REAL_PATTERN.sub("DOUBLE PRECISION", adapted)
     adapted = _ALTER_ADD_COLUMN_PATTERN.sub(r"ALTER TABLE \1 ADD COLUMN IF NOT EXISTS ", adapted)
     adapted = _replace_sqlite_datetime_functions(adapted)
+    # Scanner latency and news scheduling queries use SQLite scalar MIN/MAX
+    # and Julian day arithmetic; keep identical day units in PostgreSQL.
+    adapted = re.sub(r"\bjulianday\(\s*([\w.]+|\?)\s*\)",
+                     r"(EXTRACT(EPOCH FROM CAST(\1 AS timestamptz))/86400.0 + 2440587.5)", adapted, flags=re.I)
+    adapted = re.sub(r"\bMAX\(\s*0\s*,", "GREATEST(0,", adapted, flags=re.I)
+    adapted = re.sub(r"\bMIN\(\s*30\s*,", "LEAST(30,", adapted, flags=re.I)
     adapted = _escape_psycopg_percent_literals(adapted)
     adapted = _replace_unquoted_question_marks(adapted)
     return adapted
@@ -205,6 +215,12 @@ def _should_append_returning_id(sql: str) -> bool:
     stripped = sql.strip().rstrip(";")
     upper = stripped.upper()
     return upper.startswith("INSERT INTO ") and " RETURNING " not in upper
+
+
+class CompatibleRow(dict):
+    """Preserve sqlite.Row's named and positional access for original callers."""
+    def __getitem__(self, key):
+        return list(self.values())[key] if isinstance(key, int) else super().__getitem__(key)
 
 
 class DatabaseCursor:
@@ -219,6 +235,11 @@ class DatabaseCursor:
         if self._backend == "postgres":
             query = _adapt_sql_for_postgres(sql)
             should_capture_id = _should_append_returning_id(query)
+            if should_capture_id:
+                table = re.match(r"INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)", query, re.I).group(1)
+                # Several scanner state tables use a natural key, not an id.
+                self._cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=%s AND column_name='id'", (table,))
+                should_capture_id = self._cursor.fetchone() is not None
             if should_capture_id:
                 query = f"{query.strip().rstrip(';')} RETURNING id"
             self._cursor.execute(query, tuple(params or ()))
@@ -246,13 +267,15 @@ class DatabaseCursor:
         return self
 
     def fetchone(self):
-        return self._cursor.fetchone()
+        row = self._cursor.fetchone()
+        return CompatibleRow(row) if self._backend == "postgres" and row is not None else row
 
     def fetchall(self):
-        return self._cursor.fetchall()
+        rows = self._cursor.fetchall()
+        return [CompatibleRow(row) for row in rows] if self._backend == "postgres" else rows
 
     def __iter__(self):
-        return iter(self._cursor)
+        return (CompatibleRow(row) for row in self._cursor) if self._backend == "postgres" else iter(self._cursor)
 
     def __getattr__(self, name: str):
         return getattr(self._cursor, name)
@@ -273,6 +296,9 @@ class DatabaseConnection:
 
     def cursor(self):
         return DatabaseCursor(self._connection.cursor(), self._backend)
+
+    def execute(self, sql, params=None):
+        return self.cursor().execute(sql, params)
 
     def commit(self):
         self._connection.commit()
@@ -305,11 +331,17 @@ class DatabaseConnection:
 def get_db_connection():
     """Get database connection. Supports both SQLite and PostgreSQL."""
     if using_postgres():
+        if os.getenv("AI_TRADER_CLOUD") == "true":
+            from cloud_runtime import guard_lease
+            guard_lease()
         if psycopg is None:
             raise RuntimeError(
                 "PostgreSQL support requires psycopg. Install service requirements first."
             )
-        conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+        from psycopg.conninfo import conninfo_to_dict
+        base_options = conninfo_to_dict(DATABASE_URL).get("options", "")
+        conn = psycopg.connect(DATABASE_URL, row_factory=dict_row, connect_timeout=5,
+                              options=base_options + " -c statement_timeout=30000 -c lock_timeout=5000 -c idle_in_transaction_session_timeout=30000")
         return DatabaseConnection(conn, "postgres")
 
     db_path = _SQLITE_DB_PATH
@@ -1312,6 +1344,28 @@ def init_database():
             created_at TEXT NOT NULL
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scanner_final_ai_telemetry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            review_id TEXT NOT NULL UNIQUE,
+            scan_id TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            rank INTEGER NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
+            latency REAL NOT NULL,
+            retry_count INTEGER NOT NULL,
+            result TEXT NOT NULL,
+            reject_reason TEXT,
+            ai_call_saved INTEGER NOT NULL,
+            estimated_cost REAL,
+            attempts_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_final_ai_scan_rank ON scanner_final_ai_telemetry(scan_id,rank)")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scanner_orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

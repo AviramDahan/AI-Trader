@@ -11,13 +11,20 @@ from pathlib import Path
 env_path = Path(__file__).parent.parent.parent / ".env"
 from dotenv import load_dotenv, dotenv_values
 
-load_dotenv(env_path)
+if os.getenv("AI_TRADER_CLOUD") != "true":
+    load_dotenv(env_path)
 
 # This local deployment's private file is authoritative for Telegram routing.
 # An inherited Windows environment must not silently send alerts elsewhere.
-for _key, _value in dotenv_values(env_path).items():
+for _key, _value in ({} if os.getenv("AI_TRADER_CLOUD") == "true" else dotenv_values(env_path)).items():
     if _key in {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"} and _value is not None:
         os.environ[_key] = _value
+
+# Compose secrets are files, not image layers or public environment settings.
+for _key in ("DATABASE_URL", "OPENROUTER_API_KEY", "TELEGRAM_BOT_TOKEN",
+             "TELEGRAM_API_ID", "TELEGRAM_API_HASH", "STOCK_SCANNER_TOKEN"):
+    if os.getenv(_key + "_FILE"):
+        os.environ[_key] = Path(os.environ[_key + "_FILE"]).read_text(encoding="utf-8").strip()
 
 # ==================== Configuration ====================
 

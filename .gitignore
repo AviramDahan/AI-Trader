@@ -143,3 +143,6 @@ change.md
 # Local agent config symlink
 .codex
 .codex-remote-attachments/
+/deploy/runtime.env
+/deploy/secrets/
+*.active-snapshot.json

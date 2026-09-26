@@ -1,0 +1,4 @@
+deploy/*.sh text eol=lf
+deploy/*.sql text eol=lf
+Dockerfile text eol=lf
+service/server/migrations/*.sql text eol=lf

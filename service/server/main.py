@@ -54,8 +54,12 @@ if not api_access_log_enabled():
     logging.getLogger("uvicorn.access").propagate = False
 
 # Initialize database
-init_database()
-initialize_runtime()
+if os.getenv("AI_TRADER_CLOUD") == "true":
+    from cloud_runtime import assert_schema
+    assert_schema()
+else:
+    init_database()
+    initialize_runtime()
 
 # Create app
 app = create_app()

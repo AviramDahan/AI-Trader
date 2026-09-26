@@ -1,0 +1,8 @@
+{$PUBLIC_API_HOST} {
+    encode zstd gzip
+    reverse_proxy api:8000
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+    }
+}

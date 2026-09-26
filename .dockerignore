@@ -1,0 +1,12 @@
+**
+!service/
+!service/requirements.txt
+!service/requirements-telegram-reader.txt
+!service/server/
+!service/server/*.py
+!service/server/migrations/
+!service/server/migrations/*.sql
+!deploy/
+!deploy/*.sh
+!deploy/Caddyfile
+!Dockerfile

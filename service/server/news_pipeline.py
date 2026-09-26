@@ -624,7 +624,7 @@ def _priority_tickers(limit: int, checkpoint: dict[str, Any]) -> tuple[list[tupl
     open_rows = [(row["ticker"], row["company"]) for row in cur.fetchall()]
     cur.execute("SELECT ticker,company FROM scanner_news_watchlist WHERE enabled=1 ORDER BY created_at")
     watch_rows = [(row["ticker"], row["company"]) for row in cur.fetchall()]
-    cur.execute("SELECT DISTINCT ticker,company FROM scanner_signals WHERE status IN ('ACTIVE','PENDING_ENTRY','ENTERED') ORDER BY updated_at DESC")
+    cur.execute("SELECT ticker,company FROM scanner_signals WHERE status IN ('ACTIVE','PENDING_ENTRY','ENTERED') GROUP BY ticker,company ORDER BY MAX(updated_at) DESC")
     signal_rows = [(row["ticker"], row["company"]) for row in cur.fetchall()]
     cur.execute("SELECT ticker,MAX(company) company,MAX(id) latest FROM scanner_candidates WHERE status='candidate' GROUP BY ticker ORDER BY latest DESC LIMIT 100")
     candidates = [(row["ticker"], row["company"] or row["ticker"]) for row in cur.fetchall()]

@@ -19,7 +19,7 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-from database import begin_write_transaction, get_db_connection
+from database import begin_write_transaction, get_db_connection, using_postgres
 
 
 SCANNER_NAME = "us-stock-scanner"
@@ -906,6 +906,11 @@ def ingest_market_news() -> int:
 
 
 def _ollama_json(system: str, payload: Any, predict: int = 1000, schema: dict | None = None, model: str | None = None) -> Any:
+    if os.getenv("AI_TRADER_CLOUD") == "true" or os.getenv("AI_PROVIDER") == "openrouter":
+        from ai_provider import json_completion
+        value = json_completion(system, payload, predict=predict, schema=schema)
+        _service("ollama", "ok", "OpenRouter structured response succeeded", success=True)
+        return value
     base = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
     model = model or os.getenv("OLLAMA_MODEL", "qwen3.5:9b-q4_K_M")
     response = requests.post(base + "/api/chat", timeout=int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120")), json={
@@ -1062,6 +1067,16 @@ def _claim_telegram_outbox(limit: int = 20, lease_seconds: int = 300) -> list[di
     cur.execute("""UPDATE scanner_telegram_outbox
         SET status='retry',next_attempt_at=?,last_error='stale_dispatch_lease_recovered'
         WHERE status='sending' AND next_attempt_at<=?""", (stamp, stamp))
+    if using_postgres():
+        cur.execute("""WITH due AS (
+            SELECT id FROM scanner_telegram_outbox
+            WHERE status IN ('pending','retry') AND next_attempt_at<=?
+            ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED)
+            UPDATE scanner_telegram_outbox o SET status='sending',next_attempt_at=?,last_error=NULL
+            FROM due WHERE o.id=due.id RETURNING o.*""", (stamp, limit, lease_until))
+        rows = [dict(row) for row in cur.fetchall()]
+        conn.commit(); conn.close()
+        return rows
     cur.execute("""SELECT * FROM scanner_telegram_outbox
         WHERE status IN ('pending','retry') AND next_attempt_at<=?
         ORDER BY id LIMIT ?""", (stamp, limit))
@@ -1558,6 +1573,10 @@ def lifecycle_verification(cur, signals, trades, account):
         elif delivered and signal["action"] == "SELL":
             stages["telegram_sell_signal"] += 1
     expected_cash = float(account["initial_cash"])
+    cur.execute("SELECT value_json FROM scanner_settings WHERE key='active_snapshot_baseline'")
+    baseline = cur.fetchone()
+    if baseline:
+        expected_cash += float(json.loads(baseline["value_json"])["cash_adjustment"])
     for trade in trades:
         fills = trade["fills"]
         entries = [f for f in fills if f["fill_type"] == "entry"]

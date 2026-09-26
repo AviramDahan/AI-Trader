@@ -284,6 +284,7 @@ class StockScannerTests(unittest.TestCase):
                  patch.object(stock_scanner, "current_intraday_quote", return_value=(140, "2026-01-01T00:00:00+00:00")), \
                  patch.object(stock_scanner, "_localize_telegram_signal", side_effect=lambda value: value | {"telegram_reason_he": "סיבה", "telegram_news_he": []}), \
                  patch("scanner_engine.initialize_runtime"), \
+                 patch("final_ai.persist"), \
                  patch("scanner_engine.record_candidates"), \
                  patch("scanner_engine.record_scan_news"), \
                  patch("scanner_engine.set_service_status"), \
