@@ -830,7 +830,15 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
                 and _normal_title(str(old_facts.get("source_excerpt") or "")) ==
                 _normal_title(str(item.get("source_excerpt") or ""))
             )
+            # Missing excerpt in a refresh is not a correction of known facts.
+            # Changed titles and nonempty corrections still create revisions.
+            excerpt_missing_on_refresh = (
+                _normal_title(str(old_facts.get("title") or existing["title"] or "")) == _normal_title(item["title"])
+                and bool(str(old_facts.get("source_excerpt") or "").strip())
+                and not str(item.get("source_excerpt") or "").strip()
+            )
             if (old_version and old_version != version and not same_published_content
+                    and not excerpt_missing_on_refresh
                     and _canonical_url(existing["url"]) == item["url"]):
                 facts = {"title": item["title"], "source_excerpt": item.get("source_excerpt") or "",
                          "publisher": item["publisher"], "published_at": item["published_at"],
@@ -1265,8 +1273,7 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
         parts.insert(0, f"{row.get('original_publisher') or row['publisher']}\n{row['url']}")
         parts.append("CC BY 3.0 · כותרת בתרגום אוטומטי\nhttps://creativecommons.org/licenses/by/3.0/")
     from scanner_engine import enqueue_telegram
-    enqueue_telegram(cur, f"market-news:{row['id']}:{version}", "market_news", "\n\n".join(parts), published_at=row['published_at'])
-    return True
+    return enqueue_telegram(cur, f"market-news:{row['id']}:{version}", "market_news", "\n\n".join(parts), published_at=row['published_at'])
 
 
 def _company_for_ticker(cur, ticker: str) -> str:
@@ -1518,8 +1525,8 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                 alert_row = {**row, "ticker": ", ".join(linked_tickers), "company": ", ".join(linked_companies),
                              "impact": sentiment, "materiality": materiality,
                              "summary_he": result.get("summary_he"), "interpretation_he": result.get("interpretation_he")}
-                enqueue_telegram(cur, f"news:{row['id']}:{row.get('content_hash') or 'v1'}:{','.join(linked_tickers)}",
-                                 "position_news", _news_alert_message(alert_row), published_at=row['published_at']); alerts += 1
+                alerts += int(enqueue_telegram(cur, f"news:{row['id']}:{row.get('content_hash') or 'v1'}:{','.join(linked_tickers)}",
+                                 "position_news", _news_alert_message(alert_row), published_at=row['published_at']))
             # A watched open position already receives the position alert above;
             # never send a second notification for the same news/version.
             verified = {str(value).upper() for value in _loads(row.get("verified_tickers_json"), [])}
@@ -1550,8 +1557,8 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                     alert_row = {**row, "ticker": ticker, "company": watched_row["company"],
                                  "impact": sentiment, "materiality": materiality,
                                  "summary_he": result.get("summary_he"), "interpretation_he": result.get("interpretation_he")}
-                    enqueue_telegram(cur, f"watchlist-news:{row['id']}:{version}:{ticker}",
-                                     "watchlist_news", _watchlist_alert_message(alert_row), published_at=row['published_at']); alerts += 1
+                    alerts += int(enqueue_telegram(cur, f"watchlist-news:{row['id']}:{version}:{ticker}",
+                                     "watchlist_news", _watchlist_alert_message(alert_row), published_at=row['published_at']))
 
             # A strict broadcast tier covers important company news for
             # the rotating scanner shortlist even when no position/watchlist
@@ -1581,8 +1588,8 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                                  "impact": sentiment, "materiality": materiality,
                                  "summary_he": result.get("summary_he"),
                                  "interpretation_he": result.get("interpretation_he")}
-                    enqueue_telegram(cur, f"stock-news:{row['id']}:{version}:{','.join(allowed)}",
-                                     "stock_news", _stock_broadcast_alert_message(alert_row), published_at=row['published_at']); alerts += 1
+                    alerts += int(enqueue_telegram(cur, f"stock-news:{row['id']}:{version}:{','.join(allowed)}",
+                                     "stock_news", _stock_broadcast_alert_message(alert_row), published_at=row['published_at']))
 
     conn.commit(); conn.close()
     from scanner_engine import set_service_status
@@ -1634,17 +1641,19 @@ def run_position_summary_cycle(at: datetime | None = None) -> dict[str, Any]:
     feed = ({"errors": ["yahoo_priority:backoff"], "items_inserted": 0}
             if cooling_down else run_feed_cycle({"yahoo_priority": _fetch_yahoo_priority}, current, force=True))
     analysis = analyze_news_jobs(at=current) if not feed["errors"] else {"analyzed": 0}
+    errors = list(dict.fromkeys([*feed["errors"], *analysis.get("errors", [])]))
     cfg_hours = float(os.getenv("STOCK_SCANNER_POSITION_NEWS_INTERVAL_HOURS", "6"))
-    next_due = _z(current + (timedelta(minutes=15) if feed["errors"]
+    next_due = _z(current + (timedelta(minutes=15) if errors
                              else timedelta(hours=max(1, min(48, cfg_hours)))))
     total_new = 0
     conn = get_db_connection(); cur = conn.cursor()
     for row in due:
         cur.execute("SELECT COUNT(*) count FROM scanner_trade_news l JOIN scanner_trades t ON t.id=l.trade_id WHERE t.ticker=?", (row["ticker"],))
         added = max(0, int(cur.fetchone()["count"]) - before[row["ticker"]]); total_new += added
-        status = "error" if feed["errors"] else "new" if added else "no_new"
-        if feed["errors"]:
-            summary_he = "בדיקת החדשות נכשלה; לא ניתן לקבוע אם התפרסמו ידיעות חדשות."
+        status = "error" if errors else "new" if added else "no_new"
+        if errors:
+            summary_he = ("בדיקת החדשות נכשלה; לא ניתן לקבוע אם התפרסמו ידיעות חדשות."
+                          if feed["errors"] else "איסוף החדשות הושלם, אך ניתוח AI נכשל. הסקירה לא הושלמה בהצלחה.")
         elif not added:
             summary_he = "הסקירה הושלמה; לא נמצאו ידיעות חדשות לפוזיציה."
         else:
@@ -1663,10 +1672,10 @@ def run_position_summary_cycle(at: datetime | None = None) -> dict[str, Any]:
         cur.execute("""UPDATE scanner_news_schedule SET last_attempt_at=?,
             last_success_at=CASE WHEN ? THEN last_success_at ELSE ? END,
             next_due_at=?,status=?,error=?,summary_he=? WHERE ticker=?""",
-            (stamp, bool(feed["errors"]), stamp, next_due, status,
-             ",".join(feed["errors"]) if feed["errors"] else None, summary_he, row["ticker"]))
+            (stamp, bool(errors), stamp, next_due, status,
+             ",".join(errors) if errors else None, summary_he, row["ticker"]))
     conn.commit(); conn.close()
     from scanner_engine import set_service_status
-    set_service_status("position_news", "error" if feed["errors"] else "no_new" if not total_new else "ok",
-                       f"six_hour_reviews={len(due)} new_links={total_new} analyzed={analysis['analyzed']}", success=not feed["errors"])
-    return {"checked": len(due), "new": total_new, "errors": feed["errors"]}
+    set_service_status("position_news", "error" if errors else "no_new" if not total_new else "ok",
+                       f"six_hour_reviews={len(due)} new_links={total_new} analyzed={analysis['analyzed']}", success=not errors)
+    return {"checked": len(due), "new": total_new, "errors": errors}

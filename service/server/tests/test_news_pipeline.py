@@ -18,6 +18,85 @@ UTC = timezone.utc
 
 
 class NewsPipelineIntegrationTests(unittest.TestCase):
+    def test_missing_excerpt_refresh_preserves_analysis_and_content_version(self):
+        item = self.item(ticker='NVDA')
+        news_pipeline.ingest_items([item], self.clock)
+        news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer, at=self.clock)
+        before = self.rows('SELECT source_facts_json,content_hash,analysis_status,title_he,analyzed_at FROM scanner_news')[0]
+        for refreshed in ({**item, 'source_excerpt': ''}, {**item, 'source_excerpt': '   '}, item):
+            news_pipeline.ingest_items([refreshed], self.clock + timedelta(minutes=5))
+            self.assertEqual(before, self.rows('SELECT source_facts_json,content_hash,analysis_status,title_he,analyzed_at FROM scanner_news')[0])
+            analyzer = unittest.mock.Mock(side_effect=AssertionError('Unchanged evidence must not invoke AI'))
+            news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock + timedelta(minutes=6))
+            analyzer.assert_not_called()
+
+    def test_missing_excerpt_does_not_requeue_terminal_quality_rejection(self):
+        item = self.item(ticker='NVDA')
+        news_pipeline.ingest_items([item], self.clock)
+        news_pipeline.analyze_news_jobs(analyzer=lambda rows: [{'id': r['id'], '_error': 'news_quality_rejected'} for r in rows], at=self.clock)
+        news_pipeline.ingest_items([{**item, 'source_excerpt': ''}], self.clock)
+        self.assertEqual(self.rows('SELECT status,attempts FROM scanner_news_jobs')[0], {'status': 'quality_rejected', 'attempts': 1})
+
+    def test_real_content_corrections_still_requeue(self):
+        item = self.item(ticker='NVDA')
+        news_pipeline.ingest_items([item], self.clock)
+        for correction in ({**item, 'source_excerpt': 'Correction.'}, {**item, 'title': 'Company cancels previously announced update', 'source_excerpt': ''}):
+            news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer, at=self.clock)
+            news_pipeline.ingest_items([correction], self.clock)
+            self.assertEqual(self.rows('SELECT status FROM scanner_news_jobs')[0]['status'], 'pending')
+            self.assertEqual(json.loads(self.rows('SELECT source_facts_json FROM scanner_news')[0]['source_facts_json'])['source_excerpt'], correction['source_excerpt'])
+
+    def test_news_alert_count_matches_outbox_when_precutover_blocked(self):
+        for ticker in (None, 'NVDA'):
+            with self.subTest(ticker=ticker):
+                item = self.item(url='https://example.test/'+str(ticker), ticker=ticker)
+                item['title'] += ' ' + str(ticker)
+                item['published_at'] = (self.clock - timedelta(hours=2)).isoformat()
+                news_pipeline.ingest_items([item], self.clock)
+                with patch.dict(os.environ, {'TELEGRAM_NEWS_NOT_BEFORE': (self.clock - timedelta(hours=1)).isoformat()}):
+                    result = news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer, at=self.clock)
+                self.assertEqual(result['alerts'], 0)
+                self.assertFalse(self.rows('SELECT id FROM scanner_telegram_outbox'))
+
+    def test_enqueue_result_truthful_for_all_news_routes_and_duplicate(self):
+        with patch.dict(os.environ, {'TELEGRAM_NEWS_NOT_BEFORE': self.clock.isoformat()}):
+            conn = database.get_db_connection()
+            try:
+                for kind in ('market_news','stock_news','position_news','watchlist_news'):
+                    self.assertFalse(scanner_engine.enqueue_telegram(conn.cursor(), kind, kind, 'test', published_at=(self.clock-timedelta(seconds=1)).isoformat()))
+                    self.assertTrue(scanner_engine.enqueue_telegram(conn.cursor(), kind, kind, 'test', published_at=self.clock.isoformat()))
+                    self.assertFalse(scanner_engine.enqueue_telegram(conn.cursor(), kind, kind, 'test', published_at=self.clock.isoformat()))
+                conn.commit()
+            finally:
+                conn.close()
+        self.assertEqual(len(self.rows('SELECT id FROM scanner_telegram_outbox')), 4)
+
+    def test_six_hour_ai_failure_preserves_checkpoint_then_recovers(self):
+        self.open_trade()
+        previous = (self.clock-timedelta(hours=6)).isoformat()
+        conn = database.get_db_connection()
+        conn.execute('UPDATE scanner_news_schedule SET next_due_at=?,last_success_at=?', (self.clock.isoformat(), previous))
+        conn.commit(); conn.close()
+        trades_before = self.rows('SELECT remaining_quantity,current_stop FROM scanner_trades')
+        with patch.object(news_pipeline, 'run_feed_cycle', return_value={'errors': [], 'items_inserted': 0}), \
+             patch.object(news_pipeline, 'analyze_news_jobs', return_value={'analyzed': 0, 'errors': ['mock_ai_failure']}):
+            result = news_pipeline.run_position_summary_cycle(self.clock)
+        self.assertEqual(result['errors'], ['mock_ai_failure'])
+        row = self.rows('SELECT * FROM scanner_news_schedule')[0]
+        self.assertEqual(row['status'], 'error')
+        self.assertEqual(row['last_success_at'], previous)
+        self.assertIn('AI', row['summary_he'])
+        self.assertEqual(news_pipeline._parse_time(row['next_due_at']), self.clock+timedelta(minutes=15))
+        self.assertEqual(self.rows("SELECT status FROM scanner_service_status WHERE component='position_news'")[0]['status'], 'error')
+        with patch.object(news_pipeline, 'run_feed_cycle', return_value={'errors': [], 'items_inserted': 0}), \
+             patch.object(news_pipeline, 'analyze_news_jobs', return_value={'analyzed': 0, 'errors': []}):
+            news_pipeline.run_position_summary_cycle(self.clock+timedelta(minutes=15))
+        recovered = self.rows('SELECT * FROM scanner_news_schedule')[0]
+        self.assertEqual(recovered['status'], 'no_new')
+        self.assertIsNone(recovered['error'])
+        self.assertEqual(news_pipeline._parse_time(recovered['last_success_at']), self.clock+timedelta(minutes=15))
+        self.assertEqual(trades_before, self.rows('SELECT remaining_quantity,current_stop FROM scanner_trades'))
+
     def scan_item(self, ticker='NVDA', title='NVDA announces a new factory', age=0, excerpt=''):
         item = {'title':title,'publisher':'Issuer','url':f'https://example.test/{ticker}/{age}',
                 'published_at':(self.clock-timedelta(hours=age)).isoformat(),'source_excerpt':excerpt}

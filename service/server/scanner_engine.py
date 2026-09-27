@@ -288,19 +288,20 @@ def _fingerprint(ticker: str, url: str, title: str) -> str:
     return hashlib.sha256(f"{ticker.upper()}|{url.strip()}|{title.strip().lower()}".encode()).hexdigest()
 
 
-def enqueue_telegram(cursor, dedupe_key: str, event_type: str, message: str, *, published_at=None) -> None:
+def enqueue_telegram(cursor, dedupe_key: str, event_type: str, message: str, *, published_at=None) -> bool:
     # A clean-state cutover deliberately omits old news/delivery dedupe history.
     # Retain old items for analysis, but do not broadcast them as new messages.
     boundary = os.getenv('TELEGRAM_NEWS_NOT_BEFORE', '').strip()
     if boundary and event_type in {'market_news','position_news','watchlist_news','stock_news'}:
         if not published_at or parse_time(published_at) < parse_time(boundary):
-            return
+            return False
     cursor.execute("SELECT id FROM scanner_telegram_outbox WHERE dedupe_key=?", (dedupe_key,))
     if cursor.fetchone():
-        return
+        return False
     stamp = now_z()
     cursor.execute("INSERT INTO scanner_telegram_outbox(dedupe_key,event_type,message,status,attempts,next_attempt_at,created_at) VALUES(?,?,?,?,0,?,?)",
                    (dedupe_key, event_type, message[:4000], "pending", stamp, stamp))
+    return True
 
 
 def _telegram_ltr(value: object) -> str:
