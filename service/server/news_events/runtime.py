@@ -64,6 +64,8 @@ def ingest_items(items,at=None):
             from news_pipeline import PROVIDERS
             if pid not in PROVIDERS and pid!='scanner_yahoo':raise ValueError('unregistered_collector')
             raw={**item,'id':item.get('id') or item['url'],'excerpt':item.get('source_excerpt','')}
+            if pid=='global_voices':
+                raw.update(license_label='CC BY 3.0',license_url='https://creativecommons.org/licenses/by/3.0/')
             kind='official/regulatory' if pid in {'sec_edgar','federal_reserve','bls','ecb','fda','ftc','doj','eia'} else 'social/relay' if pid=='telegram_channels' else 'aggregator'
             if pid=='sec_edgar':
                 match=re.search(r'https://www\.sec\.gov/Archives/edgar/data/(\d+)/',item['url'])
@@ -177,6 +179,9 @@ def message(event,result,topic,tickers):
     if topic!='market_news':parts.append('פרשנות AI: '+result['interpretation_he'])
     # Attribution preserved for every contributing source, never invented.
     parts.append('\n'.join(s['publisher']+': '+s['url'] for s in event['sources'][:4]))
+    licenses={s.get('raw_metadata',{}).get('license_label','')+' '+s.get('raw_metadata',{}).get('license_url','')
+              for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')}
+    if licenses:parts.append('תרגום/תקציר AI · '+ '; '.join(sorted(licenses)))
     parts.append('פורסם: '+_publication_time_he(event['published_at']))
     return '\n\n'.join(parts)[:4000]
 

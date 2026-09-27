@@ -113,7 +113,7 @@ class BaseProvider:
     def source_timestamp(self,raw):return timestamp(raw['published_at'])
     def source_identity(self,raw):return str(raw.get('id') or self.canonical_url(raw))
     def raw_metadata(self,raw):
-        return {k:raw[k] for k in ('id','updated','categories','exchange','accession') if k in raw}
+        return {k:raw[k] for k in ('id','updated','categories','exchange','accession','license_label','license_url') if k in raw}
 
     def normalize(self,raw,collected_at):
         title,excerpt=text(raw.get('title')),text(raw.get('excerpt'))
