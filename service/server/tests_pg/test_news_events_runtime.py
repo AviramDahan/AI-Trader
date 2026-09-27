@@ -105,3 +105,61 @@ def test_success_before_crash_recovers_outbox_without_more_ai(live,monkeypatch):
     monkeypatch.setattr(runtime,'completion',Mock(side_effect=AssertionError('must not call AI twice')))
     assert runtime.analyze_jobs(at)['alerts']==1
     assert runtime.analyze_jobs(at)['alerts']==0
+
+
+def test_canonical_full_budget_usage_outbox_dispatch_once(live,monkeypatch):
+    from news_events import runtime
+    import ai_budget,requests,stock_scanner,scanner_engine
+    p,src,result,at,_=live;eid=p.ingest(src,at)
+    monkeypatch.setenv('AI_TRADER_CLOUD','true')
+    monkeypatch.setenv('OPENROUTER_MODEL','openai/gpt-6-luna')
+    monkeypatch.setenv('OPENROUTER_API_KEY','isolated-fixture-not-a-key')
+    monkeypatch.setattr(ai_budget,'check',Mock())
+    monkeypatch.setattr(ai_budget,'acquire_request_slot',Mock())
+    review=dict(faithful=True,fluent_hebrew=True,unsupported_claims=False,duplicate_of=0,material_new_fact=False,explanation='תקין')
+    def response(value,n):
+        return Mock(raise_for_status=Mock(),json=lambda:{'id':str(n),'choices':[{'message':{'content':json.dumps(value)},'finish_reason':'stop'}],
+            'usage':{'prompt_tokens':100,'completion_tokens':50,'cost':.0001}})
+    post=Mock(side_effect=[response(result,1),response(review,2)])
+    monkeypatch.setattr(requests,'post',post)
+    assert runtime.analyze_jobs(at)['analyzed']==1
+    assert post.call_count==2 # One event job, two billable editorial stages.
+    with p.store.transaction() as c:
+        assert c.execute('SELECT COUNT(*) n FROM ai_call_usage').fetchone()['n']==2
+        assert c.execute('SELECT COUNT(*) n FROM ne_ai_call_links').fetchone()['n']==2
+        assert abs(c.execute('SELECT SUM(actual_cost) v FROM ai_call_usage').fetchone()['v']-.0002)<1e-9
+        # Make the fixture due relative to the real dispatcher clock.
+        c.execute("UPDATE scanner_telegram_outbox SET next_attempt_at='2020-01-01T00:00:00Z'")
+    sender=Mock(return_value='sent')
+    monkeypatch.setattr(stock_scanner,'send_telegram',sender)
+    monkeypatch.setattr(stock_scanner,'settings',lambda:{'telegram_enabled':True})
+    assert scanner_engine.process_telegram_outbox()['sent']==1
+    assert scanner_engine.process_telegram_outbox()['sent']==0
+    sender.assert_called_once()
+
+
+def test_terminal_quality_does_not_reanalyze_or_publish(live,monkeypatch):
+    from news_events import runtime
+    from news_events.analysis import AnalysisFailure
+    import ai_budget
+    p,src,_,at,_=live;p.ingest(src,at)
+    monkeypatch.setattr(ai_budget,'check',Mock())
+    ai=Mock(side_effect=AnalysisFailure('news_quality_rejected:faithful',[]))
+    monkeypatch.setattr(runtime,'completion',ai)
+    runtime.analyze_jobs(at);runtime.analyze_jobs(at)
+    ai.assert_called_once()
+    with p.store.transaction() as c:
+        assert c.execute('SELECT count(*) n FROM scanner_telegram_outbox').fetchone()['n']==0
+
+
+def test_automatic_safety_rollback_never_changes_trade_tables(live,monkeypatch):
+    from news_events import watch
+    import ai_operations
+    p,_,_,at,_=live
+    admin=Mock();monkeypatch.setattr(ai_operations,'enqueue',admin)
+    watch.fail_back('test_integrity_alarm',at)
+    with p.store.transaction() as c:
+        assert c.execute('SELECT mode FROM ne_control').fetchone()['mode']=='phase1'
+        for table in ('scanner_trades','scanner_fills','scanner_accounts','scanner_orders'):
+            assert c.execute('SELECT count(*) n FROM '+table).fetchone()['n']==0
+    admin.assert_called_once()

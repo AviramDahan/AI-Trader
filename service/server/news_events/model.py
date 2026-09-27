@@ -112,7 +112,9 @@ EVENT_PATTERNS=(('earnings',r'earnings|quarter.*results|financial results'),
     ('insider_transaction',r'Form 4|insider.*(?:sale|purchase)'),
     ('regulatory',r'FDA|regulatory|SEC filing|FORM [48]|\b4/A\b'),
     ('management',r'appoint.*(?:CEO|officer)|chief executive'),
-    ('market',r'Federal Reserve|interest rates|inflation|nonfarm|CPI|FOMC'))
+    ('market',r'Federal Reserve|interest rates|inflation|nonfarm|CPI|FOMC|\bGDP\b|\bECB\b|'
+              r'\bOPEC\b|\btariffs?\b|\bsanctions?\b|\bTreasury yields?\b|\bceasefire\b|'
+              r'\btrade (?:deal|agreement|war)\b|\b(?:oil|gas) (?:prices?|supply)\b'))
 
 
 def event_type(title, excerpt):
