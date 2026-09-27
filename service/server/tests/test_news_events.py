@@ -44,6 +44,57 @@ def source(provider='yahoo',**kw):
     args.update(kw);return Source(**args)
 
 
+def test_prnewswire_live_rss_contract_publisher_excerpt_timestamp():
+    xml=b'''<rss xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><item>
+    <title>Apple Inc. quarterly results</title><link>https://www.prnewswire.com/news-releases/apple-123.html</link>
+    <guid>123</guid><pubDate>Sun, 27 Sep 2026 08:00:00 -0400</pubDate>
+    <description>Apple Inc. reported results.</description><dc:publisher>Apple Inc.</dc:publisher>
+    </item></channel></rss>'''
+    provider=RSSProvider(Config('prnewswire','https://www.prnewswire.com/rss/news-releases-list.rss','PR Newswire',enabled=True,rights='approved'),Mock(request=Mock(return_value=xml)))
+    raw=provider.fetch({},NOW)['items'][0];item=provider.normalize(raw,NOW)
+    assert item.publisher=='Apple Inc.' and item.provider_id=='prnewswire'
+    assert item.published_at==NOW.isoformat() and item.source_excerpt=='Apple Inc. reported results.'
+    assert item.source_id=='123' and item.url.endswith('apple-123.html')
+
+
+@pytest.mark.parametrize('date,expected', [('2026-09-27T08:00:00-04:00',NOW.isoformat()),('2026-09-27 12:00:00',None)])
+def test_investing_normalization_never_guesses_timezone(date,expected):
+    provider=RSSProvider(Config('investing','https://www.investing.com/rss/news.rss','Investing.com'))
+    raw=dict(url='https://www.investing.com/news/123',title='News',published_at=date)
+    if expected:assert provider.normalize(raw,NOW).published_at==expected
+    else:
+        with pytest.raises(ValueError,match='source_timezone_missing'):provider.normalize(raw,NOW)
+
+
+def test_benzinga_no_free_credential_does_not_make_request():
+    transport=Mock();provider=BenzingaProvider(Config('benzinga','https://api.benzinga.com/api/v2/news','Benzinga',enabled=True,rights='approved'),transport)
+    with pytest.raises(ProviderFailure,match='credential_required'):provider.fetch({},NOW)
+    transport.request.assert_not_called()
+
+
+def test_yahoo_direct_url_single_job_and_delivery_after_restart(env):
+    p,s,m=env;url='https://www.benzinga.com/news/26/09/123/apple-results'
+    a=source('yahoo',url=url,publisher='Benzinga',event_refs=())
+    b=replace(a,provider_id='benzinga',source_id='direct')
+    eid=p.ingest(a,NOW);assert p.ingest(b,NOW)==eid
+    ai=Mock(return_value=Analysis(RESULT));p.analyze(eid,ai,NOW);p.deliver_preview(eid,NOW)
+    restarted=Pipeline(Store(s.connect,sandbox=True),UNIVERSE,lambda:m,not_before=p.not_before)
+    assert restarted.ingest(b,NOW)==eid
+    restarted.analyze(eid,ai,NOW);assert restarted.deliver_preview(eid,NOW)==[]
+    assert len(rows(s,'SELECT * FROM ne_sources'))==2
+    ai.assert_called_once();assert len(rows(s,'SELECT * FROM ne_delivery'))==1
+
+
+def test_provider_change_admin_only_and_no_unchanged_notice(monkeypatch):
+    from news_events.provider_config import notify_changes
+    import ai_operations
+    sender=Mock();monkeypatch.setattr(ai_operations,'enqueue',sender)
+    before={'prnewswire':{'status':'disabled'}};after={'prnewswire':{'status':'ok'}}
+    notify_changes(before,after,NOW);sender.assert_called_once()
+    assert 'ENABLED' in sender.call_args.args[1]
+    sender.reset_mock();notify_changes(after,after,NOW);sender.assert_not_called()
+
+
 def rows(store,sql):
     with store.transaction() as c:return [dict(r) for r in c.execute(sql)]
 

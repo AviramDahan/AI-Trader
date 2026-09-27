@@ -9,10 +9,10 @@ from dataclasses import replace
 from .providers import DEFAULT_CONFIGS, registry
 
 BLOCKERS={
- 'investing':'source_timezone_missing; syndication_workflow_permission_unconfirmed',
+ 'investing':'timestamp timezone unresolved',
  'globenewswire':'cloud_http_response_timeout_after_successful_dns_tls; feed_license_confirmation_required',
- 'prnewswire':'written_owner_permission_for_redistribution_and_ai_workflow_required',
- 'benzinga':'licensed_news_api_token_and_redistribution_ai_scope_required',
+ 'prnewswire':'not_enabled',
+ 'benzinga':'free_news_api_credential_missing; official_rss_unavailable',
  'tipranks':'enterprise_market_news_contract_endpoint_schema_and_credentials_required',
 }
 
@@ -35,9 +35,32 @@ def collect(p,at):
     from .model import timestamp
     configs=configured()
     with p.store.transaction(True) as c:
+        before={r['provider_id']:json.loads(r['state_json']) for r in c.execute('SELECT * FROM ne_provider_state')}
         for cfg in configs:
             if cfg.enabled:continue
             value={'status':'disabled','error':BLOCKERS[cfg.provider_id],'next_at':None}
             c.execute('INSERT INTO ne_provider_state VALUES(?,?) ON CONFLICT(provider_id) DO UPDATE SET state_json=excluded.state_json',
                 (cfg.provider_id,json.dumps(value)))
-    return p.collect(registry([cfg for cfg in configs if cfg.enabled]),at)
+    result=p.collect(registry([cfg for cfg in configs if cfg.enabled]),at)
+    with p.store.transaction() as c:
+        after={r['provider_id']:json.loads(r['state_json']) for r in c.execute('SELECT * FROM ne_provider_state')}
+    notify_changes(before,after,at)
+    return result
+
+
+def notify_changes(before,after,at):
+    """Only provider transitions, private durable Admin outbox, no public send."""
+    from ai_operations import enqueue
+    from .model import fingerprint,timestamp
+    for pid,value in after.items():
+        if pid not in BLOCKERS:continue
+        old=before.get(pid,{})
+        signature=lambda v:(v.get('status'),v.get('error'),v.get('http_status'))
+        if signature(old)==signature(value):continue
+        status=value.get('status','unknown')
+        label='ENABLED' if status in {'ok','no_new','not_modified'} else 'DISABLED' if status=='disabled' else 'DEGRADED'
+        key='news_provider_transition:'+pid+':'+fingerprint([timestamp(at),signature(value)])
+        enqueue(key,'AI-Trader Admin\nNews provider: '+pid+' — '+label+
+                '\nStatus: '+status+'\nReason: '+str(value.get('error') or 'none')+
+                '\nHTTP: '+str(value.get('http_status') or 'n/a')+
+                '\nNext check: '+str(value.get('next_at') or 'n/a'))

@@ -136,7 +136,8 @@ class RSSProvider(BaseProvider):
         if b'<!DOCTYPE' in raw.upper() or b'<!ENTITY' in raw.upper():raise ProviderFailure('unsafe_xml',terminal=True)
         root=ET.fromstring(raw)
         rows=[]
-        ns={'a':'http://www.w3.org/2005/Atom','c':'http://purl.org/rss/1.0/modules/content/'}
+        ns={'a':'http://www.w3.org/2005/Atom','c':'http://purl.org/rss/1.0/modules/content/',
+            'dc':'http://purl.org/dc/elements/1.1/'}
         for node in root.findall('./channel/item')+root.findall('a:entry',ns):
             def value(tag):return node.findtext(tag,default='',namespaces=ns)
             link=value('link')
@@ -147,6 +148,7 @@ class RSSProvider(BaseProvider):
             refs=re.findall(r'''href=["'](https?://[^"']+)''',excerpt)
             rows.append({'id':value('guid') or value('a:id') or link,'url':link,
                 'title':value('title') or value('a:title'),'excerpt':excerpt,
+                'publisher':value('dc:publisher') or self.config.publisher,
                 'published_at':value('pubDate') or value('a:published'),
                 'event_refs':refs,'categories':[v.text for v in node.findall('category') if v.text]})
         return {'items':rows,'cursor':timestamp(now),'coverage':'broad RSS feed window; not full-universe guarantee'}
