@@ -81,6 +81,19 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         news_pipeline.bridge_scanner_news(self.clock)
         news_pipeline.bridge_scanner_news(self.clock)
         self.assertEqual(len(self.rows('SELECT * FROM scanner_news_jobs')),1)
+        canonical=self.rows('SELECT * FROM scanner_news WHERE provider IS NOT NULL')[0]
+        self.assertEqual(set(json.loads(canonical['verified_tickers_json'])),{'NVDA','INTC'})
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_news WHERE analysis_status='duplicate_event'")),1)
+        self.assertEqual(news_pipeline.bridge_scanner_news(self.clock)['verified'],0)
+
+    def test_verified_translated_universe_rows_are_not_stranded(self):
+        news_pipeline.ingest_items([self.item('yahoo_priority',ticker='NVDA')],self.clock)
+        conn=database.get_db_connection()
+        conn.execute("UPDATE scanner_news SET analysis_status='translated'")
+        conn.execute('DELETE FROM scanner_news_jobs')
+        conn.commit();conn.close()
+        news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer,at=self.clock)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='stock_news'")),1)
 
     def test_yahoo_preserves_supplied_excerpt_without_full_article_claim(self):
         with patch.object(news_pipeline,'_priority_tickers',return_value=([('INTC','Intel')],{},'test')), \

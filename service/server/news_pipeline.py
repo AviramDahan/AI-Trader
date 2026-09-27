@@ -1319,14 +1319,20 @@ def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
             w.enabled watch_enabled,w.created_at watch_created
         FROM scanner_news n LEFT JOIN scanner_news_watchlist w ON w.ticker=n.ticker
         WHERE n.analysis_status IN ('pending_translation','translated')
-          AND n.scope IN ('open_position','active_signal','watchlist','market')
+          AND n.scope IN ('open_position','active_signal','watchlist','market','universe')
           AND (n.scope!='market' OR n.provider IS NOT NULL)""")
     queued = 0
     for row in cur.fetchall():
         published = _parse_time(row["published_at"])
         if published < cutoff:
             continue
-        if row["scope"] == "market":
+        if row['scope'] == 'universe':
+            verified = _loads(row['verified_tickers_json'], [])
+            boundary = os.getenv('TELEGRAM_NEWS_NOT_BEFORE', '').strip()
+            if (not verified or published < current - timedelta(hours=feed_settings()['scan_bridge_max_age'])
+                    or (boundary and published < _parse_time(boundary))):
+                continue
+        elif row["scope"] == "market":
             if (os.getenv("STOCK_SCANNER_GENERAL_NEWS_ENABLED", "true").lower() != "true" or
                     published < current - timedelta(hours=_int_env("STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS", 6, 1, 24))):
                 continue
@@ -1346,7 +1352,7 @@ def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
                 AND status IN ('ACTIVE','PENDING_ENTRY','ENTERED') LIMIT 1""", (row["signal_id"],))
             if not cur.fetchone():
                 continue
-        priority = 100 if row["scope"] == "open_position" else 80 if row["scope"] == "watchlist" else 30 if row["scope"] == "market" else 70
+        priority = 100 if row["scope"] == "open_position" else 80 if row["scope"] == "watchlist" else 30 if row["scope"] == "market" else 40 if row['scope'] == 'universe' else 70
         cur.execute("UPDATE scanner_news SET analysis_status='pending_analysis',analysis_error=NULL,updated_at=? WHERE id=?",
                     (stamp, row["id"]))
         cur.execute("SELECT id FROM scanner_news_jobs WHERE news_id=?", (row["id"],))
