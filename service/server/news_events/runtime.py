@@ -145,7 +145,7 @@ def analyze_jobs(at=None):
     current=at or now();p=pipeline();p.recover_interrupted(current)
     with p.store.transaction() as c:
         unfinished=[r['event_id'] for r in c.execute("""SELECT e.event_id FROM ne_events e
-            WHERE e.status='analyzed' AND NOT EXISTS(SELECT 1 FROM ne_delivery d WHERE d.event_id=e.event_id AND d.version=e.evidence_version) LIMIT 20""")]
+            WHERE e.status='analyzed' AND e.reason IS NULL AND NOT EXISTS(SELECT 1 FROM ne_delivery d WHERE d.event_id=e.event_id AND d.version=e.evidence_version) LIMIT 20""")]
         rows=[dict(r) for r in c.execute("SELECT event_id FROM ne_events WHERE status='pending' ORDER BY created_at LIMIT 20")]
     recovered=0
     for eid in unfinished:

@@ -1152,6 +1152,11 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
     set_service_status("news_feed", service_status,
                        f"checked={summary['providers_checked']} inserted={summary['items_inserted']} errors={','.join(summary['errors'])}",
                        success=service_status in {"ok", "no_new", "not_modified", "degraded"})
+    from news_events.control import active
+    if active():
+        from news_events.runtime import pipeline
+        from news_events.provider_config import collect
+        summary['canonical_providers']=collect(pipeline(),current)
     return summary
 
 
@@ -1429,7 +1434,9 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                            f"Unresolved analysis jobs: {outstanding}" if outstanding else "No new due analysis jobs",
                            success=False)
         return {"analyzed": 0, "alerts": 0, "errors": []}
-    stale_ids = [row["id"] for row in rows if _parse_time(row["published_at"]) <
+    from news_events.control import state as news_control
+    fence=news_control().get('not_before')
+    stale_ids = [row["id"] for row in rows if (fence and _parse_time(row['published_at']) < _parse_time(fence)) or _parse_time(row["published_at"]) <
                  current - timedelta(hours=_int_env("STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS", 168, 24, 720))]
     if stale_ids:
         conn = get_db_connection(); cur = conn.cursor()

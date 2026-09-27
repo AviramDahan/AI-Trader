@@ -137,7 +137,7 @@ def import_data(data, url, *, allow_defaults=False, scanner_token=None):
         conn.execute("SET LOCAL lock_timeout='5s'")
         # v4 adds only isolated news-evidence tables. Portfolio schema and
         # validation are identical; these new tables are NOT snapshot contents.
-        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] not in (2,3,4):
+        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] not in (2,3,4,5):
             raise ValueError('unsupported_destination_schema')
         for key in ROLE_KEYS.values():
             if not conn.execute("SELECT pg_try_advisory_xact_lock(719322,%s) AS ok", (key,)).fetchone()["ok"]:

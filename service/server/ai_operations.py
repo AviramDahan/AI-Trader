@@ -257,7 +257,8 @@ async def operations_loop():
         # A failed provider reconciliation must not block existing admin messages.
         from budget_reports import schedule_reports, poll_commands
         from news_evidence_watch import check as evidence_check
-        for operation in (schedule_reports,poll_commands,health,evidence_check,send_one):
+        from news_events.watch import check as canonical_check
+        for operation in (schedule_reports,poll_commands,health,evidence_check,canonical_check,send_one):
             try:
                 await asyncio.to_thread(operation)
             except Exception:

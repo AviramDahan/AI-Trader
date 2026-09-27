@@ -289,6 +289,8 @@ def _fingerprint(ticker: str, url: str, title: str) -> str:
 
 
 def enqueue_telegram(cursor, dedupe_key: str, event_type: str, message: str, *, published_at=None) -> bool:
+    if not hasattr(cursor,'fetchone'):
+        cursor=cursor.cursor()
     from news_events.control import publication_allowed
     if not publication_allowed(cursor,dedupe_key,event_type,published_at):
         return False
