@@ -92,6 +92,21 @@ class NewsEvidenceTests(unittest.TestCase):
             evidence.fetch_filing(URL, 'test@example.com')
         response.read1.assert_not_called()
 
+    def test_total_deadline_also_bounds_slow_response_headers(self):
+        import time
+        connection = Mock()
+        def slow_headers():
+            time.sleep(.08)
+            return Mock(status=200)
+        connection.getresponse.side_effect = slow_headers
+        with patch.object(evidence, 'MAX_SECONDS', .04), \
+             patch.object(news_pipeline, 'SEC_LAST_REQUEST_AT', 0), \
+             patch.object(evidence, 'PinnedHTTPS', return_value=connection), \
+             patch.object(evidence, 'public_addresses', return_value=['8.8.8.8']), \
+             self.assertRaisesRegex(evidence.EvidenceError, 'deadline'):
+            evidence.fetch_filing(URL, 'test@example.com')
+        connection.abort.assert_called_once()
+
     def test_inline_xbrl_multiple_share_classes_and_wrong_issuer(self):
         raw = '''<html><ix:nonNumeric name="dei:EntityCentralIndexKey">0000320193</ix:nonNumeric>
         <ix:nonNumeric name="dei:TradingSymbol">OTHER</ix:nonNumeric>

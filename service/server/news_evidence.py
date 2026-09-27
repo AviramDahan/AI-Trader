@@ -119,6 +119,7 @@ class PinnedHTTPS(http.client.HTTPSConnection):
     def __init__(self, ip, timeout):
         super().__init__('www.sec.gov', timeout=timeout, context=ssl.create_default_context())
         self.ip = ip
+        self.transport = None
 
     def connect(self):
         family = socket.AF_INET6 if ':' in self.ip else socket.AF_INET
@@ -127,9 +128,19 @@ class PinnedHTTPS(http.client.HTTPSConnection):
             sock.settimeout(self.timeout)
             sock.connect((self.ip, 443))
             self.sock = self._context.wrap_socket(sock, server_hostname='www.sec.gov')
+            self.transport = self.sock
         except BaseException:
             sock.close()
             raise
+
+    def abort(self):
+        # shutdown interrupts a header/body read even when a peer trickles bytes
+        # just fast enough to evade the socket's inactivity timeout.
+        if self.transport is not None:
+            try:
+                self.transport.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
 
 def fetch_filing(url, user_agent):
@@ -152,11 +163,20 @@ def fetch_filing(url, user_agent):
             time.sleep(wait)
             news_pipeline.SEC_LAST_REQUEST_AT = time.monotonic()
             connection = PinnedHTTPS(addresses[0], min(3, deadline - time.monotonic()))
+            expired = threading.Event()
+            def expire():
+                expired.set()
+                connection.abort()
+            timer = threading.Timer(max(.001, deadline-time.monotonic()), expire)
+            timer.daemon = True
+            timer.start()
             try:
                 connection.request('GET', urlsplit(url).path, headers={
                     'User-Agent': user_agent, 'Accept-Encoding': 'identity',
                     'Accept': 'application/xml,text/xml,text/html'})
                 response = connection.getresponse()
+                if expired.is_set():
+                    raise EvidenceError('deadline', transient=True)
                 status = response.status
                 if status in (301, 302, 303, 307, 308):
                     if redirect == 2:
@@ -177,11 +197,13 @@ def fetch_filing(url, user_agent):
                 chunks, length = [], 0
                 while True:
                     remaining = deadline - time.monotonic()
-                    if remaining <= 0:
+                    if remaining <= 0 or expired.is_set():
                         raise EvidenceError('deadline', transient=True)
                     if connection.sock:
                         connection.sock.settimeout(min(3, remaining))
                     chunk = response.read1(min(8192, MAX_BYTES + 1 - length))
+                    if expired.is_set():
+                        raise EvidenceError('deadline', transient=True)
                     if not chunk:
                         break
                     chunks.append(chunk); length += len(chunk)
@@ -189,8 +211,9 @@ def fetch_filing(url, user_agent):
                         raise EvidenceError('body_too_large')
                 return b''.join(chunks).decode('utf-8-sig', errors='strict'), url
             except (OSError, http.client.HTTPException, UnicodeError):
-                raise EvidenceError('transport_or_encoding', transient=True) from None
+                raise EvidenceError('deadline' if expired.is_set() else 'transport_or_encoding', transient=True) from None
             finally:
+                timer.cancel()
                 connection.close()
     raise EvidenceError('redirect_limit')
 
