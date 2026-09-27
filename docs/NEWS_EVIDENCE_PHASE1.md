@@ -139,6 +139,10 @@ isolated runner permits temporary test .env fixtures but blocks the real .env.
 An additional pending-version delivery regression was added afterward: an old
 queued version cannot be rebuilt using a newer summary and duplicate the new alert.
 Stored evidence provenance remains visible when the collection kill switch is off.
+PostgreSQL CI initially detected the snapshot importer's old schema-2/3 allowlist.
+It now also recognizes the additive news-only schema 4; snapshot contents,
+portfolio validators and accounting are unchanged. The migration-count assertion
+was updated accordingly. Restore/continuation must pass again before activation.
 
 Before production activation:
 
