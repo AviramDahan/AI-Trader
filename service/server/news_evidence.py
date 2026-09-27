@@ -471,7 +471,10 @@ def audit(cur, row, result, reason=None, at=None):
     elif result.get('duplicate_of'):
         reasons.append('duplicate')
     elif not result.get('related'):
-        reasons.append('irrelevant')
+        # A personal filing containing only "FORM 4" is not evidence of
+        # irrelevance either. Distinguish inability to assess from a rejection.
+        missing = result.get('_missing_information', missing_information(row))
+        reasons.append('insufficient_information' if missing and row.get('scope') in ('open_position','watchlist') else 'irrelevant')
     elif result.get('materiality') == 'low':
         reasons.append('insufficient_information' if result.get('_missing_information', missing_information(row)) else 'low_importance')
     elif result.get('relevance', 0) < __import__('news_pipeline').feed_settings()['alert_min_relevance']:

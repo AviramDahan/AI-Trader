@@ -121,6 +121,41 @@ outcomes and 7 unchanged Yahoo items. Additional model calls: **0**. Additional 
 quality, end-to-end delivery latency, or the number of deserved publications.
 Those outcomes must not be reported as improved on this evidence alone.
 
+### Subsequent bounded real Luna comparison (two items only)
+
+After the source-only replay, two fixed stories (#420 DELL and #426 HOOD) were
+analyzed before/after with the **existing GPT-6 Luna, prompts, validators and
+editorial-repair limit**. Only source excerpts differed between each pair. The
+comparison used fixed peer context, not a live duplicate-delivery experiment.
+Normal provider budget checks/pacing remained in effect. No news/trading/outbox
+records were written; actual AI usage was recorded once in the existing cost
+ledger. The test had a conservative $0.03 upper budget and 12-call ceiling.
+
+- DELL before: quality pass, insufficient facts, related=false, low importance;
+  2 calls, $0.000249500, 7.617 seconds.
+- DELL after: quality rejected even after the one permitted editorial correction;
+  4 calls, $0.001156175, 18.599 seconds. No publication. We did not weaken the
+  validator or repeat the test to obtain a pass. The captured comparison does not
+  establish which individual quality subcheck caused rejection.
+- HOOD before: quality pass, metadata only, related=false, low importance;
+  2 calls, $0.000247600, 6.208 seconds.
+- HOOD after: quality pass, related=true, relevance 0.93, low importance, neutral;
+  3 calls, $0.000662600, 13.907 seconds. The summary retained the pre-existing
+  10b5-1 trading-plan qualification. Still **not eligible** for a material,
+  directional personal alert under the unchanged filters.
+
+Total: **11 calls, $0.002315875**, zero transport retries, one editorial repair plus
+its review, zero public messages, zero trading/news-state writes. This stage cost
+is additional to the $0 source-only replay above, not a second copy of ledger
+spend. Terminal rejection caching was separately tested offline; direct model
+comparison deliberately did not mutate production review caches.
+
+Verified corrected source gaps: 3/15. Proven newly deserved alerts: **none**.
+Observed incorrect company association in this selected sample: none accepted;
+wrong-issuer/redirect cases fail in isolated tests. Real public duplicate delivery
+and sustained queue latency were **not exercised**. These two model results do not
+justify generalizing quality/cost rates or promising higher news volume.
+
 ## Validation and activation gate
 
 `scripts/test_news_isolated.py` disables .env, blocks external sockets and runs

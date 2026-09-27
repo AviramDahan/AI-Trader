@@ -214,6 +214,9 @@ class NewsEvidenceTests(unittest.TestCase):
         with database.get_db_connection() as c:
             evidence.audit(c.cursor(), row, {**weak, '_missing_information':False})
         self.assertEqual(json.loads(self.rows('SELECT reasons_json FROM news_publication_audit')[0]['reasons_json']), ['low_importance'])
+        with database.get_db_connection() as c:
+            evidence.audit(c.cursor(), row, {**weak, 'related':False, '_missing_information':True})
+        self.assertEqual(json.loads(self.rows('SELECT reasons_json FROM news_publication_audit')[0]['reasons_json']), ['insufficient_information'])
 
     def test_versioned_delivery_can_publish_material_correction_not_same_version(self):
         row = self.article()
