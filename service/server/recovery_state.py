@@ -96,7 +96,7 @@ def export_postgres(url):
         conn.execute("SET LOCAL statement_timeout='30000'")
         # News-only v4 is additive; recovery still exports only active portfolio
         # state. No news bodies, histories or review-cache rows enter backups.
-        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] not in (2,3,4):
+        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] not in (2,3,4,5):
             raise ValueError('unsupported_source_schema')
         def select(table,condition,args=()):
             rows=conn.execute(sql.SQL('SELECT * FROM {} WHERE ').format(sql.Identifier(table))+condition,args).fetchall()

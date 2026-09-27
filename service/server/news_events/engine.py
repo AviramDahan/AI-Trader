@@ -71,7 +71,7 @@ class Pipeline:
             with self.store.transaction(True) as c:
                 saved=c.execute('SELECT state_json FROM ne_provider_state WHERE provider_id=?',(pid,)).fetchone()
                 state=json.loads(saved['state_json']) if saved else {}
-                if state.get('terminal') or state.get('next_at','')>timestamp(now) or state.get('lease_until','')>timestamp(now):return pid,state
+                if state.get('terminal') or (state.get('next_at') or '')>timestamp(now) or (state.get('lease_until') or '')>timestamp(now):return pid,state
                 # Short DB lease; no open transaction across provider I/O.
                 state['lease_until']=timestamp(now+timedelta(minutes=5))
                 c.execute('INSERT INTO ne_provider_state VALUES(?,?) ON CONFLICT(provider_id) DO UPDATE SET state_json=excluded.state_json',
