@@ -5,7 +5,6 @@ No provider/LLM calls, source fetching, trading writes or public notifications.
 import json
 from collections import Counter
 from datetime import datetime, timezone
-from database import get_db_connection
 
 
 def save(c, key, value, at):
@@ -15,6 +14,7 @@ def save(c, key, value, at):
 
 
 def check(now=None):
+    from database import get_db_connection
     now = now or datetime.now(timezone.utc)
     at = now.isoformat()
     with get_db_connection() as c:
