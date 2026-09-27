@@ -3681,6 +3681,16 @@ html[dir='rtl'] .main-content {
 .scanner-signal-identity { min-width: 0; }
 .scanner-signal-identity > span { display: block; margin-top: 3px; color: var(--text-secondary); }
 .scanner-signal-summary-meta { display: flex; flex: 0 0 auto; align-items: center; gap: 9px; }
+.position-return { display: flex; flex-direction: column; align-items: center; gap: 2px; white-space: nowrap; }
+.position-return b { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.position-return small { font-size: .65rem; color: var(--text-muted, #a0a7b4); }
+.position-return.positive b { color: #22c55e; }
+.position-return.negative b { color: #ef4444; }
+.position-return.neutral b { color: var(--text-muted, #a0a7b4); }
+@media (max-width: 480px) {
+  .scanner-trade-card .scanner-signal-summary-meta { flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 155px; }
+  .scanner-trade-card .scanner-signal-identity { min-width: 0; overflow-wrap: anywhere; }
+}
 .scanner-signal-chevron { color: var(--text-secondary); font-size: 22px; line-height: 1; transition: transform .18s ease; }
 .scanner-signal-card[open] .scanner-signal-chevron, .scanner-trade-card[open] .scanner-signal-chevron { transform: rotate(180deg); }
 .scanner-signal-body { margin-top: 14px; border-top: 1px solid var(--border-color); padding-top: 4px; }

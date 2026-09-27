@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { API_ORIGIN, useLanguage } from './appShared'
+import { positionMove, unifiedSignals } from './signalPresentation'
 
 type Dashboard = {
   market: { is_open: boolean }
@@ -44,7 +45,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const location = useLocation()
   const navigate = useNavigate()
   const requestedTab = new URLSearchParams(location.search).get('tab') || 'signals'
-  const tab = ['signals', 'trades', 'results', 'news', 'status'].includes(requestedTab) ? requestedTab : 'signals'
+  const tab = requestedTab === 'trades' ? 'signals' : ['signals', 'results', 'news', 'status'].includes(requestedTab) ? requestedTab : 'signals'
   const [data, setData] = useState<Dashboard | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -205,8 +206,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   }
   const activity = data?.activity || {}
   const primaryName = he ? (data?.primary_user?.display_name_he || 'סיגנלים פעילים') : (data?.primary_user?.display_name || 'Active Signals')
-  const activeSignals = (data?.signals || []).filter(isActiveSignal)
-  const historicSignals = (data?.signals || []).filter(item => !item.legacy_unverified && !isActiveSignal(item))
+  const unified = unifiedSignals(data?.signals || [], data?.trades || [], isActiveSignal)
   const filteredNews = useMemo(() => (data?.news || []).filter(item => {
     const tickerOk = !tickerFilter || [item.ticker, ...(item.verified_tickers || [])].join(' ').toUpperCase().includes(tickerFilter.toUpperCase())
     const sentimentOk = sentimentFilter === 'all' || item.sentiment === sentimentFilter || item.impact === sentimentFilter
@@ -221,7 +221,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const sourceOptions = useMemo(() => Array.from(new Set((data?.news || []).map(item => item.provider || item.publisher).filter(Boolean))).sort(), [data])
 
   const tabs = [
-    ['signals', text('סיגנלים', 'Signals')], ['trades', text('עסקאות דמו', 'Demo trades')],
+    ['signals', text('סיגנלים', 'Signals')],
     ['results', text('תוצאות', 'Results')], ['news', text('חדשות', 'News')],
     ['status', text('מצב הסורק', 'Scanner status')],
   ]
@@ -303,22 +303,15 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     </nav>
 
     {tab === 'signals' && <div className="scanner-section">
-      <h2>{text('סיגנלים פעילים', 'Active signals')} <small>{activeSignals.length}</small></h2>
-      {!activeSignals.length && <Empty text={text('אין כרגע סיגנלים חזקים פעילים — זה מצב תקין והמסננים לא הוחלשו.', 'No strong active signals right now — this is normal and filters were not weakened.')} />}
-      {[['pending', text('ממתינים לכניסה', 'Awaiting entry')], ['entered', text('כניסה בוצעה', 'Entry filled')]].map(([group, label]) => {
-        const signals = activeSignals.filter(signal => (signal.status === 'ENTERED') === (group === 'entered'))
-        return <section className="signal-group" key={group}><h3>{label} <small>{signals.length}</small></h3>
-          <div className="signal-list">{signals.map(signal => <SignalCard key={signal.id} signal={signal} he={he} />)}</div>
-        </section>
-      })}
-      <details className="signal-history"><summary>{text('היסטוריה', 'History')} · {historicSignals.length}</summary>
-        <div className="signal-list">{historicSignals.map(signal => <SignalCard key={signal.id} signal={signal} he={he} />)}</div>
-      </details>
+      <h2>{text('פוזיציות פתוחות', 'Open positions')} <small>{unified.open.length}</small></h2>
+      <div className="signal-list">{unified.open.map(trade => <TradeCard key={trade.id} trade={trade} signal={data?.signals.find(s => String(s.id) === String(trade.signal_id))} schedules={data?.news_schedules || []} he={he} />)}</div>
+      {!!unified.waiting.length && <section className="signal-group"><h3>{text('סיגנלים — טרם בוצעה כניסה', 'Signals — entry not filled')} <small>{unified.waiting.length}</small></h3><div className="signal-list">{unified.waiting.map(signal => <SignalCard key={signal.id} signal={signal} he={he} />)}</div></section>}
+      {!unified.open.length && !unified.waiting.length && <Empty text={text('אין כרגע פוזיציות או סיגנלים פעילים.', 'No open positions or active signals.')} />}
     </div>}
 
-    {tab === 'trades' && <div className="scanner-section">
-      <h2>{text('עסקאות פתוחות', 'Open trades')} <small>{(data?.trades || []).filter(trade => !trade.is_shadow && trade.status === 'open').length}</small></h2>
-      <div className="signal-list">{(data?.trades || []).filter(trade => !trade.is_shadow && trade.status === 'open').map(trade => <TradeCard key={trade.id} trade={trade} schedules={data?.news_schedules || []} he={he} />)}</div>
+    {tab === 'results' && <div className="scanner-section">
+      <h2>{text('תוצאות והיסטוריה', 'Results and history')}</h2>
+      <details className="signal-history"><summary>{text('סיגנלים שלא בוצעו', 'Unfilled signals')} · {unified.history.length}</summary><div className="signal-list">{unified.history.map(signal => <SignalCard key={signal.id} signal={signal} he={he} />)}</div></details>
       <details className="signal-history trade-history"><summary>{text('היסטוריית עסקאות', 'Trade history')} · {(data?.trades || []).filter(trade => !trade.is_shadow && trade.status !== 'open').length}</summary>
         <div className="signal-list">{(data?.trades || []).filter(trade => !trade.is_shadow && trade.status !== 'open').map(trade => <TradeCard key={trade.id} trade={trade} schedules={data?.news_schedules || []} he={he} />)}</div>
       </details>
@@ -458,21 +451,23 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
   </details>
 }
 
-function TradeCard({ trade, schedules, he }: { trade: Record<string, any>, schedules: Record<string, any>[], he: boolean }) {
+function TradeCard({ trade, signal, schedules, he }: { trade: Record<string, any>, signal?: Record<string, any>, schedules: Record<string, any>[], he: boolean }) {
   const [opened, setOpened] = useState(false)
   const activeTargets = [1,2,3].filter(i => Number(trade[`operational_tp${i}_pct`] ?? trade[`tp${i}_pct`] ?? 0) > 0)
   const schedule = schedules.find(item => item.ticker === trade.ticker)
   const plan = trade.settings?.target_plan
   const currentPrice = trade.current_price ?? trade.last_price
   const currentPriceAt = trade.price_as_of ?? trade.last_bar_at
+  const move = positionMove(trade)
   const stamp = (value: any) => value ? new Date(value).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
   return <details className="scanner-trade-card signal-focused" id={`trade-${trade.id}`} onToggle={event => setOpened(event.currentTarget.open)}>
     <summary className="scanner-signal-summary">
       <span className="scanner-signal-identity"><b className="scanner-ticker" dir="ltr">{trade.ticker}</b><span>{trade.company}</span></span>
-      <span className="scanner-signal-summary-meta">{!!trade.legacy_position_id && <small className="signal-status-label">Legacy</small>}<span className="scanner-chip">{trade.status === 'open' ? (he ? 'פתוחה' : 'Open') : (he ? 'סגורה' : 'Closed')}</span><span className="scanner-signal-chevron" aria-hidden="true">⌄</span></span>
+      <span className="scanner-signal-summary-meta">{trade.status === 'open' && <span className={`position-return ${move == null || Math.abs(move) < .005 ? 'neutral' : move > 0 ? 'positive' : 'negative'}`} title={he ? 'שינוי במחיר מהכניסה בפועל; לפני עמלות, לא תשואה כוללת לאחר מימושים' : 'Price change from actual entry; before fees, not total return after partial exits'}><b dir="ltr">{move == null ? '—' : `${move > 0 ? '+' : ''}${move.toFixed(2)}%`}</b><small>{he ? 'מהכניסה' : 'from entry'}{trade.price_stale ? (he ? ' · ישן' : ' · stale') : ''}</small></span>}{!!trade.legacy_position_id && <small className="signal-status-label">Legacy</small>}<span className="scanner-chip">{trade.status === 'open' ? (he ? 'פתוחה' : 'Open') : (he ? 'סגורה' : 'Closed')}</span><span className="scanner-signal-chevron" aria-hidden="true">⌄</span></span>
     </summary>
     <div className="scanner-signal-body">
     {!!trade.legacy_position_id && <p className="signal-price-time">{he ? 'Legacy · היסטוריה לא מאומתת; לא נכללת בתוצאות המאומתות.' : 'Legacy · Unverified history; excluded from verified results.'}</p>}
+    {signal && <details className="signal-secondary" id={`signal-${signal.id}`}><summary>{he ? 'ניתוח הסיגנל המקורי' : 'Original signal analysis'}</summary><p>{(he && signal.reason_he) || signal.reason}</p><p>{he ? 'כניסה מתוכננת' : 'Planned entry'}: {fmtPrice(signal.planned_entry)}</p></details>}
     <div className="signal-summary-levels">
       <span><small>{he ? 'מחיר אחרון' : 'Last price'}{trade.price_stale ? (he ? ' · ישן' : ' · stale') : ''}</small><b dir="ltr">{fmtPrice(currentPrice)}</b></span>
       <span><small>{he ? 'כניסה' : 'Entry'}</small><b dir="ltr">{fmtPrice(trade.entry_price)}</b></span>

@@ -53,11 +53,11 @@ class ChartTests(unittest.TestCase):
         with patch("database.get_db_connection",return_value=connection), \
              patch.object(telegram_charts,"entry_chart_bytes",return_value=b"\x89PNGfixture"), \
              patch.dict("os.environ",{"TELEGRAM_BOT_TOKEN":"test-token","TELEGRAM_CHAT_ID":"-5435768720",
-                                       "TELEGRAM_TRADING_THREAD_ID":"202","TELEGRAM_TRADES_THREAD_ID":""}), \
+                                       "TELEGRAM_SIGNALS_THREAD_ID":"211","TELEGRAM_TRADING_THREAD_ID":"202","TELEGRAM_TRADES_THREAD_ID":""}), \
              patch.object(telegram_charts.requests,"Session",return_value=session):
             self.assertEqual(telegram_charts.send_entry_chart(1),"sent")
         call = session.post.call_args
         self.assertEqual(call.kwargs["data"]["chat_id"],"-5435768720")
-        self.assertEqual(call.kwargs["data"]["message_thread_id"],202)
+        self.assertEqual(call.kwargs["data"]["message_thread_id"],211)
         self.assertIn("TP1",call.kwargs["data"]["caption"])
         self.assertIn("כניסה בפועל",call.kwargs["data"]["caption"])

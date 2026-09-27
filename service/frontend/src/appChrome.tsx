@@ -147,7 +147,6 @@ export function Sidebar() {
 
   const navItems = [
     { path: '/market?tab=signals', icon: '📊', label: language === 'he' ? 'סיגנלים' : 'Signals' },
-    { path: '/market?tab=trades', icon: '🧾', label: language === 'he' ? 'עסקאות דמו' : 'Demo trades' },
     { path: '/market?tab=results', icon: '📈', label: language === 'he' ? 'תוצאות' : 'Results' },
     { path: '/market?tab=news', icon: '🗞️', label: language === 'he' ? 'חדשות' : 'News' },
     { path: '/market?tab=status', icon: '⚙️', label: language === 'he' ? 'מצב הסורק' : 'Scanner status' },

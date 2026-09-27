@@ -45,3 +45,6 @@ jobs:
         run: npm ci --prefix service/frontend
       - name: Build frontend
         run: npm --prefix service/frontend run build
+      - name: Unified signals presentation regression
+        working-directory: service/frontend
+        run: node test-signal-presentation.cjs

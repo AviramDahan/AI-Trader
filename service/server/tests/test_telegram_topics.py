@@ -64,7 +64,7 @@ class TelegramTopicRoutingTests(unittest.TestCase):
             self.assertEqual(thread_id_for_event("new_signal"), 211)
             self.assertEqual(thread_id_for_event("signals_status"), 211)
             for event in ("entry", "entry_chart", "tp", "stop", "sell", "stop_change"):
-                self.assertEqual(thread_id_for_event(event), 212)
+                self.assertEqual(thread_id_for_event(event), 211)
             self.assertEqual(thread_id_for_event("portfolio_status"), 303)
 
     def test_missing_or_invalid_thread_falls_back_to_general_chat(self):
