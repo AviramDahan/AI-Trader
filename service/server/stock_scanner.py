@@ -397,6 +397,9 @@ def fetch_recent_news(ticker: str, company: str, max_age_hours: float) -> list[d
         items.append({"title": title[:300], "publisher": str(row.get("publisher") or "Yahoo Finance")[:100],
                       "url": link, "published_at": datetime.fromtimestamp(published, timezone.utc).isoformat(),
                       "age_hours": round(age_hours, 2), "relevance": round(relevance, 3)})
+        # Preserve only explicit provider text; never infer a body from a title.
+        if isinstance(row.get('summary'), str) and row['summary'].strip():
+            items[-1]['source_excerpt'] = row['summary'].strip()[:2000]
     items.sort(key=lambda item: item["published_at"], reverse=True)
     return items[:5]
 

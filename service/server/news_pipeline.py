@@ -131,7 +131,8 @@ def feed_settings() -> dict[str, Any]:
         "enabled": os.getenv("STOCK_SCANNER_NEWS_FEED_ENABLED", "true").lower() == "true",
         "cadence": cadence,
         "yahoo_cadence": _int_env("STOCK_SCANNER_YAHOO_NEWS_INTERVAL_SECONDS", 900, 300, 21600),
-        "yahoo_tickers": _int_env("STOCK_SCANNER_YAHOO_NEWS_TICKERS_PER_CYCLE", 10, 1, 50),
+        "yahoo_tickers": _int_env("STOCK_SCANNER_YAHOO_NEWS_TICKERS_PER_CYCLE", 20, 1, 50),
+        "scan_bridge_max_age": _int_env("STOCK_SCANNER_NEWS_SCAN_BRIDGE_MAX_AGE_HOURS", 6, 1, 24),
         "analysis_interval": _int_env("STOCK_SCANNER_NEWS_AI_INTERVAL_SECONDS", 2, 1, 3600),
         # Large JSON batches can exhaust Ollama's output budget mid-object.
         "analysis_batch": _int_env("STOCK_SCANNER_NEWS_AI_BATCH_SIZE", 3, 1, 30),
@@ -630,18 +631,27 @@ def _priority_tickers(limit: int, checkpoint: dict[str, Any]) -> tuple[list[tupl
     cur.execute("SELECT ticker,MAX(company) company,MAX(id) latest FROM scanner_candidates WHERE status='candidate' GROUP BY ticker ORDER BY latest DESC LIMIT 100")
     candidates = [(row["ticker"], row["company"] or row["ticker"]) for row in cur.fetchall()]
     conn.close()
+    # Rotate beyond technical candidates too; no network/LLM call for discovery.
+    try:
+        members = _loads((ROOT / '.runtime/stock-universe.json').read_text(encoding='utf-8'), {})['members']
+        candidates.extend((ticker, value.get('company') or ticker) for ticker, value in sorted(members.items()))
+    except (OSError, KeyError, TypeError, AttributeError):
+        pass
     fixed: list[tuple[str, str]] = []
     seen: set[str] = set()
     for row in open_rows + watch_rows + signal_rows:
         if row[0] not in seen:
             fixed.append(row); seen.add(row[0])
     remaining = max(0, limit - len(fixed))
-    pool = [row for row in candidates if row[0] not in seen]
+    pool = []
+    for row in candidates:
+        if row[0] not in seen:
+            pool.append(row); seen.add(row[0])
     offset = int(checkpoint.get("candidate_offset") or 0) % max(len(pool), 1)
     rotated = (pool[offset:] + pool[:offset])[:remaining]
     next_offset = (offset + len(rotated)) % max(len(pool), 1)
     selected = (fixed + rotated)[:max(limit, len(open_rows) + len(watch_rows))]
-    coverage = f"{len(open_rows)} open-position, {len(watch_rows)} watchlist, {len(signal_rows)} active-signal and {len(rotated)} rotating candidate tickers"
+    coverage = f"{len(open_rows)} open-position, {len(watch_rows)} watchlist, {len(signal_rows)} active-signal; {len(rotated)}/{len(pool)} rotating outside-priority tickers; {len(selected)} selected (not full-universe coverage per cycle)"
     return selected, {"candidate_offset": next_offset}, coverage
 
 
@@ -659,8 +669,9 @@ def _fetch_yahoo_priority(state: dict[str, Any], at: datetime) -> dict[str, Any]
                 if not _headline_verifies_ticker(ticker, company, str(item.get("title") or "")):
                     rejected_assignment += 1
                     continue
+                excerpt = _strip_markup(item.get('source_excerpt') or '')[:2000]
                 output.append({**item, "provider": "yahoo_priority", "tickers": [ticker], "scope": "universe",
-                               "source_excerpt": "", "source_kind": "headline_metadata", "headline_only": True,
+                               "source_excerpt": excerpt, "source_kind": "headline_summary" if excerpt else "headline_metadata", "headline_only": True,
                                "news_category": "company"})
         except Exception as exc:
             if "429" in str(exc):
@@ -695,7 +706,20 @@ def _fetch_existing_market(state: dict[str, Any], at: datetime) -> dict[str, Any
     return {"items": output, "coverage": "Latest cached broad-market snapshots from the existing AI-Trader feed"}
 
 
+def _fetch_intel_ir(state: dict[str, Any], at: datetime) -> dict[str, Any]:
+    # Public RSS linked by Intel IR. Conditional request/15 min, no scraping.
+    body, meta = _request('https://www.intc.com/news-events/press-releases/rss', state, OFFICIAL_USER_AGENT)
+    items = _rss_items(body, 'intel_ir', 'Intel Investor Relations', 'universe',
+                       news_category='company') if body else []
+    for item in items:
+        item['tickers'] = ['INTC']
+        item['ticker_evidence'] = {'INTC': 'Official Intel issuer press-release RSS'}
+    return {**meta, 'items': items, 'status': 'not_modified' if body is None else '',
+            'coverage': 'Intel official issuer RSS only; feed summaries, not full articles; conditional polling every 15 minutes'}
+
+
 PROVIDERS: dict[str, Callable[[dict[str, Any], datetime], dict[str, Any]]] = {
+    "intel_ir": _fetch_intel_ir,
     "telegram_channels": fetch_telegram_news,
     "ecb": _fetch_ecb,
     "global_voices": _fetch_global_voices,
@@ -713,6 +737,8 @@ PROVIDERS: dict[str, Callable[[dict[str, Any], datetime], dict[str, Any]]] = {
 
 def _provider_cadence(name: str) -> int:
     cfg = feed_settings()
+    if name == 'intel_ir':
+        return 900
     if name == 'telegram_channels':
         from telegram_news_reader import streaming_enabled
         if streaming_enabled():
@@ -886,6 +912,24 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
             final_scope = existing["scope"]
         cur.execute("UPDATE scanner_news SET scope=?,signal_id=COALESCE(signal_id,?),alternate_sources_json=?,updated_at=? WHERE id=?",
                     (final_scope, signal_id, _json(alternates), stamp, news_id))
+        if existing and not existing['content_hash'] and item['tickers']:
+            # Scanner translation rows were previously stranded outside the
+            # analysis queue. Only caller-verified source identities enter here.
+            cur.execute("""UPDATE scanner_news SET verified_tickers_json=?,headline_only=?,
+                analysis_status=CASE WHEN analysis_status IN ('pending_translation','translated')
+                    THEN 'pending_analysis' ELSE analysis_status END WHERE id=?""",
+                        (_json(item['tickers']), int(item.get('headline_only', True)), news_id))
+            cur.execute("SELECT analysis_status FROM scanner_news WHERE id=?", (news_id,))
+            if cur.fetchone()['analysis_status'] == 'pending_analysis':
+                cur.execute("SELECT id FROM scanner_news_jobs WHERE news_id=?", (news_id,))
+                if not cur.fetchone():
+                    priority = 100 if final_scope == 'open_position' else 80 if final_scope == 'watchlist' else 40
+                    cur.execute("""INSERT INTO scanner_news_jobs(news_id,priority,status,next_attempt_at,created_at,updated_at)
+                        VALUES(?,?,'pending',?,?,?)""", (news_id, priority, stamp, stamp, stamp))
+        if item['tickers']:
+            cur.execute('SELECT verified_tickers_json FROM scanner_news WHERE id=?', (news_id,))
+            verified = set(_loads(cur.fetchone()['verified_tickers_json'], [])) | set(item['tickers'])
+            cur.execute('UPDATE scanner_news SET verified_tickers_json=? WHERE id=?', (_json(sorted(verified)), news_id))
     conn.commit(); conn.close()
     return {"received": len(items), "inserted": inserted, "sources": sources, "linked": linked,
             "duplicates": duplicates, "rejected_invalid": rejected_invalid, "rejected_date": rejected_date}
@@ -962,6 +1006,59 @@ def _reconcile_source_publication_times(provider: str, items: list[dict[str, Any
     return changed
 
 
+def bridge_scanner_news(at: datetime | None = None) -> dict[str, int]:
+    """Reuse already collected scanner news; no provider/AI calls or old replay.
+
+    Source identity must be verified again, never trust a scan's ticker alone.
+    Unchanged promoted stories have a provider and are not selected twice.
+    """
+    current = _now(at)
+    cutoff = current - timedelta(hours=feed_settings()['scan_bridge_max_age'])
+    boundary = os.getenv('TELEGRAM_NEWS_NOT_BEFORE', '').strip()
+    if boundary:
+        cutoff = max(cutoff, _parse_time(boundary))
+    conn = get_db_connection()
+    rows = [dict(r) for r in conn.execute("""SELECT n.*,
+        (SELECT MAX(company) FROM scanner_candidates c WHERE c.ticker=n.ticker) company
+        FROM scanner_news n WHERE n.provider IS NULL AND n.scope='universe'
+          AND n.analysis_status IN ('pending_translation','translated')
+        ORDER BY n.id DESC LIMIT 500""").fetchall()]
+    conn.close()
+    items = []
+    for row in rows:
+        published = _published_time(row['published_at'])
+        if not published or published < cutoff or published > current + timedelta(minutes=10):
+            continue
+        if not _headline_verifies_ticker(row['ticker'], row['company'] or '', row['title']):
+            continue
+        facts = _loads(row.get('source_facts_json'), {})
+        excerpt = _strip_markup(facts.get('source_excerpt') or '')[:2000]
+        items.append({**row, 'provider': 'scanner_yahoo', 'tickers': [row['ticker']],
+                      'source_excerpt': excerpt, 'source_kind': 'headline_summary' if excerpt else 'headline_metadata',
+                      'headline_only': True, 'news_category': 'company'})
+    grouped = {}
+    for item in items:
+        key = _canonical_url(item['url'])
+        if key in grouped:
+            grouped[key]['tickers'] = sorted(set(grouped[key]['tickers'] + item['tickers']))
+        else:
+            grouped[key] = item
+    result = ingest_items(list(grouped.values()), current) if items else {'received': 0, 'inserted': 0, 'linked': 0}
+    # Older per-ticker scanner rows may share one article. Preserve them as
+    # explicit duplicates rather than enqueueing/re-promoting them each cycle.
+    if items:
+        conn = get_db_connection()
+        for item in items:
+            canonical = conn.execute('SELECT id FROM scanner_news WHERE url=? AND provider IS NOT NULL ORDER BY id LIMIT 1',
+                                     (_canonical_url(item['url']),)).fetchone()
+            if canonical and canonical['id'] != item['id']:
+                conn.execute("""UPDATE scanner_news SET analysis_status='duplicate_event',duplicate_of=?
+                    WHERE id=? AND provider IS NULL AND analysis_status IN ('pending_translation','translated')""",
+                             (canonical['id'], item['id']))
+        conn.commit(); conn.close()
+    return {'examined': len(rows), 'verified': len(items), 'linked': result['linked']}
+
+
 def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], datetime], dict[str, Any]]] | None = None,
                    at: datetime | None = None, force: bool = False) -> dict[str, Any]:
     current = _now(at)
@@ -969,6 +1066,13 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
     fetchers = provider_fetchers or PROVIDERS
     summary = {"providers_checked": 0, "providers_skipped_backoff": 0, "items_inserted": 0,
                "sources_added": 0, "errors": [], "providers": {}}
+    if provider_fetchers is None:
+        # Reuse collected data even when Yahoo is in backoff; analysis is still
+        # performed by the independent bounded AI worker, not this feed loop.
+        try:
+            summary['scanner_bridge'] = bridge_scanner_news(current)
+        except Exception as exc:
+            summary['errors'].append('scanner_bridge:' + type(exc).__name__)
     for name, fetcher in fetchers.items():
         if provider_fetchers is None and name == 'telegram_channels':
             from telegram_news_reader import streaming_enabled

@@ -18,6 +18,106 @@ UTC = timezone.utc
 
 
 class NewsPipelineIntegrationTests(unittest.TestCase):
+    def scan_item(self, ticker='NVDA', title='NVDA announces a new factory', age=0, excerpt=''):
+        item = {'title':title,'publisher':'Issuer','url':f'https://example.test/{ticker}/{age}',
+                'published_at':(self.clock-timedelta(hours=age)).isoformat(),'source_excerpt':excerpt}
+        scanner_engine.record_scan_news([{'ticker':ticker,'news':[item]}])
+        return item
+
+    def strong_analyzer(self, rows):
+        return [dict(id=r['id'],related=True,title_he='עדכון חברה מהותי',summary_he='החברה פרסמה הודעה.',
+                     sentiment='positive',materiality='high',relevance=.98,thesis_effect='unchanged',
+                     interpretation_he='המידע עשוי להיות מהותי.') for r in rows]
+
+    def test_scanner_bridge_to_stock_outbox_once_and_no_trade_mutation(self):
+        self.scan_item(excerpt='Issuer explicitly supplied source facts.')
+        self.assertEqual(news_pipeline.bridge_scanner_news(self.clock)['verified'],1)
+        row=self.rows('SELECT * FROM scanner_news')[0]
+        self.assertEqual(row['provider'],'scanner_yahoo')
+        self.assertEqual(json.loads(row['verified_tickers_json']),['NVDA'])
+        self.assertEqual(json.loads(row['source_facts_json'])['source_excerpt'],'Issuer explicitly supplied source facts.')
+        self.assertEqual(news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer,at=self.clock)['alerts'],1)
+        self.assertEqual(news_pipeline.bridge_scanner_news(self.clock)['verified'],0)
+        self.assertEqual(news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer,at=self.clock)['alerts'],0)
+        self.assertEqual(len(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='stock_news'")),1)
+        self.assertFalse(self.rows('SELECT * FROM scanner_trades'))
+
+    def test_scanner_bridge_links_positions_and_watchlist_and_routes_personal(self):
+        self.open_trade()
+        scanner_engine.set_news_watchlist('INTC','Intel Corporation')
+        before=self.rows('SELECT remaining_quantity,current_stop FROM scanner_trades')
+        self.scan_item('AAPL','AAPL announces a new factory')
+        self.scan_item('INTC','INTC announces a new factory')
+        self.assertEqual(news_pipeline.bridge_scanner_news(self.clock)['verified'],2)
+        news_pipeline.analyze_news_jobs(limit=5,analyzer=self.strong_analyzer,at=self.clock)
+        events=self.rows("SELECT event_type FROM scanner_telegram_outbox WHERE event_type LIKE '%news'")
+        self.assertEqual({r['event_type'] for r in events},{'position_news','watchlist_news'})
+        self.assertEqual(before,self.rows('SELECT remaining_quantity,current_stop FROM scanner_trades'))
+
+    def test_scanner_bridge_does_not_replay_old_precutover_or_future_news(self):
+        self.scan_item('NVDA',age=7)
+        self.scan_item('INTC','INTC update',age=2)
+        self.scan_item('MSFT','MSFT update',age=-1)
+        with patch.dict(os.environ,{'TELEGRAM_NEWS_NOT_BEFORE':(self.clock-timedelta(hours=1)).isoformat()}):
+            self.assertEqual(news_pipeline.bridge_scanner_news(self.clock)['verified'],0)
+        self.assertFalse(self.rows('SELECT * FROM scanner_news_jobs'))
+
+    def test_scanner_bridge_rejects_unverified_ticker_association(self):
+        self.scan_item('INTC','Company X announces a new factory')
+        self.assertEqual(news_pipeline.bridge_scanner_news(self.clock)['verified'],0)
+        self.assertFalse(self.rows('SELECT * FROM scanner_news_jobs'))
+
+    def test_scanner_bridge_preserves_quality_filters(self):
+        self.scan_item()
+        news_pipeline.bridge_scanner_news(self.clock)
+        def weak(rows):
+            return [dict(r,materiality='low') for r in self.strong_analyzer(rows)]
+        news_pipeline.analyze_news_jobs(analyzer=weak,at=self.clock)
+        self.assertFalse(self.rows('SELECT * FROM scanner_telegram_outbox'))
+
+    def test_scanner_bridge_deduplicates_two_tickers_same_article(self):
+        item=self.scan_item('NVDA','NVDA and INTC announce a contract')
+        scanner_engine.record_scan_news([{'ticker':'INTC','news':[item]}])
+        news_pipeline.bridge_scanner_news(self.clock)
+        news_pipeline.bridge_scanner_news(self.clock)
+        self.assertEqual(len(self.rows('SELECT * FROM scanner_news_jobs')),1)
+
+    def test_yahoo_preserves_supplied_excerpt_without_full_article_claim(self):
+        with patch.object(news_pipeline,'_priority_tickers',return_value=([('INTC','Intel')],{},'test')), \
+             patch('stock_scanner.fetch_recent_news',return_value=[{**self.item(), 'title':'Intel reports results',
+                                                                  'source_excerpt':'<p>Revenue rose.</p>'}]):
+            result=news_pipeline._fetch_yahoo_priority({},self.clock)
+        self.assertEqual(result['items'][0]['source_excerpt'],'Revenue rose.')
+        self.assertTrue(result['items'][0]['headline_only'])
+
+    def test_priority_rotation_reaches_universe_without_technical_candidates(self):
+        scanner_engine.set_news_watchlist('INTC','Intel')
+        members={t:{'company':t} for t in ('INTC','NVDA','MSFT','META')}
+        with patch.object(Path,'read_text',return_value=json.dumps({'members':members})):
+            first,checkpoint,coverage=news_pipeline._priority_tickers(3,{})
+            second,_,_=news_pipeline._priority_tickers(3,checkpoint)
+        self.assertEqual(first[0],('INTC','Intel'))
+        self.assertEqual(set(t for t,_ in first+second),set(members))
+        self.assertIn('not full-universe coverage',coverage)
+
+    def test_intel_official_rss_metadata_and_conditional_requests(self):
+        xml=b'<rss><channel><item><title>Intel reports results</title><link>https://www.intc.com/release</link><pubDate>Mon, 14 Sep 2026 12:00:00 GMT</pubDate><description>Revenue rose.</description></item></channel></rss>'
+        with patch.object(news_pipeline,'_request',return_value=(xml,{'etag':'v1'})):
+            result=news_pipeline._fetch_intel_ir({},self.clock)
+        self.assertEqual(result['items'][0]['tickers'],['INTC'])
+        self.assertEqual(result['items'][0]['source_excerpt'],'Revenue rose.')
+        self.assertTrue(result['items'][0]['headline_only'])
+        self.assertEqual(news_pipeline._provider_cadence('intel_ir'),900)
+        with patch.object(news_pipeline,'_request',return_value=(None,{'etag':'v1'})):
+            self.assertEqual(news_pipeline._fetch_intel_ir({'etag':'v1'},self.clock)['status'],'not_modified')
+
+    def test_intel_rate_limit_is_not_bypassed(self):
+        with patch.object(news_pipeline,'_request',side_effect=news_pipeline.ProviderRateLimited('HTTP 429',1800)):
+            news_pipeline.run_feed_cycle({'intel_ir':news_pipeline._fetch_intel_ir},self.clock,force=True)
+            row=self.rows("SELECT * FROM scanner_news_providers WHERE provider='intel_ir'")[0]
+            self.assertEqual(row['status'],'rate_limited')
+            self.assertEqual(news_pipeline._parse_time(row['next_check_at']),self.clock+timedelta(seconds=1800))
+
     def test_telegram_unheld_stock_routes_to_stock_topic_not_market(self):
         from unittest.mock import Mock
         import stock_scanner

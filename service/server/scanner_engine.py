@@ -497,6 +497,9 @@ def record_scan_news(candidates: list[dict[str, Any]], signals: list[dict[str, A
                            analysis_status,fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (fp, signal_ids.get(ticker), ticker, "universe", item.get("title", "")[:500], item.get("publisher", "Unknown")[:100],
                          item.get("url", ""), item.get("published_at", stamp), sentiment, item.get("relevance"), "pending_translation", stamp))
+            if item.get('source_excerpt'):
+                cur.execute("UPDATE scanner_news SET source_facts_json=? WHERE fingerprint=?",
+                            (_json({'source_excerpt': str(item['source_excerpt'])[:2000]}), fp))
     conn.commit()
     conn.close()
 
