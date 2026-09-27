@@ -100,6 +100,8 @@ class Config:
     rights:str='review_required'
     cadence:int=300
     credential:str=''
+    removals_endpoint:str=''
+    display_output:str='full'
 
 
 class BaseProvider:
@@ -154,7 +156,8 @@ class BenzingaProvider(BaseProvider):
     def fetch(self,state,now):
         self.allowed()
         if not self.config.credential:raise ProviderFailure('credential_required',terminal=True)
-        params={'token':self.config.credential,'pageSize':100,'displayOutput':'full','page':state.get('page',0)}
+        if self.config.display_output not in ('headline','abstract','full'):raise ProviderFailure('invalid_display_output',terminal=True)
+        params={'token':self.config.credential,'pageSize':100,'displayOutput':self.config.display_output,'page':state.get('page',0)}
         if state.get('cursor'):params['updatedSince']=int(datetime.fromisoformat(state['cursor']).timestamp())-300
         rows=json.loads(self.transport.request(self.config.endpoint,params,{'Accept':'application/json'}))
         if not isinstance(rows,list):raise ProviderFailure('provider_schema',terminal=True)
@@ -167,7 +170,15 @@ class BenzingaProvider(BaseProvider):
         # Advance only to the START of the pagination cycle. The next delta
         # overlaps it, covering releases added while pages were being fetched.
         cycle=state.get('cycle_started') or timestamp(now)
+        withdrawn=[]
+        if self.config.removals_endpoint:
+            removed=json.loads(self.transport.request(self.config.removals_endpoint,
+                {'token':self.config.credential},{'Accept':'application/json'}))
+            if not isinstance(removed,dict) or not isinstance(removed.get('removed'),list):
+                raise ProviderFailure('removal_schema',terminal=True)
+            withdrawn=[str(item['id']) for item in removed['removed']]
         return {'items':items,'cursor':state.get('cursor') if full else cycle,
+                'withdrawn_ids':withdrawn,
                 'cycle_started':cycle if full else None,
                 'page':params['page']+1 if full else 0,'coverage':'licensed broad news feed; updatedSince delta'}
 
@@ -227,6 +238,7 @@ DEFAULT_CONFIGS=[
     Config('investing','https://www.investing.com/rss/news.rss','Investing.com','established financial media'),
     Config('globenewswire','https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies','GlobeNewswire','press_release'),
     Config('prnewswire','https://www.prnewswire.com/rss/news-releases-list.rss','PR Newswire','press_release'),
-    Config('benzinga','https://api.benzinga.com/api/v2/news','Benzinga','established financial media'),
+    Config('benzinga','https://api.benzinga.com/api/v2/news','Benzinga','established financial media',
+           removals_endpoint='https://api.benzinga.com/api/v2/news-removed'),
     Config('tipranks','','TipRanks','established financial media'),
 ]

@@ -316,6 +316,18 @@ def test_benzinga_official_contract_and_tipranks_configured_contract():
     assert adapter.fetch({},NOW)['cursor']=='next1'
 
 
+def test_benzinga_removal_tombstone_cancels_preview_and_survives_restart(env):
+    p,s,_=env;eid=p.ingest(source('benzinga',source_id='1'),NOW)
+    p.analyze(eid,lambda e:Analysis(RESULT),NOW);p.queue(eid,NOW)
+    transport=Mock();transport.request.side_effect=[b'[]',b'{"removed":[{"id":1}]}']
+    cfg=Config('benzinga','https://api.benzinga.com/api/v2/news','Benzinga',enabled=True,rights='approved',
+        credential='fixture-only',removals_endpoint='https://api.benzinga.com/api/v2/news-removed')
+    assert p.collect([BenzingaProvider(cfg,transport)],NOW)['benzinga']['status']=='ok'
+    assert s.event(eid)['reason']=='source_retracted';assert p.deliver_preview(eid,NOW)==[]
+    assert p.ingest(source('benzinga',source_id='1'),NOW) is None
+    assert Store(s.connect,sandbox=True).event(eid)['status']=='blocked'
+
+
 @pytest.mark.parametrize('endpoint',['http://feed.example/rss','https://127.0.0.1/rss','https://feed.example:444/rss','https://user:pass@feed.example/rss'])
 def test_transport_rejects_unsafe_targets_without_network(endpoint):
     with pytest.raises(ProviderFailure,match='unsafe_endpoint'):Transport(['feed.example']).request(endpoint)

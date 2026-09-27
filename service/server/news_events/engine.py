@@ -87,6 +87,7 @@ class Pipeline:
                         with self.store.transaction(True) as c:self.store.metric(c,'normalize','invalid_metadata',timestamp(now),provider_id=pid)
                         continue
                     accepted+=bool(self.ingest(source,now))
+                for source_id in response.get('withdrawn_ids',[]):self.store.withdraw(pid,source_id,now)
                 state={**state,'status':response.get('status','ok'),'attempts':0,'terminal':False,'error':None,
                     'cursor':response.get('cursor'),'page':response.get('page',0),
                     'cycle_started':response.get('cycle_started'),
@@ -215,8 +216,8 @@ class Pipeline:
             c.execute('UPDATE ne_analysis SET status=?,result_json=?,error=?,finished_at=?,latency=? WHERE event_id=? AND version=? AND owner=?',
                       (status,json.dumps(output.result),error,timestamp(now),time.monotonic()-started,event_id,version,owner))
             # If new facts arrived during the call, old output cannot publish.
-            current=c.execute('SELECT evidence_version FROM ne_events WHERE event_id=?',(event_id,)).fetchone()
-            if current['evidence_version']==version:
+            current=c.execute('SELECT evidence_version,reason FROM ne_events WHERE event_id=?',(event_id,)).fetchone()
+            if current['evidence_version']==version and current['reason']!='source_retracted':
                 c.execute('UPDATE ne_events SET status=?,reason=? WHERE event_id=?',('analyzed' if status=='done' else 'quality_failed',error,event_id))
             self.store.metric(c,'analysis',status,timestamp(now),event_id,providers=event['providers'],
                 latency=time.monotonic()-started,calls=output.calls,invocations=1)

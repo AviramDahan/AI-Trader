@@ -65,6 +65,10 @@ class Store:
         source_key=fingerprint([source.provider_id,source.source_id,content])
         keys=anchors(source,identities)
         with self.transaction(True) as c:
+            if c.execute('SELECT 1 FROM ne_withdrawals WHERE provider_id=? AND source_id=?',
+                         (source.provider_id,source.source_id)).fetchone():
+                self.metric(c,'ingest','source_withdrawn',collected,provider_id=source.provider_id)
+                return None
             seen=c.execute('SELECT event_id FROM ne_sources WHERE source_key=?',(source_key,)).fetchone()
             if seen:
                 self.metric(c,'ingest','unchanged_source',collected,seen['event_id'],source.provider_id,ai_calls_avoided=0)
@@ -101,6 +105,7 @@ class Store:
                 started=c.execute('SELECT 1 FROM ne_analysis WHERE event_id=? LIMIT 1',(event_id,)).fetchone()
                 if started:status='needs_material_review'; reason='new_text_materiality_unverified'
             if conflicts:status='blocked';reason='source_conflict'
+            if old and old['reason']=='source_retracted':status='blocked';reason='source_retracted'
             body=dict(event_id=event_id,canonical_event_id=event_id,providers=sorted({s['provider_id'] for s in sources}),
                 sources=sources,source_urls=sorted({s['url'] for s in sources}),source_type=sorted({s['source_type'] for s in sources}),
                 publisher=sorted({s['publisher'] for s in sources}),
@@ -119,6 +124,20 @@ class Store:
             self.metric(c,'ingest','new_event' if not old else 'material_update' if changed and material else 'unverified_update' if changed else 'cross_source_duplicate',
                         collected,event_id,source.provider_id,ai_calls_avoided=int(bool(old and not changed)),conflict=bool(conflicts))
             return event_id
+
+    def withdraw(self,provider_id,source_id,now):
+        """Persist a tombstone before new polls can re-introduce a withdrawn item."""
+        with self.transaction(True) as c:
+            c.execute('INSERT INTO ne_withdrawals VALUES(?,?,?) ON CONFLICT(provider_id,source_id) DO NOTHING',
+                      (provider_id,str(source_id),timestamp(now)))
+            ids={r['event_id'] for r in c.execute('SELECT event_id FROM ne_sources WHERE provider_id=? AND source_id=?',
+                                                (provider_id,str(source_id)))}
+            for event_id in ids:
+                c.execute('UPDATE ne_sources SET active=0 WHERE event_id=? AND provider_id=? AND source_id=?',
+                          (event_id,provider_id,str(source_id)))
+                c.execute("UPDATE ne_events SET status='blocked',reason='source_retracted' WHERE event_id=?",(event_id,))
+                c.execute("UPDATE ne_delivery SET status='cancelled' WHERE event_id=? AND status='sandbox_pending'",(event_id,))
+                self.metric(c,'withdrawal','held_for_review',timestamp(now),event_id,provider_id)
 
 
 def combine(sources):

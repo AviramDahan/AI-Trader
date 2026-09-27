@@ -163,7 +163,9 @@ numeric rate limits were not publicly verified: obtain a quote, do not invent on
 A supplier [AWS Marketplace basic tier](https://aws.amazon.com/marketplace/pp/prodview-xwgvhwowjmw3g)
 lists **$0 access** for headlines/teasers/link only; credentials, applicable terms
 and our redistribution rights still need confirmation. No AWS subscription opened.
-Removal/retraction endpoint integration remains a pre-trial gap for this adapter.
+The official `news-removed` endpoint is integrated: persisted withdrawal
+tombstones block re-import and cancel pending publication, without deleting
+historical evidence. Live credential/license verification remains outstanding.
 
 ### TipRanks — contract-mapped enterprise adapter, disabled
 
@@ -250,6 +252,6 @@ and network time and is NOT a production throughput measurement.
 Recommended next trial is **isolated/nonpublishing** with existing authorized
 collectors + SEC exact-event evidence. No new provider is yet cleared for a
 public trial: Investing timezone/rights, Globe access/rights, PR license,
-Benzinga license/credential/retractions, TipRanks contract/credential.
+Benzinga license/credential, TipRanks contract/credential.
 Do not merge this branch into main: main auto-deploys production. Preserve Phase
 1 measurements and scheduled live-market validation until explicit approval.
