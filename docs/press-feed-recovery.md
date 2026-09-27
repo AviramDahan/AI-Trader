@@ -9,10 +9,13 @@ response headers with the old sandbox User-Agent (including a 20-second probe),
 but returned RSS in 0.17 seconds with the standard identifying User-Agent through
 the same pinned-IP transport. IPv4 and IPv6 HEAD also returned 200.
 
-PR Newswire's recorded 404 was followed by successful reads from the unchanged
-official URL. The historical response body/redirect destination was not retained;
-the remote cause of that response is **not established**. One 404 previously
-caused permanent suspension. A previously successful press feed now gets at most
+PR Newswire intermittently redirects its official `news-releases-list.rss` URL
+with HTTP 301 to `news-releases-list.rss/`, which returns HTTP 404 HTML. This
+chain was captured from the cloud; the official RSS directory still lists the
+original URL, which also returns HTTP 200 XML on other requests. The historical
+404 response itself was not retained, so attribution of that particular response
+to this reproduced chain remains an inference. One 404 previously caused
+permanent suspension. A previously successful press feed now gets at most
 two delayed recovery probes (minimum 300 seconds, respecting Retry-After); a
 third consecutive 404 is terminal. Unverified 404 endpoints remain terminal.
 
