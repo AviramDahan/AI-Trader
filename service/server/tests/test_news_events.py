@@ -72,10 +72,11 @@ def test_benzinga_no_free_credential_does_not_make_request():
     transport.request.assert_not_called()
 
 
-def test_yahoo_direct_url_single_job_and_delivery_after_restart(env):
-    p,s,m=env;url='https://www.benzinga.com/news/26/09/123/apple-results'
-    a=source('yahoo',url=url,publisher='Benzinga',event_refs=())
-    b=replace(a,provider_id='benzinga',source_id='direct')
+@pytest.mark.parametrize('provider', ['benzinga','prnewswire','globenewswire'])
+def test_yahoo_direct_url_single_job_and_delivery_after_restart(env,provider):
+    p,s,m=env;url=f'https://www.{provider}.com/news/26/09/123/apple-results'
+    a=source('yahoo',url=url,publisher=provider,event_refs=())
+    b=replace(a,provider_id=provider,source_id='direct')
     eid=p.ingest(a,NOW);assert p.ingest(b,NOW)==eid
     ai=Mock(return_value=Analysis(RESULT));p.analyze(eid,ai,NOW);p.deliver_preview(eid,NOW)
     restarted=Pipeline(Store(s.connect,sandbox=True),UNIVERSE,lambda:m,not_before=p.not_before)

@@ -38,8 +38,9 @@ class ProviderFailure(Exception):
 
 class Transport:
     """Pinned public IP; at most one credential-free same-origin HTTPS redirect."""
-    def __init__(self,allowed_hosts,timeout=12,max_bytes=1048576):
+    def __init__(self,allowed_hosts,timeout=12,max_bytes=1048576,user_agent='AI-Trader News Event Sandbox'):
         self.allowed_hosts=set(allowed_hosts); self.timeout=timeout; self.max_bytes=max_bytes
+        self.user_agent=user_agent
 
     def request(self,url,params=None,headers=None,method='GET',body=None,_redirects=0):
         p=urlsplit(url)
@@ -66,7 +67,7 @@ class Transport:
             query='&'.join(filter(None,[p.query,urlencode(params or {})]))
             if query:path+='?'+query
             data=json.dumps(body).encode() if body is not None else None
-            connection.request(method,path,data,{'User-Agent':'AI-Trader News Event Sandbox',
+            connection.request(method,path,data,{'User-Agent':self.user_agent,
                 'Accept-Encoding':'identity',**(headers or {})})
             response=connection.getresponse()
             from retry_policy import retry_after
@@ -236,7 +237,9 @@ def registry(configs,existing=None,transport_factory=None,tipranks_contract=None
     """Provider selection stays here, never in core routing or analysis."""
     result=[]
     from .investing import InvestingProvider
-    classes={'benzinga':BenzingaProvider,'tipranks':TipRanksProvider,'investing':InvestingProvider}
+    from .press_feed import PressFeedProvider
+    classes={'benzinga':BenzingaProvider,'tipranks':TipRanksProvider,'investing':InvestingProvider,
+             'prnewswire':PressFeedProvider,'globenewswire':PressFeedProvider}
     for cfg in configs:
         if cfg.provider_id in (existing or {}):
             result.append(ExistingProvider(cfg,existing[cfg.provider_id]));continue
