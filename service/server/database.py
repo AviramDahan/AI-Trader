@@ -2194,6 +2194,13 @@ def init_database():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanner_outbox_status_due ON scanner_telegram_outbox(status, next_attempt_at)")
 
     if not using_postgres():
+        # PostgreSQL uses the numbered migration runner; local/test SQLite uses
+        # the same additive DDL so both engines exercise identical news state.
+        from pathlib import Path
+        ddl = (Path(__file__).parent / 'migrations' / '004_news_evidence.sql').read_text()
+        for statement in ddl.split(';'):
+            if statement.strip():
+                cursor.execute(statement)
         conn.commit()
     elif previous_autocommit is not None:
         conn.autocommit = previous_autocommit

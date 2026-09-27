@@ -16,7 +16,7 @@ def migrate():
             # Idempotent baseline of the original schema. No seed/demo portfolio.
             init_database()
             control.execute("INSERT INTO schema_migrations(version) VALUES(1)")
-        for version, filename in [(2, "002_cloud.sql"), (3, "003_ai_operations.sql")]:
+        for version, filename in [(2, "002_cloud.sql"), (3, "003_ai_operations.sql"), (4, "004_news_evidence.sql")]:
             if version in versions:
                 continue
             with control.transaction():

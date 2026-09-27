@@ -1444,6 +1444,8 @@ def dashboard_payload() -> dict[str, Any]:
             news_by_id[int(row["id"])] = dict(row)
     news = sorted(news_by_id.values(), key=lambda row: row["published_at"], reverse=True)
     for item in news:
+        from news_evidence import decorate
+        decorate(cur, item)
         item["source_facts"] = _loads(item.pop("source_facts_json", None), {})
         item["verified_tickers"] = _loads(item.pop("verified_tickers_json", None), [])
         item["alternate_sources"] = _loads(item.pop("alternate_sources_json", None), [])

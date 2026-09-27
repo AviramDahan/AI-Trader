@@ -1153,23 +1153,25 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
 
 def _default_analyzer(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     from news_quality import analyze_one
+    from news_evidence import review
     output = []
     for row in rows:
         try:
-            output.append(analyze_one(row))
+            output.append(review(row, analyze_one))
         except Exception as exc:
             # One malformed response must never poison every item in a batch.
-            output.append({'id': row['id'], '_error': type(exc).__name__ + ':' +
+            output.append({**getattr(exc, 'news_evidence_meta', {}), 'id': row['id'], '_error': type(exc).__name__ + ':' +
                            (str(exc) if str(exc).startswith(('news_', 'openrouter_transport_failed:', 'provider_http_')) else __import__('retry_policy').detail(exc)),
                            '_retry_after':getattr(exc,'retry_after_seconds',0)})
     return output
 
 
 def _news_alert_message(row: dict[str, Any]) -> str:
+    from news_evidence import source_limit as describe_source
     impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
     materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
     company_line = f"\nחברה: {row['company']}" if row.get("company") else ""
-    source_limit = "זמינים כותרת ומטא־דאטה בלבד." if row.get("headline_only") else "זמין תקציר שסופק בפיד; הכתבה המלאה לא נותחה."
+    source_limit = describe_source(row)
     return "\n\n".join(("AI-Trader — חדשות מהותיות לפוזיציה פתוחה | מסחר מדומה בלבד",
                          f"סימול: {row['ticker']}{company_line}\nהשפעה אפשרית: {impact}\nמהותיות אפשרית: {materiality}",
                          f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}\n{source_limit}",
@@ -1179,10 +1181,11 @@ def _news_alert_message(row: dict[str, Any]) -> str:
 
 
 def _watchlist_alert_message(row: dict[str, Any]) -> str:
+    from news_evidence import source_limit as describe_source
     impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
     materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
     company_line = f"\nחברה: {row['company']}" if row.get("company") else ""
-    source_limit = "זמינים כותרת ומטא־דאטה בלבד." if row.get("headline_only") else "זמין תקציר שסופק בפיד; הכתבה המלאה לא נותחה."
+    source_limit = describe_source(row)
     return "\n\n".join(("AI-Trader — חדשות חשובות מרשימת המעקב | ללא עסקה וללא תלות בפוזיציה",
                          f"סימול: {row['ticker']}{company_line}\nהשפעה אפשרית: {impact}\nמהותיות אפשרית: {materiality}",
                          f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}\n{source_limit}",
@@ -1301,7 +1304,13 @@ def _same_event_filter(alias: str, row: dict[str, Any]) -> tuple[str, list[Any]]
     if row.get("canonical_key"):
         clauses.append(f"{alias}.canonical_key=?")
         values.append(row["canonical_key"])
-    return " OR ".join(clauses), values
+    expression = " OR ".join(clauses)
+    if row.get('_news_version'):
+        # The alert ledger, not the mutable source row, identifies the version
+        # actually queued for this recipient/topic. A correction is not replay.
+        expression = f"({expression}) AND a.event_version=?"
+        values.append(row['_news_version'])
+    return expression, values
 
 
 def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
@@ -1445,8 +1454,15 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
     errors = []
     conn = get_db_connection(); cur = conn.cursor(); begin_write_transaction(cur)
     from scanner_engine import enqueue_telegram
+    from news_evidence import audit, needs_personal_route, publication_outcome
     for row in rows:
+        alerts_before = alerts
         result = by_id.get(int(row["id"]))
+        if result and result.get('_news_version'):
+            # Local overlay only: never modify final-review source tables.
+            row = {**row, '_news_version': result['_news_version'], 'content_hash': result['_news_version']}
+        if result:
+            audit(cur, row, result, at=stamp)
         if result and result.get('_error'):
             attempts = int(row['attempts']) + 1
             error = result['_error'][:1500]
@@ -1454,11 +1470,15 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
             state = 'failed' if attempts >= _int_env('STOCK_SCANNER_NEWS_ANALYSIS_MAX_ATTEMPTS', 6, 1, 20) else 'retry'
             if any(reason in error for reason in ('news_quality_rejected','news_missing_hebrew')):
                 state='quality_rejected'
+            if error.startswith('news_evidence_unavailable'):
+                state = 'insufficient_information'
+            audit(cur, row, result, reason='quality_failure' if state=='quality_rejected' else
+                  'insufficient_information' if error.startswith('news_evidence_') else 'analysis_failure', at=stamp)
             due = _z(current + timedelta(seconds=max(min(3600, 30 * 2 ** min(attempts, 7)),float(result.get('_retry_after') or 0))))
             cur.execute("UPDATE scanner_news_jobs SET status=?,attempts=?,next_attempt_at=?,last_error=?,updated_at=? WHERE id=?",
                         (state, attempts, due, error, stamp, row['job_id']))
             cur.execute("UPDATE scanner_news SET analysis_status=?,analysis_error=?,updated_at=? WHERE id=?",
-                        ('quality_rejected' if state=='quality_rejected' else 'analysis_error',error, stamp, row['id']))
+                        (state if state in ('quality_rejected','insufficient_information') else 'analysis_error',error, stamp, row['id']))
             continue
         if not result:
             state = 'failed' if int(row['attempts']) + 1 >= _int_env('STOCK_SCANNER_NEWS_ANALYSIS_MAX_ATTEMPTS', 6, 1, 20) else 'retry'
@@ -1488,7 +1508,9 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                     (result.get('analysis_seconds'), _z() if at is None else stamp, row['id']))
         analyzed += 1
         if result.get('duplicate_of'):
-            cur.execute("UPDATE scanner_news SET analysis_status='duplicate_event' WHERE id=?", (row['id'],))
+            personal_route = needs_personal_route(cur, row, result['duplicate_of'])
+            if not personal_route:
+                cur.execute("UPDATE scanner_news SET analysis_status='duplicate_event' WHERE id=?", (row['id'],))
             # Preserve provenance on the retained story; do not delete history.
             cur.execute("SELECT alternate_sources_json FROM scanner_news WHERE id=?", (result['duplicate_of'],))
             prior = cur.fetchone()
@@ -1497,7 +1519,9 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                 if not any(link.get('url') == row['url'] for link in links):
                     links.append({'url': row['url'], 'publisher': row['publisher'], 'published_at': row['published_at']})
                     cur.execute("UPDATE scanner_news SET alternate_sources_json=? WHERE id=?", (_json(links), result['duplicate_of']))
-            continue
+            if not personal_route:
+                continue
+            row['_personal_route_only'] = True
         if row.get('quality_version') == -2:
             # Historical quality repair updates the dashboard, never replays
             # old headlines as new Telegram alerts.
@@ -1568,7 +1592,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
             version = row.get("content_hash") or "v1"
             broad_quality = materiality == "high" and relevance >= cfg["broad_alert_min_relevance"]
             uncovered = sorted(strict_verified - position_tickers - watched_tickers)
-            if broad_quality and uncovered:
+            if broad_quality and uncovered and not row.get('_personal_route_only'):
                 allowed: list[str] = []
                 for ticker in uncovered:
                     cur.execute(f"""SELECT 1 FROM scanner_news_broadcast_alerts a
@@ -1590,6 +1614,8 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                                  "interpretation_he": result.get("interpretation_he")}
                     alerts += int(enqueue_telegram(cur, f"stock-news:{row['id']}:{version}:{','.join(allowed)}",
                                      "stock_news", _stock_broadcast_alert_message(alert_row), published_at=row['published_at']))
+
+        publication_outcome(cur, row, result, alerts - alerts_before, stamp)
 
     conn.commit(); conn.close()
     from scanner_engine import set_service_status

@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -151,7 +152,10 @@ class ExperimentEventRouteTests(unittest.TestCase):
         self.assertGreaterEqual(cursor.fetchone()["count"], 4)
         conn.close()
 
-    def test_copied_realtime_signal_event_uses_follower_experiment_context(self):
+    @patch('price_fetcher.get_price_from_market', return_value=100)
+    def test_copied_realtime_signal_event_uses_follower_experiment_context(self, _quote):
+        # Attribution regression, not a live provider test. Never fetch a real
+        # price from the network or depend on its availability in isolated CI.
         create_experiment({
             "experiment_key": "copy-context",
             "title": "Copy context",

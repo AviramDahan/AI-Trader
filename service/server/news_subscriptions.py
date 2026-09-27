@@ -39,6 +39,8 @@ def personal_delivery_message(event):
         if not active:
             return None
         row = dict(news)
+        from news_evidence import decorate
+        decorate(conn.cursor(), row)
         row.update(ticker=', '.join(sorted(active)),
                    company=', '.join(sorted({c for c in active.values() if c})),
                    impact=row.get('impact') or row.get('sentiment') or 'unclear',

@@ -24,15 +24,23 @@ def record(task, model, body, started, success, failure=None, retry=False, notif
     from database import get_db_connection
     usage=(body or {}).get('usage') or {}
     details=usage.get('completion_tokens_details') or {}
+    call_id = uuid.uuid4().hex
     with get_db_connection() as conn:
         conn.execute('''INSERT INTO ai_call_usage(call_id,task,parent_task,model,input_tokens,output_tokens,
             reasoning_tokens,actual_cost,latency,timestamp,success,failure,generation_id)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-            (uuid.uuid4().hex,'retry_repair' if retry else task,task,model,
+            (call_id,'retry_repair' if retry else task,task,model,
              number(usage.get('prompt_tokens')),number(usage.get('completion_tokens')),
              number(details.get('reasoning_tokens')),number(usage.get('cost')),
              time.monotonic()-started,datetime.now(timezone.utc).isoformat(),int(success),failure,
              (body or {}).get('id')))
+        from news_call_context import CURRENT
+        context = CURRENT.get()
+        if context:
+            conn.execute('''INSERT INTO news_ai_call_links(call_id,news_id,content_version,stage,
+                source_excerpt_hash,source_excerpt_chars) VALUES(?,?,?,?,?,?)''',
+                (call_id, context['news_id'], context['content_version'], context['stage'],
+                 context['source_excerpt_hash'], context['source_excerpt_chars']))
     if not success and notify_failure and failure not in {'ValueError'}:
         stamp=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')
         # Only allowlisted operational metadata can enter a private notification.
