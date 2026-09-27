@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from urllib.parse import urlsplit, urlencode
+from urllib.parse import urlsplit, urlencode, urljoin
 from .model import Source, canonical_url, timestamp, text, event_type, fingerprint
 
 DNS_POOL=ThreadPoolExecutor(max_workers=3,thread_name_prefix='phase2-provider-dns')
@@ -37,11 +37,11 @@ class ProviderFailure(Exception):
 
 
 class Transport:
-    """Fixed approved hosts, pinned public IP, no redirects, bounded body/deadline."""
+    """Pinned public IP; at most one credential-free same-origin HTTPS redirect."""
     def __init__(self,allowed_hosts,timeout=12,max_bytes=1048576):
         self.allowed_hosts=set(allowed_hosts); self.timeout=timeout; self.max_bytes=max_bytes
 
-    def request(self,url,params=None,headers=None,method='GET',body=None):
+    def request(self,url,params=None,headers=None,method='GET',body=None,_redirects=0):
         p=urlsplit(url)
         if p.scheme!='https' or p.hostname not in self.allowed_hosts or p.username or p.password or p.port not in (None,443):
             raise ProviderFailure('unsafe_endpoint',terminal=True)
@@ -70,6 +70,15 @@ class Transport:
                 'Accept-Encoding':'identity',**(headers or {})})
             response=connection.getresponse()
             from retry_policy import retry_after
+            if response.status in (301,302,307,308) and method=='GET' and not params and not body and not headers:
+                target=urljoin(url,response.getheader('Location') or '')
+                dest=urlsplit(target)
+                # One HTTPS same-origin hop only. Re-resolve and pin public IP;
+                # never forward credentials or accept a downgrade/redirect loop.
+                if (_redirects==0 and target!=url and dest.scheme=='https' and dest.hostname==p.hostname
+                        and not dest.username and not dest.password and dest.port in (None,443)):
+                    timer.cancel();connection.close()
+                    return self.request(target,_redirects=1)
             if response.status!=200:
                 raise ProviderFailure('http_error',response.status,retry_after(response.getheader('Retry-After')),
                                       response.status in (400,401,403,404) or 300<=response.status<400)

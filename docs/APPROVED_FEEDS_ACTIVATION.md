@@ -37,3 +37,9 @@ explicit/absent timezone, missing Benzinga credential, Yahoo/direct URL dedupe,
 single analysis/delivery after restart and Admin transition dedupe. Existing
 pagination, failure isolation and PostgreSQL outbox tests remain in the suite.
 Real Telegram E2E requires a natural qualifying event, not fixtures in production.
+
+The scheduled PR Newswire poll intermittently returned HTTP 301 while direct
+probes returned 200. RSS transport permits at most one same-origin HTTPS hop,
+with fresh public-IP validation, no credentials, no HTTP downgrade and no loop.
+This is not an unrestricted redirect or proxy workaround. Cross-host redirects
+remain blocked. Existing checkpoint must survive recovery from that failure.

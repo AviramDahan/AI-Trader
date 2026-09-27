@@ -389,6 +389,26 @@ def test_transport_blocks_private_resolved_address(monkeypatch):
     with pytest.raises(ProviderFailure,match='unsafe_address'):Transport(['feed.example']).request('https://feed.example/rss')
 
 
+@pytest.mark.parametrize('target,allowed', [('https://feed.example/new.rss',True),('http://feed.example/rss',False),('https://other.example/rss',False),('https://user:pass@feed.example/rss',False)])
+def test_rss_redirect_one_same_origin_https_only(monkeypatch,target,allowed):
+    import news_events.providers as mod
+    first=Mock(status=301);first.getheader.side_effect=lambda k,*d:target if k=='Location' else None
+    second=Mock(status=200);second.getheader.side_effect=lambda k,*d:'identity' if k=='Content-Encoding' else None
+    second.read1.side_effect=[b'<rss/>',b'']
+    connections=[Mock(getresponse=Mock(return_value=r)) for r in (first,second)]
+    factory=Mock(side_effect=connections)
+    monkeypatch.setattr(mod,'resolve_public',lambda h:['8.8.8.8'])
+    monkeypatch.setattr(mod.socket,'create_connection',Mock(return_value=Mock()))
+    monkeypatch.setattr(mod.ssl,'create_default_context',Mock(return_value=Mock()))
+    monkeypatch.setattr(mod.http.client,'HTTPSConnection',factory)
+    if allowed:
+        assert Transport(['feed.example']).request('https://feed.example/rss')==b'<rss/>'
+        assert factory.call_count==2
+    else:
+        with pytest.raises(ProviderFailure):Transport(['feed.example']).request('https://feed.example/rss')
+        assert factory.call_count==1
+
+
 def test_legacy_adapters_normalize_without_source_specific_routing():
     cfg=Config('telegram_channels','https://example.org','Telegram',enabled=True,rights='approved')
     collector=Mock(return_value={'items':[{'url':'https://example.org/articles/12345','title':'Apple Inc. earnings',
