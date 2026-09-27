@@ -27,7 +27,7 @@ class TestExistingLifecycleOnPostgres(lifecycle_tests.ScannerEngineTests):
 def test_migrations_idempotent_and_natural_key_upsert(pg):
     migrations.migrate()
     with database.get_db_connection() as conn:
-        assert conn.execute('SELECT count(*) n FROM schema_migrations').fetchone()['n']==4
+        assert conn.execute('SELECT count(*) n FROM schema_migrations').fetchone()['n']==5
         conn.execute("INSERT INTO scanner_quotes(ticker,price,as_of,source) VALUES('TEST',1,'2026-01-01','test')")
         conn.execute("INSERT INTO scanner_settings(key,value_json,updated_at) VALUES('x','{}','2026-01-01')")
 

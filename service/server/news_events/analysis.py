@@ -52,6 +52,9 @@ class CanonicalAnalyzer:
                 jsonschema.validate(result,schema)
                 success=True
                 return result
+            except Exception as exc:
+                usage=getattr(exc,'canonical_usage',usage)
+                raise
             finally:
                 allowed=('model','input_tokens','output_tokens','reasoning_tokens','cost','request_id')
                 calls.append({'stage':stage,'success':success,'latency':time.monotonic()-start,

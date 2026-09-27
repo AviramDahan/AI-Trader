@@ -14,7 +14,7 @@ ROLES = {
     "telegram": "stock_telegram_outbox,stock_telegram_status",
 }
 ROLE_KEYS = {"scanner": 11, "monitor": 12, "telegram": 13}
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 ACTIVE_LEASE = None
 
 

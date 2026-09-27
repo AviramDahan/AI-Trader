@@ -11,9 +11,11 @@ from .model import fingerprint, text, timestamp, anchors
 
 
 class Store:
-    def __init__(self, connect, *, sandbox=False):
-        if not sandbox: raise ValueError('phase2_requires_isolated_sandbox')
+    def __init__(self, connect, *, sandbox=False, production=False):
+        if not sandbox and not production: raise ValueError('phase2_requires_isolated_sandbox')
+        if sandbox and production: raise ValueError('conflicting_store_modes')
         self.connect=connect
+        self.production=production
 
     @contextmanager
     def transaction(self, write=False):
@@ -32,6 +34,7 @@ class Store:
         finally:c.close()
 
     def install(self):
+        if self.production: raise ValueError('use_numbered_production_migration')
         with self.transaction(True) as c:
             if getattr(c,'_backend','sqlite')=='postgres':
                 schema=c.execute('SELECT current_schema() AS name').fetchone()['name']

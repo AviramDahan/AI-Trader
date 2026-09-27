@@ -41,6 +41,11 @@ def record(task, model, body, started, success, failure=None, retry=False, notif
                 source_excerpt_hash,source_excerpt_chars) VALUES(?,?,?,?,?,?)''',
                 (call_id, context['news_id'], context['content_version'], context['stage'],
                  context['source_excerpt_hash'], context['source_excerpt_chars']))
+        from news_events.call_context import CURRENT as EVENT_CALL
+        event=EVENT_CALL.get()
+        if event:
+            conn.execute('INSERT INTO ne_ai_call_links VALUES(?,?,?,?)',
+                (call_id,event['event_id'],event['version'],event['stage']))
     if not success and notify_failure and failure not in {'ValueError'}:
         stamp=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')
         # Only allowlisted operational metadata can enter a private notification.

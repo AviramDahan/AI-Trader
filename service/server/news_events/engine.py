@@ -175,6 +175,7 @@ class Pipeline:
 
     def analyze(self,event_id,analyzer,now):
         record=self.store.event(event_id)
+        if record['status']=='analyzing':return 'running'
         if record['status'] not in ('pending','analyzed'):return record['status']
         event=record['body'];version=record['evidence_version']
         positions,watchlist=self.membership()
@@ -198,6 +199,7 @@ class Pipeline:
             if saved['owner']!=owner:
                 self.store.metric(c,'analysis','cached_or_already_claimed',timestamp(now),event_id,ai_calls_avoided=1)
                 return saved['status']
+            c.execute("UPDATE ne_events SET status='analyzing' WHERE event_id=? AND evidence_version=?",(event_id,version))
         started=time.monotonic()
         try:
             # Network/LLM is strictly outside every DB transaction.
@@ -271,4 +273,5 @@ class Pipeline:
             for row in rows:
                 c.execute("UPDATE ne_analysis SET status='interrupted_unknown',error='operator_review_required' WHERE event_id=? AND version=?",
                           (row['event_id'],row['version']))
+                c.execute("UPDATE ne_events SET status='quality_failed',reason='interrupted_unknown' WHERE event_id=? AND evidence_version=? AND status='analyzing'",(row['event_id'],row['version']))
             return len(rows)

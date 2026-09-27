@@ -771,6 +771,10 @@ def _scope_context(tickers: list[str], published_at: str) -> tuple[str, int | No
 
 
 def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dict[str, int]:
+    from news_events.control import active
+    if active():
+        from news_events.runtime import ingest_items as canonical_ingest
+        return canonical_ingest(items, at)
     current, stamp = _now(at), _z(at)
     inserted = sources = linked = duplicates = rejected_invalid = rejected_date = 0
     conn = get_db_connection(); cur = conn.cursor(); begin_write_transaction(cur)
@@ -1382,6 +1386,10 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
     if not NEWS_ANALYSIS_LOCK.acquire(blocking=False):
         return {'analyzed': 0, 'alerts': 0, 'errors': [], 'busy': True}
     try:
+        from news_events.control import active
+        if active():
+            from news_events.runtime import analyze_jobs
+            return analyze_jobs(at)
         return _analyze_news_jobs(limit, analyzer, at)
     finally:
         NEWS_ANALYSIS_LOCK.release()

@@ -21,7 +21,10 @@ def request_options():
     return options
 
 
-def json_completion(system, payload, *, predict=1000, schema=None, task="news"):
+def json_completion(system, payload, *, predict=1000, schema=None, task="news",
+                    max_attempts=2, usage_sink=None, repair=False):
+    if max_attempts not in (1, 2):
+        raise ValueError('invalid_ai_attempt_limit')
     model = (os.getenv("OPENROUTER_" + task.upper() + "_MODEL") or
              os.getenv("OPENROUTER_NEWS_MODEL") or os.getenv("OPENROUTER_MODEL"))
     key = os.getenv("OPENROUTER_API_KEY")
@@ -32,7 +35,7 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news"):
     response_format = ({"type": "json_schema", "json_schema": {
         "name": "ai_trader_" + task, "strict": True, "schema": schema}}
         if schema else {"type": "json_object"})
-    for attempt in range(2):
+    for attempt in range(max_attempts):
         from ai_budget import check, acquire_request_slot
         check()  # Outside repair handling: never retry a blocked budget.
         acquire_request_slot()
@@ -68,19 +71,25 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news"):
             if status == 402:
                 from ai_budget import payment_rejected
                 payment_rejected()
-            if attempt or not (isinstance(exc, (requests.Timeout, requests.ConnectionError)) or status in {408,429,500,502,503,504}):
+            if attempt + 1 >= max_attempts or not (isinstance(exc, (requests.Timeout, requests.ConnectionError)) or status in {408,429,500,502,503,504}):
                 raise ValueError("openrouter_transport_failed:"+failure) from None
             notify_failure=False  # Persist attempt cost/error, wait for bounded retry outcome.
         except (ValueError, KeyError, IndexError, jsonschema.ValidationError) as exc:
             from retry_policy import validation_detail
             failure=validation_detail(exc)
-            if attempt:
+            if attempt + 1 >= max_attempts:
                 raise ValueError("openrouter_schema_failed:"+failure) from None
             notify_failure=False
             messages.append({"role": "user", "content": "Return valid JSON matching the required schema; do not invent missing source facts."})
         finally:
             from ai_operations import record
             record('news_translation' if task in {'translation','news_translation','summary'} else 'news_analysis',
-                   model,body,started,success,None if success else failure,retry=attempt>0,
+                   model,body,started,success,None if success else failure,retry=repair or attempt>0,
                    notify_failure=notify_failure)
+            if usage_sink is not None:
+                usage=(body or {}).get('usage') or {}
+                usage_sink.update(model=model,input_tokens=usage.get('prompt_tokens'),
+                    output_tokens=usage.get('completion_tokens'),
+                    reasoning_tokens=(usage.get('completion_tokens_details') or {}).get('reasoning_tokens'),
+                    cost=usage.get('cost'),request_id=(body or {}).get('id'))
         time.sleep(.25)

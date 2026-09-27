@@ -289,6 +289,9 @@ def _fingerprint(ticker: str, url: str, title: str) -> str:
 
 
 def enqueue_telegram(cursor, dedupe_key: str, event_type: str, message: str, *, published_at=None) -> bool:
+    from news_events.control import publication_allowed
+    if not publication_allowed(cursor,dedupe_key,event_type,published_at):
+        return False
     # A clean-state cutover deliberately omits old news/delivery dedupe history.
     # Retain old items for analysis, but do not broadcast them as new messages.
     boundary = os.getenv('TELEGRAM_NEWS_NOT_BEFORE', '').strip()
@@ -1053,6 +1056,8 @@ def monitor_position_news() -> dict[str, Any]:
 
 
 def translate_pending_news(limit: int = 5) -> int:
+    from news_events.control import active
+    if active():return 0 # Canonical analysis owns all news translations.
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("SELECT id,title FROM scanner_news WHERE analysis_status='pending_translation' ORDER BY published_at DESC LIMIT ?", (limit,))
     rows = [dict(row) for row in cur.fetchall()]; conn.close()
@@ -1119,9 +1124,20 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             cur.execute("UPDATE scanner_telegram_outbox SET status='disabled',last_error='disabled_by_configuration' WHERE id=? AND status='sending'", (row["id"],))
             conn.commit(); conn.close()
             continue
-        if row['event_type'] in {'position_news', 'watchlist_news'}:
+        from news_events.control import active, NEWS_TYPES
+        canonical=row['dedupe_key'].startswith('canonical:')
+        if row['event_type'] in NEWS_TYPES and canonical != active():
+            conn=get_db_connection()
+            conn.execute("UPDATE scanner_telegram_outbox SET status='cancelled',last_error='news_pipeline_fenced' WHERE id=? AND status='sending'",(row['id'],))
+            conn.commit();conn.close()
+            continue
+        if canonical or row['event_type'] in {'position_news', 'watchlist_news'}:
             from news_subscriptions import personal_delivery_message
-            message = personal_delivery_message(row)
+            if canonical:
+                from news_events.runtime import delivery_message
+                message=delivery_message(row)
+            else:
+                message = personal_delivery_message(row)
             if message is None:
                 conn = get_db_connection()
                 conn.execute("""UPDATE scanner_telegram_outbox SET status='cancelled',
