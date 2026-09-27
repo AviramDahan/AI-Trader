@@ -321,6 +321,11 @@ def test_transport_rejects_unsafe_targets_without_network(endpoint):
     with pytest.raises(ProviderFailure,match='unsafe_endpoint'):Transport(['feed.example']).request(endpoint)
 
 
+def test_transport_blocks_private_resolved_address(monkeypatch):
+    monkeypatch.setattr('news_events.providers.resolve_public',lambda host:['127.0.0.1'])
+    with pytest.raises(ProviderFailure,match='unsafe_address'):Transport(['feed.example']).request('https://feed.example/rss')
+
+
 def test_legacy_adapters_normalize_without_source_specific_routing():
     cfg=Config('telegram_channels','https://example.org','Telegram',enabled=True,rights='approved')
     collector=Mock(return_value={'items':[{'url':'https://example.org/articles/12345','title':'Apple Inc. earnings',

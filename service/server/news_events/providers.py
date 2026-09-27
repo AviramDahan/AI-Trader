@@ -7,11 +7,27 @@ import ipaddress
 import http.client
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlencode
 from .model import Source, canonical_url, timestamp, text, event_type, fingerprint
+
+DNS_POOL=ThreadPoolExecutor(max_workers=3,thread_name_prefix='phase2-provider-dns')
+DNS_SLOTS=threading.BoundedSemaphore(3)
+
+
+def resolve_public(host):
+    # Bounded independent slots: one slow provider DNS lookup must not make
+    # every other provider inherit Phase 1's single-resolver busy state.
+    if not DNS_SLOTS.acquire(blocking=False):raise ProviderFailure('dns_capacity')
+    try:future=DNS_POOL.submit(socket.getaddrinfo,host,443,type=socket.SOCK_STREAM)
+    except Exception:
+        DNS_SLOTS.release();raise ProviderFailure('dns_failed') from None
+    future.add_done_callback(lambda _:DNS_SLOTS.release())
+    try:return sorted({entry[4][0] for entry in future.result(timeout=3)})
+    except (FutureTimeout,OSError):raise ProviderFailure('dns_failed') from None
 
 
 class ProviderFailure(Exception):
@@ -30,9 +46,7 @@ class Transport:
         if p.scheme!='https' or p.hostname not in self.allowed_hosts or p.username or p.password or p.port not in (None,443):
             raise ProviderFailure('unsafe_endpoint',terminal=True)
         started=time.monotonic()
-        # DNS uses the same bounded shared resolver as the audited SEC transport.
-        from news_evidence import public_addresses
-        try:addresses=public_addresses(p.hostname)
+        try:addresses=resolve_public(p.hostname)
         except Exception:raise ProviderFailure('dns_failed') from None
         if not addresses or any(not ipaddress.ip_address(a).is_global for a in addresses):
             raise ProviderFailure('unsafe_address',terminal=True)
