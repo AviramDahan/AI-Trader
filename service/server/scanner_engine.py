@@ -110,7 +110,8 @@ def set_news_watchlist(ticker: str, company: str | None = None, enabled: bool = 
         cur.execute("""INSERT INTO scanner_news_watchlist(ticker,company,enabled,created_at,updated_at)
                        VALUES(?,?,1,?,?) ON CONFLICT(ticker) DO UPDATE SET company=excluded.company,
                        enabled=1,updated_at=excluded.updated_at""", (ticker, company, stamp, stamp))
-        cur.execute("UPDATE scanner_news_providers SET next_check_at=? WHERE provider='yahoo_priority'", (stamp,))
+        cur.execute("""UPDATE scanner_news_providers SET next_check_at=? WHERE provider='yahoo_priority'
+            AND status NOT IN ('rate_limited','error','config_required')""", (stamp,))
     else:
         cur.execute("UPDATE scanner_news_watchlist SET enabled=0,updated_at=? WHERE ticker=?", (stamp, ticker))
     cur.execute("SELECT ticker,company,enabled,created_at,updated_at FROM scanner_news_watchlist WHERE ticker=?", (ticker,))
@@ -1117,6 +1118,21 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             cur.execute("UPDATE scanner_telegram_outbox SET status='disabled',last_error='disabled_by_configuration' WHERE id=? AND status='sending'", (row["id"],))
             conn.commit(); conn.close()
             continue
+        if row['event_type'] in {'position_news', 'watchlist_news'}:
+            from news_subscriptions import personal_delivery_message
+            message = personal_delivery_message(row)
+            if message is None:
+                conn = get_db_connection()
+                conn.execute("""UPDATE scanner_telegram_outbox SET status='cancelled',
+                    last_error='news_subscription_inactive_or_unverifiable'
+                    WHERE id=? AND status='sending'""", (row['id'],))
+                conn.commit(); conn.close()
+                continue
+            row['message'] = message
+            conn = get_db_connection()
+            conn.execute("UPDATE scanner_telegram_outbox SET message=? WHERE id=? AND status='sending'",
+                         (message, row['id']))
+            conn.commit(); conn.close()
         if row["event_type"] == "entry_chart":
             from telegram_charts import send_entry_chart
             result = send_entry_chart(_loads(row["message"], {}).get("trade_id", 0))
@@ -1459,7 +1475,7 @@ def dashboard_payload() -> dict[str, Any]:
     cur.execute("SELECT * FROM scanner_news_schedule ORDER BY ticker"); schedules = [dict(row) for row in cur.fetchall()]
     cur.execute("SELECT * FROM scanner_service_status ORDER BY component"); services = [dict(row) for row in cur.fetchall()]
     try:
-        cur.execute("SELECT * FROM scanner_news_providers ORDER BY provider")
+        cur.execute("SELECT * FROM scanner_news_providers WHERE status!='retired' ORDER BY provider")
         news_providers = [dict(row) for row in cur.fetchall()]
     except Exception:
         news_providers = []

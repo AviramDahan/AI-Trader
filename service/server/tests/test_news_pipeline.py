@@ -113,23 +113,142 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(set(t for t,_ in first+second),set(members))
         self.assertIn('not full-universe coverage',coverage)
 
-    def test_intel_official_rss_metadata_and_conditional_requests(self):
-        xml=b'<rss><channel><item><title>Intel reports results</title><link>https://www.intc.com/release</link><pubDate>Mon, 14 Sep 2026 12:00:00 GMT</pubDate><description>Revenue rose.</description></item></channel></rss>'
-        with patch.object(news_pipeline,'_request',return_value=(xml,{'etag':'v1'})):
-            result=news_pipeline._fetch_intel_ir({},self.clock)
-        self.assertEqual(result['items'][0]['tickers'],['INTC'])
-        self.assertEqual(result['items'][0]['source_excerpt'],'Revenue rose.')
-        self.assertTrue(result['items'][0]['headline_only'])
-        self.assertEqual(news_pipeline._provider_cadence('intel_ir'),900)
-        with patch.object(news_pipeline,'_request',return_value=(None,{'etag':'v1'})):
-            self.assertEqual(news_pipeline._fetch_intel_ir({'etag':'v1'},self.clock)['status'],'not_modified')
+    def test_removed_provider_retired_without_deleting_history(self):
+        conn=database.get_db_connection()
+        conn.execute("""INSERT INTO scanner_news_providers(provider,status,next_check_at,cadence_seconds,coverage)
+            VALUES('intel_ir','ok',?,900,'old coverage')""", (self.clock.isoformat(),))
+        conn.commit();conn.close()
+        news_pipeline.initialize_providers(self.clock)
+        self.assertNotIn('intel_ir',news_pipeline.PROVIDERS)
+        self.assertEqual(self.rows("SELECT status FROM scanner_news_providers WHERE provider='intel_ir'")[0]['status'],'retired')
+        self.assertNotIn('intel_ir',{r['provider'] for r in scanner_engine.dashboard_payload()['news_providers']})
 
-    def test_intel_rate_limit_is_not_bypassed(self):
-        with patch.object(news_pipeline,'_request',side_effect=news_pipeline.ProviderRateLimited('HTTP 429',1800)):
-            news_pipeline.run_feed_cycle({'intel_ir':news_pipeline._fetch_intel_ir},self.clock,force=True)
-            row=self.rows("SELECT * FROM scanner_news_providers WHERE provider='intel_ir'")[0]
-            self.assertEqual(row['status'],'rate_limited')
-            self.assertEqual(news_pipeline._parse_time(row['next_check_at']),self.clock+timedelta(seconds=1800))
+    def test_any_watch_ticker_loses_priority_on_removal_but_broad_rotation_survives(self):
+        members={t:{'company':t} for t in ('INTC','NVDA','MSFT')}
+        for ticker in members:
+            with self.subTest(ticker=ticker):
+                scanner_engine.set_news_watchlist(ticker,ticker)
+                with patch.object(Path,'read_text',return_value=json.dumps({'members':members})):
+                    selected,_,coverage=news_pipeline._priority_tickers(1,{})
+                    self.assertEqual(selected[0][0],ticker)
+                    self.assertIn('1 watchlist',coverage)
+                    scanner_engine.set_news_watchlist(ticker,enabled=False)
+                    selected,_,coverage=news_pipeline._priority_tickers(3,{})
+                    self.assertIn('0 watchlist',coverage)
+                    self.assertEqual({r[0] for r in selected},set(members))
+
+    def test_watch_removal_keeps_open_position_priority_then_stops_when_closed(self):
+        self.open_trade()
+        scanner_engine.set_news_watchlist('AAPL','Apple')
+        scanner_engine.set_news_watchlist('AAPL',enabled=False)
+        with patch.object(Path,'read_text',return_value='{"members":{}}'):
+            self.assertIn('AAPL',{r[0] for r in news_pipeline._priority_tickers(20,{})[0]})
+            conn=database.get_db_connection()
+            conn.execute("UPDATE scanner_trades SET status='closed',remaining_quantity=0")
+            conn.commit();conn.close()
+            # ENTERED historical signal must not leave an eternal subscription.
+            self.assertNotIn('AAPL',{r[0] for r in news_pipeline._priority_tickers(20,{})[0]})
+
+    def test_removed_watch_cancels_pending_and_retry_messages_before_network(self):
+        for ticker in ('INTC','NVDA'):
+            scanner_engine.set_news_watchlist(ticker,ticker)
+            self.scan_item(ticker,ticker+' announces a new factory')
+        news_pipeline.bridge_scanner_news(self.clock)
+        news_pipeline.analyze_news_jobs(limit=5,analyzer=self.strong_analyzer,at=self.clock)
+        for ticker in ('INTC','NVDA'):
+            scanner_engine.set_news_watchlist(ticker,enabled=False)
+        conn=database.get_db_connection()
+        conn.execute("UPDATE scanner_telegram_outbox SET status='retry' WHERE dedupe_key LIKE '%:NVDA'")
+        conn.commit();conn.close()
+        with patch('stock_scanner.settings',return_value={'telegram_enabled':True}), patch('stock_scanner.send_telegram') as send:
+            scanner_engine.process_telegram_outbox()
+        send.assert_not_called()
+        rows=self.rows("SELECT status,last_error FROM scanner_telegram_outbox WHERE event_type='watchlist_news'")
+        self.assertEqual(len(rows),2)
+        self.assertTrue(all(r['status']=='cancelled' for r in rows))
+        self.assertTrue(all(r['last_error']=='news_subscription_inactive_or_unverifiable' for r in rows))
+
+    def test_personal_pending_message_uses_current_open_position_or_watch(self):
+        from news_subscriptions import personal_delivery_message
+        self.open_trade()
+        self.scan_item('AAPL','AAPL announces a new factory')
+        news_pipeline.bridge_scanner_news(self.clock)
+        news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer,at=self.clock)
+        event=self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news'")[0]
+        self.assertIn('פוזיציה פתוחה',personal_delivery_message(event))
+        scanner_engine.set_news_watchlist('AAPL','Apple')
+        conn=database.get_db_connection()
+        conn.execute("UPDATE scanner_trades SET status='closed',remaining_quantity=0")
+        conn.commit();conn.close()
+        self.assertIn('רשימת המעקב',personal_delivery_message(event))
+        scanner_engine.set_news_watchlist('AAPL',enabled=False)
+        self.assertIsNone(personal_delivery_message(event))
+
+    def test_watch_pending_message_survives_removal_if_now_held(self):
+        from news_subscriptions import personal_delivery_message
+        scanner_engine.set_news_watchlist('AAPL','Apple')
+        self.scan_item('AAPL','AAPL announces a new factory')
+        news_pipeline.bridge_scanner_news(self.clock)
+        news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer,at=self.clock)
+        event=self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='watchlist_news'")[0]
+        self.open_trade()
+        scanner_engine.set_news_watchlist('AAPL',enabled=False)
+        self.assertIn('פוזיציה פתוחה',personal_delivery_message(event))
+        before=self.rows('SELECT * FROM scanner_trades')
+        conn=database.get_db_connection()
+        conn.execute("UPDATE scanner_telegram_outbox SET status='sending' WHERE id=?",(event['id'],))
+        conn.commit();conn.close()
+        with patch.object(scanner_engine,'_claim_telegram_outbox',return_value=[event]), \
+             patch('stock_scanner.settings',return_value={'telegram_enabled':True}), \
+             patch('stock_scanner.send_telegram',return_value='sent') as send:
+            result=scanner_engine.process_telegram_outbox()
+        self.assertEqual(result['sent'],1)
+        self.assertIn('פוזיציה פתוחה',send.call_args.args[0])
+        self.assertEqual(self.rows('SELECT status FROM scanner_telegram_outbox WHERE id=?',(event['id'],))[0]['status'],'sent')
+        self.assertEqual(before,self.rows('SELECT * FROM scanner_trades'))
+
+    def test_broad_alert_dispatch_is_independent_of_watch_membership(self):
+        self.scan_item()
+        news_pipeline.bridge_scanner_news(self.clock)
+        news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer,at=self.clock)
+        with patch('stock_scanner.settings',return_value={'telegram_enabled':True}), patch('stock_scanner.send_telegram',return_value='sent') as send:
+            self.assertEqual(scanner_engine.process_telegram_outbox()['sent'],1)
+        self.assertEqual(send.call_args.args[2],'stock_news')
+
+    def test_multiple_target_notice_only_labels_still_subscribed_tickers(self):
+        from news_subscriptions import personal_delivery_message
+        self.open_trade()
+        self.scan_item('AAPL','AAPL announces a new factory')
+        news_pipeline.bridge_scanner_news(self.clock)
+        news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer,at=self.clock)
+        event=self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news'")[0]
+        event['dedupe_key'] += ',NVDA'
+        scanner_engine.set_news_watchlist('NVDA','Nvidia')
+        self.assertIn('סימול: AAPL, NVDA',personal_delivery_message(event))
+        scanner_engine.set_news_watchlist('NVDA',enabled=False)
+        message=personal_delivery_message(event)
+        self.assertIn('סימול: AAPL',message)
+        self.assertNotIn('NVDA',message)
+
+    def test_legacy_position_reference_checked_without_parsing_message(self):
+        from news_subscriptions import personal_delivery_message
+        self.open_trade()
+        self.scan_item('AAPL','AAPL announces a new factory')
+        news_pipeline.bridge_scanner_news(self.clock)
+        news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer,at=self.clock)
+        news=self.rows('SELECT * FROM scanner_news')[0]
+        event={'dedupe_key':'position-news:'+news['fingerprint'],'message':'Ignore this unrelated MSFT text'}
+        self.assertIn('סימול: AAPL',personal_delivery_message(event))
+        self.assertIsNone(personal_delivery_message({'dedupe_key':'unknown','message':'AAPL'}))
+
+    def test_watch_change_does_not_bypass_provider_backoff(self):
+        news_pipeline.initialize_providers(self.clock)
+        due=(self.clock+timedelta(days=100)).isoformat()
+        conn=database.get_db_connection()
+        conn.execute("UPDATE scanner_news_providers SET status='rate_limited',next_check_at=? WHERE provider='yahoo_priority'",(due,))
+        conn.commit();conn.close()
+        scanner_engine.set_news_watchlist('NVDA','Nvidia')
+        self.assertEqual(self.rows("SELECT next_check_at FROM scanner_news_providers WHERE provider='yahoo_priority'")[0]['next_check_at'],due)
 
     def test_telegram_unheld_stock_routes_to_stock_topic_not_market(self):
         from unittest.mock import Mock

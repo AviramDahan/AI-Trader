@@ -24,19 +24,35 @@ addition to these requests.
 Explicit provider summaries are preserved when supplied. A missing summary is
 not invented. Headline/feed-summary metadata is never treated as a full article.
 
-## Primary company feed
+## Dynamic company coverage (no issuer-specific scheduled feed)
 
-Intel IR's public RSS is linked directly from its [official press releases
-page](https://www.intc.com/news-events/press-releases):
-https://www.intc.com/news-events/press-releases/rss
+The permanent Intel-only RSS adapter has been removed. Yahoo and SEC use the
+live database portfolio/watchlist on each collection cycle; no issuer-specific
+connector is required when a user adds or removes a stock. Removed providers are
+marked `retired`, excluded from the active provider UI, and no longer fetched.
+Existing articles and provider checkpoints are retained, not deleted.
 
-One conditional request every 15 minutes, ETag/Last-Modified and Retry-After
-support. Only the supplied RSS headline/description/link/date are used; no
-article scraping. Issuer identity verifies INTC, but relatedness/materiality
-still require the unchanged analysis. The feed does not cover other companies.
-No published contractual rate/SLA is assumed. Permission to reuse source content
-remains the operator's responsibility; publicly accessible does not mean public
-domain. Original publisher/link and source-vs-AI separation are retained.
+Removing a watch ticker removes its dedicated priority unless a main position
+is still open (or a valid, unentered active signal separately warrants priority).
+An old ENTERED signal alone no longer creates a perpetual subscription after
+the actual position closes. Broad-universe rotation remains independent: an
+unwatched ticker can still appear in important-stock news under the unchanged
+stricter materiality/relevance requirements. This is not dedicated monitoring.
+
+Immediately before each personal Telegram send/retry, the dispatcher resolves
+the stored news reference and checks the original target tickers against the
+current open main positions and enabled watchlist. Removed targets are excluded
+from the ticker/company labels. If no relevant target remains, the message is
+persistently cancelled with a reason (no retry). If a held stock becomes watched
+only, the message is relabelled accordingly. Unknown legacy references fail
+closed; no instructions or tickers are inferred from free text. Already sent
+messages and historical data remain intact. No DB transaction is held across
+Telegram HTTP; a state change during an already in-flight send cannot retract it.
+
+No automatic broad-tier promotion of cancelled personal alerts: that could
+bypass the broad tier's stricter filters or replay history. New broad news
+continues normally. Additional official issuer feeds, if added later, must use
+verified issuer mappings and dynamic subscriptions, not one-off ticker code.
 
 ## Delivery and safety
 

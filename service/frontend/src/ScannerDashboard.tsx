@@ -110,7 +110,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
 
   const text = (hebrew: string, english: string) => he ? hebrew : english
   const stamp = (value: any) => value ? new Date(value).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
-  const providerName = (name: string) => he ? ({ intel_ir: 'Intel — קשרי משקיעים', scanner_yahoo: 'חדשות שנאספו בסריקת המניות', sec_edgar: 'SEC EDGAR', federal_reserve: 'הפדרל ריזרב', bls: 'הלשכה לסטטיסטיקת עבודה (BLS)', fda: 'מנהל המזון והתרופות (FDA)', ftc: 'נציבות הסחר הפדרלית (FTC)', doj: 'משרד המשפטים האמריקאי (DOJ)', eia: 'מנהל מידע האנרגיה (EIA)', yahoo_priority: 'Yahoo — מניות בעדיפות', existing_market: 'חדשות השוק הקיימות' } as Record<string, string>)[name] || name : name
+  const providerName = (name: string) => he ? ({ scanner_yahoo: 'חדשות שנאספו בסריקת המניות', sec_edgar: 'SEC EDGAR', federal_reserve: 'הפדרל ריזרב', bls: 'הלשכה לסטטיסטיקת עבודה (BLS)', fda: 'מנהל המזון והתרופות (FDA)', ftc: 'נציבות הסחר הפדרלית (FTC)', doj: 'משרד המשפטים האמריקאי (DOJ)', eia: 'מנהל מידע האנרגיה (EIA)', yahoo_priority: 'Yahoo — מניות בעדיפות', existing_market: 'חדשות השוק הקיימות' } as Record<string, string>)[name] || name : name
   const providerStatus = (status: string) => he ? ({ ok: 'תקין', no_new: 'אין ידיעות חדשות', not_modified: 'ללא שינוי (304)', degraded: 'תקין חלקית', backoff_not_checked: 'לא נבדק — המתנה', rate_limited: 'מוגבל קצב', error: 'תקלה', config_required: 'דורש הגדרה', waiting: 'ממתין' } as Record<string, string>)[status] || status : status
   const providerCounters = (provider: Record<string, any>) => text(
     `התקבלו: ${provider.last_received_count || 0} · נקלטו: ${provider.last_ingested_count || 0} · כפילויות: ${provider.last_duplicate_count || 0} · נדחו בשיוך: ${provider.last_rejected_assignment_count || 0} · נדחו בתאריך: ${provider.last_rejected_date_count || 0}`,
@@ -118,7 +118,6 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const providerCoverage = (provider: Record<string, any>) => {
     if (!he) return provider.coverage
     const fixed: Record<string, string> = {
-      intel_ir: 'פיד רשמי של Intel בלבד, כל 15 דקות. כותרות ותקצירי RSS כשהם זמינים; לא גוף הכתבה המלא.',
       sec_edgar: 'עד 100 דיווחי EDGAR אחרונים; רק שיוכי CIK/סימול שאומתו ביקום הסריקה. מטא־דאטה בלבד.',
       federal_reserve: 'פיד רשמי משותף של הודעות הפדרל ריזרב; ללא גוף כתבה מלא.',
       bls: 'פידי תעסוקה, מדד המחירים לצרכן ו־JOLTS; ללא גוף כתבה מלא.',

@@ -626,7 +626,7 @@ def _priority_tickers(limit: int, checkpoint: dict[str, Any]) -> tuple[list[tupl
     open_rows = [(row["ticker"], row["company"]) for row in cur.fetchall()]
     cur.execute("SELECT ticker,company FROM scanner_news_watchlist WHERE enabled=1 ORDER BY created_at")
     watch_rows = [(row["ticker"], row["company"]) for row in cur.fetchall()]
-    cur.execute("SELECT ticker,company FROM scanner_signals WHERE status IN ('ACTIVE','PENDING_ENTRY','ENTERED') GROUP BY ticker,company ORDER BY MAX(updated_at) DESC")
+    cur.execute("SELECT ticker,company FROM scanner_signals WHERE status IN ('ACTIVE','PENDING_ENTRY') AND valid_until>? GROUP BY ticker,company ORDER BY MAX(updated_at) DESC", (_z(),))
     signal_rows = [(row["ticker"], row["company"]) for row in cur.fetchall()]
     cur.execute("SELECT ticker,MAX(company) company,MAX(id) latest FROM scanner_candidates WHERE status='candidate' GROUP BY ticker ORDER BY latest DESC LIMIT 100")
     candidates = [(row["ticker"], row["company"] or row["ticker"]) for row in cur.fetchall()]
@@ -706,20 +706,7 @@ def _fetch_existing_market(state: dict[str, Any], at: datetime) -> dict[str, Any
     return {"items": output, "coverage": "Latest cached broad-market snapshots from the existing AI-Trader feed"}
 
 
-def _fetch_intel_ir(state: dict[str, Any], at: datetime) -> dict[str, Any]:
-    # Public RSS linked by Intel IR. Conditional request/15 min, no scraping.
-    body, meta = _request('https://www.intc.com/news-events/press-releases/rss', state, OFFICIAL_USER_AGENT)
-    items = _rss_items(body, 'intel_ir', 'Intel Investor Relations', 'universe',
-                       news_category='company') if body else []
-    for item in items:
-        item['tickers'] = ['INTC']
-        item['ticker_evidence'] = {'INTC': 'Official Intel issuer press-release RSS'}
-    return {**meta, 'items': items, 'status': 'not_modified' if body is None else '',
-            'coverage': 'Intel official issuer RSS only; feed summaries, not full articles; conditional polling every 15 minutes'}
-
-
 PROVIDERS: dict[str, Callable[[dict[str, Any], datetime], dict[str, Any]]] = {
-    "intel_ir": _fetch_intel_ir,
     "telegram_channels": fetch_telegram_news,
     "ecb": _fetch_ecb,
     "global_voices": _fetch_global_voices,
@@ -737,8 +724,6 @@ PROVIDERS: dict[str, Callable[[dict[str, Any], datetime], dict[str, Any]]] = {
 
 def _provider_cadence(name: str) -> int:
     cfg = feed_settings()
-    if name == 'intel_ir':
-        return 900
     if name == 'telegram_channels':
         from telegram_news_reader import streaming_enabled
         if streaming_enabled():
@@ -749,6 +734,10 @@ def _provider_cadence(name: str) -> int:
 def initialize_providers(at: datetime | None = None) -> None:
     stamp = _z(at)
     conn = get_db_connection(); cur = conn.cursor()
+    # Retain provider history, but removed adapters must not look active in UI.
+    placeholders = ','.join('?' for _ in PROVIDERS)
+    cur.execute(f"""UPDATE scanner_news_providers SET status='retired',error=NULL
+        WHERE provider NOT IN ({placeholders}) AND status!='retired'""", tuple(PROVIDERS))
     for name in PROVIDERS:
         cur.execute("SELECT provider FROM scanner_news_providers WHERE provider=?", (name,))
         if not cur.fetchone():
