@@ -21,7 +21,7 @@ def inspect():
             WHERE n.id IS NULL''').fetchone()['n']
         result['canonical_outbox']=[dict(r) for r in c.execute("SELECT status,count(*) n FROM scanner_telegram_outbox WHERE dedupe_key LIKE 'canonical:%' GROUP BY status")]
         result['legacy_pending']=c.execute("SELECT count(*) n FROM scanner_telegram_outbox WHERE status IN ('pending','retry','sending') AND event_type IN ('market_news','position_news','watchlist_news','stock_news') AND dedupe_key NOT LIKE 'canonical:%'").fetchone()['n']
-    result['models']={k:os.getenv(k) for k in ('OPENROUTER_MODEL','OPENROUTER_NEWS_MODEL','OPENROUTER_FINAL_MODEL','STOCK_SCANNER_AI_CANDIDATE_LIMIT')}
+    result['models']={k:os.getenv(k) for k in ('OPENROUTER_MODEL','OPENROUTER_NEWS_MODEL','STOCK_SCANNER_FINAL_AI_MODEL','STOCK_SCANNER_AI_CANDIDATE_LIMIT')}
     return result
 
 

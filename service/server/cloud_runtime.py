@@ -76,6 +76,15 @@ def probe(role):
         state = json.loads(Path("/tmp/role-health.json").read_text())
         if state["role"] != role or time.time() - state["at"] > 30:
             raise RuntimeError("role_heartbeat_stale")
+        if role=='scanner':
+            from news_events.control import active
+            if active():
+                from news_events.runtime import pipeline
+                pipeline() # Catalog, schema/control and policy; no network/AI.
+                if time.time()-state['started_at']>90:
+                    with get_db_connection() as conn:
+                        feed=conn.execute("SELECT status,last_attempt_at FROM scanner_service_status WHERE component='news_feed'").fetchone()
+                    if not feed or feed['status']=='error':raise RuntimeError('canonical_feed_not_ready')
         if role == 'monitor' and time.time() - state['started_at'] > 90:
             from datetime import datetime
             with get_db_connection() as conn:

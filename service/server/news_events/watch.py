@@ -71,5 +71,6 @@ def check(at=None):
             'AI-Trader Admin\nחדשות קנוניות: תקין\nאירועים: '+str(data['canonical_events'])+
             '; גרסאות מקורות: '+str(data['source_versions'])+'; תור: '+str(data['queue_size'])+
             '\nעלות חדשות מתועדת מאז ההפעלה: $'+str(round(data['known_cost'],6))+
-            '\nספקים: '+', '.join(r['provider']+'='+r['status'] for r in providers))
+            '\nספקים: '+', '.join(r['provider']+'='+r['status'] for r in providers)+
+            '\nספקים חדשים: '+', '.join(k+'='+v.get('status','unknown') for k,v in data['provider_health'].items() if not k.startswith('evidence:')))
     return data
