@@ -19,7 +19,7 @@ def number(v):
     return v if isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) and v>=0 else None
 
 
-def record(task, model, body, started, success, failure=None, retry=False):
+def record(task, model, body, started, success, failure=None, retry=False, notify_failure=True):
     if os.getenv('AI_TRADER_CLOUD')!='true': return
     from database import get_db_connection
     usage=(body or {}).get('usage') or {}
@@ -33,9 +33,16 @@ def record(task, model, body, started, success, failure=None, retry=False):
              number(details.get('reasoning_tokens')),number(usage.get('cost')),
              time.monotonic()-started,datetime.now(timezone.utc).isoformat(),int(success),failure,
              (body or {}).get('id')))
-    if not success and failure not in {'ValueError'}:
+    if not success and notify_failure and failure not in {'ValueError'}:
         stamp=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')
-        enqueue('openrouter_failure:'+stamp,'AI-Trader Admin\nקריאת OpenRouter נכשלה או שהתגובה לא עמדה בסכמה.\nניטור הפוזיציות ו־TP/SL ממשיכים בנפרד.')
+        # Only allowlisted operational metadata can enter a private notification.
+        from retry_policy import alert_failure_detail
+        summary=alert_failure_detail(failure)
+        enqueue('openrouter_failure:'+stamp+':'+task+':'+summary,
+                'AI-Trader Admin\nעיבוד AI לא הושלם בקריאה הנוכחית; נדרשת בדיקת הסיבה.\n'
+                'משימה: '+task+'\nסיבה: '+summary+
+                '\nכשל זמני עשוי להמתין ל-backoff; אין כאן דיווח על repair שכבר הצליח.'
+                '\nניטור הפוזיציות ו־TP/SL ממשיכים בנפרד.')
 
 
 def credits():

@@ -171,7 +171,7 @@ def review(messages, validator):
             if provider=='openrouter' and sent:
                 from ai_operations import record
                 record('final_stock_review',model,body,start,metrics['result']=='validated',
-                       metrics['reject_reason'],retry=attempt>0)
+                       metrics['reject_reason'],retry=attempt>0,notify_failure=not retry)
             if trace is not None:
                 trace["attempts"].append(metrics)
                 trace["result"] = "reviewing" if retry else metrics["result"]

@@ -22,6 +22,37 @@ def detail(exc):
         'http_status':getattr(response,'status_code',None),
         'retry_after_seconds':retry_after(response.headers.get('Retry-After')) if response is not None else 0})
 
+
+def validation_detail(exc):
+    """Never serialize model content, validation instances, paths or error text."""
+    import jsonschema
+    reason='invalid_response_structure'
+    if isinstance(exc,json.JSONDecodeError): reason='invalid_json'
+    elif isinstance(exc,jsonschema.ValidationError): reason='schema_validation_failed'
+    elif isinstance(exc,ValueError) and str(exc) in {'ai_output_truncated','ai_object_required'}:
+        reason=str(exc)
+    result={'reason':reason}
+    if isinstance(exc,jsonschema.ValidationError):
+        allowed={'type','required','additionalProperties','enum','minimum','maximum','minLength','maxLength','pattern','items','anyOf','oneOf','allOf','const'}
+        result['validator']=exc.validator if exc.validator in allowed else 'other'
+    return json.dumps(result)
+
+
+def alert_failure_detail(value):
+    try:
+        data=json.loads(value)
+    except (ValueError,TypeError):
+        return value if value in {'SchemaFailure','JSONDecodeError','Timeout','ReadTimeout','ConnectTimeout','ConnectionError','schema','timeout'} else 'unclassified_failure'
+    if not isinstance(data,dict):return 'unclassified_failure'
+    safe={}
+    reasons={'invalid_json','schema_validation_failed','ai_output_truncated','ai_object_required','invalid_response_structure'}
+    if data.get('reason') in reasons:safe['reason']=data['reason']
+    if type(data.get('http_status')) is int:safe['http_status']=data['http_status']
+    if data.get('exception') in {'HTTPError','Timeout','ReadTimeout','ConnectTimeout','ConnectionError','JSONDecodeError'}:safe['exception']=data['exception']
+    delay=data.get('retry_after_seconds')
+    if type(delay) in (int,float) and math.isfinite(delay) and delay>=0:safe['retry_after_seconds']=delay
+    return json.dumps(safe,sort_keys=True) if safe else 'unclassified_failure'
+
 class DeferredProviderError(RuntimeError):
     def __init__(self, status, delay):
         self.retry_after_seconds=delay
