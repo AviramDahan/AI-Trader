@@ -2,7 +2,7 @@
 
 ## Scope and safety
 
-Branch: `codex/cloud-news-evidence`. **Not activated or deployed.** Default
+Branch: `codex/cloud-news-evidence`. Activation requires the controlled rollout below. Default
 `NEWS_EVIDENCE_ENABLED=false`. No model, confidence/materiality thresholds,
 strategy, targets, accounting, candidate limit, budget or monitor-role changes.
 
@@ -197,3 +197,37 @@ Before production activation:
    tables can remain; do not drop evidence/history to disable the change.
 
 Monday live-market validation and existing automations are unchanged.
+
+## Approved limited rollout and observation
+
+The one-time operator entrypoint `deploy/migrate-news-evidence.sh <full-sha>
+--approved-schema-3-to-4` requires main and successful exact-commit CI/Readiness,
+builds before stopping writers, requires a Recovery-State backup, applies the
+numbered migration under its advisory lock, then checks every role with enrichment
+disabled. It does not modify the automatic deployment schema guard. The operator
+pauses the host deploy timer during this controlled release. In an unsuccessful
+schema transition, recover forward with enrichment off: never rewind a trading DB.
+
+The existing private operations loop records minute-level current metrics and
+hourly persisted snapshots, with deduplicated Admin summaries at 48 and 72 hours.
+The observation window is recorded in `scanner_settings` at activation. It keeps
+unique article/content versions separate from fetch/review attempts, stage cost
+joined once to the original ledger, unknown cost separate, quality reason codes,
+queue age, provider errors, routing and monitor age. Outbox aggregates include
+all news and are not claimed as SEC deliveries. Raw call latency remains available
+for percentiles; observer sampling is not proof of every monitor cycle's latency.
+
+Automatic feature-only stop is persistent (`news_evidence_stop`): issuer/event
+mismatch, duplicate personal delivery of the same article/version/ticker, routing
+failure, monitor error or heartbeat over 900 seconds, eligible queue over an hour,
+or recorded AI cost for an eligible item over $0.05. These are operational brakes,
+not changed quality/trading thresholds. Semantic duplicate events across distinct
+article IDs and subtle AI misassociation still require manual evidence review.
+No stop changes trades, drops data, restarts the monitor or reactivates local work.
+Admin delivery uses the existing timestamped private queue with no public fallback.
+
+For DELL #420 the saved preactivation comparison contains only
+`news_quality_rejected`, not its failing flags or rejected draft. Its exact historic
+quality cause cannot be reconstructed and it must not be re-run to obtain a pass.
+Future independent-review and repair-review gates persist allowlisted failing
+codes; terminal-cache hits preserve those codes and do not call the model again.

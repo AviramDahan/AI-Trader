@@ -51,6 +51,52 @@ class NewsEvidenceTests(unittest.TestCase):
         prepare.assert_not_called(); analyzer.assert_called_once_with(row)
         self.assertFalse(self.rows('SELECT * FROM news_review_cache'))
 
+    def test_terminal_quality_cache_preserves_safe_codes_not_feedback(self):
+        row = self.article()
+        failure = 'news_quality_rejected:'+json.dumps({'faithful':False,'unsupported_claims':True,'secret':'never store this'})
+        analyzer = Mock(side_effect=ValueError(failure))
+        with patch.object(evidence, 'prepare', return_value=row):
+            for _ in range(2):
+                with self.assertRaisesRegex(ValueError,'news_quality_rejected'):
+                    evidence.review(row,analyzer)
+        analyzer.assert_called_once()
+        saved=self.rows('SELECT terminal_error FROM news_review_cache')[0]['terminal_error']
+        self.assertIn('faithful_failed',saved)
+        self.assertIn('unsupported_claims_failed',saved)
+        self.assertNotIn('secret',saved)
+        self.assertNotIn('never store',saved)
+
+    def test_observation_counts_versions_not_retries_and_private_stop(self):
+        from news_evidence_watch import check, save
+        row=self.article()
+        with database.get_db_connection() as c:
+            c.execute('''CREATE TABLE IF NOT EXISTS ai_call_usage(call_id TEXT PRIMARY KEY,
+                actual_cost REAL,latency REAL,success INTEGER,timestamp TEXT)''')
+            save(c,'news_evidence_observation_window',{'started_at':(self.clock-timedelta(minutes=1)).isoformat()},self.clock.isoformat())
+            c.execute("INSERT INTO scanner_service_status(component,status,last_success_at) VALUES('monitor','ok',?) ON CONFLICT(component) DO UPDATE SET status='ok',last_success_at=excluded.last_success_at",(self.clock.isoformat(),))
+        fetch=Mock(return_value=(XML,URL))
+        evidence.prepare(row,self.clock,fetch)
+        evidence.prepare(row,self.clock,fetch)
+        fetch.assert_called_once()
+        with patch('ai_operations.enqueue') as notify:
+            metrics=check(self.clock)
+            self.assertEqual(metrics['eligible_versions'],1)
+            self.assertEqual(metrics['enriched_versions'],1)
+            self.assertEqual(self.rows('SELECT attempts FROM news_evidence_observations')[0]['attempts'],2)
+            notify.assert_not_called()
+            check(self.clock+timedelta(minutes=16))
+            notify.assert_called_once()
+        self.assertFalse(evidence.enabled())
+        self.assertTrue(self.rows("SELECT * FROM scanner_trades WHERE status='open'"))
+
+    def test_quality_check_records_each_failed_gate(self):
+        from news_call_context import article
+        row=self.article()
+        with article(row['id'],'v1','source'), patch.object(news_quality,'numbers_grounded',return_value=False), patch.object(news_quality,'terminology_grounded',return_value=True):
+            news_quality.record_quality_check({}, {}, {'faithful':False,'fluent_hebrew':True,'unsupported_claims':False}, 'quality_review')
+        result=self.rows('SELECT reason_codes_json FROM news_quality_checks')[0]
+        self.assertEqual(json.loads(result['reason_codes_json']),['faithful_failed','numbers_grounded_failed'])
+
     def test_exact_issuer_and_event_validation(self):
         value = evidence.extract(XML, URL, ['AAPL'])
         self.assertEqual(value['ticker'], 'AAPL')

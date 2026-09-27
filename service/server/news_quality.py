@@ -218,6 +218,45 @@ def analyze_market_fast(row):
     return {**result, 'id':row['id'], 'thesis_effect':'unchanged', 'quality_version':3, 'duplicate_of':duplicate}
 
 
+def safe_quality_error(error):
+    """Persist only deterministic flags/codes, never free-form model feedback."""
+    prefix, _, detail = str(error).partition(':')
+    if prefix != 'news_quality_rejected':
+        return 'news_missing_hebrew' if prefix == 'news_missing_hebrew' else 'news_quality_unknown'
+    try:
+        values = json.loads(detail)
+    except (ValueError, TypeError):
+        values = {}
+    if not isinstance(values, dict):
+        values = {}
+    expected = {'faithful': True, 'fluent_hebrew': True, 'unsupported_claims': False,
+                'numbers_grounded': True, 'terminology_grounded': True}
+    flags = {k: values[k] for k in expected if isinstance(values.get(k), bool)}
+    codes = [k + '_failed' for k, wanted in expected.items() if k in flags and flags[k] != wanted]
+    return prefix + ':' + json.dumps({**flags, 'reason_codes': codes or ['quality_detail_unavailable']})
+
+
+def record_quality_check(result, facts, review, stage):
+    from news_call_context import CURRENT
+    context = CURRENT.get()
+    if not context:
+        return
+    from database import get_db_connection
+    from datetime import datetime, timezone
+    checks = {'faithful': review['faithful'], 'fluent_hebrew': review['fluent_hebrew'],
+              'unsupported_claims': review['unsupported_claims'],
+              'numbers_grounded': numbers_grounded(result,facts),
+              'terminology_grounded': terminology_grounded(result,facts)}
+    expected = {'faithful':True,'fluent_hebrew':True,'unsupported_claims':False,
+                'numbers_grounded':True,'terminology_grounded':True}
+    codes = [k+'_failed' for k in checks if checks[k] != expected[k]]
+    with get_db_connection() as c:
+        c.execute('''INSERT INTO news_quality_checks(news_id,content_version,stage,reason_codes_json,checked_at)
+            VALUES(?,?,?,?,?) ON CONFLICT(news_id,content_version,stage) DO UPDATE SET
+            reason_codes_json=excluded.reason_codes_json,checked_at=excluded.checked_at''',
+            (context['news_id'],context['content_version'],stage,json.dumps(codes),datetime.now(timezone.utc).isoformat()))
+
+
 def analyze_strict(row):
     from scanner_engine import _ollama_json as generate
     _ollama_json = partial(generate, model=os.getenv('OLLAMA_NEWS_MODEL') or None)
@@ -266,6 +305,7 @@ def analyze_strict(row):
         {'source': facts, 'draft': result, 'previous_sources': []},
         1400, schema=REVIEW_SCHEMA)
     validate_object(review, REVIEW_SCHEMA)
+    record_quality_check(result, facts, review, 'quality_review')
     if not review['faithful'] or not review['fluent_hebrew'] or review['unsupported_claims'] or not numbers_grounded(result, facts) or not terminology_grounded(result, facts):
         # One bounded editorial correction, then fail closed. Never accept the
         # first draft merely to increase the number of published messages.
@@ -283,12 +323,13 @@ def analyze_strict(row):
             {'source': facts, 'draft': result, 'previous_sources': []},
             1400, schema=REVIEW_SCHEMA)
         validate_object(review, REVIEW_SCHEMA)
+        record_quality_check(result, facts, review, 'repair_review')
         if not review['faithful'] or not review['fluent_hebrew'] or review['unsupported_claims'] or not numbers_grounded(result, facts) or not terminology_grounded(result, facts):
-            raise ValueError('news_quality_rejected:'+json.dumps({
+            raise ValueError(safe_quality_error('news_quality_rejected:'+json.dumps({
                 'faithful':review['faithful'],'fluent_hebrew':review['fluent_hebrew'],
                 'unsupported_claims':review['unsupported_claims'],
                 'numbers_grounded':numbers_grounded(result,facts),
-                'terminology_grounded':terminology_grounded(result,facts)}))
+                'terminology_grounded':terminology_grounded(result,facts)})))
     # Previous headlines belong only in event comparison, never in the factual
     # translation review where they could contaminate names/prices themselves.
     duplicate = 0

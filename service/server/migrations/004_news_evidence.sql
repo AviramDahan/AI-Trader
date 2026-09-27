@@ -43,3 +43,24 @@ CREATE TABLE IF NOT EXISTS news_ai_call_links (
     source_excerpt_chars INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_news_ai_links_item ON news_ai_call_links(news_id,content_version);
+CREATE TABLE IF NOT EXISTS news_evidence_observations (
+    news_id INTEGER NOT NULL,
+    content_version TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    eligible INTEGER NOT NULL,
+    elapsed_seconds REAL NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    attempts INTEGER NOT NULL,
+    PRIMARY KEY(news_id,content_version)
+);
+CREATE TABLE IF NOT EXISTS news_quality_checks (
+    news_id INTEGER NOT NULL,
+    content_version TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    reason_codes_json TEXT NOT NULL,
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY(news_id,content_version,stage)
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_observed_at ON news_evidence_observations(first_seen_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_quality_at ON news_quality_checks(checked_at);

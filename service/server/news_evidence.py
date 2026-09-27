@@ -37,7 +37,12 @@ VERSION = 'sec-evidence-v1'
 
 
 def enabled():
-    return os.getenv('NEWS_EVIDENCE_ENABLED', 'false').lower() == 'true'
+    if os.getenv('NEWS_EVIDENCE_ENABLED', 'false').lower() != 'true':
+        return False
+    # Shared persistent kill switch: works across roles without restarting TP/SL.
+    with get_db_connection() as c:
+        state = c.execute("SELECT value_json FROM scanner_settings WHERE key='news_evidence_stop'").fetchone()
+    return not (state and json.loads(state['value_json']).get('disabled'))
 
 
 def stamp(now=None):
@@ -324,6 +329,25 @@ def extract(raw, url, verified):
 
 
 def prepare(row, now=None, fetcher=None):
+    started = time.monotonic()
+    result = _prepare(row, now, fetcher)
+    reason = result.get('_evidence_reason') or ('enriched' if result.get('_evidence_version') else
+        'content_sufficient' if not missing_information(row) else
+        'provider_out_of_scope' if row.get('provider') != 'sec_edgar' else 'not_in_portfolio_or_watchlist')
+    version = digest(normalized(row['title']) + '\n' + normalized(facts(row).get('source_excerpt')))
+    with get_db_connection() as c:
+        c.execute('''INSERT INTO news_evidence_observations(news_id,content_version,reason,eligible,
+            elapsed_seconds,first_seen_at,last_seen_at,attempts) VALUES(?,?,?,?,?,?,?,1)
+            ON CONFLICT(news_id,content_version) DO UPDATE SET reason=excluded.reason,
+            eligible=excluded.eligible,elapsed_seconds=excluded.elapsed_seconds,
+            last_seen_at=excluded.last_seen_at,attempts=news_evidence_observations.attempts+1''',
+            (row['id'],version,reason,int(reason not in ('content_sufficient','provider_out_of_scope',
+            'not_in_portfolio_or_watchlist','outside_activation_window','activation_fence_required')),
+            time.monotonic()-started,stamp(now),stamp(now)))
+    return result
+
+
+def _prepare(row, now=None, fetcher=None):
     """In-memory overlay only. Does NOT update scanner_news/source caches."""
     now = now or datetime.now(timezone.utc)
     copy = dict(row)
@@ -452,9 +476,11 @@ def review(row, analyzer):
             # text, HTTP bodies, tokens or free-form exception strings.
             reason = str(exc).split(':')[0]
             if reason in ('news_quality_rejected', 'news_missing_hebrew'):
+                from news_quality import safe_quality_error
+                safe_reason = safe_quality_error(exc)
                 with get_db_connection() as c:
                     c.execute('''INSERT INTO news_review_cache(cache_key,content_version,terminal_error,created_at)
-                        VALUES(?,?,?,?) ON CONFLICT(cache_key) DO NOTHING''', (terminal_key, version, reason, stamp()))
+                        VALUES(?,?,?,?) ON CONFLICT(cache_key) DO NOTHING''', (terminal_key, version, safe_reason, stamp()))
             raise
         with get_db_connection() as c:
             c.execute('''INSERT INTO news_review_cache(cache_key,content_version,result_json,created_at)
