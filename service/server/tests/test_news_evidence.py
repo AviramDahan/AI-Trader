@@ -263,6 +263,20 @@ class NewsEvidenceTests(unittest.TestCase):
         from news_subscriptions import personal_delivery_message
         self.assertIsNone(personal_delivery_message(event))
 
+    def test_superseded_pending_version_not_rebuilt_as_duplicate_new_version(self):
+        self.article()
+        before = lambda rows: [{**r,'_news_version':'v1'} for r in self.strong_analyzer(rows)]
+        news_pipeline.analyze_news_jobs(analyzer=before, at=self.clock)
+        event = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news'")[0]
+        with database.get_db_connection() as c:
+            c.execute("UPDATE scanner_news_jobs SET status='pending'")
+        after = lambda rows: [{**r,'_news_version':'v2'} for r in self.strong_analyzer(rows)]
+        news_pipeline.analyze_news_jobs(analyzer=after, at=self.clock)
+        from news_subscriptions import personal_delivery_message
+        self.assertIsNone(personal_delivery_message(event))
+        latest = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news' ORDER BY id DESC")[0]
+        self.assertIsNotNone(personal_delivery_message(latest))
+
     def test_provider_backoff_shared_across_filings(self):
         row = self.article()
         fetch = Mock(side_effect=evidence.EvidenceError('http_error', 429, 900, True))

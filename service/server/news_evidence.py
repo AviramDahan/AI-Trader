@@ -463,8 +463,8 @@ def audit(cur, row, result, reason=None, at=None):
 
 
 def decorate(cur, item):
-    if not enabled():
-        return item
+    # Preserve provenance of already-reviewed items after the kill switch is
+    # turned off. Disabling collection must not mislabel their source evidence.
     info = cur.execute('SELECT * FROM news_publication_audit WHERE news_id=?', (item['id'],)).fetchone()
     if info:
         item['publication_reasons'] = json.loads(info['reasons_json'])

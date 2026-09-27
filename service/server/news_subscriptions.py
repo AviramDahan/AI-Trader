@@ -27,6 +27,12 @@ def personal_delivery_message(event):
             return None
         if not news or not original:
             return None
+        if parts[0] in {'news', 'watchlist-news'} and len(parts) >= 4:
+            review = conn.execute('SELECT content_version FROM news_publication_audit WHERE news_id=?', (news['id'],)).fetchone()
+            if review and review['content_version'] != parts[2]:
+                # A pending old event must not be rebuilt from a newer draft:
+                # that would send the same new version twice under two keys.
+                return None
         placeholders = ','.join('?' for _ in original)
         params = tuple(sorted(original))
         held = {r['ticker']: r['company'] for r in conn.execute(f"""

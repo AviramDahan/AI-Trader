@@ -114,7 +114,9 @@ First isolated source replay:
   1. A stronger-looking headline is not proof of a missed publishable alert.
 
 Initial source extraction took 0.783–1.261 seconds per SEC item, including request
-spacing; a repeat measured 0.531–3.601 seconds. Additional model calls: **0**. Additional AI cost: **$0**. Public messages:
+spacing; a repeat measured 0.531–3.601 seconds. The final identical-sample replay
+measured 0.846–1.369 seconds, with 3 successful enrichments, 5 fail-closed SEC
+outcomes and 7 unchanged Yahoo items. Additional model calls: **0**. Additional AI cost: **$0**. Public messages:
 **0**. The test verifies source access/identity/excerpt preservation, not new model
 quality, end-to-end delivery latency, or the number of deserved publications.
 Those outcomes must not be reported as improved on this evidence alone.
@@ -129,6 +131,14 @@ cache, cosmetic changes, material corrections, correct-topic dedupe, removal fro
 watchlist/portfolio, and independent DB writes while source/model calls run.
 The same evidence tests run against PostgreSQL in Cloud Readiness CI, along with
 usage-ledger reconciliation, trading regression, restore, Docker and frontend build.
+
+Initial local regression: 470 tests plus 29 subtests passed, frontend build passed.
+One legacy experiment-attribution test originally depended on live price retrieval;
+its fixture now mocks that quote (test-only change, no trading code change). The
+isolated runner permits temporary test .env fixtures but blocks the real .env.
+An additional pending-version delivery regression was added afterward: an old
+queued version cannot be rebuilt using a newer summary and duplicate the new alert.
+Stored evidence provenance remains visible when the collection kill switch is off.
 
 Before production activation:
 
