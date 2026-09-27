@@ -19,6 +19,12 @@ permanent suspension. A previously successful press feed now gets at most
 two delayed recovery probes (minimum 300 seconds, respecting Retry-After); a
 third consecutive 404 is terminal. Unverified 404 endpoints remain terminal.
 
+Press transports keep the existing three-second connection timeout and 12-second
+overall deadline, but explicitly allow up to ten seconds for reads. Previously
+reads inadvertently inherited the three-second connect timeout. Exception types
+are retained without response bodies, headers or secret-bearing exception text.
+Other providers retain their existing timeout behavior.
+
 Required server settings:
 
 - `NEWS_PRNEWSWIRE_ACTIVATED_AT`

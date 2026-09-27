@@ -39,3 +39,23 @@ def test_standard_identifying_ua_is_press_only():
     cfg = Config('globenewswire', 'https://www.globenewswire.com/rss', 'Globe')
     assert PressFeedProvider(cfg).transport.user_agent.startswith('AI-Trader/1.0 ')
     assert RSSProvider(cfg).transport.user_agent == 'AI-Trader News Event Sandbox'
+    assert PressFeedProvider(cfg).transport.read_timeout == 10
+    assert PressFeedProvider(cfg).transport.timeout == 12
+    assert RSSProvider(cfg).transport.read_timeout is None
+
+@pytest.mark.parametrize('read_timeout', [None, 10])
+def test_read_timeout_applied_without_changing_connect_limit(monkeypatch, read_timeout):
+    import news_events.providers as mod
+    response=Mock(status=200)
+    response.getheader.side_effect=lambda key,*default:'identity' if key=='Content-Encoding' else None
+    response.read1.side_effect=[b'<rss/>',b'']
+    connection=Mock(getresponse=Mock(return_value=response));sock=Mock()
+    connect=Mock(return_value=Mock())
+    monkeypatch.setattr(mod,'resolve_public',lambda _:['8.8.8.8'])
+    monkeypatch.setattr(mod.socket,'create_connection',connect)
+    monkeypatch.setattr(mod.ssl,'create_default_context',Mock(return_value=Mock(wrap_socket=Mock(return_value=sock))))
+    monkeypatch.setattr(mod.http.client,'HTTPSConnection',Mock(return_value=connection))
+    assert mod.Transport(['example.com'],read_timeout=read_timeout).request('https://example.com/rss')==b'<rss/>'
+    connect.assert_called_once_with(('8.8.8.8',443),timeout=3)
+    if read_timeout is None:sock.settimeout.assert_not_called()
+    else:sock.settimeout.assert_called_once_with(10)

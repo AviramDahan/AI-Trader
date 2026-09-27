@@ -38,9 +38,10 @@ class ProviderFailure(Exception):
 
 class Transport:
     """Pinned public IP; at most one credential-free same-origin HTTPS redirect."""
-    def __init__(self,allowed_hosts,timeout=12,max_bytes=1048576,user_agent='AI-Trader News Event Sandbox'):
+    def __init__(self,allowed_hosts,timeout=12,max_bytes=1048576,user_agent='AI-Trader News Event Sandbox',read_timeout=None):
         self.allowed_hosts=set(allowed_hosts); self.timeout=timeout; self.max_bytes=max_bytes
         self.user_agent=user_agent
+        self.read_timeout=read_timeout
 
     def request(self,url,params=None,headers=None,method='GET',body=None,_redirects=0):
         p=urlsplit(url)
@@ -62,6 +63,8 @@ class Transport:
         try:
             raw=socket.create_connection((addresses[0],443),timeout=3)
             connection.sock=ssl.create_default_context().wrap_socket(raw,server_hostname=p.hostname)
+            if self.read_timeout is not None:
+                connection.sock.settimeout(min(self.timeout,self.read_timeout))
             timer.start()
             path=p.path or '/'
             query='&'.join(filter(None,[p.query,urlencode(params or {})]))
@@ -94,7 +97,11 @@ class Transport:
                 raise ProviderFailure('compressed_response_not_supported',terminal=True)
             return b''.join(chunks)
         except ProviderFailure:raise
-        except Exception:raise ProviderFailure('transport_failure') from None
+        except Exception as exc:
+            reason='transport_failure'
+            if self.read_timeout is not None:
+                reason='transport_'+type(exc).__name__
+            raise ProviderFailure(reason) from None
         finally:
             timer.cancel();connection.close()
             if raw:raw.close()
