@@ -163,3 +163,15 @@ def test_automatic_safety_rollback_never_changes_trade_tables(live,monkeypatch):
         for table in ('scanner_trades','scanner_fills','scanner_accounts','scanner_orders'):
             assert c.execute('SELECT count(*) n FROM '+table).fetchone()['n']==0
     admin.assert_called_once()
+
+
+def test_backlog_never_projects_into_dashboard_or_six_hour_review(live):
+    from dataclasses import replace
+    from news_events.runtime import project
+    p,src,_,at,_=live
+    eid=p.ingest(replace(src,published_at=(at-timedelta(hours=1)).isoformat()),at)
+    assert p.store.event(eid)['reason']=='backlog_blocked'
+    assert project(p,eid,at) is None
+    with p.store.transaction() as c:
+        assert c.execute('SELECT count(*) n FROM scanner_news').fetchone()['n']==0
+        assert c.execute('SELECT count(*) n FROM scanner_trade_news').fetchone()['n']==0

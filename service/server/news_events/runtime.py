@@ -90,6 +90,8 @@ def ingest_items(items,at=None):
 def project(p,eid,at):
     """Keep the original dashboard/six-hour review read model, not an AI queue."""
     record=p.store.event(eid);event=record['body'];stamp=timestamp(at)
+    if record['reason'] in {'backlog_blocked','stale_or_future'}:
+        return None # Audit in ne_events only; never repopulate the public feed.
     with p.store.transaction(True) as c:
         mapping=c.execute('SELECT news_id FROM ne_projection WHERE event_id=?',(eid,)).fetchone()
         held,watched=membership(c);tickers=event['tickers']
