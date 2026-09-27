@@ -6,6 +6,9 @@
 !service/server/*.py
 !service/server/migrations/
 !service/server/migrations/*.sql
+!service/server/news_events/
+!service/server/news_events/*.py
+!service/server/news_events/*.sql
 !deploy/
 !deploy/*.sh
 !deploy/Caddyfile

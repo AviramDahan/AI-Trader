@@ -59,4 +59,4 @@ jobs:
       - name: Build Linux image (no push or deploy)
         run: docker build -t ai-trader:readiness .
       - name: Compile image modules as non-root
-        run: docker run --rm --entrypoint python ai-trader:readiness -c "import config,database,ai_provider,cloud_runtime,active_snapshot,scanner_engine; print('imports OK')"
+        run: docker run --rm --entrypoint python ai-trader:readiness -c "import config,database,ai_provider,cloud_runtime,active_snapshot,scanner_engine,news_events.runtime,news_events.watch; from pathlib import Path; import news_events; assert (Path(news_events.__file__).parent/'schema.sql').is_file(); print('imports and canonical migration payload OK')"
