@@ -110,7 +110,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
 
   const text = (hebrew: string, english: string) => he ? hebrew : english
   const stamp = (value: any) => value ? new Date(value).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
-  const providerName = (name: string) => he ? ({ sec_edgar: 'SEC EDGAR', federal_reserve: 'הפדרל ריזרב', bls: 'הלשכה לסטטיסטיקת עבודה (BLS)', fda: 'מנהל המזון והתרופות (FDA)', ftc: 'נציבות הסחר הפדרלית (FTC)', doj: 'משרד המשפטים האמריקאי (DOJ)', eia: 'מנהל מידע האנרגיה (EIA)', yahoo_priority: 'Yahoo — מניות בעדיפות', existing_market: 'חדשות השוק הקיימות' } as Record<string, string>)[name] || name : name
+  const providerName = (name: string) => he ? ({ intel_ir: 'Intel — קשרי משקיעים', scanner_yahoo: 'חדשות שנאספו בסריקת המניות', sec_edgar: 'SEC EDGAR', federal_reserve: 'הפדרל ריזרב', bls: 'הלשכה לסטטיסטיקת עבודה (BLS)', fda: 'מנהל המזון והתרופות (FDA)', ftc: 'נציבות הסחר הפדרלית (FTC)', doj: 'משרד המשפטים האמריקאי (DOJ)', eia: 'מנהל מידע האנרגיה (EIA)', yahoo_priority: 'Yahoo — מניות בעדיפות', existing_market: 'חדשות השוק הקיימות' } as Record<string, string>)[name] || name : name
   const providerStatus = (status: string) => he ? ({ ok: 'תקין', no_new: 'אין ידיעות חדשות', not_modified: 'ללא שינוי (304)', degraded: 'תקין חלקית', backoff_not_checked: 'לא נבדק — המתנה', rate_limited: 'מוגבל קצב', error: 'תקלה', config_required: 'דורש הגדרה', waiting: 'ממתין' } as Record<string, string>)[status] || status : status
   const providerCounters = (provider: Record<string, any>) => text(
     `התקבלו: ${provider.last_received_count || 0} · נקלטו: ${provider.last_ingested_count || 0} · כפילויות: ${provider.last_duplicate_count || 0} · נדחו בשיוך: ${provider.last_rejected_assignment_count || 0} · נדחו בתאריך: ${provider.last_rejected_date_count || 0}`,
@@ -118,6 +118,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const providerCoverage = (provider: Record<string, any>) => {
     if (!he) return provider.coverage
     const fixed: Record<string, string> = {
+      intel_ir: 'פיד רשמי של Intel בלבד, כל 15 דקות. כותרות ותקצירי RSS כשהם זמינים; לא גוף הכתבה המלא.',
       sec_edgar: 'עד 100 דיווחי EDGAR אחרונים; רק שיוכי CIK/סימול שאומתו ביקום הסריקה. מטא־דאטה בלבד.',
       federal_reserve: 'פיד רשמי משותף של הודעות הפדרל ריזרב; ללא גוף כתבה מלא.',
       bls: 'פידי תעסוקה, מדד המחירים לצרכן ו־JOLTS; ללא גוף כתבה מלא.',
@@ -131,6 +132,8 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       telegram_channels: 'ערוצים ציבוריים מאושרים בלבד; ללא צאטים פרטיים וללא אימות מול מקור ראשוני. מצב הקליטה הרציפה מוצג בנפרד במצב הסורק.',
     }
     if (provider.provider === 'yahoo_priority') {
+      const rotation = String(provider.coverage || '').match(/(\d+) open-position, (\d+) watchlist, (\d+) active-signal; (\d+)\/(\d+) rotating outside-priority tickers; (\d+) selected/)
+      if (rotation) return `${rotation[1]} פוזיציות פתוחות, ${rotation[2]} מניות במעקב ו־${rotation[3]} סיגנלים פעילים בעדיפות. ${rotation[4]} מתוך ${rotation[5]} מניות נוספות בסבב מתחלף; ${rotation[6]} מניות ייחודיות במחזור. לא כיסוי מלא בזמן אמת.`
       const counts = String(provider.coverage || '').match(/(\d+) open-position, (\d+) watchlist, (\d+) active-signal and (\d+) rotating candidate/)
       return counts ? `${counts[1]} פוזיציות פתוחות, ${counts[2]} מניות במעקב, ${counts[3]} סיגנלים פעילים ו־${counts[4]} מועמדים מתחלפים במחזור האחרון. לא כיסוי מלא של כל המניות.` : 'מניות בעדיפות: פוזיציות פתוחות, רשימת מעקב, סיגנלים פעילים ומועמדים מתחלפים.'
     }
