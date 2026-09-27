@@ -72,6 +72,8 @@ class Store:
             ids={r['event_id'] for key in keys for r in c.execute('SELECT event_id FROM ne_anchors WHERE anchor=?',(key,))}
             if len(ids)>1:
                 # Never silently merge two already-published stories; hold bridge.
+                c.execute('INSERT INTO ne_quarantine VALUES(?,?,?,?,?) ON CONFLICT(source_key) DO NOTHING',
+                          (source_key,json.dumps(source.data()),'ambiguous_event_bridge',json.dumps(sorted(ids)),collected))
                 self.metric(c,'ingest','ambiguous_event_bridge',collected,provider_id=source.provider_id)
                 return None
             event_id=next(iter(ids),uuid.uuid4().hex)
@@ -174,6 +176,8 @@ def material_change(old,new):
         if any((k in oldclaims and oldclaims[k]!=str(val['value'])) or
                (k not in oldclaims and not k.startswith('quantity_frame:'))
                for k,val in v.get('claims',{}).items()):return True
-        if any(a['trust'] in ('official/regulatory','company official') for a in v['attributions']):return True
+        if any(a['trust'] in ('official/regulatory','company official') for a in v['attributions']):
+            oldvalues=set(oldclaims.values())
+            if any(str(val['value']) not in oldvalues for val in v.get('claims',{}).values()):return True
     # New phrasing is not proof of a material new fact; preserve for review.
     return False

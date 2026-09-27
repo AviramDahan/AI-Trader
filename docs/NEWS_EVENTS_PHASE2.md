@@ -59,9 +59,10 @@ is held as `interrupted_unknown`, not automatically repeated.
 - No automatic same-company/day or fuzzy-headline merging. Unrelated company
   stories remain separate. A bridge between two existing canonical events is
   held for review rather than silently merging previously delivered stories.
+  Its original evidence is retained in `ne_quarantine`, not dropped.
 - One event/version gets one analysis job even with concurrent workers.
 - Changed timestamps/markup/provenance alone do not generate another job.
-- Structured new facts or new primary evidence create an evidence version.
+- Structured new facts or grounded new primary-source quantities create an evidence version eligible for re-analysis.
   Unproved paraphrases after analysis are held (`needs_material_review`), not
   re-analyzed automatically and not discarded as a verified duplicate.
 - Conflicting grounded claims, including narrowly matched numeric sentence

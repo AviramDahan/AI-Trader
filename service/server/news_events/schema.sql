@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS ne_metrics (
  result TEXT NOT NULL, at TEXT NOT NULL, data_json TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS ne_evidence_cache (cache_key TEXT PRIMARY KEY, body_json TEXT NOT NULL, collected_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ne_quarantine (
+ source_key TEXT PRIMARY KEY, body_json TEXT NOT NULL, reason TEXT NOT NULL,
+ candidate_event_ids_json TEXT NOT NULL, collected_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS ne_sources_event ON ne_sources(event_id);
 CREATE INDEX IF NOT EXISTS ne_metrics_event ON ne_metrics(event_id,stage);
 CREATE INDEX IF NOT EXISTS ne_events_queue ON ne_events(status,created_at);

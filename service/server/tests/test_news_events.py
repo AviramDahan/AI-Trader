@@ -105,6 +105,18 @@ def test_no_same_ticker_day_or_homepage_merging(env):
     assert a!=b
 
 
+def test_ambiguous_late_bridge_retains_source_in_quarantine(env):
+    p,s,_=env
+    a=p.ingest(source(event_refs=()),NOW)
+    bsource=source('other',source_excerpt=FACTS+' Another separate announcement follows.',event_refs=())
+    b=p.ingest(bsource,NOW)
+    bridge=source('bridge',source_excerpt=FACTS+' Additional evidence for both references.',event_refs=(source().url,bsource.url))
+    assert p.ingest(bridge,NOW) is None
+    saved=rows(s,'SELECT * FROM ne_quarantine')[0]
+    assert set(json.loads(saved['candidate_event_ids_json']))=={a,b}
+    assert json.loads(saved['body_json'])['provider_id']=='bridge'
+
+
 def test_source_conflict_preserved_primary_preferred_not_published(env):
     p,s,_=env
     a=source(claims={'revenue':{'value':100,'quote':'revenue of 100 million'}},source_type='official/regulatory')
@@ -129,9 +141,10 @@ def test_material_update_after_analysis_preserves_prior_delivery_but_cancels_sta
     assert rows(s,'SELECT status FROM ne_delivery')[0]['status']=='cancelled'
 
 
-def test_paraphrase_without_proven_material_new_fact_does_not_trigger_extra_ai(env):
+@pytest.mark.parametrize('trust',['aggregator','official/regulatory'])
+def test_paraphrase_without_proven_material_new_fact_does_not_trigger_extra_ai(env,trust):
     p,s,_=env;eid=p.ingest(source(),NOW);ai=Mock(return_value=Analysis(RESULT));p.analyze(eid,ai,NOW)
-    p.ingest(source('benzinga',source_excerpt='Apple Inc. published results for the latest financial quarter while maintaining guidance according to its public company announcement.'),NOW)
+    p.ingest(source('benzinga',source_type=trust,source_excerpt='Apple Inc. published results for the latest financial quarter while maintaining guidance according to its public company announcement.'),NOW)
     assert p.analyze(eid,ai,NOW)=='needs_material_review';assert ai.call_count==1
 
 
