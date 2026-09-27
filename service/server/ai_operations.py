@@ -242,7 +242,8 @@ async def operations_loop():
             import logging
             logging.getLogger(__name__).warning('Private operations check failed; no public fallback')
         # A failed provider reconciliation must not block existing admin messages.
-        for operation in (health,send_one):
+        from budget_reports import schedule_reports, poll_commands
+        for operation in (schedule_reports,poll_commands,health,send_one):
             try:
                 await asyncio.to_thread(operation)
             except Exception:
