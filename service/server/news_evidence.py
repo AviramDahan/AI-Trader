@@ -513,6 +513,16 @@ def source_limit(row):
     return 'זמינים כותרת ומטא־דאטה בלבד.' if row.get('headline_only') else 'זמין תקציר שסופק בפיד; הכתבה המלאה לא נותחה.'
 
 
+def publication_allowed(row):
+    if not row.get('_news_version'):
+        return True
+    try:
+        fence = datetime.fromisoformat(os.environ['NEWS_EVIDENCE_NOT_BEFORE'].replace('Z','+00:00'))
+        return datetime.fromisoformat(row['published_at'].replace('Z','+00:00')) >= fence
+    except (KeyError, ValueError, TypeError):
+        return False
+
+
 def needs_personal_route(cur, row, duplicate_id):
     """A broad-topic duplicate does not prove delivery to a personal recipient."""
     if not enabled():

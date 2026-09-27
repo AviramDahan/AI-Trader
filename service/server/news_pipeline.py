@@ -1454,7 +1454,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
     errors = []
     conn = get_db_connection(); cur = conn.cursor(); begin_write_transaction(cur)
     from scanner_engine import enqueue_telegram
-    from news_evidence import audit, needs_personal_route, publication_outcome
+    from news_evidence import audit, needs_personal_route, publication_outcome, publication_allowed
     for row in rows:
         alerts_before = alerts
         result = by_id.get(int(row["id"]))
@@ -1507,6 +1507,11 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
         cur.execute("UPDATE scanner_news SET analysis_seconds=?,analysis_finished_at=? WHERE id=?",
                     (result.get('analysis_seconds'), _z() if at is None else stamp, row['id']))
         analyzed += 1
+        if not publication_allowed(row):
+            # Changing version algorithms or supplementing historical metadata
+            # must not bypass old delivery ledgers and replay the backlog.
+            audit(cur, row, result, reason='backlog_blocked', at=stamp)
+            continue
         if result.get('duplicate_of'):
             personal_route = needs_personal_route(cur, row, result['duplicate_of'])
             if not personal_route:

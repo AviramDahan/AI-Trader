@@ -233,6 +233,15 @@ class NewsEvidenceTests(unittest.TestCase):
         self.assertEqual(news_pipeline.analyze_news_jobs(analyzer=changed, at=self.clock)['alerts'], 1)
         self.assertEqual(len(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news'")), 2)
 
+    def test_new_version_algorithm_cannot_replay_pre_activation_backlog(self):
+        self.article()
+        analyzer = lambda rows: [{**r, '_news_version':'new-version-hash'} for r in self.strong_analyzer(rows)]
+        with patch.dict(os.environ, {'NEWS_EVIDENCE_NOT_BEFORE': (self.clock+timedelta(seconds=1)).isoformat()}):
+            result = news_pipeline.analyze_news_jobs(analyzer=analyzer, at=self.clock)
+        self.assertEqual(result['alerts'],0)
+        self.assertFalse(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='position_news'"))
+        self.assertEqual(json.loads(self.rows('SELECT reasons_json FROM news_publication_audit')[0]['reasons_json']), ['backlog_blocked'])
+
     def test_transient_enrichment_defers_without_quality_ai(self):
         row = self.article(); analyzer = Mock(side_effect=AssertionError('AI not allowed'))
         with patch.object(evidence, 'prepare', return_value={**row, '_evidence_terminal':False,'_evidence_retry_after':60,'_evidence_reason':'http_error'}):
