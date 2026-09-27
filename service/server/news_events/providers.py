@@ -235,7 +235,8 @@ class ExistingProvider(BaseProvider):
 def registry(configs,existing=None,transport_factory=None,tipranks_contract=None):
     """Provider selection stays here, never in core routing or analysis."""
     result=[]
-    classes={'benzinga':BenzingaProvider,'tipranks':TipRanksProvider}
+    from .investing import InvestingProvider
+    classes={'benzinga':BenzingaProvider,'tipranks':TipRanksProvider,'investing':InvestingProvider}
     for cfg in configs:
         if cfg.provider_id in (existing or {}):
             result.append(ExistingProvider(cfg,existing[cfg.provider_id]));continue

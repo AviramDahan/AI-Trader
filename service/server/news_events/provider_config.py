@@ -9,7 +9,7 @@ from dataclasses import replace
 from .providers import DEFAULT_CONFIGS, registry
 
 BLOCKERS={
- 'investing':'timestamp timezone unresolved',
+ 'investing':'UTC operational rule requires explicit activation boundary and enablement',
  'globenewswire':'cloud_http_response_timeout_after_successful_dns_tls; feed_license_confirmation_required',
  'prnewswire':'not_enabled',
  'benzinga':'free_news_api_credential_missing; official_rss_unavailable',
@@ -24,7 +24,7 @@ def configured():
     for original in DEFAULT_CONFIGS:
         pid=original.provider_id
         # A license cannot resolve missing source timestamps/contracts.
-        supported=pid not in {'investing','tipranks'}
+        supported=pid!='tipranks' and (pid!='investing' or bool(os.getenv('NEWS_INVESTING_ACTIVATED_AT')))
         live=pid in enabled and bool(approvals.get(pid)) and supported
         configs.append(replace(original,enabled=live,rights='approved' if live else 'review_required',
             credential=os.getenv('NEWS_'+pid.upper()+'_API_KEY','')))
@@ -61,6 +61,7 @@ def notify_changes(before,after,at):
         label='ENABLED' if status in {'ok','no_new','not_modified'} else 'DISABLED' if status=='disabled' else 'DEGRADED'
         key='news_provider_transition:'+pid+':'+fingerprint([timestamp(at),signature(value)])
         enqueue(key,'AI-Trader Admin\nNews provider: '+pid+' — '+label+
+                ('\nTimezone: UTC — provider_specific_operational_rule' if pid=='investing' else '')+
                 '\nStatus: '+status+'\nReason: '+str(value.get('error') or 'none')+
                 '\nHTTP: '+str(value.get('http_status') or 'n/a')+
                 '\nNext check: '+str(value.get('next_at') or 'n/a'))

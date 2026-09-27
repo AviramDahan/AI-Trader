@@ -102,7 +102,7 @@ class Pipeline:
                     if invalid==len(response['items']):
                         state['status']='requires_configuration';state['terminal']=True
                 state['invalid_items']=invalid
-                data={'raw_items':len(response['items']),'accepted_items':accepted}
+                data={'raw_items':response.get('raw_item_count',len(response['items'])),'accepted_items':accepted}
             except Exception as exc:
                 attempts=state.get('attempts',0)+1
                 known=isinstance(exc,ProviderFailure)

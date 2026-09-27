@@ -95,6 +95,74 @@ def test_provider_change_admin_only_and_no_unchanged_notice(monkeypatch):
     sender.reset_mock();notify_changes(after,after,NOW);sender.assert_not_called()
 
 
+def investing_adapter(xml=b'<rss><channel/></rss>',**kwargs):
+    from news_events.investing import InvestingProvider
+    return InvestingProvider(Config('investing','https://www.investing.com/rss/news.rss','Investing.com',enabled=True,rights='approved'),
+                             Mock(request=Mock(return_value=xml)),activation=(NOW-timedelta(minutes=1)).isoformat(),**kwargs)
+
+
+def investing_raw(date='2026-09-27 12:00:00'):
+    return dict(id='123',url='https://www.investing.com/news/apple-123',title='Apple Inc. quarterly results',
+                excerpt=FACTS,published_at=date,event_type='earnings')
+
+
+def test_investing_operational_utc_provenance():
+    event=investing_adapter().normalize(investing_raw(),NOW)
+    assert event.published_at=='2026-09-27T12:00:00Z'
+    assert event.raw_metadata['source_timezone']=='UTC'
+    assert event.raw_metadata['timestamp_source']=='investing_rss'
+    assert event.raw_metadata['timezone_resolution']=='provider_specific_operational_rule'
+
+
+@pytest.mark.parametrize('date,reason',[('2026-09-27 12:10:01','future'),('2026-09-19 12:00:00','stale'),('2026-09-27 11:00:00','pre_activation')])
+def test_investing_rejects_before_canonical(date,reason):
+    with pytest.raises(ValueError,match=reason):investing_adapter().normalize(investing_raw(date),NOW)
+
+
+@pytest.mark.parametrize('zone',['America/New_York','Asia/Jerusalem'])
+def test_investing_utc_no_server_timezone_fallback(monkeypatch,zone):
+    monkeypatch.setenv('TZ',zone)
+    assert investing_adapter().normalize(investing_raw(),NOW).published_at=='2026-09-27T12:00:00Z'
+    assert investing_adapter().source_timestamp(investing_raw('2026-01-15 12:00:00'))=='2026-01-15T12:00:00Z'
+
+
+def test_investing_same_url_yahoo_single_analysis_and_delivery(env):
+    p,s,_=env;direct=investing_adapter().normalize(investing_raw(),NOW)
+    yahoo=replace(direct,provider_id='yahoo',source_id='yahoo-relay')
+    eid=p.ingest(yahoo,NOW);assert p.ingest(direct,NOW)==eid
+    ai=Mock(return_value=Analysis(RESULT));p.analyze(eid,ai,NOW);p.analyze(eid,ai,NOW)
+    ai.assert_called_once();assert len(p.deliver_preview(eid,NOW))==1;assert p.deliver_preview(eid,NOW)==[]
+    assert len(rows(s,'SELECT * FROM ne_sources'))==2
+    assert set(s.event(eid)['body']['providers'])=={'yahoo','investing'}
+
+
+def test_investing_future_guard_isolated_and_persistent_across_restart(env):
+    p,s,m=env
+    xml=b'<rss><channel><item><title>Apple Inc. results</title><link>https://www.investing.com/news/apple-123</link><pubDate>2026-09-27 14:00:00</pubDate></item></channel></rss>'
+    provider=investing_adapter(xml)
+    first=p.collect([provider],NOW)['investing']
+    assert first['status']=='degraded';assert not rows(s,'SELECT * FROM ne_events')
+    restarted=Pipeline(Store(s.connect,sandbox=True),UNIVERSE,lambda:m,not_before=p.not_before)
+    second=restarted.collect([provider],NOW+timedelta(minutes=6))['investing']
+    assert second['terminal'] and second['error']=='investing_repeated_timestamp_anomaly'
+    assert not rows(s,'SELECT * FROM ne_analysis') and not rows(s,'SELECT * FROM ne_delivery')
+    good=ExistingProvider(Config('other','','Other',enabled=True,rights='approved'),Mock(return_value={'items':[]}))
+    assert restarted.collect([provider,good],NOW+timedelta(minutes=12))['other']['status']=='ok'
+
+
+def test_investing_rule_does_not_apply_to_other_hosts():
+    adapter=investing_adapter();adapter.config=replace(adapter.config,endpoint='https://uk.investing.com/rss/news.rss')
+    with pytest.raises(ValueError,match='endpoint_mismatch'):adapter.normalize(investing_raw(),NOW)
+
+
+def test_investing_pre_activation_never_enters_store(env):
+    p,s,_=env
+    xml=b'<rss><channel><item><title>Apple Inc. results</title><link>https://www.investing.com/news/apple-123</link><pubDate>2026-09-27 11:00:00</pubDate></item></channel></rss>'
+    result=p.collect([investing_adapter(xml)],NOW)['investing']
+    assert json.loads(result['checkpoint_json'])['rejected']=={'investing_pre_activation':1}
+    assert not rows(s,'SELECT * FROM ne_events')
+
+
 def rows(store,sql):
     with store.transaction() as c:return [dict(r) for r in c.execute(sql)]
 
