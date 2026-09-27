@@ -1018,9 +1018,11 @@ def bridge_scanner_news(at: datetime | None = None) -> dict[str, int]:
     if boundary:
         cutoff = max(cutoff, _parse_time(boundary))
     conn = get_db_connection()
-    rows = [dict(r) for r in conn.execute("""SELECT n.*,
-        (SELECT MAX(company) FROM scanner_candidates c WHERE c.ticker=n.ticker) company
-        FROM scanner_news n WHERE n.provider IS NULL AND n.scope='universe'
+    rows = [dict(r) for r in conn.execute("""SELECT n.*,c.company
+        FROM scanner_news n LEFT JOIN
+            (SELECT ticker,MAX(company) company FROM scanner_candidates GROUP BY ticker) c
+            ON c.ticker=n.ticker
+        WHERE n.provider IS NULL AND n.scope='universe'
           AND n.analysis_status IN ('pending_translation','translated')
         ORDER BY n.id DESC LIMIT 500""").fetchall()]
     conn.close()
