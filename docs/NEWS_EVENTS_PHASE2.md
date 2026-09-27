@@ -241,6 +241,11 @@ Synthetic four-outlet same-evidence case: 1 canonical event, 1 quality job,
 measured production saving**. Real AI spend during this Phase 2 turn: $0.
 No real AI latency measured and no production cost projection inferred.
 
+Local synthetic ingest timing (30 independent fixture events, 120 source
+versions): 30 canonical events, 90 duplicate-evidence versions; median 66.128 ms
+and p95 75.802 ms per four-source event on Windows/SQLite. This excludes model
+and network time and is NOT a production throughput measurement.
+
 Recommended next trial is **isolated/nonpublishing** with existing authorized
 collectors + SEC exact-event evidence. No new provider is yet cleared for a
 public trial: Investing timezone/rights, Globe access/rights, PR license,

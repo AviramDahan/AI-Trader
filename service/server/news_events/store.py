@@ -101,7 +101,8 @@ class Store:
             if conflicts:status='blocked';reason='source_conflict'
             body=dict(event_id=event_id,canonical_event_id=event_id,providers=sorted({s['provider_id'] for s in sources}),
                 sources=sources,source_urls=sorted({s['url'] for s in sources}),source_type=sorted({s['source_type'] for s in sources}),
-                publisher=sorted({s['publisher'] for s in sources}),published_at=min(s['published_at'] for s in sources),
+                publisher=sorted({s['publisher'] for s in sources}),
+                published_at=min([s['published_at'] for s in sources]+([prior['published_at']] if prior else [])),
                 collected_at=collected,title=source.title,source_excerpt=source.source_excerpt,
                 normalized_evidence=normalized,tickers=sorted(v['ticker'] for v in identities),
                 company_identity=identities,cik=sorted({v['cik'] for v in identities if v.get('cik')}),
@@ -170,7 +171,9 @@ def material_change(old,new):
     if not old:return True
     oldclaims={k:str(val['value']) for v in old for k,val in v.get('claims',{}).items()}
     for v in additions:
-        if any(k not in oldclaims or oldclaims[k]!=str(val['value']) for k,val in v.get('claims',{}).items()):return True
+        if any((k in oldclaims and oldclaims[k]!=str(val['value'])) or
+               (k not in oldclaims and not k.startswith('quantity_frame:'))
+               for k,val in v.get('claims',{}).items()):return True
         if any(a['trust'] in ('official/regulatory','company official') for a in v['attributions']):return True
     # New phrasing is not proof of a material new fact; preserve for review.
     return False

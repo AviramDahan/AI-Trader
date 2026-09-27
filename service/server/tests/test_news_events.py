@@ -91,6 +91,13 @@ def test_date_formatting_and_provenance_only_do_not_rerun_ai(env):
     assert s.event(eid)['body']['published_at']==NOW.isoformat()
 
 
+def test_source_revision_never_rejuvenates_original_event_publication(env):
+    p,s,_=env;eid=p.ingest(source(),NOW)
+    p.ingest(source(source_excerpt=FACTS+' A new official fact was added.',source_type='official/regulatory',
+        published_at=(NOW+timedelta(minutes=30)).isoformat(),collected_at=(NOW+timedelta(minutes=30)).isoformat()),NOW+timedelta(minutes=30))
+    assert s.event(eid)['body']['published_at']==NOW.isoformat()
+
+
 def test_no_same_ticker_day_or_homepage_merging(env):
     p,s,_=env
     a=p.ingest(source(event_refs=('https://example.org/',)),NOW)
