@@ -96,6 +96,32 @@ def test_provider_change_admin_only_and_no_unchanged_notice(monkeypatch):
     sender.reset_mock();notify_changes(after,after,NOW);sender.assert_not_called()
 
 
+def test_provider_404_recovery_clears_error_telemetry_and_admin(env,monkeypatch):
+    from news_events.provider_config import notify_changes
+    import ai_operations
+    p,s,_=env
+    provider=Mock(provider_id='prnewswire',config=Config('prnewswire','https://www.prnewswire.com/rss/news-releases-list.rss','PR Newswire'))
+    # Recoverable 404 as emitted by the existing verified press-feed policy.
+    provider.fetch.side_effect=[ProviderFailure('verified_feed_http_404',404,300,False),
+                               {'items':[],'cursor':(NOW+timedelta(seconds=301)).isoformat()}]
+    failed=p.collect([provider],NOW)['prnewswire']
+    assert failed['http_status']==404 and failed['retry_after']==300
+    assert failed['attempts']==1 and failed['error']=='verified_feed_http_404'
+    recovered=p.collect([provider],NOW+timedelta(seconds=301))['prnewswire']
+    persisted=json.loads(rows(s,"SELECT state_json FROM ne_provider_state WHERE provider_id='prnewswire'")[0]['state_json'])
+    assert recovered==persisted
+    assert recovered['status']=='ok' and recovered['error'] is None
+    assert recovered['http_status'] is None and recovered['retry_after']==0
+    assert recovered['attempts']==0 and recovered['terminal'] is False
+    assert provider.fetch.call_count==2
+    sender=Mock();monkeypatch.setattr(ai_operations,'enqueue',sender)
+    notify_changes({'prnewswire':failed},{'prnewswire':recovered},NOW+timedelta(seconds=301))
+    sender.assert_called_once()
+    message=sender.call_args.args[1]
+    assert 'ENABLED' in message and 'Status: ok' in message and 'Reason: none' in message
+    assert 'HTTP: 404' not in message and 'HTTP: n/a' in message
+
+
 def investing_adapter(xml=b'<rss><channel/></rss>',**kwargs):
     from news_events.investing import InvestingProvider
     return InvestingProvider(Config('investing','https://www.investing.com/rss/news.rss','Investing.com',enabled=True,rights='approved'),

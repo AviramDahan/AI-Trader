@@ -89,6 +89,7 @@ class Pipeline:
                     accepted+=bool(self.ingest(source,now))
                 for source_id in response.get('withdrawn_ids',[]):self.store.withdraw(pid,source_id,now)
                 state={**state,'status':response.get('status','ok'),'attempts':0,'terminal':False,'error':None,
+                    'http_status':None,'retry_after':0,
                     'cursor':response.get('cursor'),'page':response.get('page',0),
                     'cycle_started':response.get('cycle_started'),
                     'checkpoint_json':json.dumps(response.get('checkpoint',json.loads(state.get('checkpoint_json','{}')))),
