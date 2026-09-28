@@ -1,7 +1,7 @@
 """Narrow headline rules for observed macro false negatives. No provider I/O."""
 import re
 
-BENCHMARK = re.compile(r'^\s*(?:SOFR|secured overnight financing rate)\b', re.I)
+BENCHMARK = re.compile(r'^\s*(?:SOFR|secured overnight financing rate)(?=\s*:|\s+\d|\s+(?:at|is|was|rose|fell|rises|falls)\b|$)', re.I)
 US = re.compile(r'(?<!\w)(?:US|U\.S\.|United States)(?!\w)', re.I)
 
 
@@ -9,7 +9,7 @@ def diplomatic_talks(title):
     # Require named state counterparties and an actual reported negotiation,
     # not every mention of Iran, a company negotiation, or generic geopolitics.
     return bool(US.search(title) and re.search(r'\bIran\b',title,re.I)
-        and re.search(r'\b(?:mediators?|official|source)\b',title,re.I)
+        and re.search(r'\b(?:mediators?|official briefed on the negotiations)\b',title,re.I)
         and re.search(r'\b(?:hold|held|resume|resumed|scheduled)\s+(?:separate\s+)?talks\b',title,re.I))
 
 

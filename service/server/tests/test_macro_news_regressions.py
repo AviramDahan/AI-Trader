@@ -37,6 +37,7 @@ def test_vague_citi_title_remains_insufficient(env):
 
 @pytest.mark.parametrize('title',[
     'Company announces financing tied to SOFR',
+    'SOFR-linked financing announced by Company',
     'Company to hold talks with US customers about Iran',
     'Iran reaches out to Arab states',
     'Could US and Iran hold talks with mediators?',
