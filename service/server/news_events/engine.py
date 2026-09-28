@@ -7,14 +7,15 @@ import time
 import uuid
 from .model import IdentityResolver, timestamp, fingerprint
 from .providers import ProviderFailure
+from .factual_evidence import sufficient
 
 
 @dataclass(frozen=True)
 class Policy:
-    # Same existing defaults; trial must load the effective production values.
-    personal_relevance: float=.65
-    stock_relevance: float=.80
-    market_relevance: float=.50
+    # Approved news-only recall defaults; runtime loads effective settings.
+    personal_relevance: float=.55
+    stock_relevance: float=.70
+    market_relevance: float=.40
     max_age_hours: int=168
     market_age_hours: int=6
     universe_age_hours: int=6
@@ -35,11 +36,11 @@ def route(event,result,positions,watchlist,universe,policy):
         return ([('market_news',[])],None) if relevance>=policy.market_relevance else ([], 'below_market_threshold')
     if relevance<policy.personal_relevance:return [],'below_relevance_threshold'
     if materiality not in ('medium','high'):return [],'low_importance'
-    if sentiment not in ('positive','negative','mixed'):return [],'no_directional_impact'
+    if sentiment not in ('positive','negative','mixed','neutral'):return [],'invalid_sentiment'
     personal=tickers&(set(positions)|set(watchlist))
     routes=[('portfolio_watchlist',sorted(personal))] if personal else []
     broad=(tickers&set(universe))-personal
-    if broad and materiality=='high' and relevance>=policy.stock_relevance:
+    if broad and relevance>=policy.stock_relevance:
         routes.append(('important_stock_news',sorted(broad)))
     return routes,None if routes else 'below_broad_threshold'
 
@@ -184,7 +185,7 @@ class Pipeline:
         maximum=self.policy.max_age_hours if set(event['tickers'])&(set(positions)|set(watchlist)) else self.policy.market_age_hours if event['event_type']=='market' else self.policy.universe_age_hours
         reason=None
         if age<0 or age>maximum*3600:reason='stale_or_future'
-        elif not event['normalized_evidence'] or not any(len(s['source_excerpt'].split())>=12 for s in event['sources']):reason='insufficient_information'
+        elif not sufficient(event):reason='insufficient_information'
         elif sum(len(v['text']) for v in event['normalized_evidence'])>12000:reason='evidence_budget_exceeded' # no silent truncation
         elif any(s['rights'] not in ('approved','internal_review') for s in event['sources']):reason='license_required'
         if reason:

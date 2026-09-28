@@ -136,8 +136,8 @@ def feed_settings() -> dict[str, Any]:
         "analysis_interval": _int_env("STOCK_SCANNER_NEWS_AI_INTERVAL_SECONDS", 2, 1, 3600),
         # Large JSON batches can exhaust Ollama's output budget mid-object.
         "analysis_batch": _int_env("STOCK_SCANNER_NEWS_AI_BATCH_SIZE", 3, 1, 30),
-        "alert_min_relevance": _float_env("STOCK_SCANNER_NEWS_ALERT_MIN_RELEVANCE", .65, 0, 1),
-        "broad_alert_min_relevance": _float_env("STOCK_SCANNER_TELEGRAM_BROAD_NEWS_MIN_RELEVANCE", .80, .80, 1),
+        "alert_min_relevance": _float_env("STOCK_SCANNER_NEWS_ALERT_MIN_RELEVANCE", .55, 0, 1),
+        "broad_alert_min_relevance": _float_env("STOCK_SCANNER_TELEGRAM_BROAD_NEWS_MIN_RELEVANCE", .70, .70, 1),
         "sec_user_agent": os.getenv("NEWS_SEC_USER_AGENT", "").strip(),
     }
 
@@ -1256,7 +1256,7 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
             not 0 <= age <= _int_env("STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS", 6, 1, 24) * 3600):
         return False
     try:
-        if float(result.get("relevance", 0)) < _float_env("STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE", .5, .5, 1):
+        if float(result.get("relevance", 0)) < _float_env("STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE", .4, .4, 1):
             return False
     except (TypeError, ValueError):
         return False
@@ -1556,7 +1556,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
             continue
         alerts += int(_queue_general_bulletin(cur, row, result, current, stamp))
         if (related and relevance >= feed_settings()["alert_min_relevance"] and
-                materiality in {"medium", "high"} and sentiment in {"positive", "negative", "mixed"}):
+                materiality in {"medium", "high"} and sentiment in {"positive", "negative", "mixed", "neutral"}):
             cur.execute("""SELECT t.id,t.ticker,t.company FROM scanner_trade_news l JOIN scanner_trades t ON t.id=l.trade_id
                            WHERE l.news_id=? AND t.status='open' AND t.is_shadow=0 ORDER BY t.id""", (row["id"],))
             trade_rows = [dict(value) for value in cur.fetchall()]
@@ -1618,7 +1618,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
             # suppresses a distinct later event merely because the ticker was busy.
             cfg = feed_settings()
             version = row.get("content_hash") or "v1"
-            broad_quality = materiality == "high" and relevance >= cfg["broad_alert_min_relevance"]
+            broad_quality = materiality in {"medium", "high"} and relevance >= cfg["broad_alert_min_relevance"]
             uncovered = sorted(strict_verified - position_tickers - watched_tickers)
             if broad_quality and uncovered and not row.get('_personal_route_only'):
                 allowed: list[str] = []
