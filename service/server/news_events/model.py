@@ -93,6 +93,11 @@ class IdentityResolver:
         for ticker, data in self.universe.items():
             name=text(data.get('company') or data.get('name'))
             cik=str(data.get('cik') or '').lstrip('0')
+            if source.provider_id=='yahoo_priority' and 'provider_tickers' in source.raw_metadata:
+                from .yahoo_identity import corroborate
+                basis=corroborate(source,ticker,name,cik)
+                if basis:result.append({'ticker':ticker,'company':name,'cik':cik,'basis':basis})
+                continue
             explicit=bool(re.search(r'(?:\$|NASDAQ\s*:\s*|NYSE\s*:\s*)'+re.escape(ticker)+r'(?![A-Z0-9])',body))
             # A bare common word (e.g. "Apple" or "A") is not a legal-company
             # identity. Keep short-name discovery as a hint, never auto-verify.
