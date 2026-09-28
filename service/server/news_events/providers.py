@@ -161,7 +161,10 @@ class RSSProvider(BaseProvider):
             if not link:
                 links=node.findall('a:link',ns)
                 link=next((n.get('href') for n in links if n.get('rel','alternate')=='alternate'),'')
-            excerpt=value('description') or value('c:encoded') or value('a:summary') or value('a:content')
+            # Preserve distinct official feed content fields, not only the first
+            # nonempty description. No article-page request or inferred text.
+            excerpt='\n\n'.join(dict.fromkeys(v for v in
+                (value('description'),value('c:encoded'),value('a:summary'),value('a:content')) if v))
             refs=re.findall(r'''href=["'](https?://[^"']+)''',excerpt)
             category_details=[{'value':v.text,'domain':v.get('domain','')} for v in node.findall('category') if v.text]
             stocks=[];exchanges=[]
