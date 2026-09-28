@@ -85,22 +85,42 @@ class EvidenceProvider(Protocol):
 class IdentityResolver:
     """Uses scanner union universe supplied by caller; no manual ticker list."""
     def __init__(self, universe):
+        from .eligibility import company_aliases
         self.universe=universe
+        aliases = {ticker: company_aliases(ticker, text(data.get('company') or data.get('name'))) for ticker, data in universe.items()}
+        owners = {}
+        for ticker, values in aliases.items():
+            for value in values: owners.setdefault(value.lower(), set()).add(ticker)
+        self.aliases = {ticker: [a for a in values if len(owners[a.lower()]) == 1] for ticker, values in aliases.items()}
+        self.patterns = {}
+        for ticker, data in universe.items():
+            name = text(data.get('company') or data.get('name'))
+            self.patterns[ticker] = (
+                re.compile(r'(?:\$|NASDAQ\s*:\s*|NYSE\s*:\s*)'+re.escape(ticker)+r'(?![A-Z0-9])'),
+                re.compile(r'(?<!\w)'+re.escape(name)+r'(?!\w)', re.I) if len(name.split()) >= 2 else None,
+                [re.compile(r'(?<!\w)'+re.escape(a)+r'(?!\w)', re.I) for a in self.aliases[ticker]],
+                [re.compile(r'(?<!\w)'+re.escape(a)+r'\s*\('+re.escape(ticker)+r'\)', re.I) for a in self.aliases[ticker]])
 
     def resolve(self, source):
         body=source.title+' '+source.source_excerpt
+        folded=body.lower()
         result=[]
         for ticker, data in self.universe.items():
             name=text(data.get('company') or data.get('name'))
             cik=str(data.get('cik') or '').lstrip('0')
-            explicit=bool(re.search(r'(?:\$|NASDAQ\s*:\s*|NYSE\s*:\s*)'+re.escape(ticker)+r'(?![A-Z0-9])',body))
+            explicit_pattern, name_pattern, alias_patterns, paired_patterns = self.patterns[ticker]
+            explicit=bool(ticker in body and explicit_pattern.search(body))
             # A bare common word (e.g. "Apple" or "A") is not a legal-company
             # identity. Keep short-name discovery as a hint, never auto-verify.
-            named=bool(len(name.split())>=2 and re.search(r'(?<!\w)'+re.escape(name)+r'(?!\w)',body,re.I))
+            named=bool(name_pattern and name.lower() in folded and name_pattern.search(body))
             cik_match=bool(cik and source.cik and cik==source.cik.lstrip('0'))
             # Related tickers alone are discovery hints, not company verification.
-            if explicit or named or cik_match:
-                result.append({'ticker':ticker,'company':name,'cik':cik,'basis':'cik' if cik_match else 'exchange_ticker' if explicit else 'legal_name'})
+            alias_match = any(a.lower() in folded and pattern.search(body) for a,pattern in zip(self.aliases[ticker],alias_patterns))
+            paired = ticker.lower() in folded and any(a.lower() in folded and pattern.search(body) for a,pattern in zip(self.aliases[ticker],paired_patterns))
+            supported = alias_match and ticker in source.tickers
+            if explicit or named or cik_match or paired or supported:
+                basis = 'cik' if cik_match else 'exchange_ticker' if explicit else 'legal_name' if named else 'company_name_plus_parenthesized_ticker' if paired else 'verified_alias_plus_provider_ticker'
+                result.append({'ticker':ticker,'company':name,'cik':cik,'basis':basis})
         return result
 
 
@@ -118,8 +138,11 @@ EVENT_PATTERNS=(('earnings',r'earnings|quarter.*results|financial results'),
 
 
 def event_type(title, excerpt):
+    from .eligibility import EXTENDED_EVENTS
     value=title+' '+excerpt
     for kind,pattern in EVENT_PATTERNS:
+        if re.search(pattern,value,re.I):return kind
+    for kind,pattern in EXTENDED_EVENTS:
         if re.search(pattern,value,re.I):return kind
     return 'unknown'
 

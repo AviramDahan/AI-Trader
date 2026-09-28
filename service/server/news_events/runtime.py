@@ -161,7 +161,8 @@ def analyze_jobs(at=None):
     held,watched=membership()
     rows.sort(key=lambda r:not bool(set(p.store.event(r['event_id'])['body']['tickers'])&(held|watched)))
     eid=rows[0]['event_id'];event=p.store.event(eid)['body']
-    if not any(len(s['source_excerpt'].split())>=12 for s in event['sources']):
+    from .eligibility import sufficient_evidence
+    if not sufficient_evidence(event):
         p.enrich(eid,[SECEvidence(os.getenv('NEWS_SEC_USER_AGENT',''))],current)
     check() # Do not claim/bill a job if the global budget/cooldown is blocked.
     outcome=p.analyze(eid,CanonicalAnalyzer(completion),current)

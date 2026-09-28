@@ -35,7 +35,7 @@ def route(event,result,positions,watchlist,universe,policy):
         return ([('market_news',[])],None) if relevance>=policy.market_relevance else ([], 'below_market_threshold')
     if relevance<policy.personal_relevance:return [],'below_relevance_threshold'
     if materiality not in ('medium','high'):return [],'low_importance'
-    if sentiment not in ('positive','negative','mixed'):return [],'no_directional_impact'
+    if sentiment not in ('positive','negative','mixed','neutral'):return [],'no_directional_impact'
     personal=tickers&(set(positions)|set(watchlist))
     routes=[('portfolio_watchlist',sorted(personal))] if personal else []
     broad=(tickers&set(universe))-personal
@@ -175,6 +175,7 @@ class Pipeline:
         return changed
 
     def analyze(self,event_id,analyzer,now):
+        from .eligibility import sufficient_evidence
         record=self.store.event(event_id)
         if record['status']=='analyzing':return 'running'
         if record['status'] not in ('pending','analyzed'):return record['status']
@@ -184,7 +185,7 @@ class Pipeline:
         maximum=self.policy.max_age_hours if set(event['tickers'])&(set(positions)|set(watchlist)) else self.policy.market_age_hours if event['event_type']=='market' else self.policy.universe_age_hours
         reason=None
         if age<0 or age>maximum*3600:reason='stale_or_future'
-        elif not event['normalized_evidence'] or not any(len(s['source_excerpt'].split())>=12 for s in event['sources']):reason='insufficient_information'
+        elif not sufficient_evidence(event):reason='insufficient_information'
         elif sum(len(v['text']) for v in event['normalized_evidence'])>12000:reason='evidence_budget_exceeded' # no silent truncation
         elif any(s['rights'] not in ('approved','internal_review') for s in event['sources']):reason='license_required'
         if reason:
