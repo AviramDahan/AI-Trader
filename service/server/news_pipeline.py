@@ -136,8 +136,8 @@ def feed_settings() -> dict[str, Any]:
         "analysis_interval": _int_env("STOCK_SCANNER_NEWS_AI_INTERVAL_SECONDS", 2, 1, 3600),
         # Large JSON batches can exhaust Ollama's output budget mid-object.
         "analysis_batch": _int_env("STOCK_SCANNER_NEWS_AI_BATCH_SIZE", 3, 1, 30),
-        "alert_min_relevance": _float_env("STOCK_SCANNER_NEWS_ALERT_MIN_RELEVANCE", .65, 0, 1),
-        "broad_alert_min_relevance": _float_env("STOCK_SCANNER_TELEGRAM_BROAD_NEWS_MIN_RELEVANCE", .80, .80, 1),
+        "alert_min_relevance": _float_env("STOCK_SCANNER_NEWS_ALERT_MIN_RELEVANCE", .55, 0, 1),
+        "broad_alert_min_relevance": _float_env("STOCK_SCANNER_TELEGRAM_BROAD_NEWS_MIN_RELEVANCE", .70, .70, 1),
         "sec_user_agent": os.getenv("NEWS_SEC_USER_AGENT", "").strip(),
     }
 

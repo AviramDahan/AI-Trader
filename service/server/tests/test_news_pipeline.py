@@ -755,9 +755,9 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(result["alerts"], 0)
         self.assertFalse(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='stock_news'"))
 
-    def test_broad_news_relevance_floor_cannot_be_lowered_below_eighty_percent(self):
+    def test_broad_news_relevance_floor_cannot_be_lowered_below_seventy_percent(self):
         with patch.dict(os.environ, {"STOCK_SCANNER_TELEGRAM_BROAD_NEWS_MIN_RELEVANCE": ".65"}, clear=False):
-            self.assertEqual(news_pipeline.feed_settings()["broad_alert_min_relevance"], .80)
+            self.assertEqual(news_pipeline.feed_settings()["broad_alert_min_relevance"], .70)
 
     def test_all_distinct_official_high_quality_market_news_alert(self):
         items = []

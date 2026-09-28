@@ -45,7 +45,7 @@ def pipeline():
         for row in c.execute("SELECT ticker,company FROM scanner_trades WHERE status='open' AND is_shadow=0 UNION SELECT ticker,company FROM scanner_news_watchlist WHERE enabled=1"):
             universe.setdefault(row['ticker'],{'company':row['company']})
     cfg=feed_settings()
-    policy=effective_policy(cfg,_float_env('STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE',.5,.5,1),
+    policy=effective_policy(cfg,_float_env('STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE',.4,.4,1),
         _int_env('STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS',6,1,24),
         cfg['scan_bridge_max_age'],_int_env('STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS',168,24,720))
     control=state()
@@ -161,7 +161,8 @@ def analyze_jobs(at=None):
     held,watched=membership()
     rows.sort(key=lambda r:not bool(set(p.store.event(r['event_id'])['body']['tickers'])&(held|watched)))
     eid=rows[0]['event_id'];event=p.store.event(eid)['body']
-    if not any(len(s['source_excerpt'].split())>=12 for s in event['sources']):
+    from .factual_evidence import sufficient
+    if not sufficient(event):
         p.enrich(eid,[SECEvidence(os.getenv('NEWS_SEC_USER_AGENT',''))],current)
     check() # Do not claim/bill a job if the global budget/cooldown is blocked.
     outcome=p.analyze(eid,CanonicalAnalyzer(completion),current)

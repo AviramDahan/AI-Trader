@@ -109,7 +109,17 @@ class IdentityResolver:
         return result
 
 
-EVENT_PATTERNS=(('earnings',r'earnings|quarter.*results|financial results'),
+EVENT_PATTERNS=(('analyst_action',r'\bupgrades?\b|\bdowngrades?\b|price target'),
+    ('financing',r'financing|share offering|stock offering|debt issuance|issues? .*bonds?'),
+    ('cybersecurity',r'cyberattack|cybersecurity incident|data breach'),
+    ('clinical',r'clinical trial|FDA.*(?:approval|approves|reject|milestone)'),
+    ('restructuring',r'restructuring|bankruptcy|stock split|reverse split|layoffs?'),
+    ('business_update',r'\blaunch(?:es)?\b|(?:stores?|factor(?:y|ies)).*(?:clos|open)|'
+                       r'(?:clos|open).*\b(?:stores?|factor(?:y|ies))\b|customer win|'
+                       r'supply.chain disruption|production update|\brecall\b|'
+                       r'\bwarns?\b.*(?:competition|risk|profit|revenue)|asset sale|divestiture|licensing deal'),
+    ('management',r'(?:appoint|depart|resign).*(?:CEO|CFO|executive|officer)|(?:CEO|CFO).*resigns?'),
+    ('earnings',r'earnings|quarter.*results|financial results'),
     ('guidance',r'guidance|outlook'),('merger',r'acquisition|merger|acquire'),
     ('capital_return',r'dividend|share repurchase|buyback'),
     ('litigation',r'lawsuit|antitrust|settlement'),
@@ -119,10 +129,13 @@ EVENT_PATTERNS=(('earnings',r'earnings|quarter.*results|financial results'),
     ('management',r'appoint.*(?:CEO|officer)|chief executive'),
     ('market',r'Federal Reserve|interest rates|inflation|nonfarm|CPI|FOMC|\bGDP\b|\bECB\b|'
               r'\bOPEC\b|\btariffs?\b|\bsanctions?\b|\bTreasury yields?\b|\bceasefire\b|'
-              r'\btrade (?:deal|agreement|war)\b|\b(?:oil|gas) (?:prices?|supply)\b'))
+              r'\btrade (?:deal|agreement|war)\b|\b(?:oil|gas) (?:prices?|supply|rises?|falls?|above|below)\b|'
+              r'central bank|Bank of England|employment|unemployment|commodity supply|Hormuz'))
 
 
 def event_type(title, excerpt):
+    from .factual_evidence import opinion
+    if opinion(title):return 'unknown'
     value=title+' '+excerpt
     for kind,pattern in EVENT_PATTERNS:
         if re.search(pattern,value,re.I):return kind
