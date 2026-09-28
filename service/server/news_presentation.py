@@ -11,6 +11,7 @@ def hide_relay_branding(value):
     lines=[]
     for line in value.splitlines():
         if re.fullmatch(r'\s*(?:מקור:\s*)?(?:ערוץ\s+)?'+relay+r'[\s:.]*',line,re.I):continue
+        line=re.sub(r'(?:ערוץ\s+)?'+relay,'דיווח',line,flags=re.I)
         line=re.sub(r'\s*\|\s*FJ\b','',line,flags=re.I)
         lines.append(re.sub(r'[ \t]{2,}',' ',line).strip())
     return re.sub(r'\n{3,}','\n\n','\n'.join(lines)).strip()

@@ -18,6 +18,7 @@ def test_reported_ramsden_message_and_queued_sender_cleanup():
 def test_attribution_and_uncertainty_not_erased():
     assert hide_relay_branding('לפי ערוץ Telegram @financialjuice, ייתכן שהריבית תרד.')=='לפי דיווח, ייתכן שהריבית תרד.'
     assert hide_relay_branding('רמסדן אמר שלא הוחלט על הורדת ריבית.')=='רמסדן אמר שלא הוחלט על הורדת ריבית.'
+    assert hide_relay_branding('ערוץ Telegram @financialjuice ציטט את רמסדן: ייתכן שינוי.')=='דיווח ציטט את רמסדן: ייתכן שינוי.'
 
 
 def test_canonical_message_hides_publisher_without_mutating_provenance():
