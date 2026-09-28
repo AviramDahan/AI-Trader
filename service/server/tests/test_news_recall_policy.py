@@ -15,7 +15,9 @@ from test_news_events import env, source, NOW, RESULT
     ('important_stock_news',['AAPL'],set(),.70,'medium',True),
     ('important_stock_news',['AAPL'],set(),.69,'high',False),
     ('market_news',[],set(),.40,'medium',True),
-    ('market_news',[],set(),.39,'high',False),
+    ('market_news',[],set(),.39,'high',True),
+    ('market_news',[],set(),.30,'medium',True),
+    ('market_news',[],set(),.29,'high',False),
 ])
 def test_boundaries(topic,tickers,held,relevance,materiality,allowed):
     event=dict(tickers=tickers,event_type='market' if not tickers else 'earnings')

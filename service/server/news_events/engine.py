@@ -15,7 +15,7 @@ class Policy:
     # Approved news-only recall defaults; runtime loads effective settings.
     personal_relevance: float=.55
     stock_relevance: float=.70
-    market_relevance: float=.40
+    market_relevance: float=.30
     max_age_hours: int=168
     market_age_hours: int=6
     universe_age_hours: int=6

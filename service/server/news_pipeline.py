@@ -1256,7 +1256,7 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
             not 0 <= age <= _int_env("STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS", 6, 1, 24) * 3600):
         return False
     try:
-        if float(result.get("relevance", 0)) < _float_env("STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE", .4, .4, 1):
+        if float(result.get("relevance", 0)) < _float_env("STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE", .3, .3, 1):
             return False
     except (TypeError, ValueError):
         return False
