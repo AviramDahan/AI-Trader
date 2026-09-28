@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from urllib.parse import urlsplit
 
 
@@ -21,6 +22,23 @@ def with_news_community_link(message: str, event_type: str | None) -> str:
     if event_type not in MARKET_NEWS_EVENT_TYPES | STOCK_NEWS_EVENT_TYPES:
         return message
     link = os.getenv("TELEGRAM_COMMUNITY_URL", "").strip()
+    # Presentation only: stored evidence/URLs and all eligibility stay intact.
+    # Apply at send-time too, so already-queued news follows the same preference.
+    def public_link(match):
+        url = match.group(0)
+        if url == link or urlsplit(url).hostname in {'creativecommons.org', 'www.creativecommons.org'}:
+            return url  # Community invitation and license notices are not news sources.
+        return ''
+    lines = []
+    for line in message.splitlines():
+        cleaned = re.sub(r'https?://[^\s<>]+', public_link, line)
+        if cleaned != line:
+            cleaned = cleaned.rstrip(' :')
+            if cleaned in {'מקור', 'Source'}:
+                cleaned = ''
+        lines.append(cleaned)
+    message = '\n'.join(lines)
+    message = re.sub(r'\n{3,}', '\n\n', message).strip()
     parsed = urlsplit(link)
     if (len(link) > 512 or parsed.scheme != "https" or parsed.netloc != "t.me" or
             not parsed.path.strip('/') or parsed.path.startswith('/c/') or

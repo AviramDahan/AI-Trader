@@ -10,6 +10,20 @@ from telegram_topics import destination_fields, thread_id_for_event, with_news_c
 
 
 class TelegramTopicRoutingTests(unittest.TestCase):
+    def test_news_source_links_removed_but_community_and_non_news_unchanged(self):
+        body='כותרת\n\nTelegram @financialjuice: https://t.me/financialjuice/136481\nמקור: https://example.com/news?a=1\n\nפורסם: 28/09/2026 04:10'
+        with patch.dict(os.environ, {'TELEGRAM_COMMUNITY_URL':'https://t.me/+testInvite'}):
+            for event in ('market_news','position_news','watchlist_news','watchlist_news_correction','stock_news','correction','news_status'):
+                result=with_news_community_link(body,event)
+                self.assertNotIn('https://t.me/financialjuice/',result)
+                self.assertNotIn('https://example.com/',result)
+                self.assertIn('https://t.me/+testInvite',result)
+                self.assertIn('Telegram @financialjuice',result)
+                self.assertEqual(with_news_community_link(result,event),result)
+            self.assertEqual(with_news_community_link(body,'new_signal'),body)
+        with patch.dict(os.environ, {'TELEGRAM_COMMUNITY_URL':''}):
+            self.assertNotIn('https://example.com',with_news_community_link(body,'market_news'))
+
     def test_personal_news_split_keeps_market_signals_and_trades_separate(self):
         with patch.dict(os.environ, {'TELEGRAM_PERSONAL_NEWS_THREAD_ID':'114',
                 'TELEGRAM_STOCK_NEWS_THREAD_ID':'112', 'TELEGRAM_MARKET_NEWS_THREAD_ID':'111'}, clear=True):

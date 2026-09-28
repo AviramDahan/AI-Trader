@@ -180,7 +180,7 @@ def message(event,result,topic,tickers):
     parts.append(result['summary_he'])
     if topic!='market_news':parts.append('פרשנות AI: '+result['interpretation_he'])
     # Attribution preserved for every contributing source, never invented.
-    parts.append('\n'.join(s['publisher']+': '+s['url'] for s in event['sources'][:4]))
+    parts.append('\n'.join(dict.fromkeys(s['publisher'] for s in event['sources'][:4])))
     licenses={s.get('raw_metadata',{}).get('license_label','')+' '+s.get('raw_metadata',{}).get('license_url','')
               for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')}
     if licenses:parts.append('תרגום/תקציר AI · '+ '; '.join(sorted(licenses)))
