@@ -18,7 +18,7 @@ class TelegramTopicRoutingTests(unittest.TestCase):
                 self.assertNotIn('https://t.me/financialjuice/',result)
                 self.assertNotIn('https://example.com/',result)
                 self.assertIn('https://t.me/+testInvite',result)
-                self.assertIn('Telegram @financialjuice',result)
+                self.assertNotIn('Telegram @financialjuice',result)
                 self.assertEqual(with_news_community_link(result,event),result)
             self.assertEqual(with_news_community_link(body,'new_signal'),body)
         with patch.dict(os.environ, {'TELEGRAM_COMMUNITY_URL':''}):

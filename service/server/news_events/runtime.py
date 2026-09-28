@@ -175,12 +175,14 @@ def analyze_jobs(at=None):
 
 def message(event,result,topic,tickers):
     from news_pipeline import _publication_time_he
-    parts=['📰 '+result['title_he']]
+    from news_presentation import hide_relay_branding
+    parts=['📰 '+hide_relay_branding(result['title_he'])]
     if tickers:parts.append('מניות: '+', '.join(tickers))
-    parts.append(result['summary_he'])
-    if topic!='market_news':parts.append('פרשנות AI: '+result['interpretation_he'])
-    # Attribution preserved for every contributing source, never invented.
-    parts.append('\n'.join(dict.fromkeys(s['publisher'] for s in event['sources'][:4])))
+    parts.append(hide_relay_branding(result['summary_he']))
+    if topic!='market_news':parts.append('פרשנות AI: '+hide_relay_branding(result['interpretation_he']))
+    # Ingestion provenance stays in storage. Retain required licensed credits.
+    credits=[s['publisher'] for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')]
+    if credits:parts.append('\n'.join(dict.fromkeys(credits)))
     licenses={s.get('raw_metadata',{}).get('license_label','')+' '+s.get('raw_metadata',{}).get('license_url','')
               for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')}
     if licenses:parts.append('תרגום/תקציר AI · '+ '; '.join(sorted(licenses)))

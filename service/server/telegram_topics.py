@@ -37,7 +37,8 @@ def with_news_community_link(message: str, event_type: str | None) -> str:
             if cleaned in {'מקור', 'Source'}:
                 cleaned = ''
         lines.append(cleaned)
-    message = '\n'.join(lines)
+    from news_presentation import hide_relay_branding
+    message = hide_relay_branding('\n'.join(lines))
     message = re.sub(r'\n{3,}', '\n\n', message).strip()
     parsed = urlsplit(link)
     if (len(link) > 512 or parsed.scheme != "https" or parsed.netloc != "t.me" or
