@@ -25,6 +25,9 @@ x-app: &app
     AI_PROVIDER: openrouter
     STOCK_SCANNER_FINAL_AI_PROVIDER: openrouter
     STOCK_SCANNER_AI_CANDIDATE_LIMIT: "6"
+    # Bounded Yahoo coverage: 9 priority + 41 rotating, 15-minute cadence.
+    STOCK_SCANNER_YAHOO_NEWS_TICKERS_PER_CYCLE: "50"
+    STOCK_SCANNER_YAHOO_NEWS_INTERVAL_SECONDS: "900"
     API_STDERR_LOG: "true"
     REDIS_ENABLED: "false"
     OMP_NUM_THREADS: "1"

@@ -656,21 +656,26 @@ def _priority_tickers(limit: int, checkpoint: dict[str, Any]) -> tuple[list[tupl
 
 
 def _fetch_yahoo_priority(state: dict[str, Any], at: datetime) -> dict[str, Any]:
-    from stock_scanner import fetch_recent_news
+    import time
+    from news_events.yahoo_metadata import fetch_news as fetch_recent_news
+    started=time.monotonic()
     selected, checkpoint, coverage = _priority_tickers(feed_settings()["yahoo_tickers"],
                                                        _loads(state.get("checkpoint_json"), {}))
     output: list[dict[str, Any]] = []
     errors: list[str] = []
-    received = rejected_assignment = 0
+    received = rejected_assignment = attempted = successful = 0
     for ticker, company in selected:
         try:
-            for item in fetch_recent_news(ticker, company, 168):
+            attempted += 1
+            fetched = fetch_recent_news(ticker, company, 168)
+            successful += 1
+            for item in fetched:
                 received += 1
                 if not _headline_verifies_ticker(ticker, company, str(item.get("title") or "")):
                     rejected_assignment += 1
                     continue
                 excerpt = _strip_markup(item.get('source_excerpt') or '')[:2000]
-                output.append({**item, "provider": "yahoo_priority", "tickers": [ticker], "scope": "universe",
+                output.append({**item, "provider": "yahoo_priority", "tickers": item.get('provider_tickers') or [ticker], "scope": "universe",
                                "source_excerpt": excerpt, "source_kind": "headline_summary" if excerpt else "headline_metadata", "headline_only": True,
                                "news_category": "company"})
         except Exception as exc:
@@ -679,6 +684,9 @@ def _fetch_yahoo_priority(state: dict[str, Any], at: datetime) -> dict[str, Any]
             errors.append(f"{ticker}:{type(exc).__name__}")
     if errors and not output:
         raise RuntimeError(";".join(errors[:5]))
+    checkpoint['yahoo_last_cycle']={'completed_at':_z(), 'requests':attempted,
+        'successful':successful,'errors':len(errors),'duration_seconds':round(time.monotonic()-started,3),
+        'fresh_headlines':len({item['url'] for item in output if 0 <= float(item.get('age_hours',999)) < 6})}
     return {"items": output, "checkpoint": checkpoint,
             "metrics": {"received": received, "rejected_assignment": rejected_assignment},
             "errors": errors, "status": "degraded" if errors else "ok",

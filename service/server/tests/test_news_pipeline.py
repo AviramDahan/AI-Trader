@@ -176,7 +176,7 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
 
     def test_yahoo_preserves_supplied_excerpt_without_full_article_claim(self):
         with patch.object(news_pipeline,'_priority_tickers',return_value=([('INTC','Intel')],{},'test')), \
-             patch('stock_scanner.fetch_recent_news',return_value=[{**self.item(), 'title':'Intel reports results',
+             patch('news_events.yahoo_metadata.fetch_news',return_value=[{**self.item(), 'title':'Intel reports results',
                                                                   'source_excerpt':'<p>Revenue rose.</p>'}]):
             result=news_pipeline._fetch_yahoo_priority({},self.clock)
         self.assertEqual(result['items'][0]['source_excerpt'],'Revenue rose.')
@@ -526,7 +526,7 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         ]
         with patch.object(news_pipeline, "_priority_tickers",
                           return_value=([("MSTR", "Strategy Inc Common Stock Class A")], {}, "test")), \
-             patch("stock_scanner.fetch_recent_news", return_value=fetched):
+             patch("news_events.yahoo_metadata.fetch_news", return_value=fetched):
             result = news_pipeline._fetch_yahoo_priority({}, self.clock)
 
         self.assertEqual([item["title"] for item in result["items"]], ["MSTR expands its bitcoin treasury"])
