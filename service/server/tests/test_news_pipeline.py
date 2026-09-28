@@ -715,7 +715,7 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertIn("NVDA", alerts[0]["message"])
         self.assertIn("אינה סיגנל", alerts[0]["message"])
 
-    def test_broad_stock_news_requires_high_materiality_and_strict_relevance(self):
+    def test_broad_stock_news_blocks_low_materiality_and_below_seventy(self):
         items = []
         for index, ticker in enumerate(("NVDA", "AMD"), 1):
             item = self.item("yahoo_priority", f"https://example.test/weak-{index}", ticker)
@@ -727,9 +727,9 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
             output = []
             for index, row in enumerate(rows):
                 output.append({"id": row["id"], "related": True, "summary_he": "עדכון.",
-                               "sentiment": "positive", "materiality": "medium" if index == 0 else "high",
+                               "sentiment": "positive", "materiality": "low" if index == 0 else "high",
                                "thesis_effect": "unchanged", "interpretation_he": "לא ברור.",
-                               "relevance": .95 if index == 0 else .70})
+                               "relevance": .95 if index == 0 else .69})
             return output
 
         news_pipeline.analyze_news_jobs(limit=10, analyzer=analyzer, at=self.clock)
