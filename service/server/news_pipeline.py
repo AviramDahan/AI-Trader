@@ -656,7 +656,7 @@ def _priority_tickers(limit: int, checkpoint: dict[str, Any]) -> tuple[list[tupl
 
 
 def _fetch_yahoo_priority(state: dict[str, Any], at: datetime) -> dict[str, Any]:
-    from stock_scanner import fetch_recent_news
+    from news_events.yahoo_metadata import fetch_news as fetch_recent_news
     selected, checkpoint, coverage = _priority_tickers(feed_settings()["yahoo_tickers"],
                                                        _loads(state.get("checkpoint_json"), {}))
     output: list[dict[str, Any]] = []
@@ -670,7 +670,7 @@ def _fetch_yahoo_priority(state: dict[str, Any], at: datetime) -> dict[str, Any]
                     rejected_assignment += 1
                     continue
                 excerpt = _strip_markup(item.get('source_excerpt') or '')[:2000]
-                output.append({**item, "provider": "yahoo_priority", "tickers": [ticker], "scope": "universe",
+                output.append({**item, "provider": "yahoo_priority", "tickers": item.get('provider_tickers') or [ticker], "scope": "universe",
                                "source_excerpt": excerpt, "source_kind": "headline_summary" if excerpt else "headline_metadata", "headline_only": True,
                                "news_category": "company"})
         except Exception as exc:

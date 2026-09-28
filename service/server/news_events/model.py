@@ -102,6 +102,7 @@ class IdentityResolver:
                 [re.compile(r'(?<!\w)'+re.escape(a)+r'\s*\('+re.escape(ticker)+r'\)', re.I) for a in self.aliases[ticker]])
 
     def resolve(self, source):
+        from .eligibility import primary_subject
         body=source.title+' '+source.source_excerpt
         folded=body.lower()
         result=[]
@@ -119,6 +120,8 @@ class IdentityResolver:
             paired = ticker.lower() in folded and any(a.lower() in folded and pattern.search(body) for a,pattern in zip(self.aliases[ticker],paired_patterns))
             supported = alias_match and ticker in source.tickers
             if explicit or named or cik_match or paired or supported:
+                if not primary_subject(source,ticker,[name,*self.aliases[ticker]],cik_match):
+                    continue
                 basis = 'cik' if cik_match else 'exchange_ticker' if explicit else 'legal_name' if named else 'company_name_plus_parenthesized_ticker' if paired else 'verified_alias_plus_provider_ticker'
                 result.append({'ticker':ticker,'company':name,'cik':cik,'basis':basis})
         return result

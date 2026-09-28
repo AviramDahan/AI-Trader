@@ -130,7 +130,7 @@ class BaseProvider:
     def source_timestamp(self,raw):return timestamp(raw['published_at'])
     def source_identity(self,raw):return str(raw.get('id') or self.canonical_url(raw))
     def raw_metadata(self,raw):
-        return {k:raw[k] for k in ('id','updated','categories','exchange','accession','license_label','license_url') if k in raw}
+        return {k:raw[k] for k in ('id','updated','categories','category_details','subjects','exchange','exchanges','company','provider_tickers','accession','license_label','license_url') if k in raw}
 
     def normalize(self,raw,collected_at):
         title,excerpt=text(raw.get('title')),text(raw.get('excerpt'))
@@ -154,7 +154,7 @@ class RSSProvider(BaseProvider):
         root=ET.fromstring(raw)
         rows=[]
         ns={'a':'http://www.w3.org/2005/Atom','c':'http://purl.org/rss/1.0/modules/content/',
-            'dc':'http://purl.org/dc/elements/1.1/'}
+            'dc':'http://purl.org/dc/elements/1.1/', 'gn':'http://dublincore.org/documents/dcmi-namespace/'}
         for node in root.findall('./channel/item')+root.findall('a:entry',ns):
             def value(tag):return node.findtext(tag,default='',namespaces=ns)
             link=value('link')
@@ -163,9 +163,19 @@ class RSSProvider(BaseProvider):
                 link=next((n.get('href') for n in links if n.get('rel','alternate')=='alternate'),'')
             excerpt=value('description') or value('c:encoded') or value('a:summary') or value('a:content')
             refs=re.findall(r'''href=["'](https?://[^"']+)''',excerpt)
+            category_details=[{'value':v.text,'domain':v.get('domain','')} for v in node.findall('category') if v.text]
+            stocks=[];exchanges=[]
+            for category in category_details:
+                # Documented feed field, not free-text categories. Non-US venue
+                # symbols must never be mistaken for a US namesake (e.g. FLS).
+                if category['domain']!='https://www.globenewswire.com/rss/stock':continue
+                match=re.fullmatch(r'(NASDAQ|NYSE|NYSEAMERICAN|AMEX):([A-Z][A-Z0-9.-]{0,9})',category['value'],re.I)
+                if match:exchanges.append(match[1].upper());stocks.append(match[2].upper().replace('.','-'))
             rows.append({'id':value('guid') or value('a:id') or link,'url':link,
                 'title':value('title') or value('a:title'),'excerpt':excerpt,
-                'publisher':value('dc:publisher') or self.config.publisher,
+                'publisher':value('dc:publisher') or value('gn:publisher') or self.config.publisher,
+                'company':value('gn:publisher'), 'tickers':stocks,'exchanges':exchanges,
+                'category_details':category_details,'subjects':[v.text for v in node.findall('gn:subject',ns) if v.text],
                 'published_at':value('pubDate') or value('a:published'),
                 'event_refs':refs,'categories':[v.text for v in node.findall('category') if v.text]})
         return {'items':rows,'cursor':timestamp(now),'coverage':'broad RSS feed window; not full-universe guarantee'}

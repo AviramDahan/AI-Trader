@@ -4,7 +4,7 @@ import re
 # Explicitly reviewed brand/legal-name differences; no inferred fuzzy aliases.
 REVIEWED_ALIASES = {'NVDA': ('Nvidia',), 'AAPL': ('Apple',), 'MEDP': ('Medpace',),
                     'HOOD': ('Robinhood',), 'INTC': ('Intel',)}
-AMBIGUOUS = {'A', 'IT', 'ON'}
+AMBIGUOUS = {'A', 'IT', 'ON', 'TGT'}  # "price target" is not Target Corporation.
 
 
 def company_aliases(ticker, name):
@@ -14,6 +14,11 @@ def company_aliases(ticker, name):
 
 
 EXTENDED_EVENTS = (
+    # Observed in the frozen September 28 audit; intentionally narrow actions.
+    ('product', r'\bstarts?\b.{0,50}\bdrone delivery pilot\b|\bships? redesigned engines\b'),
+    ('business_update', r'\bexpands? into\b.{0,70}\bwith\b.{0,50}\bdeal\b'),
+    ('business_risk', r'\bwarns? of heightened\b.{0,40}\bcompetition\b'),
+    ('asset_sale', r'\bsells? (?:its |the )?\w+ campus for\b'),
     ('analyst_rating', r'\b(?:upgrades?|downgrades?)\b.+\b(?:to|from|rating|stock|shares)\b'),
     ('price_target', r'\b(?:price target|target price)\b|\b(?:raises?|cuts?|lowers?|adjusts?)\b.+\bPT\b'),
     ('earnings_preview', r'\b(?:earnings|profit|revenue) (?:preview|estimates?|warning)\b'),
@@ -31,6 +36,30 @@ EXTENDED_EVENTS = (
     ('licensing', r'\blicensing (?:deal|agreement)\b'),
     ('insider_transaction', r'\b(?:CEO|CFO|COO|officer|director|general counsel|insider)\b.+\b(?:sells?|buys?|purchases?)\b.+\b(?:shares?|stock)\b'),
 )
+
+
+def primary_subject(source, ticker, aliases, cik_match=False):
+    """Company mention is not subject identity. Fail closed on incidental mentions.
+
+    Filing CIK is direct issuer identity; relatedTickers is not. Analyst-action
+    headlines identify the rating target, never the bank merely issuing it.
+    """
+    if cik_match:
+        return True
+    title = source.title.strip()
+    names = [re.escape(a) for a in aliases]
+    names += [r'\$'+re.escape(ticker), r'(?:NASDAQ|NYSE)\s*:\s*'+re.escape(ticker)]
+    entity = r'(?:'+'|'.join(names)+r')(?!\w)'
+    action = re.search(r'\b(?:upgrades?|downgrades?|raises?|cuts?|lifts?|adjusts?)\b', title, re.I)
+    analyst = action and re.search(r'\b(?:rating|price target|PT|upgrades?|downgrades?)\b', title, re.I)
+    if analyst:
+        # Subject followed by colon: "TD Synnex: Morgan Stanley lifts ...".
+        if re.match(entity+r'\s*:', title, re.I):return True
+        tail=title[action.end():]
+        if re.search(entity, tail, re.I):return True
+        return False
+    prefix = r'^(?:(?:why|how|is|can|will|did)\s+)?'
+    return bool(re.search(prefix+entity, title, re.I))
 
 
 def sufficient_evidence(event):
