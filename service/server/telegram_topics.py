@@ -67,7 +67,7 @@ def thread_id_for_event(event_type: str | None) -> int | None:
     elif event_type in SIGNAL_EVENT_TYPES:
         names = ("TELEGRAM_SIGNALS_THREAD_ID", "TELEGRAM_TRADING_THREAD_ID")
     elif event_type in TRADE_EVENT_TYPES:
-        names = ("TELEGRAM_SIGNALS_THREAD_ID", "TELEGRAM_TRADES_THREAD_ID", "TELEGRAM_TRADING_THREAD_ID")
+        names = ("TELEGRAM_AGENT_ACTIONS_THREAD_ID", "TELEGRAM_SIGNALS_THREAD_ID", "TELEGRAM_TRADES_THREAD_ID", "TELEGRAM_TRADING_THREAD_ID")
     elif event_type in PORTFOLIO_EVENT_TYPES:
         names = ("TELEGRAM_PORTFOLIO_THREAD_ID",)
     else:
