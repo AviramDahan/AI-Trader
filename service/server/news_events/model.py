@@ -136,6 +136,9 @@ EVENT_PATTERNS=(('analyst_action',r'\bupgrades?\b|\bdowngrades?\b|price target')
 def event_type(title, excerpt):
     from .factual_evidence import opinion
     if opinion(title):return 'unknown'
+    from .macro_rules import market_headline
+    # A benchmark-rate headline is macro, not corporate "financing".
+    if market_headline(title):return 'market'
     value=title+' '+excerpt
     for kind,pattern in EVENT_PATTERNS:
         if re.search(pattern,value,re.I):return kind
