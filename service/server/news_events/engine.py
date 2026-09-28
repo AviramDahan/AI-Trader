@@ -12,7 +12,7 @@ from .factual_evidence import sufficient
 
 @dataclass(frozen=True)
 class Policy:
-    # Same existing defaults; trial must load the effective production values.
+    # Approved news-only recall defaults; runtime loads effective settings.
     personal_relevance: float=.55
     stock_relevance: float=.70
     market_relevance: float=.40
