@@ -25,6 +25,18 @@ def test_no_boundary_fail_closed_before_network(monkeypatch):
         PressFeedProvider(Config('prnewswire', 'https://example.com/rss', 'PR'), transport).fetch({}, NOW)
     transport.request.assert_not_called()
 
+def test_recovery_boundary_blocks_outage_backlog_after_restart(monkeypatch):
+    import json
+    monkeypatch.setenv('NEWS_PRNEWSWIRE_ACTIVATED_AT', '2026-09-26T00:00:00Z')
+    xml = b'''<rss><channel><item><title>Outage</title><link>https://example.com/old</link><pubDate>Sun, 27 Sep 2026 18:59:00 GMT</pubDate></item><item><title>New</title><link>https://example.com/new</link><pubDate>Sun, 27 Sep 2026 19:00:00 GMT</pubDate></item></channel></rss>'''
+    cfg = Config('prnewswire', 'https://example.com/rss', 'PR', enabled=True, rights='approved')
+    state = {'checkpoint_json': json.dumps({'recovery_not_before': NOW.isoformat()})}
+    for _ in range(2):
+        result = PressFeedProvider(cfg, Mock(request=Mock(return_value=xml))).fetch(state, NOW)
+        assert [r['title'] for r in result['items']] == ['New']
+        assert result['checkpoint']['replay_blocked'] == 1
+        state = {'checkpoint_json': json.dumps(result['checkpoint'])}
+
 @pytest.mark.parametrize('attempts,previous,terminal', [(0, True, False), (1, True, False), (2, True, True), (0, False, True)])
 def test_404_recovery_bounded_only_for_verified_feed(monkeypatch, attempts, previous, terminal):
     monkeypatch.setenv('NEWS_PRNEWSWIRE_ACTIVATED_AT', NOW.isoformat())

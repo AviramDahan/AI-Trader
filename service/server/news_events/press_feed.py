@@ -17,6 +17,10 @@ class PressFeedProvider(RSSProvider):
         if not boundary:
             raise ProviderFailure('press_feed_activation_required', terminal=True)
         boundary = datetime.fromisoformat(timestamp(boundary))
+        checkpoint = json.loads(state.get('checkpoint_json') or '{}')
+        # An operator-verified recovery must not replay the outage backlog.
+        if checkpoint.get('recovery_not_before'):
+            boundary = max(boundary, datetime.fromisoformat(timestamp(checkpoint['recovery_not_before'])))
         try:
             response = super().fetch(state, now)
         except ProviderFailure as exc:
@@ -33,7 +37,6 @@ class PressFeedProvider(RSSProvider):
                 blocked += 1
             else:
                 accepted.append(raw)
-        checkpoint = json.loads(state.get('checkpoint_json') or '{}')
         checkpoint.update(activation_boundary=timestamp(boundary), replay_blocked=blocked)
         return {**response, 'items': accepted, 'raw_item_count': len(response['items']),
                 'checkpoint': checkpoint}

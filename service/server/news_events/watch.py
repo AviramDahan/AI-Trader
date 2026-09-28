@@ -6,6 +6,19 @@ from .runtime import connect
 from .model import timestamp
 
 
+def coverage_summary(providers, provider_health):
+    """Pipeline integrity and provider availability are separate health signals."""
+    healthy = {'ok', 'no_new', 'not_modified'}
+    inactive = {'disabled', 'retired'}
+    states = {r['provider']: r['status'] for r in providers}
+    states.update({k: v.get('status', 'unknown') for k, v in provider_health.items()
+                   if not k.startswith('evidence:')})
+    affected = sorted(k for k, status in states.items() if status not in healthy | inactive)
+    if affected:
+        return 'חדשות קנוניות: הצינור תקין; כיסוי מקורות חלקי\nמקורות דורשים טיפול: ' + ', '.join(affected)
+    return 'חדשות קנוניות: הצינור תקין; המקורות הפעילים תקינים'
+
+
 def fail_back(reason,current):
     """Fence first, then let the singleton scanner resume Phase 1 next cycle.
 
@@ -68,7 +81,7 @@ def check(at=None):
         fail_back(','.join(alarms),current)
     else:
         enqueue('canonical_health:'+current.strftime('%Y-%m-%dT%H'),
-            'AI-Trader Admin\nחדשות קנוניות: תקין\nאירועים: '+str(data['canonical_events'])+
+            'AI-Trader Admin\n'+coverage_summary(providers,data['provider_health'])+'\nאירועים: '+str(data['canonical_events'])+
             '; גרסאות מקורות: '+str(data['source_versions'])+'; תור: '+str(data['queue_size'])+
             '\nעלות חדשות מתועדת מאז ההפעלה: $'+str(round(data['known_cost'],6))+
             '\nספקים: '+', '.join(r['provider']+'='+r['status'] for r in providers)+
