@@ -10,6 +10,18 @@ from telegram_topics import destination_fields, thread_id_for_event, with_news_c
 
 
 class TelegramTopicRoutingTests(unittest.TestCase):
+    def test_agent_actions_topic_routes_executions_only(self):
+        with patch.dict(os.environ, {'TELEGRAM_AGENT_ACTIONS_THREAD_ID':'901',
+                'TELEGRAM_SIGNALS_THREAD_ID':'902','TELEGRAM_PORTFOLIO_THREAD_ID':'903',
+                'TELEGRAM_MARKET_NEWS_THREAD_ID':'904'},clear=True):
+            for event in ('entry','entry_chart','tp','stop','sell','stop_change'):
+                self.assertEqual(thread_id_for_event(event),901)
+                self.assertEqual(destination_fields('-1001',event)['message_thread_id'],901)
+            self.assertEqual(thread_id_for_event('new_signal'),902)
+            self.assertEqual(thread_id_for_event('signals_status'),902)
+            self.assertEqual(thread_id_for_event('portfolio_status'),903)
+            self.assertEqual(thread_id_for_event('market_news'),904)
+
     def test_news_source_links_removed_but_community_and_non_news_unchanged(self):
         body='כותרת\n\nTelegram @financialjuice: https://t.me/financialjuice/136481\nמקור: https://example.com/news?a=1\n\nפורסם: 28/09/2026 04:10'
         with patch.dict(os.environ, {'TELEGRAM_COMMUNITY_URL':'https://t.me/+testInvite'}):
