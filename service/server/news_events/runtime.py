@@ -45,7 +45,7 @@ def pipeline():
         for row in c.execute("SELECT ticker,company FROM scanner_trades WHERE status='open' AND is_shadow=0 UNION SELECT ticker,company FROM scanner_news_watchlist WHERE enabled=1"):
             universe.setdefault(row['ticker'],{'company':row['company']})
     cfg=feed_settings()
-    policy=effective_policy(cfg,_float_env('STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE',.4,.4,1),
+    policy=effective_policy(cfg,_float_env('STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE',.3,.3,1),
         _int_env('STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS',6,1,24),
         cfg['scan_bridge_max_age'],_int_env('STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS',168,24,720))
     control=state()
