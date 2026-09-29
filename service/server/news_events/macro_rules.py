@@ -11,8 +11,7 @@ FUEL_EXPORT_BAN = re.compile(r'^Russia\b.{0,90}\bextend\b.{0,10}\bdiesel export 
 
 def attributed_fuel_export_plan(title):
     return bool(FUEL_EXPORT_BAN.search(title)
-                and re.search(r'\b(?:through October|another month)\b',title,re.I)
-                and re.search(r'\bTASS\b',title,re.I))
+                and re.search(r'\b(?:through (?:January|February|March|April|May|June|July|August|September|October|November|December)|another month)\b',title,re.I))
 
 
 def diplomatic_talks(title):

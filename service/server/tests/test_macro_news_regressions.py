@@ -19,6 +19,7 @@ CITI='October Fed meeting hinges on this key economic data, Citi says'
     "ECB's President Lagarde: The inflation outlook will be higher in 2027 and 2028 than we expected a few months ago.|FJ",
     'U.S. TWO-YEAR TREASURY YIELD REACHES 4.952%, HIGHEST SINCE MAY 2024',
     'Russia plans to extend diesel export ban through october - Tass|FJ',
+    'Russia plans to extend diesel export ban through November',
     'Russia Said To Be Preparing Document To Extend Diesel Export Ban For Another Month – TASS'])
 def test_real_headlines_eligible_without_identity_or_excerpt(env,title):
     p,s,_=env
