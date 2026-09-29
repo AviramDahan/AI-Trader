@@ -12,7 +12,11 @@ BOE='Bank of England’s Ramsden says rates may need to rise if inflation pressu
 CITI='October Fed meeting hinges on this key economic data, Citi says'
 
 
-@pytest.mark.parametrize('title',[SOFR,TALKS,BOE])
+@pytest.mark.parametrize('title',[SOFR,TALKS,BOE,
+    "ECB's President Lagarde: The inflation outlook will be higher in 2027 and 2028 than we expected a few months ago.|FJ",
+    'U.S. TWO-YEAR TREASURY YIELD REACHES 4.952%, HIGHEST SINCE MAY 2024',
+    'Russia plans to extend diesel export ban through october - Tass|FJ',
+    'Russia Said To Be Preparing Document To Extend Diesel Export Ban For Another Month – TASS'])
 def test_real_headlines_eligible_without_identity_or_excerpt(env,title):
     p,s,_=env
     assert event_type(title,'')=='market'
@@ -54,3 +58,32 @@ def test_stale_and_backlog_still_never_call_ai(env):
     assert s.event(eid)['reason']=='backlog_blocked'
     assert p.queue(eid,NOW)==[]
     ai.assert_not_called()
+
+
+@pytest.mark.parametrize('title',[
+    "WATCH LIVE: ECB President Lagarde speaks",
+    "ECB's President Lagarde: He was great",
+    "ECB's President Lagarde: We discussed the inflation outlook",
+    'Trump: Kim is my friend',
+    'Trump: Discussed locations for data centers',
+    'Could Apple agree to buy a startup?',
+    '3 stocks to buy before the Fed cuts rates',
+    'Russia may consider changes to diesel exports',
+    'Russia plans to extend diesel export ban',
+])
+def test_noise_does_not_gain_factual_title_evidence(env,title):
+    p,s,_=env
+    eid=p.ingest(source(title=title,source_excerpt='',event_type=event_type(title,''),event_refs=()),NOW)
+    assert not sufficient(s.event(eid)['body'])
+
+
+@pytest.mark.parametrize('title,expected',[
+    ('$BA | FAA To Delay Approval Of Boeing MAX 10 While Studying Software Issue','regulatory'),
+    ('AMD agrees to buy World Labs AI startup for $8.2b. $AMD|FJ','merger'),
+])
+def test_observed_business_classification(title,expected):
+    assert event_type(title,'')==expected
+
+
+def test_corporate_outlook_not_misclassified_as_central_bank():
+    assert event_type('Apple Inc. raises guidance despite higher inflation','')=='guidance'

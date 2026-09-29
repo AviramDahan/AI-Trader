@@ -896,19 +896,22 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
             priority = 100 if scope == "open_position" else 80 if scope == "watchlist" else 70 if scope == "active_signal" else 20 if scope == "market" else 40
             cur.execute("""INSERT INTO scanner_news_jobs(news_id,priority,status,next_attempt_at,created_at,updated_at)
                            VALUES(?,?,'pending',?,?,?)""", (news_id, priority, stamp, stamp, stamp))
-        cur.execute("SELECT id FROM scanner_news_sources WHERE provider=? AND url=?", (item["provider"], item["url"]))
+        cur.execute("SELECT id,raw_metadata_json FROM scanner_news_sources WHERE provider=? AND url=?", (item["provider"], item["url"]))
         existing_source = cur.fetchone()
+        from news_source_metadata import retain
+        source_metadata=retain({**item,'original_url':raw.get('url',item['url'])},
+            _loads(existing_source['raw_metadata_json'],{}) if existing_source else {},collected_at=stamp)
         if not existing_source:
             cur.execute("""INSERT INTO scanner_news_sources(news_id,source_key,provider,publisher,url,published_at,collected_at,
                         source_kind,headline_only,raw_metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)""",
                         (news_id, source_key, item["provider"], item["publisher"], item["url"], item["published_at"], stamp,
                          item.get("source_kind") or "headline_metadata", 1 if item.get("headline_only", True) else 0,
-                         _json({"source_excerpt": item.get("source_excerpt") or ""})))
+                         _json(source_metadata)))
             sources += 1
         else:
             cur.execute("""UPDATE scanner_news_sources SET published_at=?,collected_at=?,raw_metadata_json=?
                            WHERE id=?""", (item["published_at"], stamp,
-                                           _json({"source_excerpt": item.get("source_excerpt") or ""}), existing_source["id"]))
+                                           _json(source_metadata), existing_source["id"]))
         for trade_id in trade_ids:
             cur.execute("SELECT id FROM scanner_trade_news WHERE trade_id=? AND news_id=?", (trade_id, news_id))
             if not cur.fetchone():

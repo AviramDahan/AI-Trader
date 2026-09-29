@@ -109,7 +109,9 @@ class IdentityResolver:
         return result
 
 
-EVENT_PATTERNS=(('analyst_action',r'\bupgrades?\b|\bdowngrades?\b|price target'),
+EVENT_PATTERNS=(('regulatory',r'\bFAA\b.{0,50}\b(?:delay|delays|approve|approves|rejects?)\b.{0,30}\b(?:approval|Boeing|MAX)\b'),
+    ('merger',r'\bagrees? to buy\b'),
+    ('analyst_action',r'\bupgrades?\b|\bdowngrades?\b|price target'),
     ('financing',r'financing|share offering|stock offering|debt issuance|issues? .*bonds?'),
     ('cybersecurity',r'cyberattack|cybersecurity incident|data breach'),
     ('clinical',r'clinical trial|FDA.*(?:approval|approves|reject|milestone)'),
