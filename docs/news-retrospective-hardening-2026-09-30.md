@@ -86,6 +86,12 @@ and secondary company mentions remain covered by negative regressions.
 
 ## Safety finding and recommendation
 
+Validation performed: local backend 673 tests + 29 subtests; disposable
+PostgreSQL 189 tests + 23 subtests; Linux image/import check and frontend build
+passed. A CI test-module import-path issue was found after PostgreSQL passed,
+fixed in the test files, and the 33 focused tests passed without local
+PYTHONPATH. The final branch workflow is rerun before reporting completion.
+
 The canonical watchdog latches fallback when monitor status is error or its
 last success is older than 900 seconds. A later healthy monitor does not
 automatically resume canonical news. The historical record proves the latch,

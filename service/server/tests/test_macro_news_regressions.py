@@ -1,6 +1,9 @@
 from unittest.mock import Mock
+import sys
+from pathlib import Path
 from datetime import timedelta
 import pytest
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from news_events.model import event_type
 from news_events.factual_evidence import sufficient
 from news_events.engine import Analysis

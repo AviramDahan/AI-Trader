@@ -1,5 +1,8 @@
 import json
+import sys
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from admin_health_context import snapshot, incident, summary
 
 NOW=datetime(2026,9,30,tzinfo=timezone.utc)
