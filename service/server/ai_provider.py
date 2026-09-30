@@ -76,12 +76,24 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
             notify_failure=False  # Persist attempt cost/error, wait for bounded retry outcome.
         except (ValueError, KeyError, IndexError, jsonschema.ValidationError) as exc:
             from retry_policy import validation_detail
-            failure=validation_detail(exc)
+            failure=validation_detail(exc,body)
+            if usage_sink is not None:
+                usage_sink['structure_detail']=json.loads(failure).get('structure_detail')
             if attempt + 1 >= max_attempts:
                 raise ValueError("openrouter_schema_failed:"+failure) from None
             notify_failure=False
             messages.append({"role": "user", "content": "Return valid JSON matching the required schema; do not invent missing source facts."})
+        except (TypeError, AttributeError) as exc:
+            # Diagnose malformed envelopes without making previously terminal
+            # exceptions retryable or changing the shared repair allowance.
+            from retry_policy import validation_detail
+            failure=validation_detail(exc,body)
+            if usage_sink is not None:
+                usage_sink['structure_detail']=json.loads(failure).get('structure_detail')
+            raise
         finally:
+            # A non-object envelope cannot contain usable billing metadata.
+            if not isinstance(body,dict):body=None
             from ai_operations import record
             record('news_translation' if task in {'translation','news_translation','summary'} else 'news_analysis',
                    model,body,started,success,None if success else failure,retry=repair or attempt>0,

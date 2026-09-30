@@ -32,6 +32,9 @@ def message(status,error,calls):
         stage=last.get('stage') if last.get('stage') in STAGES else 'unknown_stage'
         reason=last.get('failure_reason') if last.get('failure_reason') in REASONS else 'request_failed'
         result+='\nשלב הכשל: '+stage+'\nסיבה: '+reason
+        from retry_policy import STRUCTURE_DETAILS
+        if last.get('structure_detail') in STRUCTURE_DETAILS:
+            result+='\nאבחון מבנה: '+last['structure_detail']
     return 'AI-Trader Admin\nתוצאת עיבוד חדשות\n'+result+'\nניטור הפוזיציות ו־TP/SL ממשיכים בנפרד.'
 
 

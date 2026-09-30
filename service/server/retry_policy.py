@@ -23,7 +23,34 @@ def detail(exc):
         'retry_after_seconds':retry_after(response.headers.get('Retry-After')) if response is not None else 0})
 
 
-def validation_detail(exc):
+STRUCTURE_DETAILS={'body_not_object','provider_error_envelope','choices_missing',
+    'choices_not_list','choices_empty','choice_not_object','message_missing',
+    'message_not_object','content_missing','content_null','content_not_text',
+    'content_empty','structure_unspecified'}
+
+
+def response_structure_detail(body):
+    """Fixed labels only: never serialize keys, values, provider error or text."""
+    if not isinstance(body,dict):return 'body_not_object'
+    if 'choices' not in body:
+        return 'provider_error_envelope' if 'error' in body else 'choices_missing'
+    choices=body['choices']
+    if not isinstance(choices,list):return 'choices_not_list'
+    if not choices:return 'choices_empty'
+    choice=choices[0]
+    if not isinstance(choice,dict):return 'choice_not_object'
+    if 'message' not in choice:return 'message_missing'
+    message=choice['message']
+    if not isinstance(message,dict):return 'message_not_object'
+    if 'content' not in message:return 'content_missing'
+    content=message['content']
+    if content is None:return 'content_null'
+    if not isinstance(content,str):return 'content_not_text'
+    if not content.strip():return 'content_empty'
+    return 'structure_unspecified'
+
+
+def validation_detail(exc, body=None):
     """Never serialize model content, validation instances, paths or error text."""
     import jsonschema
     reason='invalid_response_structure'
@@ -32,6 +59,9 @@ def validation_detail(exc):
     elif isinstance(exc,ValueError) and str(exc) in {'ai_output_truncated','ai_object_required'}:
         reason=str(exc)
     result={'reason':reason}
+    if body is not None:
+        structure=response_structure_detail(body)
+        if structure!='structure_unspecified':result['structure_detail']=structure
     if isinstance(exc,jsonschema.ValidationError):
         allowed={'type','required','additionalProperties','enum','minimum','maximum','minLength','maxLength','pattern','items','anyOf','oneOf','allOf','const'}
         result['validator']=exc.validator if exc.validator in allowed else 'other'
@@ -47,6 +77,7 @@ def alert_failure_detail(value):
     safe={}
     reasons={'invalid_json','schema_validation_failed','ai_output_truncated','ai_object_required','invalid_response_structure'}
     if data.get('reason') in reasons:safe['reason']=data['reason']
+    if data.get('structure_detail') in STRUCTURE_DETAILS:safe['structure_detail']=data['structure_detail']
     if type(data.get('http_status')) is int:safe['http_status']=data['http_status']
     if data.get('exception') in {'HTTPError','Timeout','ReadTimeout','ConnectTimeout','ConnectionError','JSONDecodeError'}:safe['exception']=data['exception']
     delay=data.get('retry_after_seconds')
