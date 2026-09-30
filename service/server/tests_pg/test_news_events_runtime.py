@@ -273,3 +273,55 @@ def test_backlog_never_projects_into_dashboard_or_six_hour_review(live):
     with p.store.transaction() as c:
         assert c.execute('SELECT count(*) n FROM scanner_news').fetchone()['n']==0
         assert c.execute('SELECT count(*) n FROM scanner_trade_news').fetchone()['n']==0
+
+
+@pytest.mark.parametrize('outcome',['recovered','quality_rejected','terminal'])
+def test_canonical_final_admin_outcome_atomic_private_once(live,outcome):
+    from news_events.analysis import CanonicalAnalyzer
+    from news_events.admin_outcome import persist
+    p,src,result,at,_=live;eid=p.ingest(src,at)
+    good=dict(faithful=True,fluent_hebrew=True,unsupported_claims=False,duplicate_of=0,
+              material_new_fact=False,explanation='תקין')
+    usage={'final_alert_owner':True,'cost':.001}
+    error=ValueError('openrouter_schema_failed:{"reason":"invalid_json"}')
+    error.canonical_usage=usage.copy()
+    last=error if outcome=='terminal' else (dict(good,faithful=outcome=='recovered'),usage.copy())
+    client=Mock(side_effect=[(result,usage.copy()),error,last])
+    status=p.analyze(eid,CanonicalAnalyzer(client),at)
+    assert status==('done' if outcome=='recovered' else 'failed')
+    p.analyze(eid,CanonicalAnalyzer(client),at);p.recover_interrupted(at)
+    assert client.call_count==3
+    with p.store.transaction() as c:
+        rows=c.execute('SELECT * FROM admin_alerts').fetchall();assert len(rows)==1
+        assert rows[0]['status']=='pending'
+        text=rows[0]['message']
+        assert ('התאוששות' if outcome=='recovered' else 'נדחתה' if outcome=='quality_rejected' else 'כשל סופי') in text
+        assert text.splitlines()[-1].startswith('Timestamp: ') and text.endswith('(Israel)')
+        assert c.execute('SELECT count(*) n FROM scanner_telegram_outbox').fetchone()['n']==0
+        assert c.execute('SELECT count(*) n FROM scanner_fills').fetchone()['n']==0
+    # Reconciliation cannot duplicate or change the original outcome timestamp.
+    with p.store.transaction(True) as c:
+        v=p.store.event(eid)['evidence_version']
+        persist(c,eid,v,status,None,[dict(final_alert_owner=True,success=False)],at)
+    with p.store.transaction() as c:
+        assert c.execute('SELECT count(*) n FROM admin_alerts').fetchone()['n']==1
+        assert c.execute('SELECT message FROM admin_alerts').fetchone()['message']==text
+
+
+def test_final_admin_insert_failure_rolls_back_completion_not_telemetry(live,monkeypatch):
+    from news_events import admin_outcome
+    from news_events.engine import Analysis
+    p,src,result,at,_=live;eid=p.ingest(src,at)
+    original_persist=admin_outcome.persist
+    monkeypatch.setattr(admin_outcome,'persist',Mock(side_effect=RuntimeError('test atomic failure')))
+    with pytest.raises(RuntimeError,match='atomic failure'):
+        p.analyze(eid,lambda _:Analysis(result),at)
+    with p.store.transaction() as c:
+        assert c.execute('SELECT status FROM ne_analysis').fetchone()['status']=='running'
+        assert c.execute('SELECT count(*) n FROM admin_alerts').fetchone()['n']==0
+    monkeypatch.setattr(admin_outcome,'persist',original_persist)
+    assert p.recover_interrupted(at+timedelta(hours=1))==1
+    assert p.recover_interrupted(at+timedelta(hours=2))==0
+    with p.store.transaction() as c:
+        rows=c.execute('SELECT message FROM admin_alerts').fetchall();assert len(rows)==1
+        assert 'התוצאה אינה ידועה' in rows[0]['message']

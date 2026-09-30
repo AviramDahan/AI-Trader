@@ -225,6 +225,9 @@ class Pipeline:
                 c.execute('UPDATE ne_events SET status=?,reason=? WHERE event_id=?',('analyzed' if status=='done' else 'quality_failed',error,event_id))
             self.store.metric(c,'analysis',status,timestamp(now),event_id,providers=event['providers'],
                 latency=time.monotonic()-started,calls=output.calls,invocations=1)
+            if self.store.production:
+                from .admin_outcome import persist
+                persist(c,event_id,version,status,error,output.calls)
         return status
 
     def queue(self,event_id,now):
@@ -276,4 +279,7 @@ class Pipeline:
                 c.execute("UPDATE ne_analysis SET status='interrupted_unknown',error='operator_review_required' WHERE event_id=? AND version=?",
                           (row['event_id'],row['version']))
                 c.execute("UPDATE ne_events SET status='quality_failed',reason='interrupted_unknown' WHERE event_id=? AND evidence_version=? AND status='analyzing'",(row['event_id'],row['version']))
+                if self.store.production:
+                    from .admin_outcome import persist
+                    persist(c,row['event_id'],row['version'],'interrupted_unknown','operator_review_required',[],now)
             return len(rows)

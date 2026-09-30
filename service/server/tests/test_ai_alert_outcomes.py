@@ -70,3 +70,33 @@ def test_schema_metadata_does_not_leak_instance():
 
 def test_alert_sanitizes_untrusted_fields():
     assert retry_policy.alert_failure_detail('{"reason":"PRIVATE","http_status":429,"body":"SECRET"}')=='{"http_status": 429}'
+
+
+def test_canonical_defers_alert_but_records_failed_attempt_and_cost(provider,monkeypatch):
+    from news_events.call_context import CURRENT
+    alert,db=provider
+    monkeypatch.setattr(ai_provider.requests,'post',Mock(return_value=response('SECRET bad JSON')))
+    token=CURRENT.set(dict(event_id='test',version='v',stage='quality_review',final_alert_owner=True))
+    try:
+        with pytest.raises(ValueError,match='invalid_json'):
+            ai_provider.json_completion('test',{},max_attempts=1)
+    finally:CURRENT.reset(token)
+    alert.assert_not_called()
+    calls=db.__enter__.return_value.execute.call_args_list
+    assert len(calls)==2 # cost row plus canonical call link, no notification.
+    assert calls[0].args[1][7]==.001
+    assert calls[0].args[1][10]==0
+
+
+def test_final_message_distinguishes_recovery_rejection_and_terminal():
+    from news_events.admin_outcome import message
+    calls=[dict(stage='quality_review',success=False,failure_reason='invalid_json'),
+           dict(stage='schema_repair:quality_review',success=True)]
+    assert 'התאוששות' in message('done',None,calls)
+    rejected=message('failed','news_quality_rejected:faithful,no_unsupported_claims',calls)
+    assert 'תיקון הפורמט הצליח' in rejected and 'נדחתה' in rejected
+    assert 'הידיעה לא פורסמה' in rejected
+    calls[-1].update(success=False,failure_reason='invalid_json')
+    assert 'כשל סופי' in message('failed','completion_failed',calls)
+    unsafe=message('failed','SECRET',[dict(stage='SECRET',success=False,failure_reason='SECRET')])
+    assert 'SECRET' not in unsafe
