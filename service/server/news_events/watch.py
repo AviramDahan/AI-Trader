@@ -4,6 +4,7 @@ from datetime import datetime,timezone,timedelta
 from .control import state
 from .runtime import connect
 from .model import timestamp
+from .queue_health import queue_rows, summarize
 
 
 def coverage_summary(providers, provider_health):
@@ -57,9 +58,8 @@ def check(at=None):
         bad_link=c.execute('''SELECT 1 FROM ne_outbox o LEFT JOIN ne_analysis a
             ON a.event_id=o.event_id AND a.version=o.version WHERE a.status IS NULL OR a.status!='done' LIMIT 1''').fetchone()
         providers=[dict(r) for r in c.execute('SELECT provider,status,last_success_at,next_check_at,error FROM scanner_news_providers')]
-        due=[dict(r) for r in c.execute("SELECT created_at FROM ne_events WHERE status IN ('pending','analyzing')")]
-    data['queue_size']=len(due)
-    data['oldest_queue_seconds']=max(((current-datetime.fromisoformat(timestamp(r['created_at']))).total_seconds() for r in due),default=0)
+        due=queue_rows(c)
+    data.update(summarize(due,current))
     costs={}
     for r in calls:costs[r['event_id']]=costs.get(r['event_id'],0)+(r['actual_cost'] or 0)
     alarms=[]

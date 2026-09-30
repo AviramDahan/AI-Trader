@@ -2,6 +2,7 @@
 import json
 from collections import Counter,defaultdict
 from datetime import datetime
+from .queue_health import summarize
 
 
 def report(store,now):
@@ -30,12 +31,10 @@ def report(store,now):
                 event['known_cost']+=call.get('cost') or 0
                 event['input_tokens']+=call.get('input_tokens') or 0
                 event['output_tokens']+=call.get('output_tokens') or 0
-    ages=[];multi=0
+    multi=0
     for row in events:
         outcomes[row['reason'] or row['status']]+=1
         body=json.loads(row['body_json']);multi+=len(body['providers'])>1
-        if row['status'] in ('pending','needs_material_review'):
-            ages.append(max(0,(now-datetime.fromisoformat(row['version_created_at'] or row['created_at'])).total_seconds()))
     known=[v['cost'] for v in calls if v.get('cost') is not None]
     return {'canonical_events':len(events),'source_versions':sources,'multi_source_events':multi,
         'source_to_event_ratio':sources/len(events) if events else None,
@@ -45,6 +44,7 @@ def report(store,now):
         'billable_calls':len(calls),'known_cost':sum(known),'calls_with_unknown_cost':len(calls)-len(known),
         'input_tokens':sum(v.get('input_tokens') or 0 for v in calls),
         'output_tokens':sum(v.get('output_tokens') or 0 for v in calls),
-        'queue_size':len(ages),'oldest_queue_seconds':max(ages,default=0),
+        **summarize(events,now),
+        'held_material_review_count':sum(r['status']=='needs_material_review' for r in events),
         'outcomes':dict(outcomes),'providers':{k:dict(v) for k,v in providers.items()},'provider_health':states,'per_event':per_event,
         'cost_attribution':'Event/call cost counted once. Contributing providers are not separately billed or allocated.'}

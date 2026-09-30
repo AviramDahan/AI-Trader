@@ -44,6 +44,56 @@ def source(provider='yahoo',**kw):
     args.update(kw);return Source(**args)
 
 
+def test_old_blocked_event_requeued_gets_new_queue_clock_not_new_publication(env):
+    p,s,_=env;eid=p.ingest(source(source_excerpt=''),NOW)
+    with s.transaction(True) as c:
+        c.execute("UPDATE ne_events SET status='blocked',reason='insufficient_information' WHERE event_id=?",(eid,))
+    later=NOW+timedelta(minutes=85)
+    # Cached evidence may retain its earlier collection time; queue time is
+    # when work becomes runnable now, not the source's collection timestamp.
+    assert p.ingest(source(),later)==eid
+    event=s.event(eid)
+    assert event['created_at']==NOW.isoformat()
+    assert event['body']['published_at']==NOW.isoformat()
+    assert event['body']['queue_entered_at']==later.isoformat()
+    data=report(s,later+timedelta(seconds=5))
+    assert data['queue_size']==1 and data['oldest_queue_seconds']==5
+    restarted=Store(s.connect,sandbox=True)
+    assert report(restarted,later+timedelta(seconds=10))['oldest_queue_seconds']==10
+
+
+@pytest.mark.parametrize('running_status',['pending','analyzing'])
+def test_continuously_waiting_job_age_never_resets_on_update_or_duplicate(env,running_status):
+    p,s,_=env;eid=p.ingest(source(),NOW)
+    with s.transaction(True) as c:c.execute('UPDATE ne_events SET status=? WHERE event_id=?',(running_status,eid))
+    later=NOW+timedelta(minutes=65)
+    p.ingest(source(collected_at=later.isoformat()),later)
+    assert report(s,later)['oldest_queue_seconds']==3900
+    update=source(collected_at=later.isoformat(),source_excerpt=FACTS+' Revenue corrected to 120 million.',
+        claims={'revenue_millions':{'value':120,'quote':'Revenue corrected to 120 million.'}})
+    p.ingest(update,later)
+    assert s.event(eid)['body']['queue_entered_at']==NOW.isoformat()
+    assert report(s,later)['oldest_queue_seconds']==3900
+
+
+def test_legacy_queue_age_uses_version_not_event_or_updated_clock(env):
+    from news_events.queue_health import entered_at
+    row=dict(created_at=NOW.isoformat(),updated_at=(NOW+timedelta(hours=3)).isoformat(),
+        version_created_at=(NOW+timedelta(hours=2)).isoformat(),body_json='{}')
+    assert entered_at(row)==row['version_created_at']
+    row['version_created_at']=None
+    assert entered_at(row)==row['created_at']
+
+
+def test_terminal_and_review_states_are_not_active_queue(env):
+    p,s,_=env;eid=p.ingest(source(),NOW)
+    for status in ('blocked','analyzed','quality_failed','needs_material_review'):
+        with s.transaction(True) as c:c.execute('UPDATE ne_events SET status=? WHERE event_id=?',(status,eid))
+        data=report(s,NOW+timedelta(days=2))
+        assert data['queue_size']==0 and data['oldest_queue_seconds']==0
+        assert data['held_material_review_count']==int(status=='needs_material_review')
+
+
 def test_prnewswire_live_rss_contract_publisher_excerpt_timestamp():
     xml=b'''<rss xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><item>
     <title>Apple Inc. quarterly results</title><link>https://www.prnewswire.com/news-releases/apple-123.html</link>
