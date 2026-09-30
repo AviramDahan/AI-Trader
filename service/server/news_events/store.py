@@ -75,6 +75,9 @@ class Store:
                 return None
             seen=c.execute('SELECT event_id FROM ne_sources WHERE source_key=?',(source_key,)).fetchone()
             if seen:
+                # Lazily add newer exact anchors for retained observations;
+                # never merge or re-analyze already-existing event histories.
+                for key in keys:c.execute('INSERT INTO ne_anchors VALUES(?,?) ON CONFLICT(anchor) DO NOTHING',(key,seen['event_id']))
                 self.metric(c,'ingest','unchanged_source',collected,seen['event_id'],source.provider_id,ai_calls_avoided=0)
                 return seen['event_id']
             ids={r['event_id'] for key in keys for r in c.execute('SELECT event_id FROM ne_anchors WHERE anchor=?',(key,))}
@@ -178,6 +181,15 @@ def combine(sources):
                     continue
                 entry['claims'][k]=v
                 claims.setdefault(k,set()).add(str(v['value']))
+    # A syndicated title-only observation contributes provenance, not new facts
+    # when that exact title is already present with a richer excerpt.
+    for key,entry in list(items.items()):
+        if entry['claims']:continue
+        richer=next((v for k,v in items.items() if k!=key and '\n' in v['text']
+            and v['text'].split('\n',1)[0].casefold()==entry['text'].strip().casefold()
+            and v['text'].split('\n',1)[1].strip()),None)
+        if richer:
+            richer['attributions'].extend(entry['attributions']);del items[key]
     ordered=sorted(items.values(),key=lambda v:fingerprint(v['text'].lower()))
     conflicts=[{'fact':k,'values':sorted(v),'status':'contested',
                 'preferred_primary_values':sorted({str(i['claims'][k]['value']) for i in ordered

@@ -133,7 +133,7 @@ def completion(stage,system,payload,schema):
     token=CURRENT.set(dict(event_id=context['canonical_event_id'],version=context['evidence_version'],stage=stage))
     try:
         value=json_completion(system,payload,schema=schema,task='news',max_attempts=1,
-            usage_sink=usage,repair=stage in {'editorial_repair','repair_review'})
+            usage_sink=usage,repair=stage in {'editorial_repair','repair_review'} or stage.startswith('schema_repair:'))
     except Exception as exc:
         exc.canonical_usage=usage
         raise

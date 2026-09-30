@@ -162,6 +162,14 @@ def anchors(source, identities):
     # Exact substantive source facts also recognize verbatim syndication.
     if len(source.source_excerpt.split())>=12:
         refs.append('facts:'+fingerprint(text(source.source_excerpt).lower()))
+    # Exact wire syndication, not title similarity or ticker/day grouping.
+    # Yahoo carries the original wire publisher but a different article URL.
+    publishers={'pr newswire':'prnewswire','pr newswire association llc.':'prnewswire',
+                'pr newswire association llc':'prnewswire','globenewswire':'globenewswire'}
+    publisher=publishers.get(text(source.publisher).lower())
+    title=text(source.title).casefold()
+    if publisher and identities and source.rights=='approved' and len(title.split())>=8:
+        refs.append('syndication:'+fingerprint([publisher,title,timestamp(source.published_at)]))
     return [fingerprint([identity,ref]) for ref in sorted(set(refs))]
 
 

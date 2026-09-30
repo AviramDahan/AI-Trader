@@ -480,7 +480,117 @@ def test_strict_schema_extra_keys_and_ungrounded_numbers_fail(env):
     p,s,_=env;eid=p.ingest(source(),NOW)
     client=Mock(return_value=({**RESULT,'invented_extra_field':True},{}))
     assert p.analyze(eid,CanonicalAnalyzer(client),NOW)=='failed'
-    assert client.call_count==1
+    assert client.call_count==2 # One shared schema repair, still fail closed.
+
+
+def test_review_invalid_json_repairs_only_failed_stage_once(env):
+    p,s,_=env;eid=p.ingest(source(),NOW)
+    error=ValueError('openrouter_schema_failed:{"reason":"invalid_json"}')
+    client=Mock(side_effect=[(RESULT,{'cost':.001}),error,(REVIEW,{'cost':.002})])
+    assert p.analyze(eid,CanonicalAnalyzer(client),NOW)=='done'
+    assert [a.args[0] for a in client.call_args_list]==['source_analysis','quality_review','schema_repair:quality_review']
+    assert client.call_args_list[1].args[2:]==client.call_args_list[2].args[2:]
+    assert report(s,NOW)['billable_calls']==3
+    p.analyze(eid,CanonicalAnalyzer(client),NOW);assert client.call_count==3
+
+
+@pytest.mark.parametrize('editorial_used',[False,True])
+def test_malformed_review_terminal_no_nested_repairs(env,editorial_used):
+    p,s,_=env;eid=p.ingest(source(),NOW)
+    error=ValueError('openrouter_schema_failed:{"reason":"invalid_json"}')
+    outcomes=[(RESULT,{}),({**REVIEW,'faithful':False},{}),(RESULT,{}),error] if editorial_used else [(RESULT,{}),error,error]
+    client=Mock(side_effect=outcomes)
+    assert p.analyze(eid,CanonicalAnalyzer(client),NOW)=='failed'
+    assert client.call_count==len(outcomes)
+    assert 'invalid_json' in s.event(eid)['reason']
+    assert p.deliver_preview(eid,NOW)==[]
+    p.analyze(eid,CanonicalAnalyzer(client),NOW);assert client.call_count==len(outcomes)
+
+
+def test_schema_repair_cannot_bypass_quality_or_request_an_editorial_repair(env):
+    p,s,_=env;eid=p.ingest(source(),NOW)
+    client=Mock(side_effect=[ValueError('openrouter_schema_failed:{"reason":"invalid_json"}'),
+        (RESULT,{}),({**REVIEW,'faithful':False},{})])
+    assert p.analyze(eid,CanonicalAnalyzer(client),NOW)=='failed'
+    assert client.call_count==3 and 'faithful' in s.event(eid)['reason']
+
+
+@pytest.mark.parametrize('error',[ValueError('openrouter_transport_failed:SECRET'),RuntimeError('SECRET')])
+def test_non_schema_failure_not_retried_or_leaked(env,error):
+    p,s,_=env;eid=p.ingest(source(),NOW);client=Mock(side_effect=error)
+    assert p.analyze(eid,CanonicalAnalyzer(client),NOW)=='failed'
+    assert client.call_count==1 and 'SECRET' not in s.event(eid)['reason']
+
+
+def wire_pair():
+    title='Apple Inc. Announces Definitive Agreement To Acquire Example, A Leading Technology Company'
+    direct=source('prnewswire',publisher='PR Newswire Association LLC.',title=title,event_refs=())
+    yahoo=source('yahoo',publisher='PR Newswire',title=title,source_excerpt='',event_refs=())
+    return direct,yahoo
+
+
+@pytest.mark.parametrize('failed',[False,True])
+def test_exact_wire_title_publisher_time_identity_dedupes_without_new_job(env,failed):
+    p,s,_=env;direct,yahoo=wire_pair();eid=p.ingest(direct,NOW)
+    ai=Mock(side_effect=ValueError('test') if failed else None,return_value=Analysis(RESULT))
+    p.analyze(eid,ai,NOW);version=s.event(eid)['evidence_version']
+    assert p.ingest(yahoo,NOW)==eid
+    assert s.event(eid)['evidence_version']==version
+    assert len(s.event(eid)['body']['sources'])==2
+    assert len(s.event(eid)['body']['normalized_evidence'][0]['attributions'])==2
+    p.analyze(eid,ai,NOW);assert ai.call_count==1
+    assert len(p.deliver_preview(eid,NOW))==(0 if failed else 1)
+    assert p.deliver_preview(eid,NOW)==[]
+
+
+@pytest.mark.parametrize('change',[{'publisher':'Other wire'},
+    {'published_at':(NOW+timedelta(seconds=1)).isoformat()},
+    {'title':'Apple Inc. Announces A Different Definitive Agreement To Acquire Another Company'}])
+def test_wire_anchor_requires_exact_corroboration(env,change):
+    p,s,_=env;direct,yahoo=wire_pair()
+    assert p.ingest(direct,NOW)!=p.ingest(replace(yahoo,**change),NOW)
+
+
+def test_wire_anchor_needs_verified_identity_and_preserves_material_correction(env):
+    from news_events.model import anchors
+    direct,yahoo=wire_pair()
+    assert not set(anchors(direct,[])) & set(anchors(yahoo,[]))
+    p,s,_=env;eid=p.ingest(direct,NOW);v=s.event(eid)['evidence_version']
+    update=replace(yahoo,source_excerpt='The company announced a revised acquisition price of 500 million.',
+        claims={'price':{'value':500,'quote':'The company announced a revised acquisition price of 500 million.'}})
+    assert p.ingest(update,NOW)==eid
+    assert s.event(eid)['evidence_version']!=v
+
+
+def test_observed_hormel_pr_yahoo_pair_uses_same_event(env):
+    _,s,_=env
+    p=Pipeline(s,{'HRL':{'company':'Hormel Foods','cik':'48465'}},lambda:[set(),set()],not_before=NOW-timedelta(days=1))
+    title='Hormel Foods Announces Definitive Agreement To Acquire Brakebush, A Leading Value-Added Chicken Company'
+    direct=source('prnewswire',publisher='PR Newswire Association LLC.',title=title,
+        source_excerpt="Acquisition Will Strengthen Hormel Foods' Position in a Growing Protein Category and Enhance its Leading Foodservice Capabilities AUSTIN, Minn., Sept. 30, 2026 /PRNewswire/ -- Hormel Foods Corporation (NYSE: HRL), a Fortune 500 global branded food company, today announced it has entered...",
+        url='https://www.prnewswire.com/news-releases/hormel-foods-announces-definitive-agreement-to-acquire-brakebush-a-leading-value-added-chicken-company-302893854.html',event_refs=(),event_type='merger')
+    yahoo=replace(direct,provider_id='yahoo_priority',publisher='PR Newswire',source_id='yahoo-hormel',
+        url='https://finance.yahoo.com/markets/stocks/articles/hormel-foods-announces-definitive-agreement-103000244.html',
+        source_excerpt='',tickers=('HRL',),raw_metadata={'provider_tickers':['HRL']})
+    eid=p.ingest(direct,NOW)
+    assert p.ingest(yahoo,NOW)==eid
+    assert s.event(eid)['body']['tickers']==['HRL']
+    assert len(s.event(eid)['body']['sources'])==2
+
+
+def test_runtime_schema_repair_single_transport_request_and_cost_category(monkeypatch):
+    from news_events import runtime
+    from news_events.call_context import CURRENT
+    captured=[]
+    def client(*args,**kwargs):
+        captured.append((dict(CURRENT.get()),kwargs));return REVIEW
+    monkeypatch.setattr('ai_provider.json_completion',client)
+    payload={'source':{'canonical_event_id':'test','evidence_version':'v'}}
+    runtime.completion('schema_repair:quality_review','system',payload,{})
+    assert captured[0][0]['stage']=='schema_repair:quality_review'
+    assert captured[0][1]['repair'] is True
+    assert captured[0][1]['max_attempts']==1
+    assert CURRENT.get() is None
 
 
 def test_rss_atom_and_disabled_license_config():
