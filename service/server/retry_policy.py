@@ -50,6 +50,31 @@ def response_structure_detail(body):
     return 'structure_unspecified'
 
 
+JSON_SYNTAX_CODES={
+    'Expecting value':'expected_value',
+    "Expecting ',' delimiter":'missing_comma',
+    "Expecting ':' delimiter":'missing_colon',
+    'Expecting property name enclosed in double quotes':'property_name_not_quoted',
+    'Unterminated string starting at':'unterminated_string',
+    'Invalid \\escape':'invalid_escape',
+    'Invalid \\uXXXX escape':'invalid_unicode_escape',
+    'Invalid control character at':'invalid_control_character',
+    'Extra data':'extra_data',
+}
+
+
+def safe_json_diagnostic(value):
+    """Revalidate at output boundaries; only fixed labels and bounded counts."""
+    if not isinstance(value,dict):return {}
+    code=value.get('code')
+    if not isinstance(code,str) or code not in {*JSON_SYNTAX_CODES.values(),'unknown_syntax'}:return {}
+    result={'code':code}
+    for key in ('line','column','position','output_chars'):
+        number=value.get(key)
+        if type(number) is int and 0<=number<=10_000_000:result[key]=number
+    return result
+
+
 def validation_detail(exc, body=None):
     """Never serialize model content, validation instances, paths or error text."""
     import jsonschema
@@ -59,6 +84,10 @@ def validation_detail(exc, body=None):
     elif isinstance(exc,ValueError) and str(exc) in {'ai_output_truncated','ai_object_required'}:
         reason=str(exc)
     result={'reason':reason}
+    if isinstance(exc,json.JSONDecodeError):
+        result['json_diagnostic']=safe_json_diagnostic({
+            'code':JSON_SYNTAX_CODES.get(exc.msg,'unknown_syntax'),
+            'line':exc.lineno,'column':exc.colno,'position':exc.pos,'output_chars':len(exc.doc)})
     if body is not None:
         structure=response_structure_detail(body)
         if structure!='structure_unspecified':result['structure_detail']=structure
@@ -77,6 +106,8 @@ def alert_failure_detail(value):
     safe={}
     reasons={'invalid_json','schema_validation_failed','ai_output_truncated','ai_object_required','invalid_response_structure'}
     if data.get('reason') in reasons:safe['reason']=data['reason']
+    diagnostic=safe_json_diagnostic(data.get('json_diagnostic'))
+    if diagnostic:safe['json_diagnostic']=diagnostic
     if data.get('structure_detail') in STRUCTURE_DETAILS:safe['structure_detail']=data['structure_detail']
     if type(data.get('http_status')) is int:safe['http_status']=data['http_status']
     if data.get('exception') in {'HTTPError','Timeout','ReadTimeout','ConnectTimeout','ConnectionError','JSONDecodeError'}:safe['exception']=data['exception']

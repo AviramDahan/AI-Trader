@@ -35,6 +35,11 @@ def message(status,error,calls):
         from retry_policy import STRUCTURE_DETAILS
         if last.get('structure_detail') in STRUCTURE_DETAILS:
             result+='\nאבחון מבנה: '+last['structure_detail']
+        from retry_policy import safe_json_diagnostic
+        diagnostic=safe_json_diagnostic(last.get('json_diagnostic'))
+        if diagnostic:
+            result+='\nאבחון JSON: '+diagnostic['code']
+            result+='\n'+', '.join(f'{key}={diagnostic[key]}' for key in ('line','column','position','output_chars') if key in diagnostic)
     return 'AI-Trader Admin\nתוצאת עיבוד חדשות\n'+result+'\nניטור הפוזיציות ו־TP/SL ממשיכים בנפרד.'
 
 

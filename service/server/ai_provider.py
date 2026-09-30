@@ -79,6 +79,7 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
             failure=validation_detail(exc,body)
             if usage_sink is not None:
                 usage_sink['structure_detail']=json.loads(failure).get('structure_detail')
+                usage_sink['json_diagnostic']=json.loads(failure).get('json_diagnostic')
             if attempt + 1 >= max_attempts:
                 raise ValueError("openrouter_schema_failed:"+failure) from None
             notify_failure=False
