@@ -19,6 +19,18 @@ class AnalysisFailure(ValueError):
         super().__init__(reason)
 
 
+def schema_reason(exc):
+    """Allowlisted diagnostics only; never copy a response or exception body."""
+    if isinstance(exc, json.JSONDecodeError):return 'invalid_json'
+    if isinstance(exc, jsonschema.ValidationError):return 'schema_validation_failed'
+    if isinstance(exc, ValueError) and str(exc).startswith('openrouter_schema_failed:'):
+        try:reason=json.loads(str(exc).split(':',1)[1]).get('reason')
+        except (ValueError,AttributeError):return None
+        if reason in {'invalid_json','schema_validation_failed','invalid_response_structure','ai_object_required'}:
+            return reason
+    return None
+
+
 class CanonicalAnalyzer:
     """completion(stage, system, payload, schema) -> (JSON object, usage dict).
 
@@ -29,7 +41,7 @@ class CanonicalAnalyzer:
     def __init__(self,completion):self.completion=completion
 
     def __call__(self,event):
-        calls=[]
+        calls=[];repair_used=False
         context={'canonical_event_id':event['event_id'],'evidence_version':event['evidence_version'],
                  'verified_company_identity':event['company_identity'],
                  'scope':'company' if event['tickers'] else 'market',
@@ -45,7 +57,7 @@ class CanonicalAnalyzer:
             'durable goods=מוצרים בני קיימא, consensus=תחזית האנליסטים, yen=ין, '
             'SEC filing=דיווח לרשות ניירות הערך (not a lawsuit). Each text under 45 words.')
 
-        def call(stage,prompt,payload,schema):
+        def request(stage,prompt,payload,schema):
             start=time.monotonic();usage={};success=False
             try:
                 result,usage=self.completion(stage,prompt,payload,schema)
@@ -54,11 +66,29 @@ class CanonicalAnalyzer:
                 return result
             except Exception as exc:
                 usage=getattr(exc,'canonical_usage',usage)
+                usage['failure_reason']=schema_reason(exc) or 'completion_failed'
                 raise
             finally:
-                allowed=('model','input_tokens','output_tokens','reasoning_tokens','cost','request_id')
+                allowed=('model','input_tokens','output_tokens','reasoning_tokens','cost','request_id','failure_reason')
                 calls.append({'stage':stage,'success':success,'latency':time.monotonic()-start,
                               **{k:usage.get(k) for k in allowed}})
+
+        def call(stage,prompt,payload,schema):
+            nonlocal repair_used
+            try:return request(stage,prompt,payload,schema)
+            except Exception as exc:
+                reason=schema_reason(exc)
+                if not reason or repair_used:
+                    raise AnalysisFailure('completion_failed:'+stage+':'+(reason or 'request_failed'),calls) from None
+                # One shared repair allowance, not another retry on every stage.
+                # Rebuild only the failed stage; keep the original facts/schema.
+                repair_used=True
+                try:
+                    return request('schema_repair:'+stage,
+                        prompt+' Return only a valid JSON object matching the schema. '
+                        'Escape double quotes inside strings; no markdown or commentary.',payload,schema)
+                except Exception as retry_exc:
+                    raise AnalysisFailure('completion_failed:'+stage+':'+(schema_reason(retry_exc) or 'request_failed'),calls) from None
 
         try:
             draft=call('source_analysis',system,context,ANALYSIS_SCHEMA)
@@ -76,7 +106,8 @@ class CanonicalAnalyzer:
                     'valid_duplicate_reference':review['duplicate_of']==0}
                 failed=[key for key,value in checks.items() if not value]
                 if not failed:return Analysis(draft,calls)
-                if attempt:raise AnalysisFailure('news_quality_rejected:'+','.join(failed),calls)
+                if attempt or repair_used:raise AnalysisFailure('news_quality_rejected:'+','.join(failed),calls)
+                repair_used=True
                 draft=call('editorial_repair',system+' Correct the draft strictly against original evidence.',
                     {**context,'draft':draft,'editor_feedback':review['explanation'],'failed_checks':failed},ANALYSIS_SCHEMA)
         except AnalysisFailure:raise
