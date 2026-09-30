@@ -187,6 +187,60 @@ def test_monitor_rollback_retains_safe_prices_context_and_stays_latched(live,mon
         assert saved['monitor_context']==result['monitor_context']
 
 
+def test_old_event_new_work_does_not_trigger_queue_growth(live,monkeypatch):
+    from dataclasses import replace
+    from news_events import watch
+    from news_events.reporting import report
+    from news_events.engine import Analysis
+    import ai_operations
+    p,src,result,at,_=live
+    monkeypatch.setattr(ai_operations,'enqueue',Mock())
+    eid=p.ingest(replace(src,source_excerpt=''),at)
+    with p.store.transaction(True) as c:
+        c.execute("UPDATE ne_events SET status='blocked',reason='insufficient_information' WHERE event_id=?",(eid,))
+    later=at+timedelta(minutes=85)
+    assert p.ingest(replace(src,collected_at=later.isoformat()),later)==eid
+    health=watch.check(later+timedelta(seconds=5))
+    assert health['queue_size']==1 and health['oldest_queue_seconds']==5
+    assert health['oldest_queue_event_id']==eid and health['alarms']==[]
+    assert report(p.store,later+timedelta(seconds=5))['oldest_queue_seconds']==5
+    assert p.store.event(eid)['body']['published_at']==at.isoformat()
+    ai=Mock(return_value=Analysis(result))
+    p.analyze(eid,ai,later);p.analyze(eid,ai,later)
+    ai.assert_called_once()
+    with p.store.transaction() as c:
+        assert c.execute('SELECT mode FROM ne_control').fetchone()['mode']=='canonical'
+        assert c.execute('SELECT count(*) n FROM scanner_telegram_outbox').fetchone()['n']==0
+
+
+@pytest.mark.parametrize('status',['pending','analyzing'])
+def test_real_stuck_queue_still_triggers_same_safety_limit(live,monkeypatch,status):
+    from news_events import watch
+    import ai_operations
+    p,src,_,at,_=live;eid=p.ingest(src,at)
+    monkeypatch.setattr(ai_operations,'enqueue',Mock())
+    with p.store.transaction(True) as c:c.execute('UPDATE ne_events SET status=? WHERE event_id=?',(status,eid))
+    assert watch.check(at+timedelta(hours=1))['alarms']==[]
+    health=watch.check(at+timedelta(hours=1,seconds=1))
+    assert health['alarms']==['queue_growth']
+    with p.store.transaction() as c:
+        assert c.execute('SELECT mode FROM ne_control').fetchone()['mode']=='phase1'
+        assert c.execute('SELECT count(*) n FROM scanner_fills').fetchone()['n']==0
+
+
+def test_queue_volume_limit_unchanged(live,monkeypatch):
+    from news_events import watch
+    import ai_operations
+    p,src,_,at,_=live;eid=p.ingest(src,at)
+    monkeypatch.setattr(ai_operations,'enqueue',Mock())
+    with p.store.transaction(True) as c:
+        for i in range(300):
+            c.execute('INSERT INTO ne_events SELECT ?,body_json,evidence_version,status,reason,created_at,updated_at FROM ne_events WHERE event_id=?',(f'queued-{i}',eid))
+    health=watch.check(at)
+    assert health['queue_size']==301 and health['oldest_queue_seconds']==0
+    assert health['alarms']==['queue_growth']
+
+
 def test_backlog_never_projects_into_dashboard_or_six_hour_review(live):
     from dataclasses import replace
     from news_events.runtime import project

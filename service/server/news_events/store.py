@@ -109,6 +109,17 @@ class Store:
                 if started:status='needs_material_review'; reason='new_text_materiality_unverified'
             if conflicts:status='blocked';reason='source_conflict'
             if old and old['reason']=='source_retracted':status='blocked';reason='source_retracted'
+            from .queue_health import ACTIVE, entered_at
+            queue_entered_at = None
+            if status in ACTIVE:
+                if old and old['status'] in ACTIVE:
+                    # A poll, new attribution, version update or claim must not
+                    # reset the clock while work is continuously outstanding.
+                    v=c.execute('SELECT created_at FROM ne_versions WHERE event_id=? AND version=?',
+                                (event_id,old['evidence_version'])).fetchone()
+                    queue_entered_at=entered_at({**dict(old),'version_created_at':v['created_at'] if v else None})
+                else:
+                    queue_entered_at=collected
             body=dict(event_id=event_id,canonical_event_id=event_id,providers=sorted({s['provider_id'] for s in sources}),
                 sources=sources,source_urls=sorted({s['url'] for s in sources}),source_type=sorted({s['source_type'] for s in sources}),
                 publisher=sorted({s['publisher'] for s in sources}),
@@ -119,7 +130,7 @@ class Store:
                 event_type=prior.get('event_type') if source.event_type=='unknown' else source.event_type,provenance=[{'provider_id':s['provider_id'],'url':s['url'],
                     'published_at':s['published_at'],'collected_at':s['collected_at'],'rights':s['rights']} for s in sources],
                 content_hash=content,evidence_version=version,analysis_status=status,
-                non_publication_reason=reason,conflicts=conflicts)
+                non_publication_reason=reason,conflicts=conflicts,queue_entered_at=queue_entered_at)
             c.execute('UPDATE ne_events SET body_json=?,evidence_version=?,status=?,reason=?,updated_at=? WHERE event_id=?',
                       (json.dumps(body),version,status,reason,collected,event_id))
             c.execute('INSERT INTO ne_versions VALUES(?,?,?,?) ON CONFLICT(event_id,version) DO NOTHING',
