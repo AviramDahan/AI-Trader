@@ -60,8 +60,9 @@ class Store:
             body.update(analysis_status=r['status'],non_publication_reason=r['reason'])
             return {**dict(r),'body':body}
 
-    def ingest(self,source,identities,reason=None):
+    def ingest(self,source,identities,reason=None,*,queued_at=None):
         collected=timestamp(source.collected_at)
+        queue_now=timestamp(queued_at) if queued_at is not None else collected
         published=timestamp(source.published_at)
         # Formatting and collection dates alone never create source revisions.
         content=fingerprint([text(source.title),text(source.source_excerpt),source.claims])
@@ -119,7 +120,7 @@ class Store:
                                 (event_id,old['evidence_version'])).fetchone()
                     queue_entered_at=entered_at({**dict(old),'version_created_at':v['created_at'] if v else None})
                 else:
-                    queue_entered_at=collected
+                    queue_entered_at=queue_now
             body=dict(event_id=event_id,canonical_event_id=event_id,providers=sorted({s['provider_id'] for s in sources}),
                 sources=sources,source_urls=sorted({s['url'] for s in sources}),source_type=sorted({s['source_type'] for s in sources}),
                 publisher=sorted({s['publisher'] for s in sources}),

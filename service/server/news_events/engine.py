@@ -60,7 +60,7 @@ class Pipeline:
             elif age<0 or age>self.policy.max_age_hours*3600:reason='stale_or_future'
             elif not identities and source.event_type!='market':reason='identity_unverified'
             elif source.event_type=='unknown':reason='unsupported_or_noise'
-            return self.store.ingest(source,identities,reason)
+            return self.store.ingest(source,identities,reason,queued_at=now)
         except (ValueError,TypeError,KeyError):
             with self.store.transaction(True) as c:
                 self.store.metric(c,'normalize','invalid_metadata',timestamp(now),provider_id=source.provider_id)

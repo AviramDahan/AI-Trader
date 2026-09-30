@@ -49,7 +49,9 @@ def test_old_blocked_event_requeued_gets_new_queue_clock_not_new_publication(env
     with s.transaction(True) as c:
         c.execute("UPDATE ne_events SET status='blocked',reason='insufficient_information' WHERE event_id=?",(eid,))
     later=NOW+timedelta(minutes=85)
-    assert p.ingest(source(collected_at=later.isoformat()),later)==eid
+    # Cached evidence may retain its earlier collection time; queue time is
+    # when work becomes runnable now, not the source's collection timestamp.
+    assert p.ingest(source(),later)==eid
     event=s.event(eid)
     assert event['created_at']==NOW.isoformat()
     assert event['body']['published_at']==NOW.isoformat()
