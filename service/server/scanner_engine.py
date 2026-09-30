@@ -176,6 +176,17 @@ def market_session_state(at: datetime | None = None) -> dict[str, Any]:
             "checked_at": local.isoformat(), "timezone": "America/New_York"}
 
 
+def _regular_session_bar_stale(last_bar_at: datetime, observed_at: datetime) -> bool:
+    """Health only: closed-session time cannot age a new session's bars.
+
+    Keep the existing 900-second tolerance. Completed 5m bars may not yet
+    exist at the opening bell; processing/recovery still consumes every bar.
+    """
+    local = observed_at.astimezone(ET)
+    opened_at = local.replace(hour=9, minute=30, second=0, microsecond=0).astimezone(UTC)
+    return (observed_at - max(last_bar_at, opened_at)).total_seconds() > 900
+
+
 def scanner_agent_id(cursor=None) -> int:
     own = cursor is None
     conn = get_db_connection() if own else None
@@ -886,8 +897,8 @@ def monitor_prices() -> dict[str, Any]:
         conn.close()
         try:
             bars = _bar_dicts(ticker, since)
-            if market_session_state()["is_open"] and (
-                    datetime.now(UTC) - (parse_time(bars[-1]["at"]) if bars else since)).total_seconds() > 900:
+            if market_session_state()["is_open"] and _regular_session_bar_stale(
+                    parse_time(bars[-1]["at"]) if bars else since, datetime.now(UTC)):
                 errors.append(f"{ticker}:stale_or_missing_bars")
             for bar in bars:
                 process_bar(ticker, bar)
