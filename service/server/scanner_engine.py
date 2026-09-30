@@ -547,12 +547,24 @@ def _outcome(net: float, threshold: float) -> str:
     return "WIN" if net > threshold else "LOSS" if net < -threshold else "BREAKEVEN"
 
 
+def _action_percent(value: float, base: float, *, signed: bool = False) -> str:
+    """Presentation only: never substitute invented percentages for missing basis."""
+    if not math.isfinite(value) or not math.isfinite(base) or base <= 0:
+        return "לא זמין"
+    percent = value / base * 100
+    return f"{percent:+.2f}%" if signed else f"{percent:.2f}%"
+
+
 def _fill_message(trade: dict[str, Any], event: str, quantity: float, remaining: float,
                   price: float, net: float | None = None) -> str:
+    original = float(trade.get("original_quantity") or 0)
+    entry = float(trade.get("entry_price") or 0)
     lines = ["AI-Trader — מסחר מדומה בלבד", f"אירוע: {event}", f"סימול: {trade['ticker']}",
-             f"מחיר ביצוע: ${price:.2f}", f"כמות שנסגרה: {quantity:.6f}", f"כמות שנותרה: {remaining:.6f}"]
+             f"שינוי במחיר מהכניסה: {_action_percent(price - entry, entry, signed=True)}",
+             f"מימוש מהפוזיציה המקורית: {_action_percent(quantity, original)}",
+             f"יתרה מהפוזיציה המקורית: {_action_percent(remaining, original)}"]
     if net is not None:
-        lines.append(f"רווח/הפסד מצטבר נטו: ${net:.2f}")
+        lines.append(f"תשואה סופית נטו על הפוזיציה: {_action_percent(net, entry * original, signed=True)}")
     if trade.get("legacy_position_id"):
         lines.append("עסקת Legacy בניהול מכאן והלאה; עלויות הכניסה ההיסטוריות אינן מאומתות. אינה נכללת בסטטיסטיקה המאומתת.")
     return "\n\n".join(lines)
@@ -629,8 +641,10 @@ def _advance_stop(cur, trade: dict[str, Any], target_index: int, settings: dict[
         cur.execute("UPDATE scanner_signals SET current_stop=?,updated_at=? WHERE id=?",
                     (proposed, now_z(), trade["signal_id"]))
         message = "\n\n".join(["AI-Trader — מסחר מדומה בלבד", "אירוע: קידום סטופ",
-                                  f"סימול: {trade['ticker']}", f"סטופ קודם: ${previous:.2f}",
-                                  f"סטופ חדש: ${proposed:.2f}", "הסטופ החדש יחול מהנר הבא ואינו מבטיח הימנעות מהפסד לאחר עלויות."])
+                                  f"סימול: {trade['ticker']}",
+                                  f"סטופ קודם ביחס לכניסה: {_action_percent(previous - float(trade['entry_price']), float(trade['entry_price']), signed=True)}",
+                                  f"סטופ חדש ביחס לכניסה: {_action_percent(proposed - float(trade['entry_price']), float(trade['entry_price']), signed=True)}",
+                                  "הסטופ החדש יחול מהנר הבא ואינו מבטיח הימנעות מהפסד לאחר עלויות."])
         enqueue_telegram(cur, f"stop:{trade['id']}:{target_index}", "stop_change", message)
 
 
@@ -733,8 +747,8 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
         cur.execute("INSERT INTO scanner_news_schedule(ticker,next_due_at,status) VALUES(?,?,'due')", (signal["ticker"], now_z()))
     trade_stub = dict(signal, entry_price=fill_price)
     message = "\n\n".join(["AI-Trader — מסחר מדומה בלבד", "אירוע: כניסה בוצעה",
-                              f"סימול: {signal['ticker']}", f"מחיר כניסה בפועל: ${fill_price:.2f}",
-                              f"כמות: {qty:.6f}", f"סטופ מקורי: ${float(signal['original_stop']):.2f}",
+                              f"סימול: {signal['ticker']}", "פוזיציה נפתחה: 100%",
+                              f"סטופ ביחס לכניסה: {_action_percent(float(signal['original_stop']) - fill_price, fill_price, signed=True)}",
                               f"אסטרטגיית יציאה פעילה: {'יעד יחיד' if active == 'single' else 'מימוש מדורג'}"])
     enqueue_telegram(cur, f"entry:{signal['id']}", "entry", message)
 

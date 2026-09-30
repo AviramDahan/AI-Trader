@@ -17,6 +17,42 @@ UTC = timezone.utc
 
 
 class ScannerEngineTests(unittest.TestCase):
+    def test_action_fill_messages_percent_only(self):
+        trade = dict(ticker='MSTR', entry_price=168.1999969482422, original_quantity=.59453)
+        message = scanner_engine._fill_message(trade, 'יציאה בסטופ', .59453, 0,
+                                               152.71945, -9.703649577138432)
+        self.assertIn('-9.20%', message)
+        self.assertIn('-9.70%', message)
+        self.assertIn('100.00%', message)
+        self.assertIn('0.00%', message)
+        for forbidden in ('$', 'כמות', '152.72', '0.594530'):
+            self.assertNotIn(forbidden, message)
+
+    def test_partial_exit_percent_uses_original_not_remaining_quantity(self):
+        trade = dict(ticker='TEST', entry_price=100, original_quantity=30)
+        message = scanner_engine._fill_message(trade, 'מימוש TP2', 10, 10, 120)
+        self.assertEqual(message.count('33.33%'), 2)
+        self.assertIn('+20.00%', message)
+        self.assertNotIn('תשואה סופית', message)
+        self.assertNotIn('$', message)
+
+    def test_action_percent_invalid_basis_and_zero_return(self):
+        for base in (0, -1, float('nan'), float('inf')):
+            self.assertEqual(scanner_engine._action_percent(1, base), 'לא זמין')
+        self.assertEqual(scanner_engine._action_percent(0, 100, signed=True), '+0.00%')
+        self.assertEqual(scanner_engine._action_percent(5, 100, signed=True), '+5.00%')
+
+    def test_stop_change_notification_percent_only(self):
+        from unittest.mock import Mock
+        trade = dict(id=999, signal_id=999, ticker='TEST', strategy='staged',
+                     current_stop=90, entry_price=100, tp1=110, is_shadow=0)
+        with patch.object(scanner_engine, 'enqueue_telegram') as enqueue:
+            scanner_engine._advance_stop(Mock(), trade, 1, {}, '2026-09-30T13:30:00Z')
+        message = enqueue.call_args.args[-1]
+        self.assertIn('-10.00%', message)
+        self.assertIn('+0.00%', message)
+        self.assertNotIn('$', message)
+
     def _extended_exit_case(self, hour, stop=False):
         self.record()
         scanner_engine.process_bar('AAPL', self.bar(1, 100, 101, 99, 100))
@@ -507,6 +543,10 @@ class ScannerEngineTests(unittest.TestCase):
         messages = [call.args[0] for call in sender.call_args_list]
         self.assertTrue(any("פעולה: קנייה" in message for message in messages))
         self.assertTrue(any("אירוע: כניסה בוצעה" in message for message in messages))
+        entry_message = next(message for message in messages if "אירוע: כניסה בוצעה" in message)
+        self.assertIn('100%', entry_message)
+        self.assertNotIn('$', entry_message)
+        self.assertNotIn('כמות', entry_message)
         signal_message = next(message for message in messages if "אות מסחר חזק חדש" in message)
         self.assertIn("יעד 1:", signal_message)
         self.assertNotIn("TP1:", signal_message)
