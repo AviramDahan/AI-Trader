@@ -16,6 +16,7 @@ FACT = re.compile(
     r'closes?|opens?|files?|approves?|rejects?|investigates?|settles?|halts?|'
     r'expands?|issues?|slashes?|restructures?|reduces?|increases?|extends?)\b|'
     r'\bto (?:close|open|cut|launch|acquire|sell|appoint|raise)\b|'
+    r'\bagrees? to buy\b|\bFAA\b.{0,50}\bdelay\w*\b.{0,25}\bapproval\b|'
     r'\b(?:price target|data breach|cyberattack|bankruptcy|clinical trial results|'
     r'stock split|debt issuance|share offering|layoffs)\b|'
     r'\b(?:oil|gas|yields?|inflation|CPI|GDP|employment)\b.{0,45}'

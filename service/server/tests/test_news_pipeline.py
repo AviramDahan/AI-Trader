@@ -18,6 +18,20 @@ UTC = timezone.utc
 
 
 class NewsPipelineIntegrationTests(unittest.TestCase):
+    def test_source_ledger_preserves_yahoo_hints_without_changing_analysis_input(self):
+        item=self.item(ticker='NVDA')
+        news_pipeline.ingest_items([item],self.clock)
+        before=self.rows('SELECT source_facts_json,content_hash,verified_tickers_json FROM scanner_news')[0]
+        with_metadata={**item,'provider_tickers':['NVDA','AMD'],'relatedTickers':['NVDA','AMD'],
+                       'summary':'Provider supplied summary'}
+        news_pipeline.ingest_items([with_metadata],self.clock+timedelta(minutes=1))
+        after=self.rows('SELECT source_facts_json,content_hash,verified_tickers_json FROM scanner_news')[0]
+        self.assertEqual(before,after)
+        raw=json.loads(self.rows('SELECT raw_metadata_json FROM scanner_news_sources')[0]['raw_metadata_json'])
+        self.assertEqual(raw['provider_tickers'],['NVDA','AMD'])
+        self.assertEqual(raw['summary'],'Provider supplied summary')
+        self.assertEqual(len(self.rows('SELECT * FROM scanner_news_jobs')),1)
+
     def test_missing_excerpt_refresh_preserves_analysis_and_content_version(self):
         item = self.item(ticker='NVDA')
         news_pipeline.ingest_items([item], self.clock)

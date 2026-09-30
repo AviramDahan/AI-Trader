@@ -165,6 +165,28 @@ def test_automatic_safety_rollback_never_changes_trade_tables(live,monkeypatch):
     admin.assert_called_once()
 
 
+def test_monitor_rollback_retains_safe_prices_context_and_stays_latched(live,monkeypatch):
+    from news_events import watch
+    import ai_operations
+    p,_,_,at,_=live
+    monkeypatch.setattr(ai_operations,'enqueue',Mock())
+    with p.store.transaction() as c:
+        for component,detail in [('monitor','Processed 0 bars'),('prices','NVDA:stale_or_missing_bars token=SECRET')]:
+            c.execute('INSERT INTO scanner_service_status VALUES(?,?,?,?,?)',(component,'error',at.isoformat(),at.isoformat(),detail))
+    result=watch.check(at)
+    assert 'monitor_degraded' in result['alarms']
+    assert result['monitor_context']['prices']['reason_codes']==['stale_or_missing_bars']
+    assert 'SECRET' not in json.dumps(result['monitor_context'])
+    with p.store.transaction() as c:
+        assert c.execute('SELECT mode FROM ne_control').fetchone()['mode']=='phase1'
+        c.execute("UPDATE scanner_service_status SET status='ok'")
+    assert watch.check(at+timedelta(minutes=1)) is None
+    with p.store.transaction() as c:
+        assert c.execute('SELECT mode FROM ne_control').fetchone()['mode']=='phase1'
+        saved=json.loads(c.execute("SELECT value_json FROM scanner_settings WHERE key='news_canonical_health'").fetchone()['value_json'])
+        assert saved['monitor_context']==result['monitor_context']
+
+
 def test_backlog_never_projects_into_dashboard_or_six_hour_review(live):
     from dataclasses import replace
     from news_events.runtime import project

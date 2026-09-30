@@ -3,6 +3,33 @@ from unittest.mock import Mock
 import ai_operations as ops
 import database
 
+
+def test_health_alert_context_recovery_private_dedupe_and_no_auto_resume(pg):
+    import json
+    from datetime import datetime, timezone
+    now=datetime.now(timezone.utc).isoformat()
+    with database.get_db_connection() as c:
+        for component,detail in [('monitor','Processed 0 bars'),('prices','NVDA:stale_or_missing_bars token=SECRET')]:
+            c.execute('INSERT INTO scanner_service_status VALUES(?,?,?,?,?)',(component,'error',now,now,detail))
+        before=dict(c.execute('SELECT * FROM ne_control WHERE id=1').fetchone())
+    ops.health();ops.health()
+    with database.get_db_connection() as c:
+        messages=[dict(r) for r in c.execute('SELECT * FROM admin_alerts')]
+        assert len(messages)==2
+        assert all('SECRET' not in r['message'] for r in messages)
+        assert any('stale_or_missing_bars' in r['message'] and 'monitor' in r['message'] for r in messages)
+        c.execute("UPDATE scanner_service_status SET status='ok',detail='recovered'")
+    ops.health();ops.health()
+    with database.get_db_connection() as c:
+        messages=[dict(r) for r in c.execute('SELECT * FROM admin_alerts')]
+        assert len(messages)==4
+        assert sum(r['dedupe_key'].startswith('health_recovered:') for r in messages)==2
+        assert all(r['message'].splitlines()[-1].startswith('Timestamp:') for r in messages)
+        state=json.loads(c.execute("SELECT value_json FROM scanner_settings WHERE key='admin_incident:monitor'").fetchone()['value_json'])
+        assert not state['active'] and 'prices' in state['last_failure']['context']
+        assert dict(c.execute('SELECT * FROM ne_control WHERE id=1').fetchone())==before
+        assert c.execute('SELECT count(*) n FROM scanner_telegram_outbox').fetchone()['n']==0
+
 def test_records_actual_cost_retry_and_unknown_cost_without_inventing(pg,monkeypatch):
     monkeypatch.setenv('AI_TRADER_CLOUD','true')
     body={'id':'generation-test','usage':{'prompt_tokens':12,'completion_tokens':5,

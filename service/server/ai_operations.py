@@ -216,9 +216,11 @@ def send_one():
 
 def health():
     from database import get_db_connection
+    from admin_health_context import snapshot, incident, summary
     now=datetime.now(timezone.utc)
     with get_db_connection() as conn:
-        states=conn.execute('SELECT component,status,last_attempt_at FROM scanner_service_status').fetchall()
+        states=conn.execute('SELECT component,status,last_attempt_at,last_success_at,detail FROM scanner_service_status').fetchall()
+    contexts={r['component']:snapshot(r,now) for r in states}
     for r in states:
         age=(now-datetime.fromisoformat(r['last_attempt_at'].replace('Z','+00:00'))).total_seconds() if r['last_attempt_at'] else 0
         stale=age>({'monitor':900,'quotes':900,'backup':7500,'scan':7200,'telegram':180}.get(r['component'],86400))
@@ -227,15 +229,18 @@ def health():
         with get_db_connection() as conn:
             old=conn.execute('SELECT value_json FROM scanner_settings WHERE key=?',(key,)).fetchone()
             state=json.loads(old['value_json']) if old else {'active':False,'generation':0}
-            newly=failed and not state['active']
-            if newly:state['generation']+=1
-            state['active']=failed
+            context={r['component']:contexts[r['component']]}
+            if r['component']=='monitor' and 'prices' in contexts:
+                context['prices']=contexts['prices']
+            state,change=incident(state,failed,context,now)
             conn.execute('''INSERT INTO scanner_settings(key,value_json,updated_at) VALUES(?,?,?)
               ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at''',
               (key,json.dumps(state),now.isoformat()))
-        if newly:
-            enqueue('health:'+r['component']+':'+str(state['generation']),
-                    'AI-Trader Admin\nתקלה ברכיב: '+r['component']+'\nנדרשת בדיקת מצב השירות.')
+        if change:
+            enqueue(('health:' if change=='failure' else 'health_recovered:')+r['component']+':'+str(state['generation']),
+                    'AI-Trader Admin\n'+('תקלה ברכיב: ' if change=='failure' else 'השירות התאושש: ')+r['component']+
+                    '\n'+summary(context)+
+                    ('\nהתאוששות שירות אינה מפעילה מחדש מסלול חדשות שנעצר בבדיקת בטיחות.' if change=='recovery' else ''))
 
 
 async def operations_loop():

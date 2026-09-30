@@ -46,7 +46,8 @@ def check(at=None):
     from .reporting import report
     data=report(Store(connect,production=True),current)
     with connect() as c:
-        monitor=c.execute("SELECT status,last_success_at FROM scanner_service_status WHERE component='monitor'").fetchone()
+        monitor=c.execute("SELECT status,last_success_at,last_attempt_at,detail FROM scanner_service_status WHERE component='monitor'").fetchone()
+        prices=c.execute("SELECT status,last_success_at,last_attempt_at,detail FROM scanner_service_status WHERE component='prices'").fetchone()
         calls=[dict(r) for r in c.execute('''SELECT l.event_id,u.actual_cost FROM ne_ai_call_links l
             JOIN ai_call_usage u ON u.call_id=l.call_id WHERE u.timestamp>=?''',(timestamp(current-timedelta(hours=1)),))]
         bad_route=c.execute('''SELECT 1 FROM ne_outbox n JOIN scanner_telegram_outbox o ON o.dedupe_key=n.dedupe_key
@@ -72,6 +73,8 @@ def check(at=None):
         age=(current-datetime.fromisoformat(timestamp(monitor['last_success_at']))).total_seconds()
         if age>900 or monitor['status']=='error':alarms.append('monitor_degraded')
     data['checked_at']=timestamp(current);data['alarms']=alarms;data['existing_provider_health']=providers
+    from admin_health_context import snapshot
+    data['monitor_context']={name:snapshot(row,current) for name,row in (('monitor',monitor),('prices',prices)) if row}
     with connect() as c:
         c.execute('''INSERT INTO scanner_settings(key,value_json,updated_at) VALUES('news_canonical_health',?,?)
             ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at''',
