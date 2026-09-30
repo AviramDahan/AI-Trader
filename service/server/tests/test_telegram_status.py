@@ -89,6 +89,30 @@ class TelegramStatusTests(unittest.TestCase):
         self.assertIn("\u200f", signals)
         self.assertIn("\u2066", signals)
 
+    def test_signals_price_return_positive_negative_flat_and_unavailable(self):
+        trade_id = self._seed_open_trade()
+        for price, expected in [(102,'🟢 רווח/הפסד מהכניסה (מחיר): \u2066+2.00%\u2069'),
+                                (98,'🔴 רווח/הפסד מהכניסה (מחיר): \u2066-2.00%\u2069'),
+                                (100,'⚪ רווח/הפסד מהכניסה (מחיר): \u20660.00%\u2069')]:
+            with self.subTest(price=price):
+                conn=database.get_db_connection()
+                conn.execute('UPDATE scanner_quotes SET price=? WHERE ticker=?',(price,'AAPL'))
+                conn.commit(); conn.close()
+                self.assertIn(expected,telegram_status.signals_status_message())
+        conn=database.get_db_connection()
+        conn.execute("DELETE FROM scanner_quotes WHERE ticker='AAPL'")
+        conn.execute('UPDATE scanner_trades SET last_price=NULL WHERE id=?',(trade_id,))
+        conn.commit(); conn.close()
+        self.assertIn('רווח/הפסד מהכניסה (מחיר): לא זמין',telegram_status.signals_status_message())
+
+    def test_signals_saved_price_return_is_not_partial_fill_accounting(self):
+        trade_id=self._seed_open_trade(strategy='staged')
+        conn=database.get_db_connection()
+        conn.execute("DELETE FROM scanner_quotes WHERE ticker='AAPL'")
+        conn.execute('UPDATE scanner_trades SET last_price=104,remaining_quantity=.5,realized_pnl=10,fees=1 WHERE id=?',(trade_id,))
+        conn.commit();conn.close()
+        self.assertIn('🟢 רווח/הפסד מהכניסה (מחיר): \u2066+4.00%\u2069',telegram_status.signals_status_message())
+
     def test_small_negative_return_and_closed_winner_are_not_hidden(self):
         trade_id = self._seed_open_trade(ticker='TMO')
         conn = database.get_db_connection()
