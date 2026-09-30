@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -223,6 +224,14 @@ def signals_status_messages() -> list[str]:
     }
     for trade in trades:
         current = float(quotes.get(trade["ticker"], {}).get("price") or trade.get("last_price") or trade["entry_price"])
+        observed = quotes.get(trade['ticker'], {}).get('price') or trade.get('last_price')
+        entry = float(trade['entry_price'])
+        return_text = 'רווח/הפסד מהכניסה (מחיר): לא זמין'
+        if observed and math.isfinite(float(observed)) and float(observed)>0 and math.isfinite(entry) and entry>0:
+            change = round((float(observed)/entry-1)*100,2)
+            icon = '🟢' if change>0 else '🔴' if change<0 else '⚪'
+            percent = f'{change:+.2f}%' if change else '0.00%'
+            return_text = f'{icon} רווח/הפסד מהכניסה (מחיר): {_ltr(percent)}'
         _, target = _next_target(trade, trade.get("hit_indexes", set()))
         legacy = " (Legacy)" if trade.get("legacy_position_id") is not None else ""
         confidence = float(trade.get("confidence") or 0)
@@ -240,6 +249,7 @@ def signals_status_messages() -> list[str]:
                 _rtl("פעולה: קנייה"),
                 _rtl(f"כניסה: {_ltr(entry_text)}"),
                 _rtl(f"מחיר נוכחי: {_ltr(current_text)}"),
+                _rtl(return_text),
                 _rtl(f"סטופ: {_ltr(stop_text)}"),
                 _rtl(f"יעד: {_ltr(target_text)}"),
                 _rtl(f"רמת ביטחון: {_ltr(confidence_text)}"),
