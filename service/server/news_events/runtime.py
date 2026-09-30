@@ -128,9 +128,9 @@ def project(p,eid,at):
 def completion(stage,system,payload,schema):
     from ai_provider import json_completion
     from .call_context import CURRENT
-    usage={}
+    usage={'final_alert_owner':True}
     context=payload.get('source',payload)
-    token=CURRENT.set(dict(event_id=context['canonical_event_id'],version=context['evidence_version'],stage=stage))
+    token=CURRENT.set(dict(event_id=context['canonical_event_id'],version=context['evidence_version'],stage=stage,final_alert_owner=True))
     try:
         value=json_completion(system,payload,schema=schema,task='news',max_attempts=1,
             usage_sink=usage,repair=stage in {'editorial_repair','repair_review'} or stage.startswith('schema_repair:'))

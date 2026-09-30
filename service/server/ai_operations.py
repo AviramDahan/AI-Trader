@@ -46,7 +46,10 @@ def record(task, model, body, started, success, failure=None, retry=False, notif
         if event:
             conn.execute('INSERT INTO ne_ai_call_links VALUES(?,?,?,?)',
                 (call_id,event['event_id'],event['version'],event['stage']))
-    if not success and notify_failure and failure not in {'ValueError'}:
+    # Canonical jobs persist a single final private outcome atomically with the
+    # analysis. Keep every attempt/cost, but do not alert before repair finishes.
+    final_owned=bool(event and event.get('final_alert_owner'))
+    if not success and notify_failure and not final_owned and failure not in {'ValueError'}:
         stamp=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')
         # Only allowlisted operational metadata can enter a private notification.
         from retry_policy import alert_failure_detail
