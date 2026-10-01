@@ -123,12 +123,17 @@ async def run_role(role):
         from ai_operations import operations_loop
         tasks.append(asyncio.create_task(operations_loop()))
     started_at = time.time()
+    last_diagnostic_cleanup = 0
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signame in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(signame, stop.set)
     while not stop.is_set():
         guard_lease()
+        if role == 'scanner' and time.time() - last_diagnostic_cleanup >= 60:
+            from news_forensics import cleanup
+            await asyncio.to_thread(cleanup)
+            last_diagnostic_cleanup = time.time()
         if any(task.done() for task in tasks):
             os._exit(72)
         Path("/tmp/role-health.json").write_text(json.dumps({"role":role,"at":time.time(),'started_at':started_at}))
