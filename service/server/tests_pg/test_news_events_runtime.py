@@ -188,12 +188,18 @@ def test_canonical_full_budget_usage_outbox_dispatch_once(live,monkeypatch):
     monkeypatch.setattr(ai_budget,'acquire_request_slot',Mock())
     review=dict(faithful=True,fluent_hebrew=True,unsupported_claims=False,duplicate_of=0,material_new_fact=False,explanation='תקין')
     def response(value,n):
-        return Mock(raise_for_status=Mock(),json=lambda:{'id':str(n),'choices':[{'message':{'content':json.dumps(value)},'finish_reason':'stop'}],
+        return Mock(raise_for_status=Mock(),json=lambda:{'id':str(n),'choices':[{'message':{'content':None,
+            'tool_calls':[{'type':'function','function':{'name':'submit_news_result','arguments':json.dumps(value)}}]},'finish_reason':'tool_calls'}],
             'usage':{'prompt_tokens':100,'completion_tokens':50,'cost':.0001}})
     post=Mock(side_effect=[response(result,1),response(review,2)])
     monkeypatch.setattr(requests,'post',post)
     assert runtime.analyze_jobs(at)['analyzed']==1
     assert post.call_count==2 # One event job, two billable editorial stages.
+    for call in post.call_args_list:
+        wire=call.kwargs['json']
+        assert wire['tool_choice']['function']['name']=='submit_news_result'
+        assert 'response_format' not in wire
+        assert 'Start with {' not in wire['messages'][0]['content']
     with p.store.transaction() as c:
         assert c.execute('SELECT COUNT(*) n FROM ai_call_usage').fetchone()['n']==2
         assert c.execute('SELECT COUNT(*) n FROM ne_ai_call_links').fetchone()['n']==2
