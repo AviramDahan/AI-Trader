@@ -132,7 +132,7 @@ def completion(stage,system,payload,schema):
     context=payload.get('source',payload)
     token=CURRENT.set(dict(event_id=context['canonical_event_id'],version=context['evidence_version'],stage=stage,final_alert_owner=True))
     try:
-        value=json_completion(system,payload,schema=schema,task='news',max_attempts=1,news_json_wrapping=True,
+        value=json_completion(system,payload,schema=schema,task='news',max_attempts=1,news_json_wrapping=True,structured_news=True,
             usage_sink=usage,repair=stage in {'editorial_repair','repair_review'} or stage.startswith('schema_repair:'))
     except Exception as exc:
         exc.canonical_usage=usage
@@ -165,7 +165,8 @@ def analyze_jobs(at=None):
     if not sufficient(event):
         p.enrich(eid,[SECEvidence(os.getenv('NEWS_SEC_USER_AGENT',''))],current)
     check() # Do not claim/bill a job if the global budget/cooldown is blocked.
-    outcome=p.analyze(eid,CanonicalAnalyzer(completion),current)
+    from news_structured_envelope import output_instruction
+    outcome=p.analyze(eid,CanonicalAnalyzer(completion,contract=lambda schema: ' '+output_instruction()),current)
     project(p,eid,current)
     alerts=queue_outbox(p,eid,current) if outcome=='done' else 0
     good=outcome=='done'

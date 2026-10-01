@@ -22,7 +22,8 @@ def request_options():
 
 
 def json_completion(system, payload, *, predict=1000, schema=None, task="news",
-                    max_attempts=2, usage_sink=None, repair=False, news_json_wrapping=False):
+                    max_attempts=2, usage_sink=None, repair=False, news_json_wrapping=False,
+                    structured_news=False):
     if max_attempts not in (1, 2):
         raise ValueError('invalid_ai_attempt_limit')
     model = (os.getenv("OPENROUTER_" + task.upper() + "_MODEL") or
@@ -35,6 +36,12 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
     response_format = ({"type": "json_schema", "json_schema": {
         "name": "ai_trader_" + task, "strict": True, "schema": schema}}
         if schema else {"type": "json_object"})
+    contract = {"response_format": response_format, "provider": {"require_parameters": True}}
+    if structured_news:
+        if task != 'news' or schema is None or max_attempts != 1:
+            raise ValueError('invalid_structured_news_contract')
+        from news_structured_envelope import request_contract
+        contract = request_contract(schema)
     for attempt in range(max_attempts):
         from ai_budget import check, acquire_request_slot
         check()  # Outside repair handling: never retry a blocked budget.
@@ -49,18 +56,22 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
                 headers={"Authorization": "Bearer " + key},
                 timeout=(10, min(180, max(10, int(os.getenv("AI_TIMEOUT_SECONDS", "120"))))),
                 json={"model": model, "messages": messages, **request_options(),
-                      "max_tokens": predict, "response_format": response_format,
-                      "provider": {"require_parameters": True}})
+                      "max_tokens": predict, **contract})
             response.raise_for_status()
             body = response.json()
-            choice = body["choices"][0]
-            if choice.get("finish_reason") == "length":
-                raise ValueError("ai_output_truncated")
-            if news_json_wrapping:
+            if structured_news:
+                from news_structured_envelope import result
+                value = result(body, schema)
+                if usage_sink is not None:usage_sink['json_normalization']='structured_function'
+            elif news_json_wrapping:
+                choice = body["choices"][0]
+                if choice.get('finish_reason') == 'length':raise ValueError('ai_output_truncated')
                 from news_json import parse
                 value,normalization=parse(choice['message']['content'])
                 if usage_sink is not None:usage_sink['json_normalization']=normalization
             else:
+                choice = body["choices"][0]
+                if choice.get('finish_reason') == 'length':raise ValueError('ai_output_truncated')
                 value = json.loads(choice["message"]["content"])
             if schema:
                 jsonschema.validate(value, schema)

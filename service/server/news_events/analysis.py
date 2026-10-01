@@ -53,7 +53,9 @@ class CanonicalAnalyzer:
     Each returned usage represents exactly that request, not cumulative usage.
     Unknown/failed costs remain null, never treated as zero.
     """
-    def __init__(self,completion):self.completion=completion
+    def __init__(self,completion,contract=output_contract):
+        self.completion=completion
+        self.contract=contract
 
     def __call__(self,event):
         calls=[];repair_used=False
@@ -75,7 +77,7 @@ class CanonicalAnalyzer:
         def request(stage,prompt,payload,schema):
             start=time.monotonic();usage={};success=False
             try:
-                result,usage=self.completion(stage,prompt+output_contract(schema),payload,schema)
+                result,usage=self.completion(stage,prompt+self.contract(schema),payload,schema)
                 jsonschema.validate(result,schema)
                 success=True
                 return result
@@ -100,7 +102,7 @@ class CanonicalAnalyzer:
                 repair_used=True
                 try:
                     return request('schema_repair:'+stage,
-                        prompt+' Return only a valid JSON object matching the schema. '
+                        prompt+' Return one valid structured result matching the schema. '
                         'Escape double quotes inside strings; no markdown or commentary.',payload,schema)
                 except Exception as retry_exc:
                     raise AnalysisFailure('completion_failed:'+stage+':'+(completion_reason(retry_exc) or 'request_failed'),calls) from None

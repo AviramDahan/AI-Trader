@@ -38,10 +38,11 @@ class ProviderFailure(Exception):
 
 class Transport:
     """Pinned public IP; at most one credential-free same-origin HTTPS redirect."""
-    def __init__(self,allowed_hosts,timeout=12,max_bytes=1048576,user_agent='AI-Trader News Event Sandbox',read_timeout=None):
+    def __init__(self,allowed_hosts,timeout=12,max_bytes=1048576,user_agent='AI-Trader News Event Sandbox',read_timeout=None,prefer_ipv4=False):
         self.allowed_hosts=set(allowed_hosts); self.timeout=timeout; self.max_bytes=max_bytes
         self.user_agent=user_agent
         self.read_timeout=read_timeout
+        self.prefer_ipv4=prefer_ipv4
 
     def request(self,url,params=None,headers=None,method='GET',body=None,_redirects=0):
         p=urlsplit(url)
@@ -52,6 +53,8 @@ class Transport:
         except Exception:raise ProviderFailure('dns_failed') from None
         if not addresses or any(not ipaddress.ip_address(a).is_global for a in addresses):
             raise ProviderFailure('unsafe_address',terminal=True)
+        if self.prefer_ipv4:
+            addresses=sorted(addresses,key=lambda a:ipaddress.ip_address(a).version)
         connection=http.client.HTTPSConnection(p.hostname,timeout=min(3,self.timeout))
         raw=None
         def abort():
@@ -60,8 +63,10 @@ class Transport:
             except OSError:pass
         timer=threading.Timer(max(.01,self.timeout-(time.monotonic()-started)),abort)
         timer.daemon=True
+        stage='connect'
         try:
             raw=socket.create_connection((addresses[0],443),timeout=3)
+            stage='tls'
             connection.sock=ssl.create_default_context().wrap_socket(raw,server_hostname=p.hostname)
             if self.read_timeout is not None:
                 connection.sock.settimeout(min(self.timeout,self.read_timeout))
@@ -70,8 +75,10 @@ class Transport:
             query='&'.join(filter(None,[p.query,urlencode(params or {})]))
             if query:path+='?'+query
             data=json.dumps(body).encode() if body is not None else None
+            stage='request'
             connection.request(method,path,data,{'User-Agent':self.user_agent,
                 'Accept-Encoding':'identity',**(headers or {})})
+            stage='headers'
             response=connection.getresponse()
             from retry_policy import retry_after
             if response.status in (301,302,307,308) and method=='GET' and not params and not body and not headers:
@@ -86,7 +93,7 @@ class Transport:
             if response.status!=200:
                 raise ProviderFailure('http_error',response.status,retry_after(response.getheader('Retry-After')),
                                       response.status in (400,401,403,404) or 300<=response.status<400)
-            chunks=[]; size=0
+            chunks=[]; size=0; stage='body'
             while True:
                 chunk=response.read1(min(16384,self.max_bytes+1-size))
                 if not chunk:break
@@ -101,6 +108,10 @@ class Transport:
             reason='transport_failure'
             if self.read_timeout is not None:
                 reason='transport_'+type(exc).__name__
+                if self.prefer_ipv4 and isinstance(exc,OSError):
+                    # Fixed stage + numeric errno only; never exception text/URL.
+                    code=exc.errno if type(exc.errno) is int else 'unknown'
+                    reason=f'transport_{stage}_oserror_{code}'
             raise ProviderFailure(reason) from None
         finally:
             timer.cancel();connection.close()
