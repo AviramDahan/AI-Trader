@@ -44,13 +44,13 @@ def check(at=None):
     control=state()
     if control['mode']!='canonical':return
     from .store import Store
-    from .reporting import report
-    data=report(Store(connect,production=True),current)
+    from .reporting import health_report
+    data=health_report(Store(connect,production=True),current)
     with connect() as c:
         monitor=c.execute("SELECT status,last_success_at,last_attempt_at,detail FROM scanner_service_status WHERE component='monitor'").fetchone()
         prices=c.execute("SELECT status,last_success_at,last_attempt_at,detail FROM scanner_service_status WHERE component='prices'").fetchone()
-        calls=[dict(r) for r in c.execute('''SELECT l.event_id,u.actual_cost FROM ne_ai_call_links l
-            JOIN ai_call_usage u ON u.call_id=l.call_id WHERE u.timestamp>=?''',(timestamp(current-timedelta(hours=1)),))]
+        calls=[dict(r) for r in c.execute('''SELECT l.event_id,coalesce(sum(u.actual_cost),0) actual_cost FROM ne_ai_call_links l
+            JOIN ai_call_usage u ON u.call_id=l.call_id WHERE u.timestamp>=? GROUP BY l.event_id''',(timestamp(current-timedelta(hours=1)),))]
         bad_route=c.execute('''SELECT 1 FROM ne_outbox n JOIN scanner_telegram_outbox o ON o.dedupe_key=n.dedupe_key
             WHERE (n.topic='market_news' AND o.event_type!='market_news') OR
                   (n.topic='portfolio_watchlist' AND o.event_type!='position_news') OR

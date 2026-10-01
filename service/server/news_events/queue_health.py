@@ -20,7 +20,12 @@ def entered_at(row):
 
 
 def queue_rows(c):
-    return [dict(r) for r in c.execute("""SELECT e.*,v.created_at AS version_created_at
+    # Queue clocks need no article/evidence/history payload in worker memory.
+    body = ("jsonb_build_object('queue_entered_at',e.body_json::jsonb->'queue_entered_at')::text"
+            if getattr(c,'_backend','sqlite')=='postgres' else
+            "json_object('queue_entered_at',json_extract(e.body_json,'$.queue_entered_at'))")
+    return [dict(r) for r in c.execute(f"""SELECT e.event_id,e.status,e.created_at,
+        {body} AS body_json,v.created_at AS version_created_at
         FROM ne_events e LEFT JOIN ne_versions v
         ON v.event_id=e.event_id AND v.version=e.evidence_version
         WHERE e.status IN ('pending','analyzing')""")]

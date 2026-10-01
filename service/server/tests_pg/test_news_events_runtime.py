@@ -5,6 +5,50 @@ from unittest.mock import Mock
 import pytest
 
 
+@pytest.mark.parametrize('populated',[False,True])
+def test_compact_health_matches_entire_legacy_summary(live,populated,monkeypatch):
+    from news_events import reporting
+    from news_events.queue_health import queue_rows
+    p,src,_,at,_=live
+    if populated:
+        eid=p.ingest(src,at)
+        with p.store.transaction(True) as c:
+            body=json.loads(c.execute('SELECT body_json FROM ne_events WHERE event_id=?',(eid,)).fetchone()['body_json'])
+            body['providers']=['yahoo','sec'];body['queue_entered_at']='invalid clock'
+            body['unused_large_evidence']='x'*200000
+            c.execute('UPDATE ne_events SET body_json=? WHERE event_id=?',(json.dumps(body),eid))
+            for i in range(5):
+                p.store.metric(c,'analysis','failed' if i%2 else 'ok',at.isoformat(),eid,'yahoo',
+                    raw_items=2,providers=['yahoo','sec'],latency=1.5,
+                    calls=[{'cost':None,'input_tokens':None},{'cost':.001,'input_tokens':12,'output_tokens':8},{'cost':0,'output_tokens':0}])
+            p.store.metric(c,'ingest','cross_source_duplicate',at.isoformat(),eid,'sec',raw_items=1)
+            p.store.metric(c,'ingest','duplicate',at.isoformat(),eid)
+    expected=reporting.report(p.store,at+timedelta(seconds=50));expected.pop('per_event')
+    monkeypatch.setattr(reporting,'report',Mock(side_effect=AssertionError('No full report in PG health')))
+    actual=reporting.health_report(p.store,at+timedelta(seconds=50))
+    json.dumps(actual)  # SQL numeric aggregates must remain JSON-compatible.
+    assert actual.keys()==expected.keys()
+    for key,value in expected.items():
+        if isinstance(value,float):assert actual[key]==pytest.approx(value)
+        else:assert actual[key]==value
+    with p.store.transaction() as c:
+        rows=queue_rows(c)
+        assert all(len(row['body_json'])<150 for row in rows)
+
+
+def test_compact_health_persisted_without_per_event_history(live,monkeypatch):
+    from news_events import watch,reporting
+    import ai_operations
+    p,src,_,at,_=live;p.ingest(src,at)
+    monkeypatch.setattr(ai_operations,'enqueue',Mock())
+    monkeypatch.setattr(reporting,'report',Mock(side_effect=AssertionError('Unbounded report called')))
+    result=watch.check(at)
+    assert result['alarms']==[] and 'per_event' not in result
+    with p.store.transaction() as c:
+        saved=json.loads(c.execute("SELECT value_json FROM scanner_settings WHERE key='news_canonical_health'").fetchone()['value_json'])
+        assert saved==result
+
+
 @pytest.fixture
 def live(pg,monkeypatch):
     from database import get_db_connection
