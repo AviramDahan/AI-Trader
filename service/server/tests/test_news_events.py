@@ -494,6 +494,46 @@ def test_review_invalid_json_repairs_only_failed_stage_once(env):
     p.analyze(eid,CanonicalAnalyzer(client),NOW);assert client.call_count==3
 
 
+@pytest.mark.parametrize('repair_kind',['none','schema','editorial'])
+def test_canonical_output_contract_on_every_stage_without_schema_changes(env,repair_kind):
+    from news_quality import ANALYSIS_SCHEMA, REVIEW_SCHEMA
+    p,s,_=env;eid=p.ingest(source(),NOW)
+    outcomes=[(RESULT,{}),(REVIEW,{})]
+    if repair_kind=='schema':
+        outcomes=[(RESULT,{}),ValueError('openrouter_schema_failed:{"reason":"invalid_json"}'),(REVIEW,{})]
+    elif repair_kind=='editorial':
+        outcomes=[(RESULT,{}),({**REVIEW,'faithful':False},{}),(RESULT,{}),(REVIEW,{})]
+    client=Mock(side_effect=outcomes)
+    assert p.analyze(eid,CanonicalAnalyzer(client),NOW)=='done'
+    assert client.call_count==len(outcomes)
+    for call in client.call_args_list:
+        stage,prompt,payload,schema=call.args
+        assert 'exactly one JSON object' in prompt and 'No markdown fences' in prompt
+        assert 'second object' in prompt
+        assert all(key in prompt for key in schema['required'])
+        assert schema in (ANALYSIS_SCHEMA, REVIEW_SCHEMA)
+        if stage in {'quality_review','repair_review','schema_repair:quality_review'}:
+            assert 'at most 40 words' in prompt and 'Evaluate all checks independently' in prompt
+    p.analyze(eid,CanonicalAnalyzer(client),NOW)
+    assert client.call_count==len(outcomes)
+
+
+def test_truncated_review_remains_terminal_with_precise_private_diagnostic(env):
+    from news_events.admin_outcome import message
+    p,s,_=env;eid=p.ingest(source(),NOW)
+    error=ValueError('openrouter_schema_failed:{"reason":"ai_output_truncated"}')
+    client=Mock(side_effect=[(RESULT,{}),error])
+    assert p.analyze(eid,CanonicalAnalyzer(client),NOW)=='failed'
+    assert client.call_count==2
+    assert s.event(eid)['reason']=='completion_failed:quality_review:ai_output_truncated'
+    assert p.deliver_preview(eid,NOW)==[]
+    p.analyze(eid,CanonicalAnalyzer(client),NOW)
+    assert client.call_count==2
+    text=message('failed',s.event(eid)['reason'],[
+        dict(stage='quality_review',success=False,failure_reason='ai_output_truncated')])
+    assert 'ai_output_truncated' in text
+
+
 @pytest.mark.parametrize('editorial_used',[False,True])
 def test_malformed_review_terminal_no_nested_repairs(env,editorial_used):
     p,s,_=env;eid=p.ingest(source(),NOW)
