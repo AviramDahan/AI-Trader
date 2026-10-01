@@ -9,7 +9,7 @@ from admin_messages import timestamped
 STAGES={'source_analysis','quality_review','editorial_repair','repair_review',
         'schema_repair:source_analysis','schema_repair:quality_review'}
 REASONS={'invalid_json','schema_validation_failed','invalid_response_structure',
-         'ai_object_required','completion_failed'}
+         'ai_object_required','completion_failed','ai_output_truncated'}
 CHECKS={'faithful','fluent_hebrew','no_unsupported_claims','numbers_grounded',
         'terminology_grounded','hebrew_present','valid_duplicate_reference'}
 
