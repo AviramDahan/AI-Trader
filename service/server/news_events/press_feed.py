@@ -10,7 +10,8 @@ from .providers import RSSProvider, ProviderFailure, Transport
 class PressFeedProvider(RSSProvider):
     def __init__(self, config, transport=None):
         super().__init__(config, transport or Transport([urlsplit(config.endpoint).hostname],
-            user_agent='AI-Trader/1.0 (+https://github.com/AviramDahan/AI-Trader)',read_timeout=10))
+            user_agent='AI-Trader/1.0 (+https://github.com/AviramDahan/AI-Trader)',read_timeout=10,
+            prefer_ipv4=config.provider_id=='globenewswire'))
 
     def fetch(self, state, now):
         boundary = os.getenv('NEWS_' + self.provider_id.upper() + '_ACTIVATED_AT', '')

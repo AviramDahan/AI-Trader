@@ -494,9 +494,13 @@ def test_review_invalid_json_repairs_only_failed_stage_once(env):
     p.analyze(eid,CanonicalAnalyzer(client),NOW);assert client.call_count==3
 
 
+@pytest.mark.parametrize('structured',[False,True])
 @pytest.mark.parametrize('repair_kind',['none','schema','editorial'])
-def test_canonical_output_contract_on_every_stage_without_schema_changes(env,repair_kind):
+def test_canonical_output_contract_on_every_stage_without_schema_changes(env,repair_kind,structured):
     from news_quality import ANALYSIS_SCHEMA, REVIEW_SCHEMA
+    from news_structured_envelope import output_instruction
+    from news_events.analysis import output_contract
+    contract=(lambda schema: ' '+output_instruction()) if structured else output_contract
     p,s,_=env;eid=p.ingest(source(),NOW)
     outcomes=[(RESULT,{}),(REVIEW,{})]
     if repair_kind=='schema':
@@ -504,13 +508,17 @@ def test_canonical_output_contract_on_every_stage_without_schema_changes(env,rep
     elif repair_kind=='editorial':
         outcomes=[(RESULT,{}),({**REVIEW,'faithful':False},{}),(RESULT,{}),(REVIEW,{})]
     client=Mock(side_effect=outcomes)
-    assert p.analyze(eid,CanonicalAnalyzer(client),NOW)=='done'
+    assert p.analyze(eid,CanonicalAnalyzer(client,contract=contract),NOW)=='done'
     assert client.call_count==len(outcomes)
     for call in client.call_args_list:
         stage,prompt,payload,schema=call.args
-        assert 'exactly one JSON object' in prompt and 'No markdown fences' in prompt
-        assert 'second object' in prompt
-        assert all(key in prompt for key in schema['required'])
+        if structured:
+            assert 'submit_news_result' in prompt and 'message content' in prompt
+            assert 'Start with {' not in prompt
+        else:
+            assert 'exactly one JSON object' in prompt and 'No markdown fences' in prompt
+            assert 'second object' in prompt
+            assert all(key in prompt for key in schema['required'])
         assert schema in (ANALYSIS_SCHEMA, REVIEW_SCHEMA)
         if stage in {'quality_review','repair_review','schema_repair:quality_review'}:
             assert 'at most 40 words' in prompt and 'Evaluate all checks independently' in prompt
@@ -685,6 +693,7 @@ def test_runtime_schema_repair_single_transport_request_and_cost_category(monkey
     assert captured[0][0]['stage']=='schema_repair:quality_review'
     assert captured[0][1]['repair'] is True
     assert captured[0][1]['max_attempts']==1
+    assert captured[0][1]['structured_news'] is True
     assert CURRENT.get() is None
 
 

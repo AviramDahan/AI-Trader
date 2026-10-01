@@ -26,7 +26,9 @@ def detail(exc):
 STRUCTURE_DETAILS={'body_not_object','provider_error_envelope','choices_missing',
     'choices_not_list','choices_empty','choice_not_object','message_missing',
     'message_not_object','content_missing','content_null','content_not_text',
-    'content_empty','structure_unspecified'}
+    'content_empty','structure_unspecified','structured_envelope_required',
+    'ambiguous_response_content','single_structured_result_required',
+    'unexpected_output_function','invalid_structured_arguments'}
 
 
 def response_structure_detail(body):
@@ -81,7 +83,7 @@ def validation_detail(exc, body=None):
     reason='invalid_response_structure'
     if isinstance(exc,json.JSONDecodeError): reason='invalid_json'
     elif isinstance(exc,jsonschema.ValidationError): reason='schema_validation_failed'
-    elif isinstance(exc,ValueError) and str(exc) in {'ai_output_truncated','ai_object_required'}:
+    elif isinstance(exc,ValueError) and str(exc) in {'ai_output_truncated','ai_object_required','schema_validation_failed'}:
         reason=str(exc)
     result={'reason':reason}
     if isinstance(exc,json.JSONDecodeError):
@@ -90,6 +92,8 @@ def validation_detail(exc, body=None):
             'line':exc.lineno,'column':exc.colno,'position':exc.pos,'output_chars':len(exc.doc)})
     if body is not None:
         structure=response_structure_detail(body)
+        if isinstance(exc,ValueError) and str(exc) in STRUCTURE_DETAILS:
+            structure=str(exc)
         if structure!='structure_unspecified':result['structure_detail']=structure
     if isinstance(exc,jsonschema.ValidationError):
         allowed={'type','required','additionalProperties','enum','minimum','maximum','minLength','maxLength','pattern','items','anyOf','oneOf','allOf','const'}

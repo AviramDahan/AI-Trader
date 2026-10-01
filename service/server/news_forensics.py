@@ -79,6 +79,14 @@ def capture(body, schema, model, failure):
         choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
         message = choice.get('message')
         content = message.get('content') if isinstance(message, dict) else None
+        output_location='content'
+        if content is None and isinstance(message,dict):
+            calls=message.get('tool_calls')
+            if isinstance(calls,list) and len(calls)==1 and isinstance(calls[0],dict):
+                function=calls[0].get('function')
+                if isinstance(function,dict) and function.get('name')=='submit_news_result':
+                    content=function.get('arguments')
+                    output_location='function_arguments'
         # Bound allocations before encoding; never retain a multi-megabyte body.
         excerpt = content[:MAX_BYTES] if isinstance(content, str) else None
         clean = redact(excerpt or '').encode('utf-8')[:48000].decode('utf-8', errors='ignore')
@@ -86,7 +94,7 @@ def capture(body, schema, model, failure):
                     evidence_version=context.get('version'), model=model,
                     provider=body.get('provider') if isinstance(body.get('provider'), str) else None,
                     finish_reason=choice.get('finish_reason'), schema=schema, failure=reason,
-                    response_content=clean, content_type=type(content).__name__,
+                    response_content=clean, content_type=type(content).__name__,output_location=output_location,
                     original_chars=len(content) if isinstance(content, str) else None,
                     truncated=isinstance(content, str) and (len(content)>MAX_BYTES or len(redact(excerpt or '').encode('utf-8'))>48000),
                     redaction_applied=True)
