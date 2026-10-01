@@ -57,17 +57,21 @@ def test_old_path_cannot_enqueue_when_canonical(live):
         assert enqueue_telegram(c,'tp:test','tp','test')
 
 
-def test_wire_syndication_one_analysis_and_outbox_after_restart(live):
+@pytest.mark.parametrize('publisher',['PR Newswire','Investing.com'])
+def test_wire_syndication_one_analysis_and_outbox_after_restart(live,publisher):
     from dataclasses import replace
     from news_events.engine import Analysis
     from news_events.runtime import queue_outbox
     p,src,result,at,_=live
-    src=replace(src,provider_id='prnewswire',publisher='PR Newswire Association LLC.',
+    src=replace(src,provider_id='prnewswire' if publisher=='PR Newswire' else 'investing',publisher=publisher,
         title='Apple Inc. Announces Definitive Agreement To Acquire Example, A Leading Technology Company')
     eid=p.ingest(src,at);ai=Mock(return_value=Analysis(result))
     p.analyze(eid,ai,at);assert queue_outbox(p,eid,at)==1
-    yahoo=replace(src,provider_id='yahoo',publisher='PR Newswire',source_id='yahoo-copy',
+    yahoo=replace(src,provider_id='yahoo',publisher=publisher,source_id='yahoo-copy',
         url='https://finance.yahoo.com/news/apple-acquires-example-123456.html',source_excerpt='')
+    if publisher=='Investing.com':
+        yahoo=replace(yahoo,published_at=(at+timedelta(minutes=1)).isoformat())
+        at+=timedelta(minutes=2)
     assert p.ingest(yahoo,at)==eid
     p.analyze(eid,ai,at);assert queue_outbox(p,eid,at)==0
     p.recover_interrupted(at);p.ingest(yahoo,at);p.analyze(eid,ai,at)

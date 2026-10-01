@@ -84,7 +84,7 @@ class CanonicalAnalyzer:
                 usage['failure_reason']=completion_reason(exc) or 'completion_failed'
                 raise
             finally:
-                allowed=('model','input_tokens','output_tokens','reasoning_tokens','cost','request_id','failure_reason','final_alert_owner','structure_detail','json_diagnostic')
+                allowed=('model','input_tokens','output_tokens','reasoning_tokens','cost','request_id','failure_reason','final_alert_owner','structure_detail','json_diagnostic','json_normalization')
                 calls.append({'stage':stage,'success':success,'latency':time.monotonic()-start,
                               **{k:usage.get(k) for k in allowed}})
 

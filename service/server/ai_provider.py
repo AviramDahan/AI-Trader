@@ -22,7 +22,7 @@ def request_options():
 
 
 def json_completion(system, payload, *, predict=1000, schema=None, task="news",
-                    max_attempts=2, usage_sink=None, repair=False):
+                    max_attempts=2, usage_sink=None, repair=False, news_json_wrapping=False):
     if max_attempts not in (1, 2):
         raise ValueError('invalid_ai_attempt_limit')
     model = (os.getenv("OPENROUTER_" + task.upper() + "_MODEL") or
@@ -56,7 +56,12 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
             choice = body["choices"][0]
             if choice.get("finish_reason") == "length":
                 raise ValueError("ai_output_truncated")
-            value = json.loads(choice["message"]["content"])
+            if news_json_wrapping:
+                from news_json import parse
+                value,normalization=parse(choice['message']['content'])
+                if usage_sink is not None:usage_sink['json_normalization']=normalization
+            else:
+                value = json.loads(choice["message"]["content"])
             if schema:
                 jsonschema.validate(value, schema)
             elif not isinstance(value, dict):

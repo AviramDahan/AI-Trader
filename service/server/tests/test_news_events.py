@@ -591,6 +591,61 @@ def test_wire_anchor_requires_exact_corroboration(env,change):
     assert p.ingest(direct,NOW)!=p.ingest(replace(yahoo,**change),NOW)
 
 
+@pytest.mark.parametrize('reverse',[False,True])
+def test_wire_verified_identity_subset_is_one_event_and_preserves_subjects(env,reverse):
+    p,s,_=env;direct,yahoo=wire_pair()
+    a={'ticker':'AAPL','company':'Apple Inc.','basis':'legal_name'}
+    d={'ticker':'DELL','company':'Dell Technologies Inc.','basis':'exchange_ticker'}
+    observations=[(direct,[a,d]),(yahoo,[a])]
+    if reverse:observations.reverse()
+    first=s.ingest(*observations[0]);second=s.ingest(*observations[1])
+    assert first==second
+    assert s.event(first)['body']['tickers']==['AAPL','DELL']
+    assert len(s.event(first)['body']['sources'])==2
+    ai=Mock(return_value=Analysis(RESULT))
+    p.analyze(first,ai,NOW);p.analyze(second,ai,NOW)
+    assert ai.call_count==1
+    delivered=p.deliver_preview(first,NOW)
+    assert len(delivered)==len({r['topic'] for r in delivered})==2
+    assert p.deliver_preview(second,NOW)==[]
+
+
+def test_investing_identical_publisher_title_with_republication_drift(env):
+    p,s,_=env;direct,yahoo=wire_pair()
+    direct=replace(direct,provider_id='investing',publisher='Investing.com')
+    yahoo=replace(yahoo,publisher='Investing.com',published_at=(NOW+timedelta(minutes=30)).isoformat())
+    eid=p.ingest(direct,NOW);ai=Mock(return_value=Analysis(RESULT))
+    p.analyze(eid,ai,NOW);v=s.event(eid)['evidence_version']
+    assert p.ingest(yahoo,NOW+timedelta(minutes=31))==eid
+    assert s.event(eid)['evidence_version']==v
+    assert s.event(eid)['body']['published_at']==direct.published_at
+    p.analyze(eid,ai,NOW+timedelta(minutes=31));assert ai.call_count==1
+    assert len(p.deliver_preview(eid,NOW+timedelta(minutes=31)))==1
+    assert p.deliver_preview(eid,NOW+timedelta(minutes=31))==[]
+
+
+@pytest.mark.parametrize('change',[
+ {'published_at':(NOW+timedelta(hours=7)).isoformat()},
+ {'publisher':'Unrelated publisher'},
+ {'title':'Apple Inc. Announces A Different Definitive Agreement With Different Terms'}])
+def test_republication_dedupe_does_not_merge_different_event(env,change):
+    p,s,_=env;direct,yahoo=wire_pair()
+    direct=replace(direct,provider_id='investing',publisher='Investing.com')
+    yahoo=replace(yahoo,publisher='Investing.com')
+    assert p.ingest(direct,NOW)!=p.ingest(replace(yahoo,**change),NOW)
+
+
+def test_investing_new_fact_not_swallowed_by_same_headline(env):
+    p,s,_=env;direct,yahoo=wire_pair()
+    direct=replace(direct,provider_id='investing',publisher='Investing.com')
+    eid=p.ingest(direct,NOW);v=s.event(eid)['evidence_version']
+    update=replace(yahoo,publisher='Investing.com',published_at=(NOW+timedelta(minutes=30)).isoformat(),
+        source_excerpt='The company announced a revised acquisition price of 500 million.',
+        claims={'price':{'value':500,'quote':'The company announced a revised acquisition price of 500 million.'}})
+    assert p.ingest(update,NOW+timedelta(minutes=31))==eid
+    assert s.event(eid)['evidence_version']!=v
+
+
 def test_wire_anchor_needs_verified_identity_and_preserves_material_correction(env):
     from news_events.model import anchors
     direct,yahoo=wire_pair()

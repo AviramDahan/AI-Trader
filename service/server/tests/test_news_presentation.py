@@ -49,6 +49,24 @@ def test_attribution_and_uncertainty_not_erased():
     assert hide_relay_branding('ערוץ Telegram @financialjuice ציטט את רמסדן: ייתכן שינוי.')=='דיווח ציטט את רמסדן: ייתכן שינוי.'
 
 
+@pytest.mark.parametrize('wrapper',[
+ 'לפי דיווח של @livesquaw,', 'לפי @livesquaw,',
+ 'לפי דיווח של FinancialJuice בטלגרם,', 'לפי הכותרת של MarketBeat,',
+ 'לפי כותרת Investing.com,', "כותרת Barron's, שהופיעה ב-Yahoo Finance, מדווחת כי",
+ 'כותרת שפורסמה ב-PR Newswire והופצה דרך Yahoo Finance מציינת כי',
+ 'Stocktwits מדווחת בכותרת כי', 'Investing.com מדווח בכותרת כי'])
+def test_observed_outlet_wrappers_preserve_uncertainty(wrapper):
+ facts='רמסדן אמר שלא הוחלט על הורדת ריבית וייתכן שינוי.'
+ result=hide_relay_branding(wrapper+' '+facts)
+ assert result=='לפי דיווח, '+facts
+ assert hide_relay_branding(result)==result
+
+
+def test_publisher_as_subject_and_required_license_credit_not_removed():
+ text='Bloomberg מינתה מנכ״ל חדש.\nPR Newswire\nתרגום/תקציר AI · CC BY https://creativecommons.org/licenses/by/4.0/'
+ assert hide_relay_branding(text)==text
+
+
 def test_canonical_message_hides_publisher_without_mutating_provenance():
     from news_events.runtime import message
     event={'published_at':'2026-09-28T10:04:00Z','sources':[{'publisher':'Telegram @financialjuice','raw_metadata':{}}]}
