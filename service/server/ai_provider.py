@@ -98,6 +98,9 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
                 usage_sink['structure_detail']=json.loads(failure).get('structure_detail')
             raise
         finally:
+            if news_json_wrapping and not success:
+                from news_forensics import capture
+                capture(body, schema, model, failure)
             # A non-object envelope cannot contain usable billing metadata.
             if not isinstance(body,dict):body=None
             from ai_operations import record

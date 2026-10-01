@@ -124,7 +124,8 @@ services:
       TELEGRAM_API_ID_FILE: /run/secrets/telegram_api_id
       TELEGRAM_API_HASH_FILE: /run/secrets/telegram_api_hash
       TELEGRAM_SESSION_PATH: /reader/telegram-reader.session
-    secrets: [database_url, openrouter_key, scanner_token, telegram_bot_token, telegram_api_id, telegram_api_hash]
+      NEWS_FORENSICS_RECIPIENT_FILE: /run/secrets/age_recipient
+    secrets: [database_url, openrouter_key, scanner_token, telegram_bot_token, telegram_api_id, telegram_api_hash, age_recipient]
     volumes: [runtime:/app/.runtime, logs:/app/service/server/logs, reader_session:/reader]
     depends_on:
       api: {condition: service_healthy}
