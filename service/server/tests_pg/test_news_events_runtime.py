@@ -26,6 +26,7 @@ def test_compact_health_matches_entire_legacy_summary(live,populated,monkeypatch
     expected=reporting.report(p.store,at+timedelta(seconds=50));expected.pop('per_event')
     monkeypatch.setattr(reporting,'report',Mock(side_effect=AssertionError('No full report in PG health')))
     actual=reporting.health_report(p.store,at+timedelta(seconds=50))
+    json.dumps(actual)  # SQL numeric aggregates must remain JSON-compatible.
     assert actual.keys()==expected.keys()
     for key,value in expected.items():
         if isinstance(value,float):assert actual[key]==pytest.approx(value)

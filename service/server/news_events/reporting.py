@@ -28,6 +28,9 @@ def health_report(store, now):
                 coalesce(sum((call->>'output_tokens')::bigint),0) output_tokens
                 FROM ne_metrics CROSS JOIN LATERAL jsonb_array_elements(data_json::jsonb->'calls') call
                 WHERE stage='analysis' ''').fetchone()))
+            # PostgreSQL SUM(bigint) returns numeric/Decimal, unlike Python sum.
+            for key in ('input_tokens','output_tokens'):
+                compact[key] = int(compact[key])
             compact['outcomes'] = {r['outcome']:r['n'] for r in c.execute(
                 "SELECT coalesce(nullif(reason,''),status) outcome,count(*) n FROM ne_events GROUP BY 1")}
             providers = defaultdict(Counter)
@@ -37,7 +40,7 @@ def health_report(store, now):
                     GROUP BY provider_id,stage,result'''):
                 p = providers[r['provider_id']]
                 p[r['stage']+':'+r['result']] += r['n']
-                p['raw_items'] += r['raw_items']
+                p['raw_items'] += int(r['raw_items'])
             compact['providers'] = {k:dict(v) for k,v in providers.items()}
             compact['provider_health'] = {r['provider_id']:json.loads(r['state_json'])
                 for r in c.execute('SELECT provider_id,state_json FROM ne_provider_state')}
