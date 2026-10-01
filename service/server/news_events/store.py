@@ -104,6 +104,13 @@ class Store:
             normalized,conflicts=combine(sources)
             version=fingerprint([{'text':v['text'].lower(),'claims':v['claims']} for v in normalized])
             prior=json.loads(old['body_json']) if old else {}
+            # Every retained identity was already verified at ingestion. A
+            # shorter syndicated observation must not erase the other verified
+            # subjects of the same event (e.g. a two-company merger).
+            prior_identities=prior.get('company_identity',[])
+            if (set(v['ticker'] for v in identities) & set(v['ticker'] for v in prior_identities)
+                    and any(s['provider_id']!=source.provider_id for s in sources)):
+                identities=list({v['ticker']:v for v in prior_identities+list(identities)}.values())
             changed=not old or old['evidence_version']!=version
             material=not old or material_change(prior.get('normalized_evidence',[]),normalized)
             status='blocked' if reason else 'pending'

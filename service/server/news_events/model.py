@@ -170,7 +170,21 @@ def anchors(source, identities):
     title=text(source.title).casefold()
     if publisher and identities and source.rights=='approved' and len(title.split())>=8:
         refs.append('syndication:'+fingerprint([publisher,title,timestamp(source.published_at)]))
-    return [fingerprint([identity,ref]) for ref in sorted(set(refs))]
+    keys=[fingerprint([identity,ref]) for ref in sorted(set(refs))]
+    # A syndicated multi-company story may have only ONE verified company in
+    # the short Yahoo copy. Require an overlapping verified identity, exact
+    # substantive headline and same known publisher, not equality of ticker sets.
+    if publisher and identities and source.rights=='approved' and len(title.split())>=8:
+        keys.extend(fingerprint([v['ticker'],'wire_story',publisher,title,timestamp(source.published_at)]) for v in identities)
+    # Observed Investing/Yahoo republication has a 30-minute timestamp drift.
+    # Conservative fixed six-hour bucket: no cross-day/fuzzy matches. Additional
+    # facts still flow through material-change/conflict validation in the store.
+    if (text(source.publisher).lower() in {'investing.com','investing'} and identities
+            and source.rights=='approved' and len(title.split())>=8):
+        dt=datetime.fromisoformat(timestamp(source.published_at))
+        bucket=dt.replace(hour=(dt.hour//6)*6,minute=0,second=0,microsecond=0).isoformat()
+        keys.extend(fingerprint([v['ticker'],'publisher_title', 'investing',title,bucket]) for v in identities)
+    return sorted(set(keys))
 
 
 def strong_reference(url):
