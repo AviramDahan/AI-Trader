@@ -1,0 +1,81 @@
+def process_bar(ticker: str, bar: dict[str, Any]) -> None:
+    """Atomically process one complete OHLC bar and its cursor."""
+    values = [float(bar[key]) for key in ("open", "high", "low", "close")]
+    if not all(math.isfinite(value) and value > 0 for value in values) or not (
+            bar["low"] <= min(bar["open"], bar["close"]) <= max(bar["open"], bar["close"]) <= bar["high"]):
+        raise ValueError("Invalid OHLC bar")
+    bar_at = parse_time(bar["at"])
+    extended = bar.get('execution_session') == 'extended'
+    if extended:
+        enabled_from = os.getenv('STOCK_SCANNER_EXTENDED_EXITS_FROM', '').strip()
+        local = bar_at.astimezone(ET)
+        if (not enabled_from or bar_at < parse_time(enabled_from)
+                or not market_session_state(bar_at)['is_trading_day']
+                or not 240 <= local.hour * 60 + local.minute < 1200):
+            return
+    conn = get_db_connection()
+    cur = conn.cursor()
+    begin_write_transaction(cur)
+    cur.execute("SELECT last_bar_at FROM scanner_price_cursors WHERE ticker=?", (ticker,))
+    cursor_row = cur.fetchone()
+    if cursor_row and bar_at <= parse_time(cursor_row["last_bar_at"]):
+        conn.rollback(); conn.close()
+        return
+    cur.execute("""SELECT o.*,s.ticker,s.company,s.action,s.valid_until AS signal_valid_until
+                   FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
+                   WHERE s.ticker=? AND o.status='pending' ORDER BY o.id""",
+                (ticker,))
+    orders = [dict(row) for row in cur.fetchall()]
+    entered_ids: set[int] = set()
+    for order in orders:
+        if extended:
+            # Extended hours enable protective/target exits only, not new
+            # entries or discretionary SELL-order fills.
+            continue
+        order_id = int(order["id"])
+        # Yahoo labels candles by their opening time. The entire candle must
+        # follow order creation; a low reached before creation cannot fill it.
+        if bar_at < parse_time(order["created_at"]):
+            continue
+        if parse_time(order["valid_until"]) < parse_time(bar["at"]):
+            cur.execute("UPDATE scanner_orders SET status='expired',updated_at=? WHERE id=?", (now_z(), order_id))
+            cur.execute("UPDATE scanner_signals SET status='EXPIRED',updated_at=? WHERE id=?", (now_z(), order["signal_id"]))
+            continue
+        slip = lifecycle_settings()["slippage_bps"] / 10000
+        if order["purpose"] == "entry" and bar["low"] <= float(order["limit_price"]):
+            raw = min(bar["open"], float(order["limit_price"]))
+            fill = min(float(order["limit_price"]), raw * (1 + slip))
+            _create_trade_rows(cur, order, fill, bar["at"])
+            entered_ids.add(int(order["signal_id"]))
+        elif order["purpose"] == "close_long" and bar["high"] >= float(order["limit_price"]):
+            fill = max(float(order["limit_price"]), bar["open"]) * (1 - slip)
+            cur.execute("SELECT * FROM scanner_trades WHERE ticker=? AND status='open' ORDER BY is_shadow,id", (ticker,))
+            for trade_row in cur.fetchall():
+                trade = dict(trade_row)
+                _close_quantity(cur, trade, float(trade["remaining_quantity"]), fill, "sell", None, bar["at"], _loads(trade["settings_json"], lifecycle_settings()))
+            cur.execute("UPDATE scanner_orders SET status='filled',filled_quantity=quantity,average_fill_price=?,updated_at=? WHERE id=?",
+                        (fill, now_z(), order_id))
+            cur.execute("UPDATE scanner_signals SET status='CLOSED',actual_entry=?,updated_at=? WHERE id=?", (fill, now_z(), order["signal_id"]))
+    cur.execute("SELECT * FROM scanner_trades WHERE ticker=? AND status='open' ORDER BY id", (ticker,))
+    for row in cur.fetchall():
+        trade = dict(row)
+        if int(trade["signal_id"]) in entered_ids:
+            # Intrabar order is unknown: permit adverse stop touch, never a
+            # same-candle profit assumption after a limit entry.
+            if bar["low"] <= float(trade["current_stop"]):
+                cfg = _loads(trade["settings_json"], lifecycle_settings())
+                _close_quantity(cur, trade, float(trade["remaining_quantity"]),
+                                float(trade["current_stop"]) * (1 - cfg["slippage_bps"] / 10000),
+                                "stop", None, bar["at"], cfg)
+        elif parse_time(bar["at"]) > parse_time(trade.get("last_bar_at")):
+            _process_trade_bar(cur, trade, bar)
+    store_quote(cur, ticker, float(bar["close"]), (bar_at+timedelta(minutes=5)).isoformat(), "Yahoo completed 5m")
+    cur.execute("SELECT ticker FROM scanner_price_cursors WHERE ticker=?", (ticker,))
+    if cur.fetchone():
+        cur.execute("UPDATE scanner_price_cursors SET last_bar_at=?,status='ok',last_attempt_at=?,last_success_at=?,error=NULL WHERE ticker=?",
+                    (bar["at"], now_z(), now_z(), ticker))
+    else:
+        cur.execute("INSERT INTO scanner_price_cursors(ticker,last_bar_at,status,last_attempt_at,last_success_at) VALUES(?,?,'ok',?,?)",
+                    (ticker, bar["at"], now_z(), now_z()))
+    conn.commit()
+    conn.close()

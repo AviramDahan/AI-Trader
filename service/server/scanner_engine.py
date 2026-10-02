@@ -432,14 +432,14 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
     status = "HOLD"
     if action == "BUY":
         cur.execute("""SELECT 1 FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
-                       WHERE s.ticker=? AND o.purpose='entry' AND o.status='pending'""", (signal["ticker"],))
+                       WHERE s.ticker=? AND o.purpose='entry' AND o.status IN ('pending','recovery_uncertain')""", (signal["ticker"],))
         duplicate_order = bool(cur.fetchone())
         cur.execute("SELECT 1 FROM scanner_trades WHERE ticker=? AND status='open' AND is_shadow=0", (signal["ticker"],))
         duplicate_trade = bool(cur.fetchone())
         cur.execute("SELECT cash FROM scanner_accounts WHERE agent_id=?", (agent_id,))
         account = cur.fetchone()
         cur.execute("""SELECT COALESCE(SUM(o.limit_price*o.quantity),0) reserved
-                       FROM scanner_orders o WHERE o.status='pending' AND o.purpose='entry'""")
+                       FROM scanner_orders o WHERE o.status IN ('pending','recovery_uncertain') AND o.purpose='entry'""")
         reserved = float(cur.fetchone()["reserved"] or 0)
         cur.execute("""SELECT COALESCE(SUM(remaining_quantity*COALESCE(last_price,entry_price)),0) exposure
                        FROM scanner_trades WHERE status='open' AND is_shadow=0""")
@@ -807,6 +807,10 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
             cur.execute("UPDATE scanner_orders SET status='expired',updated_at=? WHERE id=?", (now_z(), order_id))
             cur.execute("UPDATE scanner_signals SET status='EXPIRED',updated_at=? WHERE id=?", (now_z(), order["signal_id"]))
             continue
+        if bar_at + timedelta(minutes=5) > parse_time(order["valid_until"]):
+            # OHLC cannot locate a touch relative to an intrabar expiry.
+            # Do not assume the favourable part occurred before expiration.
+            continue
         slip = lifecycle_settings()["slippage_bps"] / 10000
         if order["purpose"] == "entry" and bar["low"] <= float(order["limit_price"]):
             raw = min(bar["open"], float(order["limit_price"]))
@@ -814,7 +818,7 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
             _create_trade_rows(cur, order, fill, bar["at"])
             entered_ids.add(int(order["signal_id"]))
         elif order["purpose"] == "close_long" and bar["high"] >= float(order["limit_price"]):
-            fill = max(float(order["limit_price"]), bar["open"]) * (1 - slip)
+            fill = max(float(order["limit_price"]), bar["open"] * (1 - slip))
             cur.execute("SELECT * FROM scanner_trades WHERE ticker=? AND status='open' ORDER BY is_shadow,id", (ticker,))
             for trade_row in cur.fetchall():
                 trade = dict(trade_row)
@@ -847,6 +851,61 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
     conn.close()
 
 
+def _pending_recovery_check(ticker, bars, observed_at):
+    """Fail closed for missing regular-session candles, never revive terminal orders.
+
+    This is an uncertainty state, not a claim that an unobserved fill occurred.
+    Uses the existing session calendar; early-close/halts missing from that calendar
+    are conservatively uncertain rather than invented executions.
+    """
+    available = {parse_time(b['at']): b for b in bars if b.get('execution_session') != 'extended'}
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        begin_write_transaction(cur)
+        orders = [dict(r) for r in cur.execute('''SELECT o.* FROM scanner_orders o
+            JOIN scanner_signals s ON s.id=o.signal_id WHERE s.ticker=? AND o.status='pending' ''', (ticker,))]
+        cursor = cur.execute('SELECT last_bar_at FROM scanner_price_cursors WHERE ticker=?', (ticker,)).fetchone()
+        last = parse_time(cursor['last_bar_at']) if cursor else datetime.fromtimestamp(0, UTC)
+        for order in orders:
+            created, expires = parse_time(order['created_at']), parse_time(order['valid_until'])
+            end = min(expires, observed_at)
+            at = created.replace(second=0, microsecond=0)
+            at -= timedelta(minutes=at.minute % 5)
+            uncertain = False
+            while at < end and at + timedelta(minutes=5) <= observed_at:
+                local = at.astimezone(ET)
+                regular = market_session_state(at)['is_trading_day'] and 570 <= local.hour*60+local.minute < 960
+                if regular and at > last:
+                    bar = available.get(at)
+                    if bar is None:
+                        uncertain = True
+                        break
+                    touched = (bar['low'] <= float(order['limit_price']) if order['purpose']=='entry'
+                               else bar['high'] >= float(order['limit_price']))
+                    if touched:
+                        uncertain = at < created or at+timedelta(minutes=5) > expires
+                        # Only evidence before the first possible fill matters to
+                        # this order. Later gaps cannot undo an already proven fill.
+                        break
+                at += timedelta(minutes=5)
+            if uncertain:
+                cur.execute("UPDATE scanner_orders SET status='recovery_uncertain',updated_at=? WHERE id=? AND status='pending'", (now_z(),order['id']))
+                cur.execute("UPDATE scanner_signals SET status='RECOVERY_UNCERTAIN',updated_at=? WHERE id=?", (now_z(),order['signal_id']))
+        conn.commit()
+
+
+def _expire_recovered_orders(ticker, observed_at):
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        begin_write_transaction(cur)
+        rows = list(cur.execute('''SELECT o.id,o.signal_id FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
+            WHERE s.ticker=? AND o.status='pending' AND o.valid_until<?''', (ticker,observed_at.isoformat().replace('+00:00','Z'))))
+        for row in rows:
+            cur.execute("UPDATE scanner_orders SET status='expired',updated_at=? WHERE id=?", (now_z(),row['id']))
+            cur.execute("UPDATE scanner_signals SET status='EXPIRED',updated_at=? WHERE id=?", (now_z(),row['signal_id']))
+        conn.commit()
+
+
 def monitor_prices() -> dict[str, Any]:
     conn = get_db_connection()
     cur = conn.cursor()
@@ -856,18 +915,12 @@ def monitor_prices() -> dict[str, Any]:
                       OR (s.legacy_unverified=0 AND s.valid_until>?)""", (now_z(),))
     tickers = [row["ticker"] for row in cur.fetchall()]
     stamp = now_z()
-    cur.execute("SELECT signal_id FROM scanner_orders WHERE status='pending' AND valid_until<?", (stamp,))
-    expired_signal_ids = [int(row["signal_id"]) for row in cur.fetchall()]
-    cur.execute("UPDATE scanner_orders SET status='expired',updated_at=? WHERE status='pending' AND valid_until<?", (stamp, stamp))
-    if expired_signal_ids:
-        placeholders = ",".join("?" for _ in expired_signal_ids)
-        cur.execute(f"UPDATE scanner_signals SET status='EXPIRED',updated_at=? WHERE id IN ({placeholders})",
-                    (stamp, *expired_signal_ids))
     # Some signals never receive an order row (for example a risk-blocked
     # signal). They still have a finite lifetime and must not remain active
     # forever merely because the order-expiry query cannot see them.
     cur.execute("""UPDATE scanner_signals SET status='EXPIRED',updated_at=?
         WHERE valid_until<? AND status IN ('ACTIVE','PENDING_ENTRY','RISK_BLOCKED','DUPLICATE_BLOCKED','BEARISH_ONLY')
+          AND NOT EXISTS (SELECT 1 FROM scanner_orders o WHERE o.signal_id=scanner_signals.id AND o.status='pending')
           AND NOT EXISTS (
               SELECT 1 FROM scanner_trades t
               WHERE t.signal_id=scanner_signals.id AND t.status='open'
@@ -894,15 +947,25 @@ def monitor_prices() -> dict[str, Any]:
             trade_started = cur.fetchone()["started"]
             starts = [parse_time(value) for value in (started, trade_started) if value]
             since = min(starts) if starts else datetime.now(UTC)-timedelta(minutes=15)
+        pending = cur.execute('''SELECT MIN(o.created_at) started FROM scanner_orders o
+            JOIN scanner_signals s ON s.id=o.signal_id WHERE s.ticker=? AND o.status='pending' ''', (ticker,)).fetchone()['started']
+        if pending:
+            opened = parse_time(pending).replace(second=0, microsecond=0)
+            opened -= timedelta(minutes=opened.minute % 5)
+            since = min(since, opened-timedelta(microseconds=1))
         conn.close()
         try:
             bars = _bar_dicts(ticker, since)
+            observed_at = datetime.now(UTC)
+            bars = sorted((b for b in bars if parse_time(b['at'])+timedelta(minutes=5) <= observed_at), key=lambda b: parse_time(b['at']))
+            _pending_recovery_check(ticker, bars, observed_at)
             if market_session_state()["is_open"] and _regular_session_bar_stale(
                     parse_time(bars[-1]["at"]) if bars else since, datetime.now(UTC)):
                 errors.append(f"{ticker}:stale_or_missing_bars")
             for bar in bars:
                 process_bar(ticker, bar)
                 processed += 1
+            _expire_recovered_orders(ticker, observed_at)
         except Exception as exc:
             errors.append(f"{ticker}:{type(exc).__name__}")
     market = market_session_state()
@@ -1557,18 +1620,17 @@ def dashboard_payload() -> dict[str, Any]:
             for fill in trade["fills"]:
                 if fill["fill_type"] == "tp" and fill["target_index"] in target_hits:
                     target_hits[int(fill["target_index"])] += 1
-        peak = drawdown = running = 0.0
-        for result in marked_results:
-            running += result
-            peak = max(peak, running)
-            drawdown = max(drawdown, peak - running)
         item.update(
             closed_trades=len(closed),
             open_trades=len(strategy_trades) - len(closed),
             win_rate=sum(1 for trade in closed if trade["outcome"] == "WIN") / max(len(closed), 1),
             expectancy_r=sum(net_r_values) / max(len(net_r_values), 1),
             marked_net=sum(marked_results),
-            current_drawdown=drawdown,
+            current_drawdown=None,
+            maximum_drawdown=None,
+            drawdown_available_since=None,
+            drawdown_status='UNAVAILABLE_NO_EQUITY_HISTORY',
+            comparison_basis='Trade outcomes, not independent portfolio equity; legacy excluded',
             tp1_rate=target_hits[1] / max(len(strategy_trades), 1),
             tp2_rate=target_hits[2] / max(len(strategy_trades), 1),
             tp3_rate=target_hits[3] / max(len(strategy_trades), 1),
@@ -1579,6 +1641,10 @@ def dashboard_payload() -> dict[str, Any]:
     cur.execute("SELECT cash FROM agents WHERE id=?", (agent_id,))
     legacy_cash = float(cur.fetchone()["cash"])
     lifecycle_checks = lifecycle_verification(cur, signals, primary, account)
+    recovery_holds = [dict(r) for r in cur.execute('''SELECT o.id,o.signal_id,s.ticker,o.purpose,
+        o.status,o.limit_price,o.quantity,o.filled_quantity,o.created_at,o.valid_until,o.updated_at
+        FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
+        WHERE o.status='recovery_uncertain' ORDER BY o.id''')]
     conn.close()
     account["open_exposure"] = sum(float(t["remaining_quantity"]) * float(t.get("last_price") or t["entry_price"]) for t in primary if t["status"] == "open")
     account["unrealized_pnl"] = sum(float(t["unrealized_pnl"] or 0) for t in primary if t["status"] == "open")
@@ -1607,6 +1673,10 @@ def dashboard_payload() -> dict[str, Any]:
     collected_times = [item.get("collected_at") or item.get("fetched_at") for item in news if item.get("collected_at") or item.get("fetched_at")]
     provider_success_times = [item["last_success_at"] for item in news_providers if item.get("last_success_at")]
     return {"paper_only": True, "scanner_name": SCANNER_NAME,
+            "recovery_holds": {"orders": recovery_holds,
+                "reserved_entry_notional": sum(float(o['limit_price'])*float(o['quantity'])
+                    for o in recovery_holds if o['purpose']=='entry'),
+                "resolution": "MANUAL_EVIDENCE_REVIEW_REQUIRED" if recovery_holds else "NONE"},
             "primary_user": identity, "visible_users": [identity], "main_portfolio": main_portfolio,
             "settings": lifecycle_settings(), "market": market_session_state(), "account": account,
             "signals": signals, "trades": trades, "news": news, "news_schedules": schedules, "news_watchlist": watchlist,
