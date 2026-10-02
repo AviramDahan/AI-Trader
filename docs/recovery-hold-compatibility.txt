@@ -1,0 +1,67 @@
+RECOVERY HOLD COMPATIBILITY — TWO SEPARATE APPROVALS, NO DEPLOYMENT
+
+Compatibility is based on production/main 10bd6ea. It adds only reservation and
+duplicate-entry recognition for recovery_uncertain, plus active recovery format 2
+and its tests. It DOES NOT create holds, recover missed candles, change SELL LIMIT,
+drawdown, strategy, sizing, fees, AI, providers or runtime cadence. No DB migration.
+
+Format: active snapshot version=2, secret-free recovery_format=2. hold_coverage
+records sorted held order IDs and entry reservation=sum(limit_price*quantity),
+matching admission's status/purpose predicate. The source query, linked parents,
+positions/fills/accounts and coverage manifest are read within one repeatable-read
+read-only transaction. SQLite export uses one read transaction as before.
+Closed history/news/prompts/outbox/permissions/secrets remain excluded. Ordinary
+pending orders are NOT newly covered. Held standalone orders retain their signal,
+primary account/agent, external signal parent if present, identifiers, validity,
+status and quantities; sanitize removes narrative/analysis payloads.
+
+Format 1 remains readable/validatable, with UNKNOWN hold coverage. It is NOT proof
+of zero holds and this release refuses to restore it automatically. Existing
+10bd6ea rejects format 2 in both recovery and active snapshot validators; no silent
+partial restore. Format 2 can be restored by this compatibility release and by
+PR #24 integrated with it. Do not strip/change version tags to bypass rejection.
+
+Restore retains existing exclusive-table locks, clean-target checks, per-role
+advisory locks and external credential provisioning. It validates source coverage,
+numbers/statuses/relations, reads back all rows and compares restored hold coverage
+inside the same transaction before commit. A hold reserves admission capacity but
+does not debit cash or create a trade/fill/message. Expired validity does not release
+it. Initialization never resets it. No automatic resolution tool is added.
+
+Tests: real age round-trip to a separate empty PostgreSQL schema; standalone and
+multiple holds with native/shadow positions; expired validity; no holds; damaged
+content/relationships/numbers/status/coverage; repeated/nonempty target rejection;
+unchanged cash/quantities/fees/P&L; duplicate blocking; restart and existing stops.
+The extra image workflow mounts only the test driver, not engine function snapshots.
+It builds baseline, compatibility and integrated-trading application images, switches
+them over the SAME disposable database, injects a candidate command failure, selects
+the previous compatibility image, restarts, exports/encrypts a post-rollback backup,
+then returns to trading. Network is internal; real provider/AI/Telegram calls forbidden.
+Exact code SHAs and local Docker content IDs are published as sanitized Actions
+artifacts (14 days), alongside results only. No database, snapshot, key or plaintext
+account contents are artifacts. Workflow is a tested rebuild recipe, not a registry.
+
+Mandatory order:
+1. Review/approve/merge compatibility ALONE. Main is automatically deployable, so
+   merge itself requires deployment approval. Confirm there are no holds and no
+   hold-producing version running before allowing rollback of compatibility to
+   10bd6ea. Format 2 restore must still use a compatible tool even in that case.
+2. Verify installed SHA/readiness on API/scanner/monitor/backup, format-2 backup
+   coverage, actual final server image ID and retained rollback image. Obtain an
+   independent approval for PR #24 only AFTER this proof. The server rebuilds from
+   source: CI image ID is NOT a promise of identical deployed-image bytes.
+3. Merge/deploy integrated PR #24. Existing hetzner-deploy captures the previously
+   active compatibility image. It stops writers including backup before replacing
+   services; the new monitor and both old/new backup versions now understand holds.
+   There is no interval where a hold-producing monitor relies on a hold-blind backup.
+4. Verify same-code SHA on each role, single leases, reservations/accounting,
+   uncertainty diagnostics, natural monitor progress and encrypted backup coverage.
+   If readiness fails, existing rollback returns to the retained compatible image
+   and current database, never an old DB. Do not start old local workers.
+
+Stop if compatibility is not active on ALL relevant roles, image is missing, backup
+coverage differs, schema/accounting checks fail or a hold-blind admission writer
+could overlap. After holds exist, 10bd6ea is NOT a permissible rollback target.
+Resolution of holds still requires separate evidence and approval; no automatic
+expiration, conversion or guessed execution. Natural E2E waits and true drawdown
+are separate from these release blockers. No Production PASS claim.
