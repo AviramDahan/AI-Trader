@@ -69,6 +69,8 @@ def backup(predeploy=False):
         command('git','push','origin','HEAD:main',cwd=repo)
         history_bytes=sum(p.stat().st_size for p in (repo/'.git').rglob('*') if p.is_file())
         status={'success_at':now.isoformat(),**sizes,'retained_files':len(list(repo.glob('*/*.age'))),
+                'recovery_format':data['recovery_format'],
+                'held_orders':len(data['hold_coverage']['order_ids']),
                 'git_bytes':history_bytes,'warning':history_bytes>=int(os.getenv('RECOVERY_GIT_WARN_BYTES','104857600')),
                 'retention':'24 hourly / 7 daily / 4 weekly / latest predeploy',
                 'snapshot_id':data['snapshot_id']}

@@ -432,14 +432,14 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
     status = "HOLD"
     if action == "BUY":
         cur.execute("""SELECT 1 FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
-                       WHERE s.ticker=? AND o.purpose='entry' AND o.status='pending'""", (signal["ticker"],))
+                       WHERE s.ticker=? AND o.purpose='entry' AND o.status IN ('pending','recovery_uncertain')""", (signal["ticker"],))
         duplicate_order = bool(cur.fetchone())
         cur.execute("SELECT 1 FROM scanner_trades WHERE ticker=? AND status='open' AND is_shadow=0", (signal["ticker"],))
         duplicate_trade = bool(cur.fetchone())
         cur.execute("SELECT cash FROM scanner_accounts WHERE agent_id=?", (agent_id,))
         account = cur.fetchone()
         cur.execute("""SELECT COALESCE(SUM(o.limit_price*o.quantity),0) reserved
-                       FROM scanner_orders o WHERE o.status='pending' AND o.purpose='entry'""")
+                       FROM scanner_orders o WHERE o.status IN ('pending','recovery_uncertain') AND o.purpose='entry'""")
         reserved = float(cur.fetchone()["reserved"] or 0)
         cur.execute("""SELECT COALESCE(SUM(remaining_quantity*COALESCE(last_price,entry_price)),0) exposure
                        FROM scanner_trades WHERE status='open' AND is_shadow=0""")

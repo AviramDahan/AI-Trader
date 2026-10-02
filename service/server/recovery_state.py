@@ -2,6 +2,7 @@
 
 Not a database dump. Authentication is re-provisioned at restore, never exported.
 News/history/outbox/pending orders are intentionally excluded.
+Format 2 additionally preserves blocked recovery_uncertain orders, even standalone.
 """
 import copy
 import gzip
@@ -16,6 +17,7 @@ import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
 import active_snapshot as active
+import recovery_holds
 
 AGENT_FIELDS = {'id','name','cash','deposited','created_at','updated_at'}
 CONFIG_FIELDS = {'active_strategy','entry_order_type','signal_validity_hours','paper_notional',
@@ -48,7 +50,8 @@ def sanitize(data):
     data['tables']['scanner_operators']=[]
     data['tables']['scanner_target_revisions']=[]
     for row in data['tables']['scanner_signals']:
-        row.update(news_json='[]', technical_json='{}',market_context_json='{}')
+        row.update(news_json='[]', technical_json='{}',market_context_json='{}',
+                   reason='',reason_he='',confidence_basis='{}')
     for row in data['tables']['signals']:
         for field in ('content','title','tags'):
             if field in row: row[field]=None
@@ -59,7 +62,7 @@ def sanitize(data):
     for row in data['tables']['scanner_trades']:
         settings=json.loads(row['settings_json'])
         row['settings_json']=json.dumps({k:v for k,v in settings.items() if k in CONFIG_FIELDS},sort_keys=True)
-    data['recovery_format']=1
+    data['recovery_format']=2 if data['version']==2 else 1
     data['runtime_policy']=runtime_policy()
     data['snapshot_id']=active.digest(data)
     validate(data)
@@ -67,7 +70,8 @@ def sanitize(data):
 
 
 def validate(data):
-    if data.get('recovery_format') != 1: raise ValueError('not_a_recovery_snapshot')
+    if data.get('recovery_format') not in (1,2): raise ValueError('not_a_recovery_snapshot')
+    if data['recovery_format']!=data.get('version'): raise ValueError('recovery_format_version_mismatch')
     if set(data.get('runtime_policy',{}))!=set(POLICY_DEFAULTS):
         raise ValueError('recovery_runtime_policy_missing_or_unknown')
     active.validate(data)
@@ -111,6 +115,8 @@ def export_postgres(url):
         agent=agents[0]['id']
         trades=select('scanner_trades',sql.SQL("agent_id=%s AND status='open'"),(agent,))
         select('scanner_accounts',sql.SQL('agent_id=%s'),(agent,))
+        holds=select('scanner_orders',sql.SQL("status='recovery_uncertain'"),())
+        ids('scanner_signals','id',[r['signal_id'] for r in holds])
         ids('scanner_signals','id',[r['signal_id'] for r in trades])
         fills=ids('scanner_fills','trade_id',[r['id'] for r in trades])
         ids('scanner_orders','id',[r['order_id'] for r in trades]+[r['order_id'] for r in fills])
@@ -124,13 +130,15 @@ def export_postgres(url):
         # Original positions/signals can reference other agent parents.
         ids('agents','id',[r.get('agent_id') for r in positions+tables['signals']]+[r.get('leader_id') for r in positions])
         settings=[dict(r) for r in conn.execute("SELECT * FROM scanner_settings WHERE key='active_exit_strategy'")]
-        data={'version':1,'created_at':datetime.now(timezone.utc).isoformat(),
-              'tables':tables,'settings':settings,'primary_agent_id':agent}
+        data={'version':2,'created_at':datetime.now(timezone.utc).isoformat(),
+              'tables':tables,'settings':settings,'primary_agent_id':agent,
+              'hold_coverage':recovery_holds.coverage(holds)}
         return sanitize(data)
 
 
 def restore(data,url,scanner_token):
     validate(data)
+    if data['recovery_format']!=2: raise ValueError('legacy_hold_coverage_unknown_restore_refused')
     if data['runtime_policy']!=runtime_policy():
         raise ValueError('restore_runtime_policy_mismatch_configure_saved_policy_before_import')
     return active.import_data(data,url,allow_defaults=True,scanner_token=scanner_token)
@@ -171,7 +179,9 @@ def main():
                            Path(args.scanner_token_file).read_text().strip())
         else:
             result=validate(data)
-        print(json.dumps({'status':'PASS','counts':result,'snapshot_id':data['snapshot_id']}))
+        print(json.dumps({'status':'PASS','counts':result,'snapshot_id':data['snapshot_id'],
+                          'recovery_format':data['recovery_format'],
+                          'hold_coverage':data.get('hold_coverage',{'scope':'UNKNOWN_LEGACY'})}))
     except Exception as exc:
         print('Recovery failed: '+type(exc).__name__,file=sys.stderr)
         raise SystemExit(1)
