@@ -12,6 +12,7 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+import recovery_holds
 from datetime import datetime, timezone
 
 TABLES = ("agents", "scanner_accounts", "positions", "signals", "scanner_signals",
@@ -49,6 +50,8 @@ def export_data(path):
         select("scanner_operators", "agent_id=?", (agent,))
         ids("scanner_signals", "id", [t["signal_id"] for t in trades])
         fills = ids("scanner_fills", "trade_id", [t["id"] for t in trades])
+        holds = select('scanner_orders', "status='recovery_uncertain'", ())
+        ids('scanner_signals','id',[o['signal_id'] for o in holds])
         ids("scanner_orders", "id", [t["order_id"] for t in trades] + [f["order_id"] for f in fills])
         ids("scanner_legacy_adoptions", "trade_id", [t["id"] for t in trades])
         ids("scanner_target_revisions", "trade_id", [t["id"] for t in trades])
@@ -72,8 +75,9 @@ def export_data(path):
             if count == sum(map(len, tables.values())):
                 break
         settings = [dict(r) for r in conn.execute("SELECT * FROM scanner_settings WHERE key='active_exit_strategy'")]
-        data = {"version":1, "created_at":datetime.now(timezone.utc).isoformat(),
-                "tables":tables, "settings":settings, "primary_agent_id":agent}
+        data = {"version":2, "created_at":datetime.now(timezone.utc).isoformat(),
+                "tables":tables, "settings":settings, "primary_agent_id":agent,
+                "hold_coverage":recovery_holds.coverage(holds)}
         validate(data)
         data["snapshot_id"] = digest(data)
         return data
@@ -82,7 +86,7 @@ def export_data(path):
 
 
 def validate(data):
-    if data.get("version") != 1 or set(data["tables"]) != set(TABLES):
+    if data.get("version") not in (1,2) or set(data["tables"]) != set(TABLES):
         raise ValueError("unsupported_snapshot_schema")
     if "snapshot_id" in data and data["snapshot_id"] != digest({k:v for k,v in data.items() if k != "snapshot_id"}):
         raise ValueError("snapshot_checksum_mismatch")
@@ -97,6 +101,7 @@ def validate(data):
         raise ValueError("closed_trade_in_snapshot")
     if any(o["status"] in {"pending", "partial", "partially_filled"} for o in tables["scanner_orders"]):
         raise ValueError("active_order_requires_manual_review")
+    recovery_holds.validate(data)
     for trade in tables["scanner_trades"]:
         for field in ("original_quantity", "remaining_quantity", "entry_price", "original_r", "current_stop"):
             if not math.isfinite(trade[field]) or trade[field] <= 0:
@@ -133,6 +138,8 @@ def import_data(data, url, *, allow_defaults=False, scanner_token=None):
     from psycopg.rows import dict_row
     from cloud_runtime import ROLE_KEYS
     validate(data)
+    if data['version']!=2:
+        raise ValueError('legacy_hold_coverage_unknown_restore_refused')
     with psycopg.connect(url, row_factory=dict_row) as conn:
         conn.execute("SET LOCAL lock_timeout='5s'")
         # v4 adds only isolated news-evidence tables. Portfolio schema and
@@ -197,6 +204,9 @@ def import_data(data, url, *, allow_defaults=False, scanner_token=None):
             if not allow_defaults or len(scanner_token) < 32:
                 raise ValueError('invalid_recovery_scanner_token')
             conn.execute('UPDATE agents SET token=%s WHERE id=%s', (scanner_token,data['primary_agent_id']))
+        actual_holds=conn.execute("SELECT * FROM scanner_orders WHERE status='recovery_uncertain' ORDER BY id").fetchall()
+        if recovery_holds.coverage(actual_holds)!=data['hold_coverage']:
+            raise ValueError('restored_hold_reservation_mismatch')
         conn.execute("INSERT INTO cloud_imports(snapshot_id,manifest) VALUES(%s,%s)",
                      (data["snapshot_id"],json.dumps({"counts":validate(data),"baseline":baseline})))
     return validate(data)

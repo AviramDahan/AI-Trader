@@ -1,0 +1,75 @@
+name: Recovery compatibility images (no deployment)
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      trading_ref:
+        description: Trading branch or exact SHA including compatibility
+        default: codex/trading-correctness
+        required: true
+permissions:
+  contents: read
+jobs:
+  images:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'codex/recovery-hold-compatibility'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Resolve exact sources and build real Linux images
+        env:
+          TRADING_REF: ${{ inputs.trading_ref || 'codex/trading-correctness' }}
+        run: |
+          set -euo pipefail
+          compat=$(git rev-parse HEAD)
+          git fetch origin "$TRADING_REF"
+          trading=$(git rev-parse FETCH_HEAD)
+          git merge-base --is-ancestor "$compat" "$trading"
+          git worktree add --detach /tmp/trading "$trading"
+          git worktree add --detach /tmp/baseline 10bd6ea40b01fab449a4a6769b347e18841aee34
+          mkdir -p /tmp/proof /tmp/artifacts
+          chmod 777 /tmp/proof
+          docker build --build-arg BUILD_SHA="$compat" -t compat:test .
+          docker build --build-arg BUILD_SHA="$trading" -t trading:test /tmp/trading
+          docker build --build-arg BUILD_SHA=10bd6ea40b01fab449a4a6769b347e18841aee34 -t baseline:test /tmp/baseline
+          docker image inspect compat:test trading:test baseline:test --format '{{.Id}} {{json .Config.Env}}' | python -c 'import sys,json; rows=[]
+          for line in sys.stdin:
+            image,env=line.strip().split(" ",1); rows.append({"image_id":image,"build_sha":next(v.split("=",1)[1] for v in json.loads(env) if v.startswith("BUILD_SHA="))})
+          print(json.dumps(rows,indent=2))' > /tmp/artifacts/images.json
+      - name: Isolated complete-application rollback and restart
+        run: |
+          set -euo pipefail
+          docker network create --internal compatibility-test
+          docker run -d --name compatibility-pg --network compatibility-test -e POSTGRES_USER=isolated -e POSTGRES_PASSWORD=disposable -e POSTGRES_DB=isolated postgres:17-bookworm
+          for i in $(seq 1 30); do docker exec compatibility-pg pg_isready -U isolated && break; sleep 2; done
+          probe() {
+            docker run --rm --network compatibility-test \
+              -e AI_TRADER_CLOUD=true -e DATABASE_URL=postgresql://isolated:disposable@compatibility-pg:5432/isolated \
+              -e STOCK_SCANNER_ENABLED=false -e TELEGRAM_NEWS_STREAM_ENABLED=false \
+              -e STOCK_SCANNER_TELEGRAM_PORTFOLIO_STATUS_ENABLED=false \
+              -v "$PWD/scripts/compatibility_image_probe.py:/probe.py:ro" -v /tmp/proof:/proof \
+              --entrypoint python "$1" /probe.py "$2"
+          }
+          probe compat:test seed
+          probe baseline:test baseline
+          probe compat:test baseline
+          probe trading:test create
+          # Simulated readiness failure: explicitly fail a candidate command,
+          # then select the retained compatibility image on the SAME database.
+          if docker run --rm --network none --entrypoint python trading:test -c 'raise SystemExit(7)'; then exit 1; fi
+          probe compat:test rollback
+          probe compat:test restart
+          probe baseline:test old_reader_rejects
+          probe trading:test forward
+          probe compat:test exit
+          cp /tmp/proof/results.jsonl /tmp/artifacts/results.jsonl
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: recovery-compatibility-evidence
+          path: /tmp/artifacts/
+          if-no-files-found: error
+          retention-days: 14
