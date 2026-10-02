@@ -11,12 +11,12 @@ import active_snapshot,recovery_state as recovery
 from test_postgres_cloud import _sqlite_portfolio
 
 
-def record(ticker):
-    signal=dict(signal_id=None,ticker=ticker,company=ticker,action='BUY',entry=100,stop_loss=97,
+def record(ticker,action='BUY'):
+    signal=dict(signal_id=None,ticker=ticker,company=ticker,action=action,entry=100,stop_loss=97 if action=='BUY' else 103,
                 confidence=.91,time_horizon='1-4 weeks',reason='synthetic',telegram_reason_he='',
                 telegram_news_he=[],relevant_news=[])
     candidate=dict(ticker=ticker,company=ticker,technical_score=7,combined_rank_score=.92,atr=2,average_dollar_volume=1e9)
-    return engine.record_signal(signal,candidate,dict(action='BUY',confidence=.91,news_relevance=.9,news_sentiment=.4),{},'isolated')
+    return engine.record_signal(signal,candidate,dict(action=action,confidence=.91,news_relevance=.9,news_sentiment=.4),{},'isolated')
 
 
 def initialize_empty():
@@ -25,9 +25,9 @@ def initialize_empty():
     engine.initialize_runtime()
 
 
-def add_holds(tickers):
+def add_holds(tickers,action='BUY'):
     for ticker in tickers:
-        result=record(ticker)
+        result=record(ticker,action)
         with database.get_db_connection() as c:
             c.execute("UPDATE scanner_orders SET status='recovery_uncertain',created_at='2026-01-05T14:30:00Z',valid_until='2026-01-05T14:45:00Z' WHERE signal_id=?",(result['id'],))
             c.execute("UPDATE scanner_signals SET status='RECOVERY_UNCERTAIN' WHERE id=?",(result['id'],))
@@ -132,3 +132,22 @@ def test_legacy_coverage_unknown_and_nonempty_restore_refused(pg):
     before=state()
     with pytest.raises(ValueError,match='destination_not_empty'):recovery.restore(data,pg,'synthetic-scanner-token-32-characters')
     assert state()==before
+
+
+def test_blocked_close_survives_natural_stop_without_recreating_position(pg,tmp_path):
+    source,last=_sqlite_portfolio(tmp_path)
+    active_snapshot.import_data(active_snapshot.export_data(source),pg)
+    add_holds(['AAPL'],'SELL')
+    bar={**last,'at':(datetime.fromisoformat(last['at'])+timedelta(minutes=5)).isoformat(),
+         'open':90,'high':91,'low':89,'close':90}
+    engine.process_bar('AAPL',bar)
+    data=recovery.export_postgres(pg)
+    assert len(data['hold_coverage']['order_ids'])==1
+    assert data['hold_coverage']['entry_reserved_notional']==0
+    assert not data['tables']['scanner_trades']
+    with target_schema(pg) as target:
+        recovery.restore(data,target,'synthetic-scanner-token-32-characters')
+        engine.initialize_runtime()
+        with patch.object(engine,'_bar_dicts',return_value=[]):engine.monitor_prices()
+        assert state()['holds'] and not state()['trades'] and not state()['fills']
+        assert recovery.export_postgres(target)['hold_coverage']==data['hold_coverage']

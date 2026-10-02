@@ -36,6 +36,8 @@ def validate(data):
             raise ValueError('missing_recovery_external_signal_parent')
         if (o['purpose'],o['side']) not in {('entry','buy'),('close_long','sell')} or o['order_type']!='limit':
             raise ValueError('unsupported_recovery_hold_type')
+        if s['action']!=('BUY' if o['purpose']=='entry' else 'SELL'):
+            raise ValueError('recovery_hold_action_mismatch')
         if any(not isinstance(o[k],(int,float)) or not math.isfinite(o[k]) or o[k]<=0 for k in ('limit_price','quantity')):
             raise ValueError('invalid_recovery_hold_numbers')
         if o['filled_quantity']!=0 or o.get('average_fill_price') not in (None,0):
@@ -44,8 +46,8 @@ def validate(data):
             raise ValueError('recovery_hold_has_fill')
         if o['purpose']=='entry' and any(t.get('order_id')==o['id'] for t in tables['scanner_trades']):
             raise ValueError('recovery_entry_hold_has_trade')
-        if o['purpose']=='close_long' and not any(t['ticker']==s['ticker'] and not t['is_shadow'] for t in tables['scanner_trades']):
-            raise ValueError('recovery_close_hold_missing_position')
+        # A blocked close may outlive its position (natural protective stop/TP).
+        # Keep the hold for manual resolution; never recreate the closed position.
         times=[datetime.fromisoformat(str(o[k]).replace('Z','+00:00')) for k in ('created_at','valid_until','updated_at')]
         if any(t.tzinfo is None for t in times) or times[1]<=times[0]:
             raise ValueError('invalid_recovery_hold_times')
