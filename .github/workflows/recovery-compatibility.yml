@@ -11,7 +11,7 @@ permissions:
   contents: read
 jobs:
   images:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'codex/recovery-hold-compatibility'
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'codex/recovery-hold-compatibility' || github.head_ref == 'codex/recovery-legacy-compatibility'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

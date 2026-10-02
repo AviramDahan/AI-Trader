@@ -24,11 +24,31 @@ def validate(data):
         ids=[r['id'] for r in tables[table]]
         if len(ids)!=len(set(ids)): raise ValueError('duplicate_recovery_identity')
     for o in orders:
-        if o['status'] not in {'filled','expired','cancelled','canceled','invalid','risk_rejected','recovery_uncertain'}:
+        if o['status'] not in {'filled','expired','cancelled','canceled','invalid','risk_rejected','recovery_uncertain','imported'}:
             raise ValueError('unsupported_recovery_order_status')
         s=signals.get(o['signal_id'])
         if not s or s['agent_id'] not in agents or s['agent_id'] not in accounts:
             raise ValueError('missing_recovery_order_parent')
+        if o['status']=='imported':
+            # Terminal historical parent, NOT a new fill or a reserved order.
+            linked=[t for t in tables['scanner_trades'] if t['order_id']==o['id']]
+            valid=(o['purpose']=='legacy_adoption' and o['order_type']=='historical_record'
+                   and o['side']=='buy' and s.get('legacy_unverified')==1 and len(linked)==1)
+            if valid:
+                t=linked[0]
+                p=next((p for p in tables['positions'] if p['id']==t.get('legacy_position_id')),None)
+                valid=(p is not None and t['signal_id']==s['id'] and t['agent_id']==s['agent_id']
+                       and not t['is_shadow'] and p['agent_id']==t['agent_id']
+                       and p['symbol']==t['ticker']==s['ticker']
+                       and any(a['trade_id']==t['id'] and a['position_id']==p['id'] for a in tables['scanner_legacy_adoptions']))
+                if valid:
+                    pairs=((o['quantity'],t['original_quantity']),(o['filled_quantity'],t['original_quantity']),
+                           (o['limit_price'],t['entry_price']),(o['average_fill_price'],t['entry_price']),
+                           (p['quantity'],t['remaining_quantity']))
+                    valid=all(isinstance(a,(int,float)) and isinstance(b,(int,float))
+                              and math.isfinite(a) and math.isfinite(b) and a>0 and b>0
+                              and math.isclose(a,b,rel_tol=1e-9,abs_tol=1e-6) for a,b in pairs)
+            if not valid:raise ValueError('invalid_imported_legacy_order')
         if o['status']!='recovery_uncertain': continue
         if s['agent_id']!=data['primary_agent_id'] or s['status']!='RECOVERY_UNCERTAIN':
             raise ValueError('invalid_recovery_hold_identity')
