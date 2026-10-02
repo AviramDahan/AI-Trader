@@ -4,7 +4,7 @@ from datetime import datetime
 
 
 def coverage(orders):
-    held=[o for o in orders if o['status']=='recovery_uncertain']
+    held=sorted((o for o in orders if o['status']=='recovery_uncertain'),key=lambda o:o['id'])
     # Same predicate and formula as scanner_engine.record_signal reservations.
     return {'scope':'recovery_uncertain_only','order_ids':sorted(o['id'] for o in held),
             'entry_reserved_notional':sum(o['limit_price']*o['quantity'] for o in held if o['purpose']=='entry')}

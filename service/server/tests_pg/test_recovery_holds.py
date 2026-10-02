@@ -11,6 +11,13 @@ import active_snapshot,recovery_state as recovery
 from test_postgres_cloud import _sqlite_portfolio
 
 
+def test_reservation_manifest_is_independent_of_source_row_order():
+    from recovery_holds import coverage
+    rows=[dict(id=i,status='recovery_uncertain',purpose='entry',quantity=1,limit_price=p)
+          for i,p in enumerate((.1,.2,.3),1)]
+    assert coverage(rows)==coverage(list(reversed(rows)))
+
+
 def record(ticker,action='BUY'):
     signal=dict(signal_id=None,ticker=ticker,company=ticker,action=action,entry=100,stop_loss=97 if action=='BUY' else 103,
                 confidence=.91,time_horizon='1-4 weeks',reason='synthetic',telegram_reason_he='',
