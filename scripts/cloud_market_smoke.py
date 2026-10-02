@@ -1,6 +1,7 @@
 """Read-only cloud smoke check. No credentials, trading writes, or test signals."""
 import json
 import os
+import math
 from datetime import datetime, timezone
 from urllib.request import urlopen
 
@@ -29,9 +30,20 @@ def main():
         return
     quotes=get('/api/scanner/quotes')
     open_trades=[t for t in data['trades'] if t['status']=='open']
-    needed={t['ticker'] for t in open_trades}
+    # /quotes deliberately tracks primary positions/signals, not shadow-only
+    # tickers. Shadow execution uses the same completed OHLC monitor instead.
+    needed={t['ticker'] for t in open_trades if not t.get('is_shadow')}
     fresh={q['ticker'] for q in quotes['quotes'] if not q['stale']}
     assert needed <= fresh, 'missing_or_stale_quotes:'+','.join(sorted(needed-fresh))
+    for trade in open_trades:
+        if not trade.get('is_shadow'):
+            continue
+        stamp=trade.get('last_bar_at')
+        mark=trade.get('last_price')
+        assert stamp and 300 <= age(stamp) <= 900, 'shadow_completed_bar_stale:'+trade['ticker']
+        start=trade.get('managed_from') or trade.get('opened_at')
+        assert start and age(stamp) < age(start), 'shadow_monitor_bar_not_after_entry:'+trade['ticker']
+        assert isinstance(mark,(int,float)) and math.isfinite(mark) and mark>0, 'shadow_bar_price_missing:'+trade['ticker']
     stale=[t['ticker'] for t in open_trades if not t.get('last_bar_at') or age(t['last_bar_at'])>900]
     assert not stale, 'monitor_cursor_not_progressing:'+','.join(sorted(set(stale)))
     print(json.dumps({'cloud_health':'PASS','fresh_quotes':'PASS','monitor_progress':'PASS',

@@ -1,0 +1,50 @@
+def initialize_runtime() -> None:
+    """Create the isolated paper account and preserve old JSON history as unverified."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    agent_id = scanner_agent_id(cur)
+    stamp = now_z()
+    cur.execute("SELECT id FROM scanner_accounts WHERE agent_id=?", (agent_id,))
+    if not cur.fetchone():
+        initial = _env_float("STOCK_SCANNER_INITIAL_CASH", 100000, 1000, 10000000)
+        cur.execute("INSERT INTO scanner_accounts(agent_id,initial_cash,cash,updated_at) VALUES(?,?,?,?)",
+                    (agent_id, initial, initial, stamp))
+    legacy_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".runtime", "stock-scanner.json")
+    try:
+        payload = json.loads(open(legacy_path, encoding="utf-8").read())
+        for index, item in enumerate(payload.get("tracked_signals") or []):
+            key = f"tracked:{item.get('signal_id') or item.get('ticker')}:{item.get('timestamp') or index}"
+            cur.execute("SELECT id FROM scanner_legacy_records WHERE source_key=?", (key,))
+            if not cur.fetchone():
+                cur.execute("INSERT INTO scanner_legacy_records(source,source_key,payload_json,imported_at,verified) VALUES(?,?,?,?,0)",
+                            ("stock-scanner.json", key, _json(item), stamp))
+    except (OSError, ValueError, TypeError):
+        pass
+    for source, table in (("original_signals", "signals"), ("original_positions", "positions")):
+        try:
+            cur.execute(f"SELECT * FROM {table} WHERE agent_id=?", (agent_id,))
+            for item in cur.fetchall():
+                payload = dict(item)
+                key = f"{source}:{payload.get('id')}"
+                cur.execute("SELECT id FROM scanner_legacy_records WHERE source_key=?", (key,))
+                if not cur.fetchone():
+                    cur.execute("INSERT INTO scanner_legacy_records(source,source_key,payload_json,imported_at,verified) VALUES(?,?,?,?,0)",
+                                (source, key, _json(payload), stamp))
+        except Exception:
+            # Older/isolated schemas may not include all upstream tables.
+            pass
+    conn.commit()
+    conn.close()
+    for component in ("prices", "news", "news_feed", "news_ai", "ollama", "scan", "monitor", "position_news", "telegram", "telegram_status"):
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT component FROM scanner_service_status WHERE component=?", (component,))
+        exists = cur.fetchone()
+        conn.close()
+        if not exists:
+            _service(component, "waiting", "Not run since lifecycle initialization")
+    try:
+        from news_pipeline import initialize_providers
+        initialize_providers()
+    except Exception as exc:
+        _service("news_feed", "error", f"Provider initialization: {type(exc).__name__}")

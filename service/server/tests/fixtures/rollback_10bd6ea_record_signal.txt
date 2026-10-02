@@ -1,0 +1,111 @@
+def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: dict[str, Any],
+                  market_context: dict[str, Any], scan_id: str) -> dict[str, Any]:
+    """Validate and persist a strong signal. Signal creation never fills an order."""
+    action = str(signal.get("action") or "").upper()
+    if action not in {"BUY", "SELL", "HOLD"}:
+        raise ValueError("Invalid signal action")
+    entry = float(signal["entry"])
+    stop = float(signal["stop_loss"])
+    if not all(math.isfinite(value) and value > 0 for value in (entry, stop)):
+        raise ValueError("Invalid signal prices")
+    if action == "BUY" and stop >= entry:
+        raise ValueError("Long stop must be below entry")
+    if action == "SELL" and stop <= entry:
+        raise ValueError("Bearish stop must be above entry")
+    risk = abs(entry - stop)
+    direction = 1 if action == "BUY" else -1
+    tp1, tp2, tp3 = (round(entry + direction * risk * multiple, 2) for multiple in (1, 2, 3))
+    if min(tp1, tp2, tp3) <= 0:
+        raise ValueError("Invalid target order")
+    cfg = lifecycle_settings()
+    created = now_z()
+    plan = signal.get("target_plan")
+    if plan:
+        from scanner_targets import validate_plan
+        plan = validate_plan(plan, entry, stop, action)
+        tp1, tp2, tp3 = plan["targets"]
+    rr_values = plan["rr"] if plan else [1, 2, 3]
+    fractions = plan["fractions"] if plan else [cfg["tp1_pct"], cfg["tp2_pct"], cfg["tp3_pct"]]
+    weighted_rr = sum(r*p for r, p in zip(rr_values, fractions))
+    candidate = dict(candidate, target_plan=plan) if plan else candidate
+    valid_until = (parse_time(created) + timedelta(hours=cfg["signal_validity_hours"])).isoformat().replace("+00:00", "Z")
+    confidence = float(signal["confidence"])
+    if not 0 <= confidence <= 1:
+        raise ValueError("Invalid model score")
+    basis = {
+        "label": "Uncalibrated model score; not an empirical probability",
+        "model": confidence,
+        "technical_score": candidate.get("technical_score"),
+        "combined_rank_score": candidate.get("combined_rank_score"),
+        "news_relevance": decision.get("news_relevance"),
+        "news_sentiment": decision.get("news_sentiment"),
+    }
+    news = signal.get("relevant_news") or []
+    news_he = signal.get("telegram_news_he") or []
+    structured_news = [{**item, "title_he": news_he[index] if index < len(news_he) else ""}
+                       for index, item in enumerate(news)]
+    conn = get_db_connection()
+    cur = conn.cursor()
+    begin_write_transaction(cur)
+    agent_id = scanner_agent_id(cur)
+    cur.execute("""INSERT INTO scanner_signals(
+        external_signal_id,agent_id,scan_id,ticker,company,action,status,planned_entry,entry_type,valid_until,
+        original_stop,current_stop,tp1,tp2,tp3,tp1_pct,tp2_pct,tp3_pct,rr1,rr2,rr3,weighted_rr,
+        confidence,confidence_basis,time_horizon,reason,reason_he,news_json,technical_json,market_context_json,
+        created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (signal.get("signal_id"), agent_id, scan_id, signal["ticker"], signal["company"], action, "HOLD" if action == "HOLD" else "ACTIVE",
+         entry, cfg["entry_order_type"], valid_until, stop, stop, tp1, tp2, tp3,
+         *fractions, *rr_values, weighted_rr,
+         confidence, _json(basis), signal["time_horizon"], signal["reason"], signal.get("telegram_reason_he") or "",
+         _json(structured_news), _json(candidate), _json(market_context), created, created))
+    signal_id = int(cur.lastrowid)
+    if signal.get("quote_at"):
+        store_quote(cur, signal["ticker"], entry, signal["quote_at"], "Yahoo 1m")
+    status = "HOLD"
+    if action == "BUY":
+        cur.execute("""SELECT 1 FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
+                       WHERE s.ticker=? AND o.purpose='entry' AND o.status='pending'""", (signal["ticker"],))
+        duplicate_order = bool(cur.fetchone())
+        cur.execute("SELECT 1 FROM scanner_trades WHERE ticker=? AND status='open' AND is_shadow=0", (signal["ticker"],))
+        duplicate_trade = bool(cur.fetchone())
+        cur.execute("SELECT cash FROM scanner_accounts WHERE agent_id=?", (agent_id,))
+        account = cur.fetchone()
+        cur.execute("""SELECT COALESCE(SUM(o.limit_price*o.quantity),0) reserved
+                       FROM scanner_orders o WHERE o.status='pending' AND o.purpose='entry'""")
+        reserved = float(cur.fetchone()["reserved"] or 0)
+        cur.execute("""SELECT COALESCE(SUM(remaining_quantity*COALESCE(last_price,entry_price)),0) exposure
+                       FROM scanner_trades WHERE status='open' AND is_shadow=0""")
+        open_exposure = float(cur.fetchone()["exposure"] or 0)
+        notional = min(cfg["paper_notional"], cfg["max_symbol_exposure"])
+        quantity = math.floor(notional / entry * 1_000_000) / 1_000_000
+        if duplicate_order or duplicate_trade:
+            status = "DUPLICATE_BLOCKED"
+        elif open_exposure + reserved + notional > cfg["max_total_exposure"]:
+            status = "RISK_BLOCKED"
+        elif not account or float(account["cash"]) - reserved < notional + cfg["minimum_commission"]:
+            status = "RISK_BLOCKED"
+        elif quantity > 0:
+            key = f"signal:{signal_id}:entry"
+            cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (signal_id, key, "entry", "buy", cfg["entry_order_type"], entry, quantity, "pending", valid_until, created, created))
+            status = "PENDING_ENTRY"
+    elif action == "SELL":
+        cur.execute("SELECT id,remaining_quantity FROM scanner_trades WHERE ticker=? AND status='open' AND is_shadow=0 ORDER BY id LIMIT 1",
+                    (signal["ticker"],))
+        trade = cur.fetchone()
+        if trade:
+            key = f"signal:{signal_id}:close:{trade['id']}"
+            cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (signal_id, key, "close_long", "sell", "limit", entry, float(trade["remaining_quantity"]), "pending", valid_until, created, created))
+            status = "PENDING_CLOSE"
+        else:
+            status = "BEARISH_ONLY"
+    cur.execute("UPDATE scanner_signals SET status=?,updated_at=? WHERE id=?", (status, created, signal_id))
+    row = dict(signal, id=signal_id, planned_entry=entry, original_stop=stop, current_stop=stop,
+               tp1=tp1, tp2=tp2, tp3=tp3, confidence=confidence, valid_until=valid_until,
+               reason_he=signal.get("telegram_reason_he") or "", news_json=_json(structured_news))
+    enqueue_telegram(cur, f"signal:{signal_id}", "new_signal", _signal_telegram_message(row))
+    conn.commit()
+    conn.close()
+    _service("scan", "ok", f"Signal {signal_id} stored as {status}", success=True)
+    return {"id": signal_id, "status": status, "valid_until": valid_until}

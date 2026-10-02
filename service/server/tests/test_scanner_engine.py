@@ -308,7 +308,7 @@ class ScannerEngineTests(unittest.TestCase):
         conn.execute("UPDATE scanner_orders SET status='risk_rejected'")
         conn.execute("UPDATE scanner_signals SET status='RISK_BLOCKED'")
         conn.commit(); conn.close()
-        with patch.object(scanner_engine, "_bar_dicts", return_value=[self.bar(1,100,102,99,101)]):
+        with patch.object(scanner_engine, "_bar_dicts", return_value=[self.bar(-6,100,102,99,101)]):
             self.assertEqual(scanner_engine.monitor_prices()["tickers"], 1)
         self.assertEqual(scanner_engine.dashboard_payload()["signals"][0]["current_price"], 101)
         self.assertFalse(self.fetchall("SELECT * FROM scanner_trades"))
@@ -638,17 +638,26 @@ class ScannerEngineTests(unittest.TestCase):
     def test_complete_isolated_single_and_shadow_cycle_with_monitor_restart_and_alert_retry(self):
         self.record()
         entry = self.bar(1, 100, 101, 99, 100)
-        with patch.object(scanner_engine, "_bar_dicts", return_value=[entry]):
+        start = datetime.now(UTC).replace(second=0,microsecond=0)
+        start += timedelta(minutes=5-start.minute%5)
+        entry['at'] = start.isoformat()
+        with database.get_db_connection() as conn:
+            conn.execute('UPDATE scanner_orders SET created_at=?',(entry['at'],))
+        with patch.object(scanner_engine, "_bar_dicts", return_value=[entry]), patch.object(scanner_engine, 'datetime', wraps=datetime) as clock:
+            clock.now.side_effect=lambda tz=None:(start+timedelta(minutes=5)).astimezone(tz)
             self.assertFalse(scanner_engine.monitor_prices()["errors"])
         trade = self.fetchall("SELECT * FROM scanner_trades WHERE is_shadow=0")[0]
         tp1 = self.bar(2, trade["tp1"], trade["tp1"]+.1, trade["entry_price"]+.1, trade["tp1"])
+        tp1['at'] = (start+timedelta(minutes=5)).isoformat()
         scanner_engine.process_bar("AAPL", tp1)
         shadow = self.fetchall("SELECT * FROM scanner_trades WHERE is_shadow=1")[0]
         self.assertAlmostEqual(shadow["current_stop"], shadow["entry_price"])
         self.assertGreater(shadow["remaining_quantity"], 0)
         scanner_engine.initialize_runtime()
         tp3 = self.bar(3, trade["tp2"], trade["tp3"]+.1, trade["entry_price"]+.1, trade["tp3"])
-        with patch.object(scanner_engine, "_bar_dicts", return_value=[tp1, tp3]):
+        tp3['at'] = (start+timedelta(minutes=10)).isoformat()
+        with patch.object(scanner_engine, "_bar_dicts", return_value=[tp1, tp3]), patch.object(scanner_engine, 'datetime', wraps=datetime) as clock:
+            clock.now.side_effect=lambda tz=None:(start+timedelta(minutes=15)).astimezone(tz)
             self.assertFalse(scanner_engine.monitor_prices()["errors"])
         closed = self.fetchall("SELECT * FROM scanner_trades ORDER BY is_shadow")
         self.assertTrue(all(row["status"] == "closed" for row in closed))
@@ -657,7 +666,7 @@ class ScannerEngineTests(unittest.TestCase):
              patch("stock_scanner.send_telegram", return_value="failed"):
             self.assertGreater(scanner_engine.process_telegram_outbox()["failed"], 0)
         conn = database.get_db_connection()
-        conn.execute("UPDATE scanner_telegram_outbox SET next_attempt_at='2000-01-01T00:00:00Z' WHERE status='retry'")
+        conn.execute("UPDATE scanner_telegram_outbox SET next_attempt_at='2000-01-01T00:00:00Z' WHERE status IN ('retry','pending')")
         conn.commit(); conn.close()
         with patch.dict(os.environ, {"STOCK_SCANNER_TELEGRAM_ENABLED": "true"}, clear=False), \
              patch("stock_scanner.send_telegram", return_value="sent"):

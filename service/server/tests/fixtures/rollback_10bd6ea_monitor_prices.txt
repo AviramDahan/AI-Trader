@@ -1,0 +1,65 @@
+def monitor_prices() -> dict[str, Any]:
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""SELECT DISTINCT s.ticker FROM scanner_signals s LEFT JOIN scanner_orders o ON o.signal_id=s.id
+                   LEFT JOIN scanner_trades t ON t.signal_id=s.id
+                   WHERE o.status='pending' OR t.status='open'
+                      OR (s.legacy_unverified=0 AND s.valid_until>?)""", (now_z(),))
+    tickers = [row["ticker"] for row in cur.fetchall()]
+    stamp = now_z()
+    cur.execute("SELECT signal_id FROM scanner_orders WHERE status='pending' AND valid_until<?", (stamp,))
+    expired_signal_ids = [int(row["signal_id"]) for row in cur.fetchall()]
+    cur.execute("UPDATE scanner_orders SET status='expired',updated_at=? WHERE status='pending' AND valid_until<?", (stamp, stamp))
+    if expired_signal_ids:
+        placeholders = ",".join("?" for _ in expired_signal_ids)
+        cur.execute(f"UPDATE scanner_signals SET status='EXPIRED',updated_at=? WHERE id IN ({placeholders})",
+                    (stamp, *expired_signal_ids))
+    # Some signals never receive an order row (for example a risk-blocked
+    # signal). They still have a finite lifetime and must not remain active
+    # forever merely because the order-expiry query cannot see them.
+    cur.execute("""UPDATE scanner_signals SET status='EXPIRED',updated_at=?
+        WHERE valid_until<? AND status IN ('ACTIVE','PENDING_ENTRY','RISK_BLOCKED','DUPLICATE_BLOCKED','BEARISH_ONLY')
+          AND NOT EXISTS (
+              SELECT 1 FROM scanner_trades t
+              WHERE t.signal_id=scanner_signals.id AND t.status='open'
+          )""", (stamp, stamp))
+    conn.commit()
+    conn.close()
+    processed, errors = 0, []
+    market = market_session_state()
+    if not market['is_trading_day']:
+        _service('monitor', 'market_closed', 'Weekend/holiday; cursors retained for next trading day', success=True)
+        return {'tickers': len(tickers), 'bars': 0, 'errors': [], 'market': market}
+    for ticker in tickers:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT last_bar_at FROM scanner_price_cursors WHERE ticker=?", (ticker,))
+        row = cur.fetchone()
+        if row and row["last_bar_at"]:
+            since = parse_time(row["last_bar_at"])
+        else:
+            cur.execute("""SELECT MIN(o.created_at) started FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
+                           WHERE s.ticker=? AND o.status='pending'""", (ticker,))
+            started = cur.fetchone()["started"]
+            cur.execute("SELECT MIN(COALESCE(managed_from,opened_at)) started FROM scanner_trades WHERE ticker=? AND status='open'", (ticker,))
+            trade_started = cur.fetchone()["started"]
+            starts = [parse_time(value) for value in (started, trade_started) if value]
+            since = min(starts) if starts else datetime.now(UTC)-timedelta(minutes=15)
+        conn.close()
+        try:
+            bars = _bar_dicts(ticker, since)
+            if market_session_state()["is_open"] and _regular_session_bar_stale(
+                    parse_time(bars[-1]["at"]) if bars else since, datetime.now(UTC)):
+                errors.append(f"{ticker}:stale_or_missing_bars")
+            for bar in bars:
+                process_bar(ticker, bar)
+                processed += 1
+        except Exception as exc:
+            errors.append(f"{ticker}:{type(exc).__name__}")
+    market = market_session_state()
+    local_now = datetime.now(ET)
+    extended_active = bool(os.getenv('STOCK_SCANNER_EXTENDED_EXITS_FROM', '').strip()) and market['is_trading_day'] and 240 <= local_now.hour * 60 + local_now.minute < 1200
+    status = "error" if errors else "market_closed" if not (market["is_open"] or extended_active) else "idle" if not tickers else "ok"
+    _service("prices", status, f"tickers={len(tickers)} bars={processed} errors={','.join(errors[:5])}", success=not errors)
+    _service("monitor", status, f"Processed {processed} complete 5-minute bars; market={market['reason']}", success=not errors)
+    return {"tickers": len(tickers), "bars": processed, "errors": errors, "market": market}

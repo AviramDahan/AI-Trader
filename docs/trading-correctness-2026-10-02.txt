@@ -1,0 +1,113 @@
+TRADING CORRECTNESS — RELEASE REVIEW ONLY, NO DEPLOYMENT
+
+Base and independently verified production: 10bd6ea40b01fab449a4a6769b347e18841aee34.
+Branch: codex/trading-correctness. The original unpublished a3b2765 report contained
+private account evidence. That commit is replaced before the first push; only this
+sanitized report is published. Private balances, snapshot IDs and position inventory
+are deliberately omitted. No production data or secrets are committed.
+
+CONFIRMED FINDINGS
+A: monitor expired pending orders before recovering completed candles. Recovery now
+processes candles chronologically within the order validity interval. A missing
+regular-session candle before the first possible fill or a touched candle straddling
+creation/expiry yields explicit uncertainty, not an optimistic fill. Completed legal
+fills replace their reservation exactly once. Terminal orders are never revived.
+Transport failure retains pending reservation. Existing calendar unchanged; special
+early closes/halts absent from that calendar may conservatively require review.
+This does not certify completeness of all subsequent position history.
+B: SELL LIMIT max(limit,open)*(1-slip) could violate the limit. Now
+max(limit,open*(1-slip)); the floor is BEFORE commission. Stops keep gap/slippage
+risk and no guaranteed price. BUY LIMIT/TP policy unchanged. No historical repricing.
+C: cumulative trade outcomes in reverse opening order were mislabeled drawdown.
+Both current_drawdown and maximum_drawdown are null, available_since null,
+status UNAVAILABLE_NO_EQUITY_HISTORY. UI explicitly says unavailable; no numeric
+drawdown or ranking consumer. Shadow compares trades, not independent account equity.
+No snapshots, migration or invented equity history in this change.
+
+UNCERTAINTY STATE / OBSERVABILITY
+scanner_orders.status='recovery_uncertain', updated_at=decision time;
+scanner_signals.status='RECOVERY_UNCERTAIN', updated_at=decision time.
+Amounts, validity, filled_quantity and ledger are NOT changed by uncertainty.
+record_signal includes both pending and recovery_uncertain entry orders in:
+  duplicate-ticker protection; reserved limit_price*quantity; total exposure limit;
+  available cash = ledger cash - reservation (existing commission admission rule).
+Uncertainty does not debit cash or create a fill. Reservation is not a second ledger
+entry. A completed/explicitly resolved order leaves this sum; no automatic timeout
+release or automatic uncertain-to-pending transition exists.
+process_bar and expiry select pending only; uncertain orders cannot execute or expire.
+initialize_runtime does not reset them. monitor continues open-position TP/SL even
+when an entry is held. dashboard recovery_holds exposes order IDs, ticker, purpose,
+validity, quantity, status, updated_at, reserved entry notional and
+MANUAL_EVIDENCE_REVIEW_REQUIRED. Order/signal state and SQL remain authoritative.
+No new notification path or Telegram writes were added.
+
+MANUAL RESOLUTION PROCEDURE (DESIGN ONLY, NOT PERFORMED)
+Require an authorized operator and explicit per-order approval. Preserve order,
+signal, cursor, account and fill evidence plus the gap interval, source candle
+timestamps, completion/session/timezone evidence and provider retrieval timestamps.
+Obtain ALL completed regular-session bars covering creation through the earliest
+possible fill/expiry; partial boundary candles alone cannot establish sequencing.
+Record decision, reviewer, reason, evidence hash and before/after ledger reconciliation
+in a protected incident record. If chronology remains ambiguous, retain hold.
+Never infer no-fill just from elapsed time. Never reset terminal orders or rewind a
+global cursor (that could replay unrelated positions). A proven fill requires a
+separately reviewed isolated replay and idempotent transactional application; no
+automatic remediation tool is included. A proven no-fill may be explicitly resolved
+only with full evidence and exposure/cash checks. Do not edit production in this task.
+
+ROLLBACK — RELEASE BLOCKER
+10bd6ea is NOT state-compatible once an uncertainty hold exists. Tests execute exact
+record_signal/monitor_prices/process_bar/initialize_runtime function snapshots from
+that revision against the same isolated database. They reproduce duplicate-entry
+admission and loss of reserved cash. Snapshots contain code only, no production data.
+Minimal compatible fallback: 10bd6ea plus the TWO record_signal predicates selecting
+status IN ('pending','recovery_uncertain') instead of pending alone. Isolated tests
+exercise that exact patch, restart, old monitor and forward return without changing
+held orders. Shared helpers for these paths are unchanged from baseline.
+This fallback is a tested source recipe, NOT a built/deployed approved rollback image.
+Existing deploy stops writers, starts monitor before scanner, then can automatically
+restore the previous image on readiness failure. New monitor can create a hold before
+that rollback. Therefore do NOT approve this release straight onto unpatched 10bd6ea.
+Proposed minimal separate compatibility release first, after its own review/approval,
+so the retained previous image understands holds. No deployment machinery is changed.
+Never restore an old database after fills. Old/new admission processes must not overlap
+while old code ignores holds. Existing per-role leases do not fix cross-role semantics.
+
+SMOKE / E2E
+Run 36911124802 failed missing_or_stale_quotes:TMO: shadow-only quote-contract mismatch.
+Run 36920832235 ran health/accounting then explicitly skipped live checks because the
+market was closed. Green did NOT prove recovery. Smoke now uses shadow last_price
+and completed monitor last_bar_at, age 300..900s, strictly after managed_from/opened_at.
+Missing, stale, unfinished, nonfinite or initial-entry-only marks fail. Main quote
+checks remain. Closed session is NOT_VERIFIED_MARKET_CLOSED.
+trading_chain_evidence is read-only: links signal/order/trade/entry and exit fills by
+IDs; caller supplies independently verified cutover boundary. Imported/Legacy/Shadow
+cannot prove a new native chain. Accounting reconciliation is required separately.
+No reliance on aggregate live_e2e_complete. WAITING_FOR_NATURAL_EVENT is not a code
+release blocker or proof of success. No generated trades or paid AI tests.
+
+PUBLISH SAFETY
+Read GitHub CI/Readiness/Pages/backend workflows and actual server timer/pull script.
+Server resolves refs/heads/main, then requires exact-SHA main push CI+Readiness success.
+Deployment script independently rejects non-main SHA. PR checks run tests/build only.
+No merge, auto-merge, push to main, live settings changes or deployment authorized.
+No strategy/threshold/sizing/fees/slippage/AI/news policy changes.
+
+TEST COVERAGE
+Initial baseline A/B/C repros failed; shadow smoke repro failed. Existing 74 backend
+and 71 PostgreSQL targeted tests were the previous report, not a full Linux claim.
+Added: old rollback unsafe repros; compatible fallback reservations/restart; held entry
+does not block another position stop; timeout retry and single fill; cash accounting;
+weekend/full holiday/overnight gaps; boundary no-touch then legal full candle; UI null
+contract; missing/invalid/unfinished/entry-only shadow marks; same-chain provenance.
+Full Linux CI/Readiness results are linked from PR after execution, including retention,
+full backend/PG suites, frontend build and container build. Failures/skips are reported,
+not hidden. Windows local PG startup limitations do not count as passing tests.
+
+POST-APPROVAL PLAN ONLY
+First resolve state-compatible rollback artifact. Then exact-SHA green checks,
+encrypted recovery backup, existing gated single-writer deploy, readiness and restart
+validation. Verify unchanged live policy, accounting, leases, recovery_holds and
+completed bars; wait for natural entry/exit evidence. No terminal/history replay.
+Operational health, tested code correctness, ledger reconciliation and natural E2E
+are distinct. This report neither declares full Production PASS nor profitability.
