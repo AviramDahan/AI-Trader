@@ -65,3 +65,16 @@ could overlap. After holds exist, 10bd6ea is NOT a permissible rollback target.
 Resolution of holds still requires separate evidence and approval; no automatic
 expiration, conversion or guessed execution. Natural E2E waits and true drawdown
 are separate from these release blockers. No Production PASS claim.
+
+Legacy compatibility follow-up (after the failed compatibility rollout):
+Format remains 2. Terminal imported/legacy_adoption historical records are now
+accepted only with matching signal, native Legacy trade, original position and
+adoption link, and matching finite prices/quantities. They are not executable
+orders and contribute no reservation. Unknown statuses still fail closed.
+Round-trip fixtures now include Legacy alongside Native/Shadow and blocked orders;
+the Linux image transition also retains a synthetic Legacy position. No production
+records are fixtures. The historical SQLite adoption helper's PostgreSQL lastrowid
+assumption is adapted only in fixture setup; no live adoption code is changed.
+The initial rollout returned to 10bd6ea because format-2 validation rejected
+imported parents. Main containing compatibility is not evidence of active coverage.
+This follow-up must be deployed and its real format-2 backup verified BEFORE #24.

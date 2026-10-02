@@ -32,6 +32,29 @@ def initialize_empty():
     engine.initialize_runtime()
 
 
+def seed_legacy():
+    """Synthetic original wallet, adopted through the real application path."""
+    import scanner_legacy
+    with database.get_db_connection() as c:
+        agent=c.execute("SELECT id FROM agents WHERE name='us-stock-scanner'").fetchone()['id']
+        c.execute("INSERT INTO positions(agent_id,symbol,market,side,quantity,entry_price,current_price,opened_at) VALUES(?,'TEST','us-stock','long',1,100,102,'2026-01-02T14:30:00Z')",(agent,))
+        c.execute("INSERT INTO signals(signal_id,agent_id,message_type,market,signal_type,symbol,side,entry_price,quantity,timestamp,created_at,executed_at) VALUES(911,?,'operation','us-stock','realtime','TEST','buy',100,1,1,'2026-01-02T14:30:00Z','2026-01-02T14:30:00Z')",(agent,))
+        tracked=dict(ticker='TEST',company='Synthetic Legacy',action='BUY',paper_execution='long_opened',entry=100,stop_loss=97,take_profit=106,paper_quantity=1,signal_id=911,status='OPEN')
+        c.execute("INSERT INTO scanner_legacy_records(source,source_key,payload_json,imported_at) VALUES('stock-scanner.json','synthetic-911',?,'2026-01-05T14:30:00Z')",(json.dumps(tracked),))
+    original_insert=scanner_legacy._insert
+    def fixture_insert(cur,table,values):
+        # Historical adoption was SQLite-only; PG does not expose lastrowid
+        # for the position_id-keyed adoption table. Seed it without that adapter
+        # return-value assumption, leaving application recovery code unmocked.
+        if table=='scanner_legacy_adoptions':
+            keys=list(values)
+            cur.execute(f"INSERT INTO {table}({','.join(keys)}) VALUES({','.join('?' for _ in keys)})",tuple(values[k] for k in keys))
+            return values['position_id']
+        return original_insert(cur,table,values)
+    with patch.object(engine,'now_z',return_value='2026-01-05T14:30:00Z'),patch.object(scanner_legacy,'_insert',side_effect=fixture_insert):
+        assert len(scanner_legacy.adopt_positions()['adopted'])==1
+
+
 def add_holds(tickers,action='BUY'):
     for ticker in tickers:
         result=record(ticker,action)
@@ -57,19 +80,23 @@ def state():
     with database.get_db_connection() as c:
         return {key:[dict(r) for r in c.execute(query)] for key,query in {
             'account':'SELECT cash,realized_pnl,fees_paid FROM scanner_accounts ORDER BY id',
+            'legacy_wallet':'SELECT id,cash FROM agents ORDER BY id',
+            'legacy_positions':'SELECT id,quantity,entry_price FROM positions ORDER BY id',
             'fills':'SELECT * FROM scanner_fills ORDER BY id',
             'trades':'SELECT id,remaining_quantity,fees,realized_pnl,current_stop FROM scanner_trades ORDER BY id',
             'holds':"SELECT * FROM scanner_orders WHERE status='recovery_uncertain' ORDER BY id",
             'reserved':"SELECT COALESCE(SUM(limit_price*quantity),0) amount FROM scanner_orders WHERE status IN ('pending','recovery_uncertain') AND purpose='entry'"}.items()}
 
 
+@pytest.mark.parametrize('legacy',[False,True])
 @pytest.mark.parametrize('native,tickers',[(False,['MSFT']),(True,['MSFT','NVDA']),(True,[])])
-def test_hold_encrypted_roundtrip(pg,tmp_path,native,tickers):
+def test_hold_encrypted_roundtrip(pg,tmp_path,native,tickers,legacy):
     if native:
         source,last=_sqlite_portfolio(tmp_path)
         active_snapshot.import_data(active_snapshot.export_data(source),pg)
     else:
         initialize_empty()
+    if legacy:seed_legacy()
     add_holds(tickers)
     before=state()
     data=recovery.export_postgres(pg)
@@ -96,6 +123,10 @@ def test_hold_encrypted_roundtrip(pg,tmp_path,native,tickers):
         assert state()==before
         after=recovery.export_postgres(target)
         assert after['hold_coverage']==data['hold_coverage']
+        if legacy:
+            with database.get_db_connection() as c:
+                assert c.execute("SELECT count(*) n FROM scanner_orders WHERE status='imported' AND purpose='legacy_adoption'").fetchone()['n']==1
+                assert c.execute('SELECT quantity FROM positions').fetchone()['quantity']==1
         if native:
             bar={**last,'at':(datetime.fromisoformat(last['at'])+timedelta(minutes=5)).isoformat(),
                  'open':90,'high':91,'low':89,'close':90}
@@ -109,6 +140,25 @@ def test_hold_encrypted_roundtrip(pg,tmp_path,native,tickers):
         with pytest.raises(ValueError,match='already_imported'):recovery.restore(decrypted,target,'synthetic-scanner-token-32-characters')
         assert state()==unchanged
     print('HOLD_ROUNDTRIP_PASS '+json.dumps(dict(native=native,holds=len(tickers),**sizes)))
+
+
+@pytest.mark.parametrize('damage',['purpose','type','position','adoption','signal','amount'])
+def test_imported_parent_validation_fails_closed(pg,damage):
+    initialize_empty();seed_legacy()
+    data=recovery.export_postgres(pg)
+    order=data['tables']['scanner_orders'][0]
+    if damage=='purpose':order['purpose']='entry'
+    if damage=='type':order['order_type']='limit'
+    if damage=='position':data['tables']['positions']=[]
+    if damage=='adoption':data['tables']['scanner_legacy_adoptions']=[]
+    if damage=='signal':data['tables']['scanner_signals'][0]['legacy_unverified']=0
+    if damage=='amount':order['quantity']+=1
+    data.pop('snapshot_id');data['snapshot_id']=active_snapshot.digest(data)
+    with target_schema(pg) as target:
+        with pytest.raises(ValueError,match='invalid_imported_legacy_order'):
+            recovery.restore(data,target,'synthetic-scanner-token-32-characters')
+        with database.get_db_connection() as c:
+            assert c.execute('SELECT count(*) n FROM agents').fetchone()['n']==0
 
 
 @pytest.mark.parametrize('damage',['omit','parent','reservation','status','number','checksum'])

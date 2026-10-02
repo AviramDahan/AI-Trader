@@ -26,6 +26,8 @@ def state():
     with database.get_db_connection() as c:
         return {k:[dict(r) for r in c.execute(q)] for k,q in {
             'account':'SELECT cash,fees_paid,realized_pnl FROM scanner_accounts ORDER BY id',
+            'legacy_wallet':'SELECT id,cash FROM agents ORDER BY id',
+            'legacy_positions':'SELECT id,quantity,entry_price FROM positions ORDER BY id',
             'trades':'SELECT id,remaining_quantity,fees,realized_pnl FROM scanner_trades ORDER BY id',
             'fills':'SELECT id,trade_id,quantity,price,fee FROM scanner_fills ORDER BY id',
             'reservation':"SELECT COALESCE(SUM(limit_price*quantity),0) amount FROM scanner_orders WHERE status IN ('pending','recovery_uncertain') AND purpose='entry'",
@@ -41,6 +43,9 @@ def main(mode):
         with database.get_db_connection() as c:
             c.execute("UPDATE scanner_orders SET created_at='2026-01-05T14:30:00Z',valid_until='2026-01-05T15:30:00Z'")
         e.process_bar('AAPL',dict(at='2026-01-05T14:35:00Z',open=100,high=101,low=99,close=100))
+        sys.path.insert(0,'/app/service/server/tests_pg')
+        from test_recovery_holds import seed_legacy
+        seed_legacy()  # synthetic only; recovery/rollback paths remain unmocked
         record('MSFT')
         with database.get_db_connection() as c:
             c.execute("UPDATE scanner_orders SET created_at='2026-01-05T14:40:00Z',valid_until='2026-01-05T14:50:00Z' WHERE status='pending'")
@@ -57,7 +62,7 @@ def main(mode):
             e.monitor_prices()
         actual=state();before=json.loads(ROOT.joinpath('before.json').read_text())
         assert len(actual['holds'])==1
-        assert all(actual[k]==before[k] for k in ('account','trades','fills','reservation'))
+        assert all(actual[k]==before[k] for k in ('account','trades','fills','reservation','legacy_wallet','legacy_positions'))
         ROOT.joinpath('held.json').write_text(json.dumps(actual))
     elif mode in ('rollback','restart','forward'):
         e.initialize_runtime()
@@ -71,6 +76,7 @@ def main(mode):
             import recovery_state as r
             data=r.export_postgres(os.environ['DATABASE_URL'])
             assert len(data['hold_coverage']['order_ids'])==1
+            assert any(o['status']=='imported' for o in data['tables']['scanner_orders'])
             subprocess.run(['age-keygen','-o',str(ROOT/'test-key')],capture_output=True,check=True)
             recipient=subprocess.check_output(['age-keygen','-y',str(ROOT/'test-key')]).decode().strip()
             encrypted,_=r.encrypted_bytes(data,recipient);(ROOT/'test.age').write_bytes(encrypted)
