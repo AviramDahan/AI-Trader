@@ -103,6 +103,18 @@ def test_v2_source_provenance_does_not_reach_ai_payload():
     assert 'confirmed_at' not in payload['candidate']['price_zones'][0]['pivots'][0]
 
 
+def test_legacy_revision_tool_cannot_rewrite_v2_contract():
+    import importlib.util
+    from pathlib import Path
+    path=Path(__file__).resolve().parents[3]/'scripts'/'revise_open_position_targets.py'
+    spec=importlib.util.spec_from_file_location('isolated_target_revision',path)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    groups={1:[{'settings_json':json.dumps({'target_plan':plan()})}]}
+    with patch.object(module,'_backup_sqlite') as backup:
+        with pytest.raises(ValueError,match='immutable'):module._apply(groups,{},'synthetic')
+        backup.assert_not_called()
+
+
 class TestV2Lifecycle(unittest.TestCase):
     setUp, tearDown = fixture_module.ScannerEngineTests.setUp, fixture_module.ScannerEngineTests.tearDown
     signal = fixture_module.ScannerEngineTests.signal
