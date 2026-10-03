@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Explicit 005 -> 006 only. Normal hetzner-deploy.sh schema guard stays intact.
+# Explicit 005 -> 006, or guarded resume on 006. Normal schema guard stays intact.
 # Install/run only after separate operator approval; never invoked by pull gate.
 set -Eeuo pipefail
 umask 077
 sha=${1:-}
 expected_old=${3:-}
-[[ "$sha" =~ ^[0-9a-f]{40}$ && "${2:-}" == --approved-schema-5-to-6 && "$expected_old" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 64
+[[ "$sha" =~ ^[0-9a-f]{40}$ && "$expected_old" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 64
+case "${2:-}" in
+  --approved-schema-5-to-6) expected_schema=5 ;;
+  --approved-resume-schema-6) expected_schema=6 ;;
+  *) exit 64 ;;
+esac
 root=/opt/ai-trader-staging
 exec 9>/run/lock/ai-trader-deploy.lock
 flock -n 9 || exit 75
@@ -26,13 +31,7 @@ for role in api scanner monitor telegram backup; do
 done
 old_sha=$(docker exec ai-trader-cloud-api-1 python -c 'import os; print(os.environ["BUILD_SHA"])')
 [[ "$old_sha" =~ ^[0-9a-f]{40}$ ]] || exit 66
-docker exec ai-trader-cloud-api-1 python -c 'import cloud_runtime as c, single_target_activation as a
-from database import get_db_connection
-assert c.SCHEMA_VERSION==5 and c.SUPPORTED_SCHEMAS==(5,6)
-assert c.SINGLE_TARGET_ROLLBACK_CAPABILITY=="v2-format3-holds-legacy-v1" and not a.CREATION_CAPABLE
-with get_db_connection() as db:
- db.execute("SET TRANSACTION READ ONLY")
- assert db.execute("SELECT max(version) version FROM schema_migrations").fetchone()["version"]==5'
+docker exec ai-trader-cloud-api-1 python -c 'import sys; from single_target_release import assert_bridge; assert_bridge(int(sys.argv[1]))' "$expected_schema"
 work=$(mktemp -d /opt/ai-trader-migration006.XXXXXXXX)
 curl -fsSL "https://github.com/AviramDahan/AI-Trader/archive/$sha.tar.gz" -o "$work/source.tar.gz"
 mkdir "$work/source"
@@ -41,8 +40,11 @@ tar xzf "$work/source.tar.gz" --strip-components=1 -C "$work/source"
 docker build --build-arg BUILD_SHA="$sha" --label org.opencontainers.image.revision="$sha" -t "ai-trader:$sha" "$work/source"
 new=$(docker image inspect --format '{{.Id}}' "ai-trader:$sha")
 # Candidate must initially run with creation disabled under the REAL compose env.
-APP_IMAGE="$new" dc run --rm -T --no-deps --entrypoint python api -c 'import single_target_activation as a; assert not a.enabled()'
+APP_IMAGE="$new" dc run --rm -T --no-deps --entrypoint python api -c 'from single_target_release import assert_creation_disabled; assert_creation_disabled()'
 dc run --rm -T --no-deps backup --once --predeploy
+# Recheck after the build/backup, before stopping services. The same shared lock
+# excludes the normal deploy/pull gate for the entire transition and rollback.
+[[ $(git ls-remote https://github.com/AviramDahan/AI-Trader.git refs/heads/main | cut -f1) == "$sha" ]] || exit 65
 cp deploy/compose.yml "$work/previous-compose.yml"
 docker tag "$old" "ai-trader:single-target-rollback-$old_sha"
 printf '%s\n%s\n' "$old_sha" "$old" > deploy/single-target-compatible-image
@@ -67,7 +69,15 @@ writers_stopped=1
 dc stop scanner telegram monitor backup api
 cp "$work/source/deploy/compose.yml" deploy/compose.yml
 export APP_IMAGE="$new"
-dc run --rm -T --no-deps migrate
+# Verify the rollback IMAGE itself against the current database after quiescing
+# writers (not merely a running container or MAX(version)). No init or DDL.
+APP_IMAGE="$old" dc run --rm -T --no-deps --entrypoint python api -c 'import sys; from single_target_release import assert_bridge; assert_bridge(int(sys.argv[1]))' "$expected_schema"
+dc run --rm -T --no-deps --entrypoint python api -c 'from single_target_release import assert_creation_disabled; assert_creation_disabled()'
+if [[ "$expected_schema" == 5 ]]; then
+  dc run --rm -T --no-deps migrate
+fi
+# Resume never invokes migrate: not even an idempotent DDL/history writer.
+dc run --rm -T --no-deps --entrypoint python api -c 'from single_target_release import assert_transition_schema; assert_transition_schema(6)'
 # Failure even here is recoverable on the bridge image.
 dc run --rm -T --no-deps --entrypoint python api -c 'from cloud_runtime import assert_schema; assert_schema()'
 dc up -d --no-deps --no-build --wait --wait-timeout 180 api monitor
@@ -79,4 +89,4 @@ docker exec ai-trader-cloud-api-1 python -c 'from pathlib import Path; import sy
 printf '%s\n%s\n%s\n' "$sha" "$new" "$old" > deploy/last-release.next
 mv deploy/last-release.next deploy/last-release
 trap - ERR
-echo "MIGRATION 006 PASS commit=$sha image=$new rollback=$old creation=disabled"
+echo "MIGRATION 006 PASS commit=$sha image=$new rollback=$old creation=disabled source_schema=$expected_schema"
