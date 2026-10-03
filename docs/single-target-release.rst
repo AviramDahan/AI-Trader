@@ -45,6 +45,19 @@ Exact future release order (requires release approval)
    bridge ID; stop writers/API; transactional 006; readiness; start OFF. Failure
    immediately after migration restores the bridge on the CURRENT DB. The pull
    gate shares the lock and cannot invoke this special migration command.
+   If 006 committed and deployment failed back to the bridge, use the explicit
+   retry command (under the same future release approval):
+   deploy/migrate-single-target.sh SHA --approved-resume-schema-6 BRIDGE_IMAGE_ID
+   The original mode still requires 5; there is no automatic mode selection.
+   Resume verifies the bridge's capability and image availability, exact main
+   checks, disabled creation, complete migration history 1..6 with applied_at,
+   all six nullable target fields and plan_json TEXT NOT NULL DEFAULT '{}'.
+   Catalog/history are read in one REPEATABLE READ, READ ONLY transaction.
+   The bridge preflight is re-run from the pinned image after writers stop.
+   Both modes require validated/encrypted predeploy backup; resume NEVER calls
+   migrate or writes migration history. A second failure returns to that same
+   bridge on the current schema6 database. A broken schema is rejected, never
+   repaired by this script. The normal deploy schema guard is unchanged.
 3. Verify all-role build/deployed SHA, health, leases, accounting/reservation,
    no duplicate fills, encrypted backup coverage and rollback image. Only then
    enable the environment flag under explicit rollout approval. A closed-market
@@ -77,6 +90,16 @@ activation-image restart. Old binary explicitly refuses schema6. Upload only
 phase results/build SHAs/image IDs; no keys, snapshots or plaintext artifacts.
 Both final heads require full CI/Readiness and this new image workflow. A skip
 of the older Recovery compatibility images workflow is NOT evidence.
+
+The script harness runs the actual Bash file with only three filesystem roots
+relocated, strict Docker/Git/HTTP/lock doubles and unmodified Python preflights.
+It reproduces the reviewed script's dead end and the normal guard rejection,
+then tests 006 -> failed start -> bridge -> failed resume -> bridge -> successful
+resume with exactly one migration call. It rejects incomplete schema/history,
+unsafe/missing bridge, creation ON, stale SHA, failed checks/backup and a busy
+release lock. These are shell control-flow proofs, not real Compose health.
+Real PostgreSQL tests independently check every 006 field, ledger and read-only
+isolation; the full-image workflow retains the application/age/hold proofs.
 
 Scope of backup remains active positions and recovery_uncertain holds, NOT all
 pending orders. The probe fills its extra pending before round-trip. No silent

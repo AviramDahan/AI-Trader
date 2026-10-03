@@ -14,6 +14,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+      - name: Actual release script failure, rollback and explicit resume harness
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/artifacts
+          python3 scripts/test_single_target_migration.py -v 2>&1 | tee /tmp/artifacts/migration-script-harness.txt
       - name: Build exact bridge, activation and existing application images
         run: |
           set -euo pipefail

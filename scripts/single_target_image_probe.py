@@ -85,6 +85,9 @@ def run(mode):
         assert not gate.CREATION_CAPABLE
         os.environ['STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED']='true'
         assert not gate.enabled()
+        os.environ['STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED']='false'
+        from single_target_release import assert_bridge
+        assert_bridge(5)
         # The actual role CLI must leave schema 5 unchanged on normal deploy.
         sys.argv=['cloud_runtime.py','migrate'];cloud.main()
         cloud.assert_schema();e.initialize_runtime();unchanged('seed');leases()
@@ -95,6 +98,8 @@ def run(mode):
         cloud.assert_schema();e.initialize_runtime();unchanged('prepared')
     elif mode=='immediate_failure':
         import single_target_activation as gate
+        from single_target_release import assert_bridge
+        assert_bridge(6)
         cloud.assert_schema();assert cloud.SCHEMA_VERSION==5 and not gate.CREATION_CAPABLE
         e.initialize_runtime();unchanged('prepared');leases()
         assert e.dashboard_payload()['lifecycle_verification']['accounting_ok']
@@ -134,6 +139,8 @@ def run(mode):
         save('disabled')
     elif mode in ('rollback','restart'):
         import single_target_activation as gate
+        from single_target_release import assert_bridge
+        assert_bridge(6)
         assert not gate.CREATION_CAPABLE
         cloud.assert_schema();e.initialize_runtime();unchanged('disabled');leases()
         assert record('V2HOLD')['status']=='DUPLICATE_BLOCKED'
