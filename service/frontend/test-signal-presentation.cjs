@@ -6,6 +6,10 @@ const code = ts.transpileModule(fs.readFileSync('src/signalPresentation.ts', 'ut
 const context = {exports:{}}
 vm.runInNewContext(code, context)
 const {positionMove, unifiedSignals} = context.exports
+const {activeTargetIndexes} = context.exports
+assert.equal(JSON.stringify(activeTargetIndexes({policy_version:'single_target_v2',tp1:104.5,tp2:null,tp3:null})), '[1]')
+assert.equal(JSON.stringify(activeTargetIndexes({policy_version:'single_target_v2',tp1:null})), '[]')
+assert.equal(JSON.stringify(activeTargetIndexes({tp1:103,tp2:106,tp3:109,operational_tp1_pct:0,operational_tp2_pct:1,operational_tp3_pct:0})), '[2]')
 assert.equal(positionMove({status:'open', entry_price:100,current_price:110}).toFixed(2),'10.00')
 assert.equal(positionMove({status:'open', entry_price:100,current_price:90}).toFixed(2),'-10.00')
 for (const price of [null, 0, NaN, Infinity]) assert.equal(positionMove({status:'open',entry_price:100,current_price:price}),null)

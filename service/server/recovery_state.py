@@ -18,13 +18,15 @@ from psycopg import sql
 from psycopg.rows import dict_row
 import active_snapshot as active
 import recovery_holds
+import single_target_recovery
+from single_target_policy import is_v2
 
 AGENT_FIELDS = {'id','name','cash','deposited','created_at','updated_at'}
 CONFIG_FIELDS = {'active_strategy','entry_order_type','signal_validity_hours','paper_notional',
     'max_symbol_exposure','max_total_exposure','slippage_bps','commission_per_share',
     'minimum_commission','breakeven_threshold','tp1_pct','tp2_pct','tp3_pct',
     'staged_stop_after_tp2','news_interval_hours','news_overlap_hours','monitor_interval',
-    'quote_refresh_seconds','strategy','captured_at'}
+    'quote_refresh_seconds','strategy','captured_at','target_plan'}
 SECRET_PATTERN = re.compile(r'sk-or-v1-[a-zA-Z0-9]+|-----BEGIN .*PRIVATE KEY|postgres(?:ql)?://|\b\d{7,12}:[A-Za-z0-9_-]{30,}|\bgh[pousr]_[A-Za-z0-9_]{20,}')
 POLICY_DEFAULTS = {
     'STOCK_SCANNER_EXIT_STRATEGY':'single', 'STOCK_SCANNER_EXTENDED_EXITS_FROM':'',
@@ -50,8 +52,11 @@ def sanitize(data):
     data['tables']['scanner_operators']=[]
     data['tables']['scanner_target_revisions']=[]
     for row in data['tables']['scanner_signals']:
+        plan = single_target_recovery.plan(row, 'technical_json')
         row.update(news_json='[]', technical_json='{}',market_context_json='{}',
                    reason='',reason_he='',confidence_basis='{}')
+        if is_v2(plan):
+            row['technical_json'] = json.dumps({'target_plan': plan}, sort_keys=True)
     for row in data['tables']['signals']:
         for field in ('content','title','tags'):
             if field in row: row[field]=None
@@ -61,8 +66,10 @@ def sanitize(data):
         row['error']=None  # Provider exceptions can contain URLs/credentials.
     for row in data['tables']['scanner_trades']:
         settings=json.loads(row['settings_json'])
+        if not is_v2(settings.get('target_plan')):
+            settings.pop('target_plan', None)  # Preserve the previous sanitized V1 contract.
         row['settings_json']=json.dumps({k:v for k,v in settings.items() if k in CONFIG_FIELDS},sort_keys=True)
-    data['recovery_format']=2 if data['version']==2 else 1
+    data['recovery_format']=data['version']
     data['runtime_policy']=runtime_policy()
     data['snapshot_id']=active.digest(data)
     validate(data)
@@ -70,7 +77,7 @@ def sanitize(data):
 
 
 def validate(data):
-    if data.get('recovery_format') not in (1,2): raise ValueError('not_a_recovery_snapshot')
+    if data.get('recovery_format') not in (1,2,3): raise ValueError('not_a_recovery_snapshot')
     if data['recovery_format']!=data.get('version'): raise ValueError('recovery_format_version_mismatch')
     if set(data.get('runtime_policy',{}))!=set(POLICY_DEFAULTS):
         raise ValueError('recovery_runtime_policy_missing_or_unknown')
@@ -80,7 +87,9 @@ def validate(data):
     if data['tables']['scanner_operators'] or data['tables']['scanner_target_revisions']:
         raise ValueError('unnecessary_history_in_recovery')
     for row in data['tables']['scanner_signals']:
-        if row['news_json']!='[]' or row['technical_json']!='{}' or row['market_context_json']!='{}':
+        technical = json.loads(row['technical_json'])
+        allowed = not technical or (set(technical) == {'target_plan'} and is_v2(technical['target_plan']))
+        if row['news_json']!='[]' or not allowed or row['market_context_json']!='{}':
             raise ValueError('news_history_forbidden')
     for row in data['tables']['scanner_trades']:
         if set(json.loads(row['settings_json']))-CONFIG_FIELDS:
@@ -100,7 +109,7 @@ def export_postgres(url):
         conn.execute("SET LOCAL statement_timeout='30000'")
         # News-only v4 is additive; recovery still exports only active portfolio
         # state. No news bodies, histories or review-cache rows enter backups.
-        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] not in (2,3,4,5):
+        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] not in (2,3,4,5,6):
             raise ValueError('unsupported_source_schema')
         def select(table,condition,args=()):
             rows=conn.execute(sql.SQL('SELECT * FROM {} WHERE ').format(sql.Identifier(table))+condition,args).fetchall()
@@ -130,7 +139,7 @@ def export_postgres(url):
         # Original positions/signals can reference other agent parents.
         ids('agents','id',[r.get('agent_id') for r in positions+tables['signals']]+[r.get('leader_id') for r in positions])
         settings=[dict(r) for r in conn.execute("SELECT * FROM scanner_settings WHERE key='active_exit_strategy'")]
-        data={'version':2,'created_at':datetime.now(timezone.utc).isoformat(),
+        data={'version':single_target_recovery.version(tables),'created_at':datetime.now(timezone.utc).isoformat(),
               'tables':tables,'settings':settings,'primary_agent_id':agent,
               'hold_coverage':recovery_holds.coverage(holds)}
         return sanitize(data)
@@ -138,7 +147,7 @@ def export_postgres(url):
 
 def restore(data,url,scanner_token):
     validate(data)
-    if data['recovery_format']!=2: raise ValueError('legacy_hold_coverage_unknown_restore_refused')
+    if data['recovery_format'] not in (2,3): raise ValueError('legacy_hold_coverage_unknown_restore_refused')
     if data['runtime_policy']!=runtime_policy():
         raise ValueError('restore_runtime_policy_mismatch_configure_saved_policy_before_import')
     return active.import_data(data,url,allow_defaults=True,scanner_token=scanner_token)

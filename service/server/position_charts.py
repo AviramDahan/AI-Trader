@@ -64,6 +64,11 @@ def _download_daily(ticker: str) -> pd.DataFrame:
 
 
 def operational_allocations(trade: dict) -> list[float]:
+    from single_target_policy import is_v2
+    plan = (_loads(trade.get('settings_json'), {}).get('target_plan') or
+            _loads(trade.get('technical_json'), {}).get('target_plan'))
+    if is_v2(plan):
+        return [1.0]
     if trade["strategy"] == "single":
         return [0.0, 1.0, 0.0]
     return [float(trade[f"tp{i}_pct"]) for i in (1, 2, 3)]

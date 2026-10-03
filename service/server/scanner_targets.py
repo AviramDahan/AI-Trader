@@ -27,7 +27,9 @@ def swing_zones(frame, atr, lookback=126):
             price = float(frame.iloc[i][column])
             extreme = window[column].max() if column == "High" else window[column].min()
             if math.isfinite(price) and price > 0 and price == extreme:
-                points.append({"price": price, "date": frame.index[i].date().isoformat(), "kind": kind})
+                confirmed = datetime.combine(frame.index[i+2].date(), time(16, 5), ET)
+                points.append({"price": price, "date": frame.index[i].date().isoformat(), "kind": kind,
+                               "confirmed_at": confirmed.astimezone(timezone.utc).isoformat()})
     groups = []
     for point in sorted(points, key=lambda p: p["price"]):
         if not groups or point["price"] - groups[-1][0]["price"] > .5 * atr:
@@ -35,6 +37,19 @@ def swing_zones(frame, atr, lookback=126):
         groups[-1].append(point)
     return [{"low": min(p["price"] for p in group), "high": max(p["price"] for p in group),
              "touches": len({p["date"] for p in group}), "pivots": group} for group in groups]
+
+
+def single_source_structure(frame):
+    """V2 price-plan inputs only; does not alter technical ranking or AI input."""
+    completed = _completed_daily(frame)
+    if len(completed) < 15:
+        return None
+    previous = completed['Close'].shift(1)
+    tr = pd.concat([completed['High']-completed['Low'],
+                    (completed['High']-previous).abs(), (completed['Low']-previous).abs()], axis=1).max(axis=1)
+    atr = float(tr.rolling(14).mean().iloc[-1])
+    return dict(atr=atr, zones=swing_zones(completed, atr),
+                data_as_of=completed.index[-1].date().isoformat())
 
 
 def open_position_target_plan(frame, entry, stop, fractions, current_price=None):
@@ -177,6 +192,9 @@ def structure_plan(direction, entry, atr, zones, minimum_rr):
 
 
 def validate_plan(plan, entry, stop, action):
+    from single_target_policy import is_v2, validate
+    if is_v2(plan):
+        return validate(plan, entry, stop, action)
     rebuilt = structure_plan(action, entry, float(plan["atr"]),
                              [*plan["zones"], plan["stop_zone"]], float(plan["minimum_rr"]))
     if stop != rebuilt["stop"] or plan["targets"] != rebuilt["targets"]:
