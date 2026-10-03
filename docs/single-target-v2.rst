@@ -3,7 +3,10 @@ SINGLE Target Policy V2 (review only)
 
 Scope
 -----
-Only new BUY plans when the selected strategy is SINGLE use single_target_v2.
+Only new BUY plans when SINGLE is selected AND the default-OFF environment flag
+STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED=true use single_target_v2. The bridge
+additionally has CREATION_CAPABLE=False. Disabling creation never disables
+handling of stored contracts. See single-target-release.rst for release order.
 Technical ranking, News, AI input, candidate cap/refill, SELL, sizing and existing
 positions are unchanged. Source-only provenance is stripped from the AI payload.
 V2 uses completed daily source candles/ATR and pivot confirmation timestamps.
@@ -52,11 +55,12 @@ retains only the V2 plan, not news, AI prompts or unrelated candidate metadata.
 Backup scope remains open positions plus recovery_uncertain orders, not all
 normal pending orders. A held V2 order retains its plan and reservation.
 
-Rollback to pre-V2 binaries is NOT safe once any V2 signal/order/trade exists:
+Rollback to pre-V2 binaries is NOT safe immediately after migration 006, even
+before any V2 signal/order/trade exists:
 they assume three targets, lack the order contract and require schema 5. Do not
 retag backups, drop NULL levels, rewrite old orders or restore an older database
-to force compatibility. A future release needs a separately reviewed compatible
-rollback binary or an explicit operational release plan before production use.
+to force compatibility. The codex/single-target-v2-compat prerequisite supplies
+the complete compatible rollback binary; see single-target-release.rst.
 No migration, merge or deployment is performed by this PR.
 
 Existing sample comparison (not execution/performance evidence)

@@ -62,7 +62,7 @@ def test_scanner_build_publication_and_sell_unchanged():
     import stock_scanner
     from unittest.mock import Mock
     c=dict(ticker='TEST',company='Synthetic',atr=1,price_as_of='2026-09-25',price_zones=[zone(98,98.4),zone(104.65,105)])
-    with patch.object(engine,'lifecycle_settings',return_value={'active_strategy':'single'}):
+    with patch.object(engine,'lifecycle_settings',return_value={'active_strategy':'single'}), patch('single_target_activation.enabled',return_value=True):
         p=stock_scanner._candidate_target_plan(c,'BUY',100,{'min_risk_reward':2})
         assert p['policy_version']==policy.VERSION
         with patch.object(stock_scanner,'format_signal',return_value='synthetic'), patch.object(stock_scanner,'_candidate_target_plan',return_value=p):
@@ -125,7 +125,7 @@ class TestV2Lifecycle(unittest.TestCase):
     fetchall = fixture_module.ScannerEngineTests.fetchall
     def v2_record(self):
         signal=dict(self.signal(),signal_id=None,target_plan=plan(),stop_loss=97.75)
-        with patch.object(engine,'now_z',return_value='2026-09-28T13:30:00Z'):
+        with patch.object(engine,'now_z',return_value='2026-09-28T13:30:00Z'), patch('single_target_activation.enabled',return_value=True):
             return engine.record_signal(signal,self.candidate(),self.decision(),{},'synthetic-v2')
 
     def v2_bar(self,minute=35,**changes):
@@ -210,3 +210,38 @@ class TestV2Lifecycle(unittest.TestCase):
 
 # unittest discovers inherited tests too; retain them intentionally as V1/Legacy
 # regression coverage against the same schema (no external services).
+
+
+def test_creation_gate_defaults_off_and_does_not_affect_sell(monkeypatch):
+    import single_target_activation as gate, stock_scanner
+    monkeypatch.delenv('STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED', raising=False)
+    assert not gate.enabled()
+    monkeypatch.setenv('STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED', 'true')
+    monkeypatch.setattr(gate, 'CREATION_CAPABLE', False)
+    assert not gate.enabled()  # bridge is incapable of creating V2
+    monkeypatch.setattr(gate, 'CREATION_CAPABLE', True)
+    assert gate.enabled()
+    monkeypatch.setenv('STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED', 'false')
+    c=dict(atr=1, price_zones=[])
+    with patch('scanner_targets.structure_plan',return_value={'v1':True}) as old:
+        assert stock_scanner._candidate_target_plan(c,'BUY',100,{'min_risk_reward':2})=={'v1':True}
+        old.assert_called_once_with('BUY',100,1,[],2)
+
+
+def test_v2_render_retains_context_rtl_and_length():
+    signal=dict(ticker='TEST',company='Test Company',action='BUY',planned_entry=100,
+        target_plan=plan(),valid_until='2026-09-29T13:30:00Z',confidence=.91,
+        reason_he='סיבה קיימת',news_json=json.dumps([{'title_he':'חדשות קיימות'}]),status='RISK_BLOCKED')
+    msg=engine._signal_telegram_message(signal)
+    for expected in ('Test Company','קנייה','סיבה קיימת','חדשות קיימות','לא־מכויל','91%',
+                     '100%','ברוטו','RISK_BLOCKED','זכאות סיגנל','תוקף','single_target_v2'):
+        assert expected in msg
+    assert msg.count('יעד פעיל')==1 and 'יעד 2' not in msg
+    assert '\u200f' in msg and msg.count('\u2066')==msg.count('\u2069')
+    assert '$' not in msg
+    signal.update(reason_he='😀'*6000,company='😀'*1000,news_json=json.dumps([{'title':'😀'*2000}]*3))
+    msg=engine._signal_telegram_message(signal)
+    assert len(msg.encode('utf-16-le'))//2<=4000
+    signal.update(company=None,reason_he=None,news_json='[]',confidence=None)
+    msg=engine._signal_telegram_message(signal)
+    assert 'לא זמין' in msg and 'נבדקה על ידי' not in msg

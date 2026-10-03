@@ -583,7 +583,8 @@ def _candidate_target_plan(candidate, action, price, cfg):
     from scanner_engine import lifecycle_settings
     from scanner_targets import structure_plan
     from single_target_policy import build
-    if action == 'BUY' and lifecycle_settings()['active_strategy'] == 'single':
+    from single_target_activation import enabled
+    if enabled() and action == 'BUY' and lifecycle_settings()['active_strategy'] == 'single':
         source = candidate.get('single_target_source') or dict(atr=candidate['atr'], zones=candidate.get('price_zones', []), data_as_of=candidate.get('price_as_of', ''))
         return build(price, source['atr'], source['zones'], source['data_as_of'], datetime.now(timezone.utc).isoformat())
     return structure_plan(action, price, candidate['atr'], candidate.get('price_zones', []), cfg['min_risk_reward'])

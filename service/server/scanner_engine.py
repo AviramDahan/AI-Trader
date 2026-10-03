@@ -332,12 +332,28 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
     from single_target_policy import is_v2
     plan = signal.get('target_plan') or _loads(signal.get('technical_json'), {}).get('target_plan')
     if is_v2(plan):
-        return '\n\n'.join(['AI-Trader — מסחר מדומה בלבד', f"סימול: {signal['ticker']}",
-            f"כניסה מתוכננת: {signal['planned_entry']:.2f}", f"סטופ: {plan['stop']:.2f}",
-            f"יעד פעיל — 100%: {plan['active_target']:.2f}", f"RR מתוכנן ברוטו: {plan['rr'][0]:.2f}R",
-            f"תוקף: {signal['valid_until']}", f"מדיניות: {plan['policy_version']}",
-            f"זכאות סיגנל: אושר; ביצוע דמה: {signal.get('status', 'PENDING_ENTRY')}",
-            'הפוזיציה אינה פעילה לפני כניסה תקפה.', 'השוואת STAGED: לא זמינה'])
+        # Preserve editorial context without invented fallbacks. Bound each
+        # optional section so safety/validity fields can never be truncated.
+        def bounded(value, size):
+            return str(value).strip().encode('utf-16-le')[:size * 2].decode('utf-16-le', errors='ignore') if value is not None else ''
+        news = _loads(signal.get('news_json'), []) if isinstance(signal.get('news_json'), str) else signal.get('news') or []
+        titles = [bounded(item.get('title_he') or item.get('title'), 300) for item in news[:3] if isinstance(item, dict)]
+        confidence = signal.get('confidence')
+        confidence_text = f'{confidence:.0%}' if isinstance(confidence, (int, float)) and math.isfinite(confidence) else 'לא זמין'
+        action = {'BUY':'קנייה', 'SELL':'מכירה', 'HOLD':'החזקה'}.get(signal.get('action'), 'לא זמין')
+        ltr = _telegram_ltr
+        lines = [f"{ltr('AI-Trader')} — מסחר מדומה בלבד",
+            f"סימול: {ltr(bounded(signal.get('ticker'), 32))}",
+            f"חברה: {ltr(bounded(signal.get('company'), 180) or 'לא זמין')}", f'פעולה: {action}',
+            f"כניסה מתוכננת: {ltr(format(signal['planned_entry'], '.2f'))}", f"סטופ: {ltr(format(plan['stop'], '.2f'))}",
+            f"יעד פעיל — 100%: {ltr(format(plan['active_target'], '.2f'))}", f"RR מתוכנן ברוטו: {ltr(format(plan['rr'][0], '.2f') + 'R')}",
+            f"תוקף: {ltr(bounded(signal.get('valid_until'), 48))}", f"מדיניות: {ltr(plan['policy_version'])}",
+            f"זכאות סיגנל: אושר; ביצוע דמה: {ltr(bounded(signal.get('status'), 64) or 'לא זמין')}",
+            'הפוזיציה אינה פעילה לפני כניסה תקפה.', 'השוואת STAGED: לא זמינה',
+            f'ציון מודל לא־מכויל: {ltr(confidence_text)}',
+            'סיבה:\n' + (bounded(signal.get('reason_he') or signal.get('reason'), 900) or 'לא זמין'),
+            'חדשות רלוונטיות:\n' + ('\n'.join('• ' + t for t in titles if t) or 'לא זמין')]
+        return '\n\n'.join(_telegram_rtl(line) for line in lines)
     reason = str(signal.get("reason_he") or "הסיבה נבדקה על ידי הסורק.").strip()
     reason = "\n\n".join(part.strip() for part in re.split(r"(?<=[.!?])\s+", reason) if part.strip())
     news = _loads(signal.get("news_json"), []) if isinstance(signal.get("news_json"), str) else signal.get("news") or []
@@ -404,6 +420,9 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
     from single_target_policy import is_v2
     v2 = is_v2(plan)
     if v2:
+        from single_target_activation import enabled
+        if not enabled():
+            raise ValueError('new_single_target_v2_disabled')
         if parse_time(plan['decided_at']) > parse_time(created):
             raise ValueError('future_plan_decision')
         cfg = dict(cfg, active_strategy='single')
@@ -469,9 +488,13 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
             status = "RISK_BLOCKED"
         elif quantity > 0:
             key = f"signal:{signal_id}:entry"
-            cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at,plan_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (signal_id, key, "entry", "buy", cfg["entry_order_type"], entry, quantity, "pending", valid_until, created, created,
-                         _json({'target_plan': plan, 'execution_settings': cfg}) if v2 else '{}'))
+            values = (signal_id, key, "entry", "buy", cfg["entry_order_type"], entry, quantity, "pending", valid_until, created, created)
+            if v2:
+                cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at,plan_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                            values + (_json({'target_plan': plan, 'execution_settings': cfg}),))
+            else:
+                # Bridge must continue normal V1 admissions before migration 006.
+                cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", values)
             status = "PENDING_ENTRY"
     elif action == "SELL":
         cur.execute("SELECT id,remaining_quantity FROM scanner_trades WHERE ticker=? AND status='open' AND is_shadow=0 ORDER BY id LIMIT 1",

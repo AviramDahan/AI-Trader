@@ -20,7 +20,7 @@ def test_encrypted_v3_roundtrip_with_legacy_and_blocked_order(pg,tmp_path):
         p=fixture.plan()
         s=dict(ticker=ticker,company='Synthetic',action='BUY',entry=100,stop_loss=p['stop'],
                target_plan=p,confidence=.9,time_horizon='days',reason='synthetic',relevant_news=[])
-        with patch.object(engine,'now_z',return_value='2026-09-28T13:30:00Z'):
+        with patch.object(engine,'now_z',return_value='2026-09-28T13:30:00Z'), patch('single_target_activation.enabled',return_value=True):
             return engine.record_signal(s,{}, {}, {}, 'isolated-v2')['id']
     first=record('V2TEST')
     bar=dict(at='2026-09-28T13:35:00Z',open=100,high=101,low=99.5,close=100)

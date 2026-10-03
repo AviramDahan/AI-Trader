@@ -2,12 +2,14 @@
 from pathlib import Path
 
 
-def migrate():
+def migrate(target_version=6):
     import psycopg
     from config import DATABASE_URL
     from database import init_database
     if not DATABASE_URL:
         raise RuntimeError("migration_requires_postgresql")
+    if target_version not in (5, 6):
+        raise ValueError('unsupported_migration_target')
     with psycopg.connect(DATABASE_URL, autocommit=True) as control:
         control.execute("SELECT pg_advisory_lock(719323,1)")
         control.execute("CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())")
@@ -17,6 +19,8 @@ def migrate():
             init_database()
             control.execute("INSERT INTO schema_migrations(version) VALUES(1)")
         for version, filename in [(2, "002_cloud.sql"), (3, "003_ai_operations.sql"), (4, "004_news_evidence.sql"), (5, "005_news_events.sql"), (6, "006_single_target.sql")]:
+            if version > target_version:
+                continue
             if version in versions:
                 continue
             with control.transaction():
