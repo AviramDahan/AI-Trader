@@ -14,10 +14,10 @@ ROLES = {
     "telegram": "stock_telegram_outbox,stock_telegram_status",
 }
 ROLE_KEYS = {"scanner": 11, "monitor": 12, "telegram": 13}
-# Normal deployment/migration floor. This bridge runs on 5 and 6; it does not
-# pretend that migration 006 has run. The activation release requires 6.
-SCHEMA_VERSION = 5
-SUPPORTED_SCHEMAS = (5, 6)
+# Activation release: migration 006 is required. The prerequisite bridge
+# supports actual schemas 5/6 and is the only safe binary rollback target.
+SCHEMA_VERSION = 6
+SUPPORTED_SCHEMAS = (6,)
 SINGLE_TARGET_ROLLBACK_CAPABILITY = 'v2-format3-holds-legacy-v1'
 ACTIVE_LEASE = None
 
