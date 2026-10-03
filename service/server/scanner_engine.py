@@ -726,7 +726,7 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
     cur.execute("SELECT * FROM scanner_signals WHERE id=?", (order["signal_id"],))
     signal = dict(cur.fetchone())
     cfg = lifecycle_settings()
-    from single_target_policy import is_v2, validate_fill
+    from single_target_policy import is_v2, validate_fill, validate
     contract = _loads(order.get('plan_json'), {})
     target_plan = _loads(signal.get('technical_json'), {}).get('target_plan')
     v2 = is_v2(target_plan) or is_v2(contract.get('target_plan'))
@@ -734,6 +734,11 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
         try:
             if contract.get('target_plan') != target_plan or contract.get('execution_settings', {}).get('active_strategy') != 'single':
                 raise ValueError('order_plan_mismatch')
+            validate(target_plan, signal['planned_entry'], signal['original_stop'], signal['action'])
+            if (order['limit_price'] != target_plan['entry'] or
+                    [signal['tp1'], signal['tp2'], signal['tp3']] != [target_plan['active_target'], None, None] or
+                    [signal['tp1_pct'], signal['tp2_pct'], signal['tp3_pct']] != [1, 0, 0]):
+                raise ValueError('order_levels_mismatch')
             validate_fill(target_plan, fill_price)
             cfg = contract['execution_settings']
         except (ValueError, KeyError, TypeError):

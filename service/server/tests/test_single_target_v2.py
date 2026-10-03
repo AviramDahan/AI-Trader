@@ -85,6 +85,8 @@ def test_smci_historical_geometry_regression_not_a_current_signal():
     # Public historical levels only. Confirmation upper bound is the saved
     # completed-source cutoff, not a claimed exact historical pivot timestamp.
     zs=[zone(40.4500007629,41.5299987793),zone(42.3100013733,42.3100013733),zone(51.4000015259,51.4000015259)]
+    for z, date in zip(zs, ('2026-09-11','2026-08-13','2026-06-02')):
+        z['pivots'][0].update(date=date, confirmed_at='2026-09-25T20:05:00+00:00')
     p=plan(zs,entry=43.2599983215,atr=2.3242852347214287)
     assert p['stop']==39.77 and p['active_target']==51.05
     assert p['rr'][0]==pytest.approx(2.232093245)
@@ -173,6 +175,15 @@ class TestV2Lifecycle(unittest.TestCase):
     def test_v2_gap_entry_is_not_manufactured(self):
         self.v2_record()
         engine.process_bar('AAPL',{**self.v2_bar(),'open':98.1,'high':100,'low':97.9,'close':99})
+        self.assertFalse(self.fetchall('SELECT * FROM scanner_fills'))
+        self.assertEqual(self.fetchall('SELECT status FROM scanner_orders')[0]['status'],'invalid')
+
+    def test_v2_changed_persisted_stop_cannot_override_contract(self):
+        self.v2_record()
+        import database
+        with database.get_db_connection() as c:
+            c.execute('UPDATE scanner_signals SET original_stop=99')
+        engine.process_bar('AAPL',self.v2_bar())
         self.assertFalse(self.fetchall('SELECT * FROM scanner_fills'))
         self.assertEqual(self.fetchall('SELECT status FROM scanner_orders')[0]['status'],'invalid')
 
