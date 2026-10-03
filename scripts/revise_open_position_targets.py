@@ -114,6 +114,7 @@ def _load_open_groups(conn) -> dict[int, list[dict]]:
 
 
 def _build_plans(groups: dict[int, list[dict]], frames: dict[str, pd.DataFrame]) -> dict[int, dict]:
+    _reject_v2_revision(groups)
     plans = {}
     today = datetime.now(timezone.utc).date()
     for signal_id, trades in groups.items():
@@ -167,7 +168,16 @@ def _backup_sqlite() -> Path:
     return destination
 
 
+def _reject_v2_revision(groups):
+    from single_target_policy import is_v2
+    for trades in groups.values():
+        for trade in trades:
+            if is_v2(json.loads(trade.get('settings_json') or '{}').get('target_plan')):
+                raise ValueError('V2 contract is immutable; legacy target revision is not supported')
+
+
 def _apply(groups: dict[int, list[dict]], plans: dict[int, dict], requested_by: str) -> int:
+    _reject_v2_revision(groups)
     backup = _backup_sqlite()
     conn = database.get_db_connection()
     cur = conn.cursor()

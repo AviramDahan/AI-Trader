@@ -1,0 +1,86 @@
+name: Single target compatibility images (no deployment)
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  images:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'codex/single-target-v2' || github.head_ref == 'codex/single-target-v2-compat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Actual release script failure, rollback and explicit resume harness
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/artifacts
+          python3 scripts/test_single_target_migration.py -v 2>&1 | tee /tmp/artifacts/migration-script-harness.txt
+      - name: Build exact bridge, activation and existing application images
+        run: |
+          set -euo pipefail
+          git fetch origin codex/single-target-v2 codex/single-target-v2-compat
+          bridge=$(git rev-parse origin/codex/single-target-v2-compat)
+          release=$(git rev-parse origin/codex/single-target-v2)
+          # Current PR HEAD must be one of the exact tested images.
+          test "$(git rev-parse HEAD)" = "$bridge" || test "$(git rev-parse HEAD)" = "$release"
+          git merge-base --is-ancestor "$bridge" "$release"
+          git worktree add --detach /tmp/bridge "$bridge"
+          git worktree add --detach /tmp/activation "$release"
+          git worktree add --detach /tmp/baseline f837daa99438a6c89b2371a607155de11eefd063
+          mkdir -p /tmp/proof /tmp/artifacts
+          chmod 777 /tmp/proof
+          docker build --build-arg BUILD_SHA="$bridge" -t v2-bridge:test /tmp/bridge
+          docker build --build-arg BUILD_SHA="$release" -t v2-release:test /tmp/activation
+          docker build --build-arg BUILD_SHA=f837daa99438a6c89b2371a607155de11eefd063 -t v2-baseline:test /tmp/baseline
+          docker image inspect v2-bridge:test v2-release:test v2-baseline:test --format '{{.Id}} {{json .Config.Env}}' | python -c 'import sys,json; rows=[]
+          for line in sys.stdin:
+            image,env=line.strip().split(" ",1); rows.append({"image_id":image,"build_sha":next(v.split("=",1)[1] for v in json.loads(env) if v.startswith("BUILD_SHA="))})
+          print(json.dumps(rows,indent=2))' > /tmp/artifacts/images.json
+      - name: Complete applications migration, failure, rollback, age restore, restart
+        run: |
+          set -euo pipefail
+          bash -n deploy/migrate-single-target.sh
+          docker network create --internal v2-test
+          docker run -d --name v2-pg --network v2-test -e POSTGRES_USER=isolated -e POSTGRES_PASSWORD=disposable -e POSTGRES_DB=isolated postgres:17-bookworm
+          for i in $(seq 1 30); do docker exec v2-pg pg_isready -U isolated && break; sleep 2; done
+          docker exec v2-pg createdb -U isolated restored
+          probe() {
+            docker run --rm --network v2-test \
+              -e AI_TRADER_CLOUD=true -e DATABASE_URL="postgresql://isolated:disposable@v2-pg:5432/${3:-isolated}" \
+              -e STOCK_SCANNER_ENABLED=false -e TELEGRAM_NEWS_STREAM_ENABLED=false \
+              -e STOCK_SCANNER_TELEGRAM_PORTFOLIO_STATUS_ENABLED=false \
+              -e STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED=false \
+              -v "$PWD/scripts/single_target_image_probe.py:/probe.py:ro" -v /tmp/proof:/proof \
+              --entrypoint python "$1" /probe.py "$2"
+          }
+          probe v2-baseline:test seed
+          probe v2-bridge:test prepare
+          probe v2-baseline:test baseline_return
+          # Real role entrypoint, numbered transaction. Bridge already available.
+          docker run --rm --network v2-test -e AI_TRADER_CLOUD=true -e DATABASE_URL=postgresql://isolated:disposable@v2-pg:5432/isolated v2-release:test migrate
+          if docker run --rm --network none --entrypoint python v2-release:test -c 'raise SystemExit(7)'; then exit 1; fi
+          probe v2-bridge:test immediate_failure
+          probe v2-bridge:test immediate_failure
+          probe v2-baseline:test old_refused
+          probe v2-release:test activate
+          probe v2-release:test disable
+          if docker run --rm --network none --entrypoint python v2-release:test -c 'raise SystemExit(7)'; then exit 1; fi
+          probe v2-bridge:test rollback
+          probe v2-bridge:test restart
+          probe v2-bridge:test restore restored
+          probe v2-bridge:test exit restored
+          probe v2-release:test forward restored
+          probe v2-bridge:test exit
+          probe v2-release:test forward
+          cp /tmp/proof/results.jsonl /tmp/artifacts/results.jsonl
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: single-target-release-evidence
+          path: /tmp/artifacts/
+          if-no-files-found: error
+          retention-days: 14

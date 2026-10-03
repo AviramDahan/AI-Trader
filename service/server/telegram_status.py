@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import os
 from datetime import datetime, timezone
@@ -58,6 +59,10 @@ def _scanner_agent_id(cur) -> int:
 
 
 def _next_target(trade: dict, hit_indexes: set[int]) -> tuple[str, float]:
+    from single_target_policy import is_v2
+    settings = json.loads(trade.get('settings_json') or '{}')
+    if is_v2(settings.get('target_plan')):
+        return 'יעד פעיל — 100%', float(settings['target_plan']['active_target'])
     if trade["strategy"] == "single":
         return "יעד תפעולי", float(trade["tp2"])
     for index in (1, 2, 3):

@@ -13,6 +13,7 @@ import sqlite3
 import subprocess
 import sys
 import recovery_holds
+import single_target_recovery
 from datetime import datetime, timezone
 
 TABLES = ("agents", "scanner_accounts", "positions", "signals", "scanner_signals",
@@ -75,7 +76,7 @@ def export_data(path):
             if count == sum(map(len, tables.values())):
                 break
         settings = [dict(r) for r in conn.execute("SELECT * FROM scanner_settings WHERE key='active_exit_strategy'")]
-        data = {"version":2, "created_at":datetime.now(timezone.utc).isoformat(),
+        data = {"version":single_target_recovery.version(tables), "created_at":datetime.now(timezone.utc).isoformat(),
                 "tables":tables, "settings":settings, "primary_agent_id":agent,
                 "hold_coverage":recovery_holds.coverage(holds)}
         validate(data)
@@ -86,7 +87,7 @@ def export_data(path):
 
 
 def validate(data):
-    if data.get("version") not in (1,2) or set(data["tables"]) != set(TABLES):
+    if data.get("version") not in (1,2,3) or set(data["tables"]) != set(TABLES):
         raise ValueError("unsupported_snapshot_schema")
     if "snapshot_id" in data and data["snapshot_id"] != digest({k:v for k,v in data.items() if k != "snapshot_id"}):
         raise ValueError("snapshot_checksum_mismatch")
@@ -102,6 +103,7 @@ def validate(data):
     if any(o["status"] in {"pending", "partial", "partially_filled"} for o in tables["scanner_orders"]):
         raise ValueError("active_order_requires_manual_review")
     recovery_holds.validate(data)
+    single_target_recovery.validate_snapshot(data)
     for trade in tables["scanner_trades"]:
         for field in ("original_quantity", "remaining_quantity", "entry_price", "original_r", "current_stop"):
             if not math.isfinite(trade[field]) or trade[field] <= 0:
@@ -109,6 +111,9 @@ def validate(data):
         if trade["remaining_quantity"] > trade["original_quantity"] + 1e-6:
             raise ValueError("quantity_exceeds_original")
         levels = [trade[f'tp{i}'] for i in (1,2,3)]
+        from single_target_policy import is_v2
+        if is_v2(single_target_recovery.plan(trade, 'settings_json')):
+            levels = [trade['tp1']]
         percentages = [trade[f'tp{i}_pct'] for i in (1,2,3)]
         if not all(math.isfinite(v) and v > 0 for v in levels) or levels != sorted(levels):
             raise ValueError("invalid_preserved_targets")
@@ -138,13 +143,14 @@ def import_data(data, url, *, allow_defaults=False, scanner_token=None):
     from psycopg.rows import dict_row
     from cloud_runtime import ROLE_KEYS
     validate(data)
-    if data['version']!=2:
+    if data['version'] not in (2,3):
         raise ValueError('legacy_hold_coverage_unknown_restore_refused')
     with psycopg.connect(url, row_factory=dict_row) as conn:
         conn.execute("SET LOCAL lock_timeout='5s'")
         # v4 adds only isolated news-evidence tables. Portfolio schema and
         # validation are identical; these new tables are NOT snapshot contents.
-        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] not in (2,3,4,5):
+        schema = conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version']
+        if schema not in (2,3,4,5,6) or (data['version'] == 3 and schema < 6):
             raise ValueError('unsupported_destination_schema')
         for key in ROLE_KEYS.values():
             if not conn.execute("SELECT pg_try_advisory_xact_lock(719322,%s) AS ok", (key,)).fetchone()["ok"]:

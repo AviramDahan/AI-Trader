@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { API_ORIGIN, useLanguage } from './appShared'
-import { positionMove, unifiedSignals } from './signalPresentation'
+import { positionMove, unifiedSignals, activeTargetIndexes } from './signalPresentation'
 
 type Dashboard = {
   market: { is_open: boolean }
@@ -417,7 +417,7 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
   const plan = signal.technical_json?.target_plan
   const movementEntry = signal.actual_entry ?? signal.planned_entry
   const [opened, setOpened] = useState(false)
-  const activeTargets = [1, 2, 3].filter(i => Number(signal[`operational_tp${i}_pct`] ?? signal[`tp${i}_pct`] ?? 0) > 0)
+  const activeTargets = activeTargetIndexes(signal)
   const statusLabels: Record<string, string> = he ? {ENTERED:'כניסה בוצעה', ACTIVE:'ממתין לכניסה', PENDING_ENTRY:'ממתין לכניסה', EXPIRED:'פג תוקף', CLOSED:'נסגר', RISK_BLOCKED:'נחסם בסיכון', DUPLICATE_BLOCKED:'כפילות נחסמה', BEARISH_ONLY:'איתות דובי', COMPLETED:'הושלם'} : {ENTERED:'Entry filled', ACTIVE:'Awaiting entry', PENDING_ENTRY:'Awaiting entry', EXPIRED:'Expired', CLOSED:'Closed', RISK_BLOCKED:'Risk blocked', DUPLICATE_BLOCKED:'Duplicate blocked', BEARISH_ONLY:'Bearish signal', COMPLETED:'Completed'}
   const horizon = he ? String(signal.time_horizon || '—').replace(/weeks?/gi, 'שבועות').replace(/days?/gi, 'ימים').replace(/hours?/gi, 'שעות') : signal.time_horizon
   const stamp = (value: any) => value ? new Date(value).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
@@ -428,6 +428,7 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
     </summary>
     <div className="scanner-signal-body">
       <em className="signal-status-label">{statusLabels[signal.status] || signal.status}</em>
+      {signal.policy_version && <p>{he ? 'זכאות הסיגנל: אושר; ביצוע דמה נפרד' : 'Signal qualified; paper execution is separate'} · {signal.execution_status} · {signal.position_activated ? (he ? 'כניסה בוצעה' : 'Entry filled') : (he ? 'הפוזיציה לא הופעלה' : 'Position not activated')}</p>}
       <span className="signal-summary-levels">
         <span><small>{he ? 'מחיר אחרון' : 'Last price'}{signal.price_stale ? (he ? ' · ישן' : ' · stale') : ''}</small><b dir="ltr">{fmtPrice(signal.current_price)}</b></span>
         <span><small>{he ? 'כניסה' : 'Entry'}</small><b dir="ltr">{fmtPrice(movementEntry)}</b></span>
@@ -438,9 +439,9 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
     {opened && <LevelChart record={signal} kind="signal" he={he} initiallyOpen />}
     <h3>{he ? 'תוכנית המימוש הפעילה' : 'Active exit plan'}</h3>
     <TargetRows record={signal} entry={movementEntry} strategy={signal.operational_strategy || 'single'} he={he} indices={activeTargets} />
-    <details className="signal-secondary"><summary>{he ? 'יעדי השוואה — Shadow' : 'Comparison targets — Shadow'}</summary>
+    {signal.policy_version ? <p>{he ? 'השוואת STAGED אינה זמינה — אין תוכנית תקפה שמורה' : 'STAGED comparison unavailable — no valid saved plan'}</p> : <details className="signal-secondary"><summary>{he ? 'יעדי השוואה — Shadow' : 'Comparison targets — Shadow'}</summary>
       <TargetRows record={signal} entry={movementEntry} strategy={signal.operational_strategy || 'single'} he={he} indices={[1,2,3].filter(i => !activeTargets.includes(i))} />
-    </details>
+    </details>}
     <details className="signal-secondary"><summary>{he ? 'פרטי כניסה וחישוב יעדים' : 'Entry and target calculation'}</summary>
     <div className="scanner-levels"><span>{he ? 'כניסה מתוכננת' : 'Planned entry'}<b>{fmtPrice(signal.planned_entry)}</b></span><span>{he ? 'כניסה בפועל' : 'Actual entry'}<b>{fmtPrice(signal.actual_entry)}</b></span><span>{he ? 'סטופ מקורי' : 'Original stop'}<b>{fmtPrice(signal.original_stop)}</b></span><span>{he ? 'סטופ נוכחי' : 'Current stop'}<b>{fmtPrice(signal.current_stop)}</b></span></div>
     <TargetPlanDetails plan={plan} he={he} />
@@ -458,7 +459,7 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
 
 function TradeCard({ trade, signal, schedules, he }: { trade: Record<string, any>, signal?: Record<string, any>, schedules: Record<string, any>[], he: boolean }) {
   const [opened, setOpened] = useState(false)
-  const activeTargets = [1,2,3].filter(i => Number(trade[`operational_tp${i}_pct`] ?? trade[`tp${i}_pct`] ?? 0) > 0)
+  const activeTargets = activeTargetIndexes(trade)
   const schedule = schedules.find(item => item.ticker === trade.ticker)
   const plan = trade.settings?.target_plan
   const currentPrice = trade.current_price ?? trade.last_price
@@ -483,7 +484,7 @@ function TradeCard({ trade, signal, schedules, he }: { trade: Record<string, any
     {opened && trade.status === 'open' && <LevelChart record={trade} kind="trade" he={he} initiallyOpen />}
     <h3>{he ? 'תוכנית המימוש' : 'Exit plan'}</h3>
     <TargetRows record={trade} entry={trade.entry_price} strategy={trade.strategy} he={he} indices={activeTargets} />
-    <details className="signal-secondary"><summary>{he ? 'יעדי השוואה — Shadow' : 'Comparison targets — Shadow'}</summary><TargetRows record={trade} entry={trade.entry_price} strategy={trade.strategy} he={he} indices={[1,2,3].filter(i => !activeTargets.includes(i))} /></details>
+    {trade.policy_version ? <><p>{he ? 'השוואת STAGED: לא זמינה' : 'STAGED comparison: unavailable'}</p><p>{he ? 'ממומש נטו, כולל עמלות ששולמו' : 'Realized net, including paid fees'}: {Number(trade.realized_net_pct).toFixed(2)}% / {Number(trade.realized_net_r).toFixed(2)}R · {he ? 'פתוח ברוטו, משוקלל לפי יתרת הפוזיציה' : 'Open gross, weighted by remaining position'}: {Number(trade.open_gross_pct).toFixed(2)}% / {Number(trade.open_gross_r).toFixed(2)}R</p></> : <details className="signal-secondary"><summary>{he ? 'יעדי השוואה — Shadow' : 'Comparison targets — Shadow'}</summary><TargetRows record={trade} entry={trade.entry_price} strategy={trade.strategy} he={he} indices={[1,2,3].filter(i => !activeTargets.includes(i))} /></details>}
     <TargetPlanDetails plan={plan} he={he} />
     <details className="signal-secondary"><summary>{he ? 'חדשות העסקה' : 'Trade news'}</summary>
     <p>{he ? 'בדיקה אחרונה' : 'Last check'}: {stamp(schedule?.last_success_at)}{trade.status === 'open' && <> · {he ? 'הבאה' : 'Next'}: {stamp(schedule?.next_due_at)}</>} · {he ? ({no_new:'אין חדשות חדשות',closed:'המעקב הסתיים',error:'תקלה',idle:'ממתין',ok:'תקין'} as Record<string,string>)[schedule?.status] || schedule?.status || '—' : schedule?.status || '—'}</p>
@@ -496,15 +497,15 @@ function TradeCard({ trade, signal, schedules, he }: { trade: Record<string, any
 }
 
 function TargetRows({ record, entry, strategy, he, indices = [1,2,3] }: { record: Record<string, any>, entry: any, strategy: string, he: boolean, indices?: number[] }) {
-  return <div className="scanner-targets">{indices.map(index => {
+  return <div className="scanner-targets">{indices.filter(index => record[`tp${index}`] != null).map(index => {
     const allocation = Number(record[`operational_tp${index}_pct`] ?? record[`tp${index}_pct`] ?? 0)
-    const rr = Number(record[`rr${index}`])
+    const rr = record[`rr${index}`] == null ? (Number(record[`tp${index}`]) - Number(entry)) / (Number(entry) - Number(record.original_stop)) : Number(record[`rr${index}`])
     const execution = allocation > 0
       ? strategy === 'single'
         ? (he ? 'יעד פעיל — סגירה מלאה' : 'Active target — full exit')
         : (he ? 'יעד פעיל — מימוש מדורג' : 'Active target — staged exit')
       : (he ? 'Shadow בלבד — אין מימוש בפועל' : 'Shadow only — no actual exit')
-    return <span key={index}>TP{index}: <b>{fmtPrice(record[`tp${index}`])}</b> · {he ? 'תשואה מהכניסה' : 'Return from entry'} {fmtMove(entry, record[`tp${index}`])} · {execution}{Number.isFinite(rr) && <> · {rr.toFixed(1)}R</>}</span>
+    return <span key={index}>{record.policy_version ? (he ? 'יעד פעיל 100%' : 'Active target 100%') : `TP${index}`}: <b>{fmtPrice(record[`tp${index}`])}</b> · {he ? 'תשואה ברוטו מהכניסה' : 'Gross return from entry'} {fmtMove(entry, record[`tp${index}`])} · {execution}{Number.isFinite(rr) && <> · {rr.toFixed(2)}R</>}</span>
   })}</div>
 }
 
@@ -517,7 +518,9 @@ function LevelChart({ record, kind, he, initiallyOpen = false }: { record: Recor
     record.tp1, record.tp2, record.tp3, record.operational_strategy ?? record.strategy, record.updated_at ?? record.last_bar_at,
   ].join('|'))
   const src = `${API_ORIGIN}/api/scanner/${isSignal ? 'signals' : 'trades'}/${record.id}/chart?v=${version}`
-  const description = he
+  const description = record.policy_version === 'single_target_v2'
+    ? `${record.ticker} · SINGLE V2 · Entry / Stop / one active target (100%)`
+    : he
     ? `גרף יומי של ${record.ticker} עם ${isSignal && record.actual_entry == null ? 'כניסה מתוכננת שטרם בוצעה' : 'כניסה בפועל'}, סטופ ויעדי TP1, TP2 ו־TP3`
     : `${record.ticker} daily chart with ${isSignal && record.actual_entry == null ? 'planned entry not yet filled' : 'actual entry'}, stop, TP1, TP2 and TP3 levels`
   useEffect(() => {
@@ -552,6 +555,7 @@ function LevelChart({ record, kind, he, initiallyOpen = false }: { record: Recor
 }
 
 function TargetPlanDetails({ plan, he }: { plan: Record<string, any> | undefined, he: boolean }) {
+  if (plan?.policy_version === 'single_target_v2') return <p>{plan.policy_version} · SINGLE · {he ? 'נתוני מקור' : 'Source data'}: {plan.source_data_at} · {he ? 'יעד לפני ההתנגדות הקרובה; RR מתוכנן ברוטו' : 'Target before nearest resistance; planned gross RR'}: {Number(plan.rr[0]).toFixed(2)}R</p>
   if (!plan) return <details><summary>{he ? 'כיצד חושבו היעדים?' : 'How were targets calculated?'}</summary><p>{he ? 'תוכנית Legacy או תוכנית קודמת ללא ראיות מבנה שמורות.' : 'Legacy or earlier plan without stored structural evidence.'}</p></details>
   const objectives = Array.isArray(plan.objectives) ? plan.objectives : Array.isArray(plan.zones) ? plan.zones.map((zone: any) => ({ source: 'confirmed_daily_resistance', zone })) : []
   const revised = plan.method === 'daily_resistance_and_measured_move_v1'

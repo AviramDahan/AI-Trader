@@ -14,7 +14,11 @@ ROLES = {
     "telegram": "stock_telegram_outbox,stock_telegram_status",
 }
 ROLE_KEYS = {"scanner": 11, "monitor": 12, "telegram": 13}
+# Normal deployment/migration floor. This bridge runs on 5 and 6; it does not
+# pretend that migration 006 has run. The activation release requires 6.
 SCHEMA_VERSION = 5
+SUPPORTED_SCHEMAS = (5, 6)
+SINGLE_TARGET_ROLLBACK_CAPABILITY = 'v2-format3-holds-legacy-v1'
 ACTIVE_LEASE = None
 
 
@@ -24,8 +28,18 @@ def assert_schema():
         raise RuntimeError("cloud_requires_postgresql")
     with get_db_connection() as conn:
         row = conn.cursor().execute("SELECT MAX(version) AS version FROM schema_migrations").fetchone()
-        if row["version"] != SCHEMA_VERSION:
+        if row["version"] not in SUPPORTED_SCHEMAS:
             raise RuntimeError("run_numbered_migrations_before_start")
+        if row['version'] == 6:
+            # A version label alone is insufficient readiness evidence.
+            columns = conn.execute("""SELECT table_name,column_name,is_nullable FROM information_schema.columns
+                WHERE table_schema=current_schema() AND table_name IN ('scanner_orders','scanner_signals','scanner_trades')""").fetchall()
+            actual = {(r['table_name'], r['column_name']): r['is_nullable'] for r in columns}
+            if ('scanner_orders', 'plan_json') not in actual or any(
+                actual.get((table, column)) != 'YES' for table, column in (
+                    ('scanner_signals','tp2'),('scanner_signals','tp3'),('scanner_signals','rr2'),('scanner_signals','rr3'),
+                    ('scanner_trades','tp2'),('scanner_trades','tp3'))):
+                raise RuntimeError('single_target_schema_incomplete')
 
 
 class RoleLease:
@@ -156,7 +170,7 @@ def main():
         raise RuntimeError("cloud_entrypoint_requires_explicit_cloud_mode")
     if role == "migrate":
         from migrations import migrate
-        migrate(); return
+        migrate(target_version=SCHEMA_VERSION); return
     if role == "api":
         assert_schema()
         os.environ["AI_TRADER_API_BACKGROUND_TASKS"] = "false"
