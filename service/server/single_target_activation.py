@@ -4,7 +4,7 @@ import os
 # The bridge release handles V2 state but cannot originate it, even if an old
 # environment accidentally contains the activation flag. The activation release
 # changes only this capability and the required schema floor.
-CREATION_CAPABLE = False
+CREATION_CAPABLE = True
 
 
 def enabled():
