@@ -219,7 +219,7 @@ def send_one():
 
 def health():
     from database import get_db_connection
-    from admin_health_context import snapshot, incident, summary
+    from admin_health_context import snapshot, incident, health_message
     now=datetime.now(timezone.utc)
     with get_db_connection() as conn:
         states=conn.execute('SELECT component,status,last_attempt_at,last_success_at,detail FROM scanner_service_status').fetchall()
@@ -241,9 +241,7 @@ def health():
               (key,json.dumps(state),now.isoformat()))
         if change:
             enqueue(('health:' if change=='failure' else 'health_recovered:')+r['component']+':'+str(state['generation']),
-                    'AI-Trader Admin\n'+('תקלה ברכיב: ' if change=='failure' else 'השירות התאושש: ')+r['component']+
-                    '\n'+summary(context)+
-                    ('\nהתאוששות שירות אינה מפעילה מחדש מסלול חדשות שנעצר בבדיקת בטיחות.' if change=='recovery' else ''))
+                    health_message(r['component'], change, context, state))
 
 
 async def operations_loop():
