@@ -87,7 +87,7 @@ def test_health_loop_enqueues_one_backup_recovery_to_private_queue(monkeypatch):
            'last_success_at': (NOW-timedelta(hours=1)).isoformat(), 'detail': ''}
     saved = {}
     now = [NOW]
-    class Clock:
+    class Clock(datetime):
         @staticmethod
         def now(tz): return now[0]
     def execute(sql, params=()):
