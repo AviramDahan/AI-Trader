@@ -7,6 +7,13 @@ from .model import timestamp
 from .queue_health import queue_rows, summarize
 
 
+def summary_key(current):
+    # Only deduplicate routine reports; every check and alarm still runs.
+    # Keep the existing key namespace so deployment/restart cannot replay a bucket.
+    utc = current.astimezone(timezone.utc)
+    return 'canonical_health:' + utc.replace(hour=utc.hour // 4 * 4).strftime('%Y-%m-%dT%H')
+
+
 def coverage_summary(providers, provider_health):
     """Pipeline integrity and provider availability are separate health signals."""
     healthy = {'ok', 'no_new', 'not_modified'}
@@ -83,7 +90,7 @@ def check(at=None):
     if alarms:
         fail_back(','.join(alarms),current)
     else:
-        enqueue('canonical_health:'+current.strftime('%Y-%m-%dT%H'),
+        enqueue(summary_key(current),
             'AI-Trader Admin\n'+coverage_summary(providers,data['provider_health'])+'\nאירועים: '+str(data['canonical_events'])+
             '; גרסאות מקורות: '+str(data['source_versions'])+'; תור: '+str(data['queue_size'])+
             '\nעלות חדשות מתועדת מאז ההפעלה: $'+str(round(data['known_cost'],6))+
