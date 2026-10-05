@@ -579,15 +579,30 @@ def format_signal(candidate: dict[str, Any], decision: dict[str, Any], news: lis
     ])
 
 
-def _candidate_target_plan(candidate, action, price, cfg):
+def _candidate_target_plan(candidate, action, price, cfg, *, quote_at=None, phase='pre_ai'):
     from scanner_engine import lifecycle_settings
     from scanner_targets import structure_plan
     from single_target_policy import build
     from single_target_activation import enabled
-    if enabled() and action == 'BUY' and lifecycle_settings()['active_strategy'] == 'single':
-        source = candidate.get('single_target_source') or dict(atr=candidate['atr'], zones=candidate.get('price_zones', []), data_as_of=candidate.get('price_as_of', ''))
-        return build(price, source['atr'], source['zones'], source['data_as_of'], datetime.now(timezone.utc).isoformat())
-    return structure_plan(action, price, candidate['atr'], candidate.get('price_zones', []), cfg['min_risk_reward'])
+    v2 = enabled() and action == 'BUY' and lifecycle_settings()['active_strategy'] == 'single'
+    source = (candidate.get('single_target_source') if v2 else None) or dict(
+        atr=candidate['atr'], zones=candidate.get('price_zones', []), data_as_of=candidate.get('price_as_of', ''))
+    at = datetime.now(timezone.utc).isoformat()
+    plan, rejection = None, None
+    try:
+        if v2:
+            plan = build(price, source['atr'], source['zones'], source['data_as_of'], at)
+        else:
+            plan = structure_plan(action, price, candidate['atr'], candidate.get('price_zones', []), cfg['min_risk_reward'])
+        return plan
+    except ValueError as exc:
+        rejection = str(exc)
+        raise
+    finally:
+        from target_evidence import capture
+        capture(candidate, action, price, quote_at, phase,
+                'single_target_v2' if v2 else 'confirmed_daily_swing_zones_v1',
+                'single' if v2 else None, source, cfg, decided_at=at, plan=plan, rejection=rejection)
 
 
 def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list[dict[str, Any]],
@@ -601,7 +616,7 @@ def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list
     ticker, direction = candidate["ticker"], decision["action"]
     price, quote_at = quote
     try:
-        plan = _candidate_target_plan(candidate, direction, price, cfg)
+        plan = _candidate_target_plan(candidate, direction, price, cfg, quote_at=quote_at, phase='post_ai')
     except ValueError as exc:
         candidate["target_rejection"] = str(exc)
         return None
@@ -859,6 +874,7 @@ def run_scan() -> dict[str, Any]:
         rejection_start = len(rejected)
         published_start = len(published)
         precheck_complete = False
+        quote = None
         try:
             news = candidate["news"]
             # Same six candidates, no refill, no new session/calendar hard block.
@@ -870,7 +886,7 @@ def run_scan() -> dict[str, Any]:
                 rejected.append({"ticker": ticker, "reason": "pre_duplicate_cooldown"})
                 continue
             try:
-                _candidate_target_plan(candidate, candidate["technical_direction"], quote[0], cfg)
+                _candidate_target_plan(candidate, candidate["technical_direction"], quote[0], cfg, quote_at=quote[1])
             except ValueError as exc:
                 rejected.append({"ticker": ticker, "reason": "pre_" + str(exc)})
                 continue
@@ -928,6 +944,13 @@ def run_scan() -> dict[str, Any]:
             reviewed_candidates += int(trace["ai_started"])
             early_skips += int(trace["ai_call_saved"])
             trace["result"] = "signal" if len(published) > published_start else "early_skip" if trace["ai_call_saved"] else "rejected"
+            if not trace.get('target_checks') and not trace.get('target_evidence_attempted'):
+                from target_evidence import capture
+                capture(candidate, candidate['technical_direction'], quote[0] if quote else None,
+                        quote[1] if quote else None, 'pre_ai', 'NOT_EVALUATED', None,
+                        candidate.get('single_target_source') or dict(atr=candidate.get('atr'),
+                            zones=candidate.get('price_zones', []), data_as_of=candidate.get('price_as_of')),
+                        cfg, decided_at=None, rejection=trace['reject_reason'], evaluated=False)
             try:
                 final_ai.persist(trace)
             finally:
