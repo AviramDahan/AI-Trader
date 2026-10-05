@@ -1,5 +1,6 @@
 """Run inside API container via stdin. Read-only, bounded, no network or initialization."""
 import config,json,os,math
+from short_policy import fill_cash_flow
 from trading_chain_evidence import chain_evidence
 from datetime import datetime,timezone
 from database import get_db_connection
@@ -27,7 +28,8 @@ with get_db_connection() as c:
     for a in accounts:
         rows=[t for t in native if t['agent_id']==a['agent_id']]
         fs=[f for t in out['trades'] if t['id'] in {r['id'] for r in rows} for f in t['fills']]
-        flow=sum(((-1 if f['fill_type']=='entry' else 1)*f['price']*f['quantity']-f['fee']) for f in fs)
+        by_id={t['id']:t for t in rows}
+        flow=sum(fill_cash_flow(by_id[t['id']],f) for t in out['trades'] if t['id'] in by_id for f in t['fills'])
         out['account_reconciliation']={'cash_delta':a['cash']-(a['initial_cash']+(baseline or {}).get('cash_adjustment',0)+flow),
            'realized_vs_retained_trades_delta':a['realized_pnl']-sum(t['realized_pnl'] for t in rows),
            'fees_vs_retained_trades_delta':a['fees_paid']-sum(t['fees'] for t in rows)}

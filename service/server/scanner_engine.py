@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import requests
 import yfinance as yf
+import short_policy
 
 from database import begin_write_transaction, get_db_connection, using_postgres
 
@@ -359,7 +360,19 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
     news = _loads(signal.get("news_json"), []) if isinstance(signal.get("news_json"), str) else signal.get("news") or []
     titles = [str(item.get("title_he") or item.get("title") or "").strip() for item in news[:3]]
     news_text = "\n\n".join(f"• {title}" for title in titles if title) or "אין"
-    action = {"BUY": "קנייה", "SELL": "מכירה", "HOLD": "החזקה"}.get(signal["action"], signal["action"])
+    action = {"BUY": "קנייה", "SELL": "מכירה", "HOLD": "החזקה", "SHORT": "פתיחת שורט מדומה"}.get(signal["action"], signal["action"])
+    if signal['action'] == 'SHORT':
+        return '\n\n'.join(_telegram_rtl(line) for line in [
+            'AI-Trader — מסחר מדומה בלבד', f"סימול: {_telegram_ltr(str(signal['ticker'])[:32])}",
+            f"חברה: {str(signal.get('company') or '')[:100]}", f'פעולה: {action}',
+            f"כניסה מתוכננת: {signal['planned_entry']:.2f}", f"סטופ: {signal['original_stop']:.2f}",
+            f"יעד פעיל TP2 — 100%: {signal['tp2']:.2f}",
+            f"RR מתוכנן ברוטו: {(signal['planned_entry']-signal['tp2'])/(signal['original_stop']-signal['planned_entry']):.2f}R",
+            f"תוקף: {signal['valid_until']}", f'מדיניות: {short_policy.VERSION}',
+            f"זכאות הסיגנל אושרה; ביצוע דמה: {signal.get('status', 'לא זמין')}",
+            'הפוזיציה אינה פעילה לפני כניסה תקפה. אין מודל השאלת מניות או עלויות השאלה.',
+            f"ציון מודל לא־מכויל: {signal['confidence']:.0%}",
+            'סיבה:\n' + reason[:450], 'חדשות רלוונטיות:\n' + news_text[:450]])
     prices = {
         "entry": f"${float(signal['planned_entry']):.2f}",
         "stop": f"${float(signal['original_stop']):.2f}",
@@ -395,7 +408,7 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
                   market_context: dict[str, Any], scan_id: str) -> dict[str, Any]:
     """Validate and persist a strong signal. Signal creation never fills an order."""
     action = str(signal.get("action") or "").upper()
-    if action not in {"BUY", "SELL", "HOLD"}:
+    if action not in {"BUY", "SELL", "HOLD", "SHORT"}:
         raise ValueError("Invalid signal action")
     entry = float(signal["entry"])
     stop = float(signal["stop_loss"])
@@ -403,7 +416,7 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
         raise ValueError("Invalid signal prices")
     if action == "BUY" and stop >= entry:
         raise ValueError("Long stop must be below entry")
-    if action == "SELL" and stop <= entry:
+    if action in {"SELL", "SHORT"} and stop <= entry:
         raise ValueError("Bearish stop must be above entry")
     risk = abs(entry - stop)
     direction = 1 if action == "BUY" else -1
@@ -413,6 +426,13 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
     cfg = lifecycle_settings()
     created = now_z()
     plan = signal.get("target_plan")
+    short = action == 'SHORT'
+    if short:
+        if not short_policy.enabled() or cfg['active_strategy'] != 'single':
+            raise ValueError('new_short_disabled')
+        short_policy.validate(plan, entry, stop)
+        if parse_time(plan['decided_at']) > parse_time(created):
+            raise ValueError('future_short_decision')
     if plan:
         from scanner_targets import validate_plan
         plan = validate_plan(plan, entry, stop, action)
@@ -464,7 +484,7 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
     if signal.get("quote_at"):
         store_quote(cur, signal["ticker"], entry, signal["quote_at"], "Yahoo 1m")
     status = "HOLD"
-    if action == "BUY":
+    if action in {"BUY", "SHORT"}:
         cur.execute("""SELECT 1 FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
                        WHERE s.ticker=? AND o.purpose='entry' AND o.status IN ('pending','recovery_uncertain')""", (signal["ticker"],))
         duplicate_order = bool(cur.fetchone())
@@ -488,8 +508,8 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
             status = "RISK_BLOCKED"
         elif quantity > 0:
             key = f"signal:{signal_id}:entry"
-            values = (signal_id, key, "entry", "buy", cfg["entry_order_type"], entry, quantity, "pending", valid_until, created, created)
-            if v2:
+            values = (signal_id, key, "entry", "sell" if short else "buy", cfg["entry_order_type"], entry, quantity, "pending", valid_until, created, created)
+            if v2 or short:
                 cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at,plan_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                             values + (_json({'target_plan': plan, 'execution_settings': cfg}),))
             else:
@@ -497,7 +517,7 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
                 cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", values)
             status = "PENDING_ENTRY"
     elif action == "SELL":
-        cur.execute("SELECT id,remaining_quantity FROM scanner_trades WHERE ticker=? AND status='open' AND is_shadow=0 ORDER BY id LIMIT 1",
+        cur.execute("SELECT id,remaining_quantity FROM scanner_trades WHERE ticker=? AND status='open' AND is_shadow=0 AND side IN ('long','BUY') ORDER BY id LIMIT 1",
                     (signal["ticker"],))
         trade = cur.fetchone()
         if trade:
@@ -615,6 +635,8 @@ def _fill_message(trade: dict[str, Any], event: str, quantity: float, remaining:
              f"יתרה מהפוזיציה המקורית: {_action_percent(remaining, original)}"]
     if net is not None:
         lines.append(f"תשואה סופית נטו על הפוזיציה: {_action_percent(net, entry * original, signed=True)}")
+    if trade.get('side') == 'short':
+        lines.insert(3, 'כיוון: Short — ירידת מחיר מועילה לפוזיציה; תוצאת המחיר לפני עמלות ועלויות השאלה שאינן מדומות.')
     if trade.get("legacy_position_id"):
         lines.append("עסקת Legacy בניהול מכאן והלאה; עלויות הכניסה ההיסטוריות אינן מאומתות. אינה נכללת בסטטיסטיקה המאומתת.")
     return "\n\n".join(lines)
@@ -627,7 +649,7 @@ def _insert_fill(cur, trade: dict[str, Any], fill_type: str, target_index: int |
     if cur.fetchone():
         return 0.0, 0.0
     fee = _commission(quantity, settings)
-    gross = (price - float(trade["entry_price"])) * quantity
+    gross = short_policy.direction(trade) * (price - float(trade["entry_price"])) * quantity
     cur.execute("""INSERT INTO scanner_fills(trade_id,order_id,event_key,fill_type,target_index,price,quantity,gross_pnl,fee,slippage,bar_at,created_at)
                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (trade["id"], trade.get("order_id"), event_key, fill_type, target_index, price, quantity, gross, fee, 0, bar_at, now_z()))
@@ -650,7 +672,7 @@ def _close_quantity(cur, trade: dict[str, Any], quantity: float, price: float, f
         outcome = _outcome(realized - fees, settings["breakeven_threshold"])
     cur.execute("UPDATE scanner_trades SET remaining_quantity=?,realized_pnl=?,fees=?,status=?,closed_at=?,outcome=?,last_price=?,last_bar_at=?,unrealized_pnl=? WHERE id=?",
                 (remaining, realized, fees, status, closed, outcome, price, bar_at,
-                 (price - float(trade["entry_price"])) * remaining, trade["id"]))
+                 short_policy.direction(trade) * (price - float(trade["entry_price"])) * remaining, trade["id"]))
     trade.update(remaining_quantity=remaining, realized_pnl=realized, fees=fees, status=status,
                  closed_at=closed, outcome=outcome, last_price=price, last_bar_at=bar_at)
     if not int(trade["is_shadow"]):
@@ -663,7 +685,7 @@ def _close_quantity(cur, trade: dict[str, Any], quantity: float, price: float, f
                         (remaining, price, trade["legacy_position_id"], trade["agent_id"]))
         else:
             cur.execute("UPDATE scanner_accounts SET cash=cash+?,realized_pnl=realized_pnl+?,fees_paid=fees_paid+?,updated_at=? WHERE agent_id=?",
-                        (price * quantity - fee, gross, fee, now_z(), trade["agent_id"]))
+                        (short_policy.exit_value(trade, price) * quantity - fee, gross, fee, now_z(), trade["agent_id"]))
         label = {"tp": f"מימוש TP{target_index}", "stop": "יציאה בסטופ", "sell": "סגירה בעקבות SELL"}[fill_type]
         enqueue_telegram(cur, f"fill:{trade['id']}:{bar_at}:{fill_type}:{target_index or 0}", fill_type,
                          _fill_message(trade, label, quantity, remaining, price,
@@ -705,6 +727,21 @@ def _process_trade_bar(cur, trade: dict[str, Any], bar: dict[str, Any]) -> None:
     if remaining <= 0:
         return
     slip = settings["slippage_bps"] / 10000
+    if trade.get('side') == 'short':
+        # SHORT is single/TP2 only. Stop wins ambiguous candles; gap stops are
+        # not guaranteed prices. TP is a BUY LIMIT and may not exceed its limit.
+        target = float(trade['tp2'])
+        if bar['open'] >= stop:
+            _close_quantity(cur, trade, remaining, bar['open'] * (1 + slip), 'stop', None, bar['at'], settings)
+        elif bar['high'] >= stop:
+            _close_quantity(cur, trade, remaining, stop * (1 + slip), 'stop', None, bar['at'], settings)
+        elif bar['low'] <= target:
+            price = min(target, min(bar['open'], target) * (1 + slip))
+            _close_quantity(cur, trade, remaining, price, 'tp', 2, bar['at'], settings)
+        else:
+            cur.execute('UPDATE scanner_trades SET unrealized_pnl=?,last_price=?,last_bar_at=? WHERE id=?',
+                        ((float(trade['entry_price']) - bar['close']) * remaining, bar['close'], bar['at'], trade['id']))
+        return
     if bar["open"] <= stop:
         _close_quantity(cur, trade, remaining, max(.01, bar["open"] * (1 - slip)), "stop", None, bar["at"], settings)
         return
@@ -753,6 +790,25 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
     contract = _loads(order.get('plan_json'), {})
     target_plan = _loads(signal.get('technical_json'), {}).get('target_plan')
     v2 = is_v2(target_plan) or is_v2(contract.get('target_plan'))
+    short = signal['action'] == 'SHORT' or short_policy.is_short(contract.get('target_plan'))
+    if order['side'] == 'sell' and not short:
+        cur.execute("UPDATE scanner_orders SET status='invalid',updated_at=? WHERE id=?", (now_z(), order['id']))
+        return
+    if short:
+        try:
+            if (contract.get('target_plan') != target_plan or order['side'] != 'sell' or
+                    contract.get('execution_settings', {}).get('active_strategy') != 'single' or
+                    order['limit_price'] != target_plan['entry'] or
+                    [signal[f'tp{i}'] for i in (1, 2, 3)] != target_plan['targets'] or
+                    [signal[f'tp{i}_pct'] for i in (1, 2, 3)] != target_plan['fractions']):
+                raise ValueError('short_order_mismatch')
+            short_policy.validate(target_plan, signal['planned_entry'], signal['original_stop'], signal['action'])
+            short_policy.validate_fill(target_plan, fill_price)
+            cfg = contract['execution_settings']
+        except (ValueError, KeyError, TypeError):
+            cur.execute("UPDATE scanner_orders SET status='invalid',updated_at=? WHERE id=?", (now_z(), order['id']))
+            cur.execute("UPDATE scanner_signals SET status='ENTRY_POLICY_REJECTED',updated_at=? WHERE id=?", (now_z(), signal['id']))
+            return
     if v2:
         try:
             if contract.get('target_plan') != target_plan or contract.get('execution_settings', {}).get('active_strategy') != 'single':
@@ -772,34 +828,44 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
     fee = _commission(qty, cfg)
     cur.execute("SELECT cash FROM scanner_accounts WHERE agent_id=?", (signal["agent_id"],))
     account = cur.fetchone()
+    if short:
+        # A favourable SELL gap can increase collateral; it cannot consume
+        # cash reserved by another order/uncertainty hold or bypass risk limits.
+        other = cur.execute("SELECT COALESCE(sum(limit_price*quantity),0) n FROM scanner_orders WHERE purpose='entry' AND status IN ('pending','recovery_uncertain') AND id<>?", (order['id'],)).fetchone()['n']
+        exposure = cur.execute("SELECT COALESCE(sum(remaining_quantity*COALESCE(last_price,entry_price)),0) n FROM scanner_trades WHERE status='open' AND is_shadow=0").fetchone()['n']
+        if (not account or account['cash'] - other < fill_price * qty + fee or
+                fill_price * qty > cfg['max_symbol_exposure'] or exposure + other + fill_price * qty > cfg['max_total_exposure']):
+            cur.execute("UPDATE scanner_orders SET status='risk_rejected',updated_at=? WHERE id=?", (now_z(), order['id']))
+            cur.execute("UPDATE scanner_signals SET status='RISK_BLOCKED',updated_at=? WHERE id=?", (now_z(), signal['id']))
+            return
     if not account or float(account["cash"]) < fill_price * qty + fee:
         cur.execute("UPDATE scanner_orders SET status='risk_rejected',updated_at=? WHERE id=?", (now_z(), order["id"]))
         cur.execute("UPDATE scanner_signals SET status='RISK_BLOCKED',updated_at=? WHERE id=?", (now_z(), signal["id"]))
         return
-    original_r = fill_price - float(signal["original_stop"])
+    original_r = (float(signal["original_stop"]) - fill_price) if short else (fill_price - float(signal["original_stop"]))
     if original_r <= 0:
         cur.execute("UPDATE scanner_orders SET status='invalid',updated_at=? WHERE id=?", (now_z(), order["id"]))
         return
     active = cfg["active_strategy"]
     targets = ([target_plan['active_target'], None, None] if v2 else
                [float(signal[f"tp{i}"]) for i in (1, 2, 3)] if target_plan else [fill_price + i*original_r for i in (1, 2, 3)])
-    if not v2 and not fill_price < targets[0] < targets[1] < targets[2]:
+    if not v2 and not short and not fill_price < targets[0] < targets[1] < targets[2]:
         cur.execute("UPDATE scanner_orders SET status='invalid',updated_at=? WHERE id=?", (now_z(), order["id"]))
         return
-    if target_plan and not v2:
+    if target_plan and not v2 and not short:
         actual_rr = [(target-fill_price)/original_r for target in targets]
         weighted = sum(actual_rr[i-1]*float(signal[f"tp{i}_pct"]) for i in (1,2,3))
         if actual_rr[0] < 1 or actual_rr[1] < target_plan["minimum_rr"] or weighted < target_plan["minimum_rr"]:
             cur.execute("UPDATE scanner_orders SET status='risk_rejected',updated_at=? WHERE id=?", (now_z(), order["id"]))
             cur.execute("UPDATE scanner_signals SET status='RISK_BLOCKED',updated_at=? WHERE id=?", (now_z(), signal["id"]))
             return
-    strategies = [('single', 0)] if v2 else [(active, 0), ("staged" if active == "single" else "single", 1)]
+    strategies = [('single', 0)] if v2 or short else [(active, 0), ("staged" if active == "single" else "single", 1)]
     for strategy, shadow in strategies:
         snapshot = dict(cfg, strategy=strategy, captured_at=bar_at, target_plan=target_plan)
         cur.execute("""INSERT INTO scanner_trades(signal_id,order_id,agent_id,ticker,company,side,strategy,is_shadow,status,
             original_quantity,remaining_quantity,entry_price,original_stop,current_stop,original_r,tp1,tp2,tp3,tp1_pct,tp2_pct,tp3_pct,
             settings_json,fees,opened_at,last_price,last_bar_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (signal["id"], order["id"], signal["agent_id"], signal["ticker"], signal["company"], "long", strategy, shadow,
+            (signal["id"], order["id"], signal["agent_id"], signal["ticker"], signal["company"], "short" if short else "long", strategy, shadow,
              "open", qty, qty, fill_price, signal["original_stop"], signal["original_stop"], original_r,
              *targets,
              signal["tp1_pct"], signal["tp2_pct"], signal["tp3_pct"], _json(snapshot), fee, bar_at, fill_price, bar_at))
@@ -819,7 +885,7 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
         cur.execute("INSERT INTO scanner_news_schedule(ticker,next_due_at,status) VALUES(?,?,'due')", (signal["ticker"], now_z()))
     trade_stub = dict(signal, entry_price=fill_price)
     message = "\n\n".join(["AI-Trader — מסחר מדומה בלבד", "אירוע: כניסה בוצעה",
-                              f"סימול: {signal['ticker']}", "פוזיציה נפתחה: 100%",
+                              f"סימול: {signal['ticker']}" + ('\nכיוון: Short' if short else ''), "פוזיציה נפתחה: 100%",
                               f"סטופ ביחס לכניסה: {_action_percent(float(signal['original_stop']) - fill_price, fill_price, signed=True)}",
                               f"אסטרטגיית יציאה פעילה: {'יעד יחיד' if active == 'single' else 'מימוש מדורג'}"])
     enqueue_telegram(cur, f"entry:{signal['id']}", "entry", message)
@@ -857,9 +923,9 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
     # advance the shared ticker cursor past data that must be reconsidered.
     from single_target_policy import is_v2
     if bar_at + timedelta(minutes=5) > parse_time(now_z()):
-        has_v2 = any(is_v2(_loads(o.get('plan_json'), {}).get('target_plan')) for o in orders)
+        has_v2 = any(is_v2(_loads(o.get('plan_json'), {}).get('target_plan')) or short_policy.is_short(_loads(o.get('plan_json'), {}).get('target_plan')) for o in orders)
         cur.execute("SELECT settings_json FROM scanner_trades WHERE ticker=? AND status='open'", (ticker,))
-        has_v2 = has_v2 or any(is_v2(_loads(r['settings_json'], {}).get('target_plan')) for r in cur.fetchall())
+        has_v2 = has_v2 or any(is_v2(_loads(r['settings_json'], {}).get('target_plan')) or short_policy.is_short(_loads(r['settings_json'], {}).get('target_plan')) for r in cur.fetchall())
         if has_v2:
             conn.rollback(); conn.close()
             return
@@ -884,14 +950,18 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
             continue
         execution = _loads(order.get('plan_json'), {}).get('execution_settings') or lifecycle_settings()
         slip = execution["slippage_bps"] / 10000
-        if order["purpose"] == "entry" and bar["low"] <= float(order["limit_price"]):
+        if order['purpose'] == 'entry' and order['side'] == 'sell' and bar['high'] >= float(order['limit_price']):
+            fill = max(float(order['limit_price']), bar['open'] * (1 - slip))
+            _create_trade_rows(cur, order, fill, bar['at'])
+            entered_ids.add(int(order['signal_id']))
+        elif order["purpose"] == "entry" and order['side'] == 'buy' and bar["low"] <= float(order["limit_price"]):
             raw = min(bar["open"], float(order["limit_price"]))
             fill = min(float(order["limit_price"]), raw * (1 + slip))
             _create_trade_rows(cur, order, fill, bar["at"])
             entered_ids.add(int(order["signal_id"]))
         elif order["purpose"] == "close_long" and bar["high"] >= float(order["limit_price"]):
             fill = max(float(order["limit_price"]), bar["open"] * (1 - slip))
-            cur.execute("SELECT * FROM scanner_trades WHERE ticker=? AND status='open' ORDER BY is_shadow,id", (ticker,))
+            cur.execute("SELECT * FROM scanner_trades WHERE ticker=? AND status='open' AND side IN ('long','BUY') ORDER BY is_shadow,id", (ticker,))
             for trade_row in cur.fetchall():
                 trade = dict(trade_row)
                 _close_quantity(cur, trade, float(trade["remaining_quantity"]), fill, "sell", None, bar["at"], _loads(trade["settings_json"], lifecycle_settings()))
@@ -904,10 +974,12 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
         if int(trade["signal_id"]) in entered_ids:
             # Intrabar order is unknown: permit adverse stop touch, never a
             # same-candle profit assumption after a limit entry.
-            if bar["low"] <= float(trade["current_stop"]):
+            short = trade.get('side') == 'short'
+            stop_touched = bar['high'] >= float(trade['current_stop']) if short else bar['low'] <= float(trade['current_stop'])
+            if stop_touched:
                 cfg = _loads(trade["settings_json"], lifecycle_settings())
                 _close_quantity(cur, trade, float(trade["remaining_quantity"]),
-                                float(trade["current_stop"]) * (1 - cfg["slippage_bps"] / 10000),
+                                float(trade["current_stop"]) * (1 + (1 if short else -1) * cfg["slippage_bps"] / 10000),
                                 "stop", None, bar["at"], cfg)
         elif parse_time(bar["at"]) > parse_time(trade.get("last_bar_at")):
             _process_trade_bar(cur, trade, bar)
@@ -952,7 +1024,7 @@ def _pending_recovery_check(ticker, bars, observed_at):
                     if bar is None:
                         uncertain = True
                         break
-                    touched = (bar['low'] <= float(order['limit_price']) if order['purpose']=='entry'
+                    touched = (bar['low'] <= float(order['limit_price']) if order['side']=='buy'
                                else bar['high'] >= float(order['limit_price']))
                     if touched:
                         uncertain = at < created or at+timedelta(minutes=5) > expires
@@ -1587,6 +1659,12 @@ def dashboard_payload() -> dict[str, Any]:
                        signal_eligibility='QUALIFIED', execution_status=row['status'],
                        position_activated=row.get('actual_entry') is not None,
                        shadow_comparison=plan['shadow_comparison'])
+        elif short_policy.is_short(plan):
+            operational_strategy = 'single'
+            row.update(policy_version=plan['policy_version'], active_target=plan['active_target'],
+                       signal_eligibility='QUALIFIED', execution_status=row['status'],
+                       position_activated=row.get('actual_entry') is not None,
+                       shadow_comparison=plan['shadow_comparison'])
         row["operational_strategy"] = operational_strategy
         if is_v2(plan):
             row['operational_tp1_pct'], row['operational_tp2_pct'], row['operational_tp3_pct'] = 1., 0., 0.
@@ -1613,10 +1691,10 @@ def dashboard_payload() -> dict[str, Any]:
         ).total_seconds() > 900
         from single_target_policy import is_v2
         plan = trade['settings'].get('target_plan')
-        if is_v2(plan):
+        if is_v2(plan) or short_policy.is_short(plan):
             trade.update(policy_version=plan['policy_version'], active_target=plan['active_target'],
                          shadow_comparison=plan['shadow_comparison'])
-            trade['operational_tp1_pct'], trade['operational_tp2_pct'], trade['operational_tp3_pct'] = 1., 0., 0.
+            trade['operational_tp1_pct'], trade['operational_tp2_pct'], trade['operational_tp3_pct'] = (1., 0., 0.) if is_v2(plan) else (0., 1., 0.)
             basis = float(trade['entry_price']) * float(trade['original_quantity'])
             risk_basis = float(trade['original_r']) * float(trade['original_quantity'])
             realized_net = float(trade['realized_pnl']) - float(trade['fees'])
@@ -1827,7 +1905,7 @@ def lifecycle_verification(cur, signals, trades, account):
         stages["stop"] += any(f["fill_type"] == "stop" for f in exits)
         stages["closed"] += trade["status"] == "closed"
         expected_cash -= sum(f["quantity"] * f["price"] + f["fee"] for f in entries)
-        expected_cash += sum(f["quantity"] * f["price"] - f["fee"] for f in exits)
+        expected_cash += sum(short_policy.fill_cash_flow(trade, f) for f in exits)
         if not math.isclose(sum(f["quantity"] for f in entries) - sum(f["quantity"] for f in exits),
                             trade["remaining_quantity"], abs_tol=1e-5):
             errors.append(f"trade:{trade['id']}:quantity_mismatch")

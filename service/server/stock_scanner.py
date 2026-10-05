@@ -605,24 +605,32 @@ def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list
     except ValueError as exc:
         candidate["target_rejection"] = str(exc)
         return None
+    import short_policy
+    execution_action = short_policy.scanner_action(direction, ticker)
+    if execution_action == 'SHORT':
+        try:
+            plan = short_policy.wrap(plan, candidate['price_as_of'], datetime.now(timezone.utc).isoformat())
+        except (ValueError, KeyError) as exc:
+            candidate['target_rejection'] = str(exc)
+            return None
     from single_target_policy import is_v2
     index = 0 if is_v2(plan) else 1
     take_profit, stop_loss, risk_reward = plan["targets"][index], plan["stop"], plan["rr"][index]
     if risk_reward + .001 < cfg["min_risk_reward"]:
         return None
     timestamp = datetime.now(timezone.utc).isoformat()
-    content = format_signal(candidate, decision, news, price, take_profit, stop_loss, risk_reward, timestamp)
+    content = format_signal(candidate, dict(decision, action=execution_action), news, price, take_profit, stop_loss, risk_reward, timestamp)
     result = api("POST", "/signals/strategy", json={
-        "market": "us-stock", "title": f"{direction} {ticker} | Paper signal", "content": content,
-        "symbols": ticker, "tags": f"stock-scanner,paper-only,{direction.lower()}-signal",
+        "market": "us-stock", "title": f"{execution_action} {ticker} | Paper signal", "content": content,
+        "symbols": ticker, "tags": f"stock-scanner,paper-only,{execution_action.lower()}-signal",
     })
-    return {"ticker": ticker, "company": candidate["company"], "action": direction,
+    return {"ticker": ticker, "company": candidate["company"], "action": execution_action,
             "entry": price, "take_profit": take_profit, "stop_loss": stop_loss,
             "risk_reward": risk_reward, "target_plan": plan, "confidence": decision["confidence"],
             "time_horizon": decision["time_horizon"], "reason": decision["reason"],
             "relevant_news": news[:3], "timestamp": timestamp, "quote_at": quote_at,
             "signal_id": result.get("signal_id"), "paper_quantity": 0,
-            "paper_execution": "pending_entry" if direction == "BUY" else "signal_or_pending_close",
+            "paper_execution": "pending_entry" if execution_action in {'BUY','SHORT'} else "signal_or_pending_close",
             "message_type": "strategy"}
 
 

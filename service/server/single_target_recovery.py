@@ -8,6 +8,9 @@ def plan(row, field):
 
 
 def version(tables):
+    from short_policy import in_snapshot
+    if in_snapshot(tables):
+        return 4
     return 3 if (any(is_v2(plan(r, 'technical_json')) for r in tables['scanner_signals']) or
                  any(is_v2(plan(r, 'plan_json')) for r in tables['scanner_orders']) or
                  any(is_v2(plan(r, 'settings_json')) for r in tables['scanner_trades'])) else 2
@@ -15,7 +18,7 @@ def version(tables):
 
 def validate_snapshot(data):
     tables = data['tables']
-    if version(tables) == 3 and data['version'] != 3:
+    if version(tables) == 3 and data['version'] not in (3,4):
         raise ValueError('single_policy_requires_format3')
     signals = {s['id']: s for s in tables['scanner_signals']}
     orders = {o['id']: o for o in tables['scanner_orders']}

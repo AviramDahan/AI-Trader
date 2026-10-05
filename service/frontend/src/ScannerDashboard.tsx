@@ -31,11 +31,11 @@ type Dashboard = {
 
 const fmtPrice = (value: any) => value != null && value !== '' && Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '—'
 const fmtPct = (value: any) => Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : '—'
-const fmtMove = (entry: any, target: any) => {
+const fmtMove = (entry: any, target: any, short = false) => {
   const from = Number(entry)
   const to = Number(target)
   if (!Number.isFinite(from) || !Number.isFinite(to) || from <= 0) return '—'
-  const change = (to / from - 1) * 100
+  const change = (short ? -1 : 1) * (to / from - 1) * 100
   return `${change >= 0 ? '+' : ''}${change.toFixed(1)}%`
 }
 
@@ -424,7 +424,7 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
   return <details className="scanner-signal-card signal-focused" id={`signal-${signal.id}`} onToggle={event => setOpened(event.currentTarget.open)}>
     <summary className="scanner-signal-summary">
       <span className="scanner-signal-identity"><b className="scanner-ticker" dir="ltr">{signal.ticker}</b><span>{signal.company}</span></span>
-      <span className="scanner-signal-summary-meta"><span className={`scanner-action ${String(signal.action).toLowerCase()}`}>{he ? ({BUY:'קנייה',SELL:'מכירה',HOLD:'המתנה'} as Record<string,string>)[signal.action] || signal.action : signal.action}</span><span className="scanner-signal-chevron" aria-hidden="true">⌄</span></span>
+      <span className="scanner-signal-summary-meta"><span className={`scanner-action ${String(signal.action).toLowerCase()}`}>{he ? ({BUY:'קנייה',SELL:'מכירה',HOLD:'המתנה',SHORT:'שורט מדומה'} as Record<string,string>)[signal.action] || signal.action : signal.action}</span><span className="scanner-signal-chevron" aria-hidden="true">⌄</span></span>
     </summary>
     <div className="scanner-signal-body">
       <em className="signal-status-label">{statusLabels[signal.status] || signal.status}</em>
@@ -469,10 +469,11 @@ function TradeCard({ trade, signal, schedules, he }: { trade: Record<string, any
   return <details className="scanner-trade-card signal-focused" id={`trade-${trade.id}`} onToggle={event => setOpened(event.currentTarget.open)}>
     <summary className="scanner-signal-summary">
       <span className="scanner-signal-identity"><b className="scanner-ticker" dir="ltr">{trade.ticker}</b><span>{trade.company}</span></span>
-      <span className="scanner-signal-summary-meta">{trade.status === 'open' && <span className={`position-return ${move == null || Math.abs(move) < .005 ? 'neutral' : move > 0 ? 'positive' : 'negative'}`} title={he ? 'שינוי במחיר מהכניסה בפועל; לפני עמלות, לא תשואה כוללת לאחר מימושים' : 'Price change from actual entry; before fees, not total return after partial exits'}><b dir="ltr">{move == null ? '—' : `${move > 0 ? '+' : ''}${move.toFixed(2)}%`}</b><small>{he ? 'מהכניסה' : 'from entry'}{trade.price_stale ? (he ? ' · ישן' : ' · stale') : ''}</small></span>}{!!trade.legacy_position_id && <small className="signal-status-label">Legacy</small>}<span className="scanner-chip">{trade.status === 'open' ? (he ? 'פתוחה' : 'Open') : (he ? 'סגורה' : 'Closed')}</span><span className="scanner-signal-chevron" aria-hidden="true">⌄</span></span>
+      <span className="scanner-signal-summary-meta">{trade.status === 'open' && <span className={`position-return ${move == null || Math.abs(move) < .005 ? 'neutral' : move > 0 ? 'positive' : 'negative'}`} title={trade.side === 'short' ? (he ? 'תוצאת Short ברוטו מהכניסה; לפני עמלות ועלויות השאלה שאינן מדומות' : 'Gross Short result from entry; before commissions and unmodelled borrow costs') : (he ? 'שינוי במחיר מהכניסה בפועל; לפני עמלות, לא תשואה כוללת לאחר מימושים' : 'Price change from actual entry; before fees, not total return after partial exits')}><b dir="ltr">{move == null ? '—' : `${move > 0 ? '+' : ''}${move.toFixed(2)}%`}</b><small>{he ? 'מהכניסה' : 'from entry'}{trade.price_stale ? (he ? ' · ישן' : ' · stale') : ''}</small></span>}{!!trade.legacy_position_id && <small className="signal-status-label">Legacy</small>}<span className="scanner-chip">{trade.status === 'open' ? (he ? 'פתוחה' : 'Open') : (he ? 'סגורה' : 'Closed')}</span><span className="scanner-signal-chevron" aria-hidden="true">⌄</span></span>
     </summary>
     <div className="scanner-signal-body">
     {!!trade.legacy_position_id && <p className="signal-price-time">{he ? 'Legacy · היסטוריה לא מאומתת; לא נכללת בתוצאות המאומתות.' : 'Legacy · Unverified history; excluded from verified results.'}</p>}
+    {trade.side === 'short' && <p>{he ? 'Short מדומה · ירידת מחיר מועילה לפוזיציה. אין סימולציית השאלה או עלויות השאלה.' : 'Paper Short · falling prices benefit the position. Borrow availability/costs are not simulated.'}</p>}
     {signal && <details className="signal-secondary" id={`signal-${signal.id}`}><summary>{he ? 'ניתוח הסיגנל המקורי' : 'Original signal analysis'}</summary><p>{(he && signal.reason_he) || signal.reason}</p><p>{he ? 'כניסה מתוכננת' : 'Planned entry'}: {fmtPrice(signal.planned_entry)}</p></details>}
     <div className="signal-summary-levels">
       <span><small>{he ? 'מחיר אחרון' : 'Last price'}{trade.price_stale ? (he ? ' · ישן' : ' · stale') : ''}</small><b dir="ltr">{fmtPrice(currentPrice)}</b></span>
@@ -505,7 +506,7 @@ function TargetRows({ record, entry, strategy, he, indices = [1,2,3] }: { record
         ? (he ? 'יעד פעיל — סגירה מלאה' : 'Active target — full exit')
         : (he ? 'יעד פעיל — מימוש מדורג' : 'Active target — staged exit')
       : (he ? 'Shadow בלבד — אין מימוש בפועל' : 'Shadow only — no actual exit')
-    return <span key={index}>{record.policy_version ? (he ? 'יעד פעיל 100%' : 'Active target 100%') : `TP${index}`}: <b>{fmtPrice(record[`tp${index}`])}</b> · {he ? 'תשואה ברוטו מהכניסה' : 'Gross return from entry'} {fmtMove(entry, record[`tp${index}`])} · {execution}{Number.isFinite(rr) && <> · {rr.toFixed(2)}R</>}</span>
+    return <span key={index}>{record.policy_version ? (he ? 'יעד פעיל 100%' : 'Active target 100%') : `TP${index}`}: <b>{fmtPrice(record[`tp${index}`])}</b> · {he ? 'תשואה ברוטו מהכניסה' : 'Gross return from entry'} {fmtMove(entry, record[`tp${index}`], record.side === 'short' || record.action === 'SHORT')} · {execution}{Number.isFinite(rr) && <> · {rr.toFixed(2)}R</>}</span>
   })}</div>
 }
 
@@ -555,6 +556,12 @@ function LevelChart({ record, kind, he, initiallyOpen = false }: { record: Recor
 }
 
 function TargetPlanDetails({ plan, he }: { plan: Record<string, any> | undefined, he: boolean }) {
+  if (plan?.policy_version === 'short_structure_v1') return <details><summary>{he ? 'תוכנית Short — שלושה אזורי תמיכה' : 'Short plan — three support zones'}</summary>
+    <p>{plan.policy_version} · SINGLE · TP2 100% · {he ? 'RR מתוכנן ברוטו' : 'Planned gross RR'}: {Number(plan.rr[1]).toFixed(2)}R</p>
+    <p>{he ? 'נתוני מקור' : 'Source data'}: {plan.source_data_at}</p>
+    {plan.zones.map((zone: any, i: number) => <p key={i}>TP{i+1}: {he ? 'תמיכה מאומתת' : 'Confirmed support'} {fmtPrice(zone.low)}–{fmtPrice(zone.high)}</p>)}
+    <p>{he ? 'סטופ מעל מבנה ההתנגדות. TP1 ו־TP3 הם רמות מבנה, ללא מימושים במסלול SINGLE.' : 'Stop above resistance structure. TP1/TP3 are reference levels, not SINGLE exits.'}</p>
+  </details>
   if (plan?.policy_version === 'single_target_v2') return <p>{plan.policy_version} · SINGLE · {he ? 'נתוני מקור' : 'Source data'}: {plan.source_data_at} · {he ? 'יעד לפני ההתנגדות הקרובה; RR מתוכנן ברוטו' : 'Target before nearest resistance; planned gross RR'}: {Number(plan.rr[0]).toFixed(2)}R</p>
   if (!plan) return <details><summary>{he ? 'כיצד חושבו היעדים?' : 'How were targets calculated?'}</summary><p>{he ? 'תוכנית Legacy או תוכנית קודמת ללא ראיות מבנה שמורות.' : 'Legacy or earlier plan without stored structural evidence.'}</p></details>
   const objectives = Array.isArray(plan.objectives) ? plan.objectives : Array.isArray(plan.zones) ? plan.zones.map((zone: any) => ({ source: 'confirmed_daily_resistance', zone })) : []

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import recovery_holds
 import single_target_recovery
+import short_policy
 from datetime import datetime, timezone
 
 TABLES = ("agents", "scanner_accounts", "positions", "signals", "scanner_signals",
@@ -87,7 +88,7 @@ def export_data(path):
 
 
 def validate(data):
-    if data.get("version") not in (1,2,3) or set(data["tables"]) != set(TABLES):
+    if data.get("version") not in (1,2,3,4) or set(data["tables"]) != set(TABLES):
         raise ValueError("unsupported_snapshot_schema")
     if "snapshot_id" in data and data["snapshot_id"] != digest({k:v for k,v in data.items() if k != "snapshot_id"}):
         raise ValueError("snapshot_checksum_mismatch")
@@ -104,6 +105,7 @@ def validate(data):
         raise ValueError("active_order_requires_manual_review")
     recovery_holds.validate(data)
     single_target_recovery.validate_snapshot(data)
+    short_policy.validate_snapshot(data)
     for trade in tables["scanner_trades"]:
         for field in ("original_quantity", "remaining_quantity", "entry_price", "original_r", "current_stop"):
             if not math.isfinite(trade[field]) or trade[field] <= 0:
@@ -115,13 +117,13 @@ def validate(data):
         if is_v2(single_target_recovery.plan(trade, 'settings_json')):
             levels = [trade['tp1']]
         percentages = [trade[f'tp{i}_pct'] for i in (1,2,3)]
-        if not all(math.isfinite(v) and v > 0 for v in levels) or levels != sorted(levels):
+        if not all(math.isfinite(v) and v > 0 for v in levels) or levels != sorted(levels, reverse=trade['side']=='short'):
             raise ValueError("invalid_preserved_targets")
         if not all(math.isfinite(v) and 0 <= v <= 1 for v in percentages) or not math.isclose(sum(percentages),1,abs_tol=1e-5):
             raise ValueError("invalid_preserved_target_fractions")
         if trade['strategy'] not in {'single','staged'}:
             raise ValueError("unsupported_exit_strategy")
-        if trade["side"] != "long" and trade["side"] != "BUY":
+        if trade['side'] not in {'long','BUY','short'}:
             raise ValueError("unsupported_short_position")
         json.loads(trade["settings_json"])
         fills = [f for f in tables["scanner_fills"] if f["trade_id"] == trade["id"]]
@@ -143,14 +145,14 @@ def import_data(data, url, *, allow_defaults=False, scanner_token=None):
     from psycopg.rows import dict_row
     from cloud_runtime import ROLE_KEYS
     validate(data)
-    if data['version'] not in (2,3):
+    if data['version'] not in (2,3,4):
         raise ValueError('legacy_hold_coverage_unknown_restore_refused')
     with psycopg.connect(url, row_factory=dict_row) as conn:
         conn.execute("SET LOCAL lock_timeout='5s'")
         # v4 adds only isolated news-evidence tables. Portfolio schema and
         # validation are identical; these new tables are NOT snapshot contents.
         schema = conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version']
-        if schema not in (2,3,4,5,6) or (data['version'] == 3 and schema < 6):
+        if schema not in (2,3,4,5,6) or (data['version'] in (3,4) and schema < 6):
             raise ValueError('unsupported_destination_schema')
         for key in ROLE_KEYS.values():
             if not conn.execute("SELECT pg_try_advisory_xact_lock(719322,%s) AS ok", (key,)).fetchone()["ok"]:
@@ -184,7 +186,8 @@ def import_data(data, url, *, allow_defaults=False, scanner_token=None):
         # Carry current cash unchanged. Record the omitted history as an explicit
         # opening audit balance, NOT fabricated fills or closed trade performance.
         main_ids = {t["id"] for t in data["tables"]["scanner_trades"] if not t["is_shadow"] and not t.get("legacy_position_id")}
-        cash_flow = sum(((-1 if f["fill_type"] == "entry" else 1)*f["quantity"]*f["price"]-f["fee"])
+        trade_by_id = {t['id']:t for t in data['tables']['scanner_trades']}
+        cash_flow = sum(short_policy.fill_cash_flow(trade_by_id[f['trade_id']], f)
                         for f in data["tables"]["scanner_fills"] if f["trade_id"] in main_ids and f["fill_type"] in {"entry","tp","stop","sell"})
         account = data["tables"]["scanner_accounts"][0]
         baseline = {"cash_adjustment":account["cash"]-account["initial_cash"]-cash_flow,

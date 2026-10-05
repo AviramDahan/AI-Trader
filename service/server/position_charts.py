@@ -80,7 +80,7 @@ def signal_chart_record(signal: dict, strategy: str) -> dict:
         **signal,
         "strategy": strategy,
         "entry_price": float(signal["actual_entry"] if filled else signal["planned_entry"]),
-        "entry_label": "Actual paper entry" if filled else "Planned entry (not filled)",
+        "entry_label": ("SHORT " if signal.get('action') == 'SHORT' else '') + ("Actual paper entry" if filled else "Planned entry (not filled)"),
         "entry_note": "Triangle = actual simulated fill." if filled else "Triangle = planned entry; no fill has occurred.",
         "opened_at": signal["created_at"],
         "chart_kind": "SIGNAL",
@@ -97,15 +97,16 @@ def render_position_chart(trade: dict, frame: pd.DataFrame) -> bytes:
         raise ValueError("Insufficient position chart data")
     allocations = operational_allocations(trade)
     levels = [
-        (str(trade.get("entry_label") or "Entry"), float(trade["entry_price"]), "#ffcd57", "-"),
+        (str(trade.get("entry_label") or ("SHORT entry" if trade.get('side') == 'short' else "Entry")), float(trade["entry_price"]), "#ffcd57", "-"),
         ("SL", float(trade["current_stop"]), "#ff6677", "-"),
     ]
     for index, allocation in enumerate(allocations, 1):
         active = allocation > 0
+        inactive_label = ' reference' if trade.get('side') == 'short' or trade.get('action') == 'SHORT' else ' shadow'
         target = float(trade[f"tp{index}"])
         price_move = target / float(trade["entry_price"]) - 1
         levels.append((
-            f"TP{index} ({price_move:+.1%} move, {allocation:.0%}{' active' if active else ' shadow'})",
+            f"TP{index} ({price_move:+.1%} move, {allocation:.0%}{' active' if active else inactive_label})",
             target,
             "#45d6bd",
             "-" if active else "--",
@@ -135,7 +136,7 @@ def render_position_chart(trade: dict, frame: pd.DataFrame) -> bytes:
         )
     opened = pd.Timestamp(trade.get("opened_at") or trade.get("created_at"))
     entry_index = min(range(len(frame)), key=lambda i: abs(pd.Timestamp(frame.index[i]).date() - opened.date()))
-    ax.scatter([entry_index], [float(trade["entry_price"])], marker="^", s=100, color="#ffcd57", zorder=5)
+    ax.scatter([entry_index], [float(trade["entry_price"])], marker="v" if trade.get('side') == 'short' or trade.get('action') == 'SHORT' else "^", s=100, color="#ffcd57", zorder=5)
     ticks = list(range(0, len(frame), max(1, len(frame) // 6)))
     ax.set_xticks(ticks, [pd.Timestamp(frame.index[i]).strftime("%m/%d") for i in ticks])
     ax.set_xlim(-1, len(frame) + 3)

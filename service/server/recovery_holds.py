@@ -54,9 +54,12 @@ def validate(data):
             raise ValueError('invalid_recovery_hold_identity')
         if s.get('external_signal_id') is not None and not any(r['id']==s['external_signal_id'] for r in tables['signals']):
             raise ValueError('missing_recovery_external_signal_parent')
-        if (o['purpose'],o['side']) not in {('entry','buy'),('close_long','sell')} or o['order_type']!='limit':
+        allowed = {('entry','buy'),('close_long','sell')}
+        if data.get('version') == 4:
+            allowed.add(('entry','sell'))
+        if (o['purpose'],o['side']) not in allowed or o['order_type']!='limit':
             raise ValueError('unsupported_recovery_hold_type')
-        if s['action']!=('BUY' if o['purpose']=='entry' else 'SELL'):
+        if s['action']!=('SHORT' if o['purpose']=='entry' and o['side']=='sell' else 'BUY' if o['purpose']=='entry' else 'SELL'):
             raise ValueError('recovery_hold_action_mismatch')
         if any(not isinstance(o[k],(int,float)) or not math.isfinite(o[k]) or o[k]<=0 for k in ('limit_price','quantity')):
             raise ValueError('invalid_recovery_hold_numbers')
