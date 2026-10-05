@@ -10,7 +10,7 @@ export function positionMove(trade: Row): number | null {
   const price = trade.current_price ?? trade.last_price
   const entry = trade.entry_price
   if (price == null || entry == null || !Number.isFinite(Number(price)) || !Number.isFinite(Number(entry)) || Number(price) <= 0 || Number(entry) <= 0) return null
-  return (Number(price) / Number(entry) - 1) * 100
+  return (trade.side === 'short' ? -1 : 1) * (Number(price) / Number(entry) - 1) * 100
 }
 
 export function unifiedSignals(signals: Row[], trades: Row[], active: (row: Row) => boolean) {

@@ -192,6 +192,9 @@ def structure_plan(direction, entry, atr, zones, minimum_rr):
 
 
 def validate_plan(plan, entry, stop, action):
+    import short_policy
+    if short_policy.is_short(plan) or action == 'SHORT':
+        return short_policy.validate(plan, entry, stop, action)
     from single_target_policy import is_v2, validate
     if is_v2(plan):
         return validate(plan, entry, stop, action)

@@ -97,7 +97,8 @@ def portfolio_status_message() -> str:
 
     managed = [row for row in trades if row.get("legacy_position_id") is None]
     legacy = [row for row in trades if row.get("legacy_position_id") is not None]
-    managed_value = sum(float(row["remaining_quantity"]) * float(quotes.get(row["ticker"], {}).get("price") or row["last_price"] or row["entry_price"])
+    from short_policy import exit_value, direction
+    managed_value = sum(float(row["remaining_quantity"]) * exit_value(row, float(quotes.get(row["ticker"], {}).get("price") or row["last_price"] or row["entry_price"]))
                         for row in managed)
     equity = float(account["cash"]) + managed_value
     net = equity - float(account["initial_cash"])
@@ -115,13 +116,13 @@ def portfolio_status_message() -> str:
         for number, trade in enumerate(rows, start):
             quote = quotes.get(trade["ticker"], {})
             current = float(quote.get("price") or trade.get("last_price") or trade["entry_price"])
-            change = (current / float(trade["entry_price"]) - 1) * 100
+            change = direction(trade) * (current / float(trade["entry_price"]) - 1) * 100
             target_name, target = _next_target(trade, trade["hit_indexes"])
             target_change = (target / float(trade['entry_price']) - 1) * 100
             stop_change = (float(trade['current_stop']) / float(trade['entry_price']) - 1) * 100
             lines.append(
-                f"{number}. {trade['ticker']}\n"
-                f"שינוי מהכניסה: {_ltr(_pct(change))}\n"
+                f"{number}. {trade['ticker']}{' · Short' if trade.get('side') == 'short' else ''}\n"
+                f"{'תוצאת Short ברוטו מהכניסה' if trade.get('side') == 'short' else 'שינוי מהכניסה'}: {_ltr(_pct(change))}\n"
                 f"סטופ: {_ltr(_pct(stop_change))} | {target_name}: {_ltr(_pct(target_change))}\n"
                 "היעד והסטופ באחוזים ביחס למחיר הכניסה."
             )
@@ -233,7 +234,8 @@ def signals_status_messages() -> list[str]:
         entry = float(trade['entry_price'])
         return_text = 'רווח/הפסד מהכניסה (מחיר): לא זמין'
         if observed and math.isfinite(float(observed)) and float(observed)>0 and math.isfinite(entry) and entry>0:
-            change = round((float(observed)/entry-1)*100,2)
+            from short_policy import direction
+            change = round(direction(trade)*(float(observed)/entry-1)*100,2)
             icon = '🟢' if change>0 else '🔴' if change<0 else '⚪'
             percent = f'{change:+.2f}%' if change else '0.00%'
             return_text = f'{icon} רווח/הפסד מהכניסה (מחיר): {_ltr(percent)}'
@@ -251,7 +253,7 @@ def signals_status_messages() -> list[str]:
             "\n".join((
                 _rtl(f"סימול: {_ltr(trade['ticker'])}{legacy}"),
                 _rtl(f"חברה: {_ltr(trade['company'])}"),
-                _rtl("פעולה: קנייה"),
+                _rtl("פעולה: שורט מדומה" if trade.get('side') == 'short' else "פעולה: קנייה"),
                 _rtl(f"כניסה: {_ltr(entry_text)}"),
                 _rtl(f"מחיר נוכחי: {_ltr(current_text)}"),
                 _rtl(return_text),
