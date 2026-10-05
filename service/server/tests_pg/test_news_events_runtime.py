@@ -49,6 +49,28 @@ def test_compact_health_persisted_without_per_event_history(live,monkeypatch):
         assert saved==result
 
 
+def test_four_hour_reports_do_not_delay_health_or_safety_alarms(live):
+    from news_events import watch
+    p,_,_,at,_=live  # 12:00 UTC, beginning of a four-hour bucket
+    for minute in (0, 1, 60, 180, 239, 240):
+        current=at+timedelta(minutes=minute)
+        result=watch.check(current)
+        assert result['alarms']==[]
+        with p.store.transaction() as c:
+            saved=json.loads(c.execute("SELECT value_json FROM scanner_settings WHERE key='news_canonical_health'").fetchone()['value_json'])
+            assert saved['checked_at']==current.isoformat()
+            count=c.execute("SELECT count(*) n FROM admin_alerts WHERE dedupe_key LIKE 'canonical_health:%'").fetchone()['n']
+            assert count==(2 if minute==240 else 1)
+    # An alarm just after a routine summary is NOT held until the next bucket.
+    now=at+timedelta(minutes=241)
+    with p.store.transaction() as c:
+        c.execute('INSERT INTO scanner_service_status VALUES(?,?,?,?,?)',
+                  ('monitor','error',now.isoformat(),now.isoformat(),'test-only'))
+    assert 'monitor_degraded' in watch.check(now)['alarms']
+    with p.store.transaction() as c:
+        assert c.execute("SELECT count(*) n FROM admin_alerts WHERE dedupe_key LIKE 'canonical_rollback:%'").fetchone()['n']==1
+
+
 @pytest.fixture
 def live(pg,monkeypatch):
     from database import get_db_connection
