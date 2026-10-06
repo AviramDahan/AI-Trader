@@ -219,6 +219,8 @@ def test_early_quote_skips_all_six_without_refill(pipeline):
     assert ai.call_count==0 and session.request.call_count==0
     assert [e["rank"] for e in events]==[1,2,3,4,5,6]
     assert all(e["ai_call_saved"] and e["result"]=="early_skip" for e in events)
+    assert all(e['target_checks']['pre_ai']['outcome']=='NOT_EVALUATED' for e in events)
+    assert all(e['target_checks']['pre_ai']['quote']['price'] is None for e in events)
 
 
 def test_early_cooldown(pipeline):
@@ -235,6 +237,7 @@ def test_early_targets_skip_without_ai(pipeline):
     scanner.run_scan()
     assert ai.call_count==0
     assert all(e["reject_reason"]=="pre_insufficient_confirmed_price_zones" for e in events)
+    assert all(e['target_checks']['pre_ai']['outcome']=='REJECT' for e in events)
 
 
 def test_quote_provider_error_is_early_skip(pipeline):
@@ -258,6 +261,7 @@ def test_success_preserves_max_three_and_paper_publication(pipeline):
     assert result["ai_selected_count"]==6
     assert all(c.args[1].endswith("/signals/strategy") for c in session.request.call_args_list)
     assert [e["rank"] for e in events if e["result"]=="signal"]==[1,2,3]
+    assert all(set(e['target_checks'])=={'pre_ai','post_ai'} for e in events if e['result']=='signal')
 
 
 @pytest.mark.parametrize("change", ["stale","targets","cooldown"])
