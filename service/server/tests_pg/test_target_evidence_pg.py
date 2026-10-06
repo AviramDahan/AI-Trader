@@ -66,6 +66,8 @@ def test_pg_signal_order_links_and_trading_backup_unchanged(pg,monkeypatch):
     from test_recovery_holds import initialize_empty
     import recovery_state
     from single_target_policy import build
+    # Opt in only inside this isolated test; the production creation gate stays intact.
+    monkeypatch.setenv('STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED','true')
     initialize_empty()
     zs=[dict(low=x,high=x,touches=1,pivots=[dict(price=x,date='2026-09-21',
         kind='swing_high',confirmed_at='2026-09-23T20:05:00Z')]) for x in (98,105)]
@@ -74,6 +76,11 @@ def test_pg_signal_order_links_and_trading_backup_unchanged(pg,monkeypatch):
            target_plan=p,confidence=.9,time_horizon='days',reason='synthetic',relevant_news=[])
     with patch.object(scanner_engine,'now_z',return_value='2026-09-28T14:00:00Z'):
         signal=scanner_engine.record_signal(s,{}, {}, {}, 'synthetic-evidence')
+    # Ordinary pending orders are deliberately outside active recovery snapshots.
+    # A synthetic blocked V2 order exercises the existing format-3 hold contract.
+    with database.get_db_connection() as c:
+        c.execute("UPDATE scanner_orders SET status='recovery_uncertain' WHERE signal_id=?",(signal['id'],))
+        c.execute("UPDATE scanner_signals SET status='RECOVERY_UNCERTAIN' WHERE id=?",(signal['id'],))
     before=recovery_state.export_postgres(pg)
     final_ai.persist(trace(monkeypatch))
     after=recovery_state.export_postgres(pg)
@@ -89,3 +96,4 @@ def test_pg_signal_order_links_and_trading_backup_unchanged(pg,monkeypatch):
         assert links[0]['signal_id']==signal['id']
         assert links[0]['saved_policy_version']=='single_target_v2'
         assert len(links[0]['orders'])==1
+        assert links[0]['orders'][0]['status']=='recovery_uncertain'
