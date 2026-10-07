@@ -183,6 +183,9 @@ def pipeline(monkeypatch,tmp_path):
     monkeypatch.setattr(scanner_engine, 'lifecycle_settings', lambda: {'active_strategy':'staged'})
     monkeypatch.setenv("STOCK_SCANNER_TOKEN","test-only")
     monkeypatch.setenv("STOCK_SCANNER_AI_CANDIDATE_LIMIT","6")
+    monkeypatch.setattr(scanner,'regular_session_open',lambda:True)
+    monkeypatch.setattr(scanner,'research_reference_quote',Mock(side_effect=AssertionError('Provider calls forbidden')))
+    monkeypatch.setattr(__import__('signal_projection'),'retry_pending',Mock())
     monkeypatch.setattr(scanner,"STATE_FILE",tmp_path/"state.json")
     candidates=[dict(ticker=f"T{i}",company=f"Company{i}",technical_direction="BUY",technical_score=7,
                      average_dollar_volume=1e9-i,atr=2,atr_pct=2,return_20d_pct=4,
@@ -212,12 +215,12 @@ def pipeline(monkeypatch,tmp_path):
     return candidates,quote,ai,events,session
 
 
-def test_early_quote_skips_all_six_without_refill(pipeline):
+def test_early_quote_skips_bounded_pool_without_ai(pipeline):
     _,quote,ai,events,session=pipeline
     quote.return_value=None
     scanner.run_scan()
     assert ai.call_count==0 and session.request.call_count==0
-    assert [e["rank"] for e in events]==[1,2,3,4,5,6]
+    assert [e["rank"] for e in events]==[1,2,3,4,5,6,7]
     assert all(e["ai_call_saved"] and e["result"]=="early_skip" for e in events)
     assert all(e['target_checks']['pre_ai']['outcome']=='NOT_EVALUATED' for e in events)
     assert all(e['target_checks']['pre_ai']['quote']['price'] is None for e in events)
@@ -227,7 +230,7 @@ def test_early_cooldown(pipeline):
     _,quote,ai,events,_=pipeline
     scanner.save_state({"cooldowns":{"T1:BUY":time.time()}})
     scanner.run_scan()
-    assert ai.call_count==5
+    assert ai.call_count==6
     assert events[0]["reject_reason"]=="pre_duplicate_cooldown"
 
 
@@ -245,7 +248,7 @@ def test_quote_provider_error_is_early_skip(pipeline):
     quote.side_effect=requests.Timeout()
     scanner.run_scan()
     ai.assert_not_called()
-    assert len(events)==6 and all(e["ai_call_saved"] for e in events)
+    assert len(events)==7 and all(e["ai_call_saved"] for e in events)
 
 
 def test_success_preserves_max_three_and_paper_publication(pipeline):
@@ -258,7 +261,7 @@ def test_success_preserves_max_three_and_paper_publication(pipeline):
     assert ai.call_count==3 and quote.call_count==6
     assert result["signals_published"]==3
     assert result["ai_candidates_count"]==3
-    assert result["ai_selected_count"]==6
+    assert result["ai_selected_count"]==3
     assert all(c.args[1].endswith("/signals/strategy") for c in session.request.call_args_list)
     assert [e["rank"] for e in events if e["result"]=="signal"]==[1,2,3]
     assert all(set(e['target_checks'])=={'pre_ai','post_ai'} for e in events if e['result']=='signal')
@@ -285,6 +288,64 @@ def test_hold_not_retried_or_published_and_keeps_six(pipeline):
     scanner.run_scan()
     assert ai.call_count==6 and session.request.call_count==0
     assert len([e for e in events if e["result"]=="rejected"])==6
+
+
+def test_deterministic_failures_refill_but_hold_consumes_slot(pipeline):
+    candidates,quote,ai,events,_=pipeline
+    candidates[0]['price_zones']=[]
+    result=scanner.run_scan()
+    assert ai.call_count==6 and result['ai_selected_count']==6
+    assert events[0]['reject_reason']=='pre_insufficient_confirmed_price_zones'
+    assert [e['rank'] for e in events if e['ai_started']]==[2,3,4,5,6,7]
+
+
+def test_closed_session_reference_is_research_only(pipeline,monkeypatch):
+    _,quote,ai,events,session=pipeline
+    monkeypatch.setattr(scanner,'regular_session_open',lambda:False)
+    reference=Mock(return_value=dict(price=101,as_of='2026-09-25T12:59:00Z',
+        source='yahoo_prepost_1m',fresh=True,age_seconds=60,eligible_for_entry=False))
+    monkeypatch.setattr(scanner,'research_reference_quote',reference)
+    result=scanner.run_scan()
+    assert reference.call_count==6 and result['ai_selected_count']==0
+    quote.assert_not_called();ai.assert_not_called();session.request.assert_not_called()
+    scanner_engine.record_signal.assert_not_called()
+    assert all(e['reject_reason']=='pre_waiting_regular_session' for e in events)
+    assert all(e['target_checks']['pre_ai']['quote']['eligible_for_entry'] is False for e in events)
+
+
+def test_ai_input_uses_actual_quote_and_validated_plan(pipeline):
+    candidates,_,ai,events,_=pipeline
+    for c in candidates:c.update(entry=95,price_as_of='2026-09-24')
+    scanner.run_scan()
+    value=ai.call_args.args[0]
+    assert value['entry']==100 and value['daily_reference_close']==95
+    assert value['quote_at']=='2026-09-25T15:00:00Z'
+    assert value['validated_target_plan']['entry']==100
+    assert candidates[0]['entry']==95  # No alteration of recorded technical evidence.
+    decision=next(e['decision'] for e in events if e.get('decision'))
+    assert decision['quote']['price']==100
+    assert decision['filter_failures']==['ai_hold']
+
+
+def test_durable_failure_cannot_publish_projection(pipeline,monkeypatch):
+    _,_,ai,_,session=pipeline
+    ai.side_effect=lambda *a:copy.deepcopy(DECISION)
+    monkeypatch.setattr(scanner_engine,'record_signal',Mock(side_effect=RuntimeError('isolated failure')))
+    result=scanner.run_scan()
+    assert result['signals_published']==0
+    session.request.assert_not_called()
+
+
+def test_projection_failure_does_not_create_second_order(pipeline):
+    _,_,ai,_,session=pipeline
+    ai.side_effect=lambda *a:copy.deepcopy(DECISION)
+    session.request.side_effect=requests.Timeout('isolated publication failure')
+    result=scanner.run_scan()
+    assert result['signals_published']==3 and scanner_engine.record_signal.call_count==3
+    assert session.request.call_count==3
+    saved=scanner_engine.record_signal.call_args.args[1]
+    assert saved['_strategy_projection']['market']=='us-stock'
+    assert session.request.call_args.kwargs['json']['scanner_signal_id']==1
 
 
 def test_monitor_and_state_access_not_blocked_by_scanner_lock(monkeypatch):

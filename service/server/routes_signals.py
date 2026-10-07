@@ -13,7 +13,7 @@ from config import (
     REPLY_PUBLISH_REWARD,
     SIGNAL_PUBLISH_REWARD,
 )
-from database import begin_write_transaction, get_db_connection
+from database import begin_write_transaction, get_db_connection, using_postgres
 from experiment_events import record_event, record_signal_event
 from experiments import experiment_accepts_unit, get_active_experiments, normalize_variants, variant_for_agent
 from routes_models import DiscussionRequest, FollowRequest, RealtimeSignalRequest, ReplyRequest, StrategyRequest
@@ -573,6 +573,21 @@ def register_signal_routes(app: FastAPI, ctx: RouteContext) -> None:
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
+            if data.scanner_signal_id is not None:
+                begin_write_transaction(cursor)
+                suffix = ' FOR UPDATE' if using_postgres() else ''
+                saved = cursor.execute('SELECT external_signal_id,ticker,created_at,technical_json FROM scanner_signals WHERE id=? AND agent_id=?'+suffix,
+                    (data.scanner_signal_id, agent_id)).fetchone()
+                if not saved or data.market != 'us-stock' or data.symbols != saved['ticker']:
+                    raise HTTPException(status_code=400, detail='Invalid scanner projection')
+                if saved['external_signal_id'] is not None:
+                    conn.rollback(); conn.close()
+                    return {'signal_id':saved['external_signal_id'], 'status':'already_published'}
+                import json
+                expected = json.loads(saved['technical_json']).get('_strategy_projection')
+                if not expected or any(getattr(data, k) != expected.get(k) for k in ('market','title','content','symbols','tags')):
+                    raise HTTPException(status_code=400, detail='Scanner projection differs from saved signal')
+                now = saved['created_at']
             cursor.execute(
                 """
                 INSERT INTO signals
@@ -587,10 +602,12 @@ def register_signal_routes(app: FastAPI, ctx: RouteContext) -> None:
                     data.content,
                     data.symbols,
                     data.tags,
-                    int(datetime.now(timezone.utc).timestamp()),
+                    int(datetime.fromisoformat(now.replace('Z','+00:00')).timestamp()),
                     now,
                 ),
             )
+            if data.scanner_signal_id is not None:
+                cursor.execute('UPDATE scanner_signals SET external_signal_id=? WHERE id=?', (signal_id, data.scanner_signal_id))
             if data.challenge_key:
                 record_challenge_submission_from_signal(
                     cursor,
@@ -647,6 +664,9 @@ def register_signal_routes(app: FastAPI, ctx: RouteContext) -> None:
                 cursor=cursor,
             )
             conn.commit()
+        except HTTPException:
+            conn.rollback(); conn.close()
+            raise
         except (ChallengeError, TeamMissionError) as exc:
             conn.rollback()
             conn.close()

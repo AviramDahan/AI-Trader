@@ -8,13 +8,14 @@ from __future__ import annotations
 import asyncio
 import gzip
 import json
+import logging
 import math
 import os
 import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,7 @@ import requests
 import yfinance as yf
 import config  # loads the ignored project-root .env
 import final_ai
-from scanner_targets import swing_zones
+from scanner_targets import swing_zones, _completed_daily
 
 ROOT = Path(__file__).resolve().parents[2]
 STATE_FILE = ROOT / ".runtime" / "stock-scanner.json"
@@ -41,6 +42,7 @@ YAHOO_SEARCH_URL = "https://query1.finance.yahoo.com/v1/finance/search"
 ALLOWED_HORIZONS = {"1-5 trading days", "1-4 weeks", "1-3 months"}
 STATE_LOCK = threading.RLock()
 SCAN_LOCK = threading.Lock()
+LOG = logging.getLogger(__name__)
 
 
 def _state_synchronized(function):
@@ -239,12 +241,15 @@ def _read_history_cache() -> tuple[dict[str, pd.DataFrame], float]:
     try:
         with gzip.open(HISTORY_CACHE_FILE, "rt", encoding="utf-8") as stream:
             payload = json.load(stream)
-        if payload.get("schema") != 1 or not isinstance(payload.get("histories"), dict):
+        if payload.get("schema") not in (1, 2) or not isinstance(payload.get("histories"), dict):
             raise ValueError("unsupported history cache")
         histories = {}
         for symbol, encoded in payload["histories"].items():
-            frame = pd.read_json(StringIO(encoded), orient="split")
+            observed = payload['fetched_at'] if payload['schema'] == 1 else encoded['fetched_at']
+            frame = pd.read_json(StringIO(encoded if payload['schema'] == 1 else encoded['data']), orient="split")
             frame.index = pd.to_datetime(frame.index)
+            frame.attrs['history_fetched_at'] = float(observed)
+            frame = _completed_daily(frame)
             if len(frame) >= 65:
                 histories[symbol] = frame
         return histories, float(payload["fetched_at"])
@@ -254,9 +259,10 @@ def _read_history_cache() -> tuple[dict[str, pd.DataFrame], float]:
 
 def _write_history_cache(histories: dict[str, pd.DataFrame], fetched_at: float) -> None:
     HISTORY_CACHE_FILE.parent.mkdir(exist_ok=True)
-    payload = {"schema": 1, "fetched_at": fetched_at, "histories": {
-        symbol: frame[["Open", "High", "Low", "Close", "Volume"]].to_json(
-            orient="split", date_format="iso", double_precision=10)
+    payload = {"schema": 2, "fetched_at": fetched_at, "histories": {
+        symbol: {'fetched_at': frame.attrs.get('history_fetched_at', fetched_at),
+                 'data': frame[["Open", "High", "Low", "Close", "Volume"]].to_json(
+            orient="split", date_format="iso", double_precision=10)}
         for symbol, frame in histories.items() if len(frame) >= 65
     }}
     temporary = HISTORY_CACHE_FILE.with_suffix(".tmp.gz")
@@ -271,15 +277,20 @@ def load_historical_data(symbols: list[str], cfg: dict[str, Any]) -> tuple[dict[
     now = time.time()
     cache_age = max(0.0, now - fetched_at) if fetched_at else None
     requested = set(symbols)
+    expected = latest_completed_session(datetime.fromtimestamp(now, timezone.utc))
     cached_coverage = len(requested.intersection(cached)) / max(len(requested), 1)
     full_refresh = not fetched_at or cache_age is None or cache_age >= cfg["history_cache_ttl"]
-    refresh_symbols = symbols if full_refresh else sorted(requested.difference(cached))
-    if not full_refresh and cached_coverage >= .95:
+    refresh_symbols = symbols if full_refresh else [s for s in symbols if s not in cached or
+        pd.Timestamp(cached[s].index[-1]).date() < expected or
+        now - float(cached[s].attrs.get('history_fetched_at', fetched_at)) >= cfg['history_cache_ttl']]
+    if not refresh_symbols and cached_coverage >= .95:
         return {symbol: cached[symbol] for symbol in symbols if symbol in cached}, {
             "status": "cache_hit", "age_seconds": round(cache_age or 0), "refreshed_symbols": 0,
         }
     try:
         downloaded = _download_history(refresh_symbols)
+        downloaded = {s: _finalize_download(f, now) for s, f in downloaded.items()}
+        downloaded = {s: f for s, f in downloaded.items() if len(f) >= 65}
         required_coverage = .85 if len(refresh_symbols) >= 20 else 1.0
         if len(downloaded) / max(len(refresh_symbols), 1) < required_coverage:
             raise RuntimeError("Yahoo history refresh was incomplete")
@@ -290,7 +301,7 @@ def load_historical_data(symbols: list[str], cfg: dict[str, Any]) -> tuple[dict[
         return {symbol: merged[symbol] for symbol in symbols if symbol in merged}, {
             "status": "refreshed" if full_refresh else "incremental_refresh",
             "age_seconds": 0 if full_refresh else round(cache_age or 0),
-            "refreshed_symbols": len(downloaded),
+            "refreshed_symbols": len(downloaded), "expected_session": expected.isoformat(),
         }
     except Exception:
         if fetched_at and cache_age is not None and cache_age <= cfg["history_stale_after"] and cached_coverage >= .95:
@@ -298,6 +309,21 @@ def load_historical_data(symbols: list[str], cfg: dict[str, Any]) -> tuple[dict[
                 "status": "stale_fallback", "age_seconds": round(cache_age), "refreshed_symbols": 0,
             }
         raise RuntimeError("Historical data unavailable; scan stopped safely")
+
+
+def _finalize_download(frame, observed_at):
+    frame = frame.copy()
+    frame.attrs['history_fetched_at'] = observed_at
+    return _completed_daily(frame, datetime.fromtimestamp(observed_at, timezone.utc))
+
+
+def latest_completed_session(at):
+    from scanner_engine import market_session_state
+    local = at.astimezone(ET)
+    day = local.date() if (local.hour, local.minute) >= (16, 5) else local.date()-timedelta(days=1)
+    while not market_session_state(datetime.combine(day, datetime.min.time(), ET).replace(hour=12))['is_trading_day']:
+        day -= timedelta(days=1)
+    return day
 
 
 def _rsi(close: pd.Series, period: int = 14) -> float:
@@ -310,6 +336,9 @@ def _rsi(close: pd.Series, period: int = 14) -> float:
 
 
 def analyze_history(symbol: str, company: str, frame: pd.DataFrame, cfg: dict[str, Any]) -> dict[str, Any] | None:
+    frame = _completed_daily(frame)
+    if len(frame) < 65:
+        return None
     last_date = pd.Timestamp(frame.index[-1]).date()
     if (datetime.now(timezone.utc).date() - last_date).days > 4:
         return None
@@ -349,6 +378,7 @@ def analyze_history(symbol: str, company: str, frame: pd.DataFrame, cfg: dict[st
             "return_20d_pct": return20, "volume_ratio": volume_ratio,
             "recent_high_20d": high20, "recent_low_20d": low20,
             "price_as_of": last_date.isoformat(),
+            "history_fetched_at": frame.attrs.get('history_fetched_at'),
             "single_target_source": single_source_structure(frame),
             "price_zones": swing_zones(frame, atr)}
 
@@ -357,6 +387,8 @@ def _market_context(histories: dict[str, pd.DataFrame]) -> dict[str, Any]:
     result = {}
     for symbol in ("SPY", "QQQ"):
         frame = histories.get(symbol)
+        if frame is not None:
+            frame = _completed_daily(frame)
         if frame is None or len(frame) < 51:
             continue
         close = frame["Close"].astype(float)
@@ -398,7 +430,11 @@ def fetch_recent_news(ticker: str, company: str, max_age_hours: float) -> list[d
         relevance = min(1.0, .65 + (.2 if company_match else 0) + .15 * max(0, 1 - age_hours / max_age_hours))
         items.append({"title": title[:300], "publisher": str(row.get("publisher") or "Yahoo Finance")[:100],
                       "url": link, "published_at": datetime.fromtimestamp(published, timezone.utc).isoformat(),
-                      "age_hours": round(age_hours, 2), "relevance": round(relevance, 3)})
+                      "age_hours": round(age_hours, 2), "relevance": round(relevance, 3),
+                      'relatedTickers': related, 'original_url': link,
+                      'provenance': [{'ingestion_provider':'scanner_yahoo', 'original_url':link,
+                          'publisher':str(row.get('publisher') or 'Yahoo Finance')[:100],
+                          'published_at':datetime.fromtimestamp(published, timezone.utc).isoformat()}]})
         # Preserve only explicit provider text; never infer a body from a title.
         if isinstance(row.get('summary'), str) and row['summary'].strip():
             items[-1]['source_excerpt'] = row['summary'].strip()[:2000]
@@ -452,6 +488,12 @@ def enrich_and_rank_candidates(candidates: list[dict[str, Any]], market_context:
     """Fetch news for the broad shortlist and rank it before expensive AI review."""
     cache = _read_news_cache()
     now = time.time()
+    from signal_news import existing_news, merge
+    try:
+        canonical = existing_news(candidates[:cfg['shortlist_limit']], cfg['news_max_age_hours'])
+    except Exception as exc:
+        LOG.warning('signal_canonical_news_unavailable:%s', type(exc).__name__)
+        canonical = {}
     enriched, rejected = [], []
     for candidate in candidates[:cfg["shortlist_limit"]]:
         ticker = candidate["ticker"]
@@ -463,8 +505,20 @@ def enrich_and_rank_candidates(candidates: list[dict[str, Any]], market_context:
                 news = fetch_recent_news(ticker, candidate["company"], cfg["news_max_age_hours"])
                 cache[ticker] = {"fetched_at": now, "items": news}
         except Exception:
-            rejected.append({"ticker": ticker, "reason": "news_provider_unavailable_fail_closed"})
-            continue
+            news = []
+            if not canonical.get(ticker):
+                rejected.append({"ticker": ticker, "reason": "news_provider_unavailable_fail_closed"})
+                continue
+        from news_events.model import timestamp
+        fresh = []
+        for item in news:
+            try:
+                age = (now-datetime.fromisoformat(timestamp(item['published_at'])).timestamp())/3600
+                if 0 <= age <= cfg['news_max_age_hours']:
+                    fresh.append(item)
+            except (ValueError, TypeError, KeyError):
+                continue
+        news = merge(fresh, canonical.get(ticker, []))
         if not news:
             rejected.append({"ticker": ticker, "reason": "insufficient_current_news"})
             continue
@@ -506,7 +560,7 @@ def validate_ai_decision(value: Any, expected_direction: str) -> dict[str, Any]:
 def ai_review(candidate: dict[str, Any], news: list[dict[str, Any]], market_context: dict[str, Any]) -> dict[str, Any]:
     # Provenance for the deterministic V2 executor is not a change to the
     # existing AI review contract or ranking inputs.
-    review_candidate = {k:v for k,v in candidate.items() if k != 'single_target_source'}
+    review_candidate = {k:v for k,v in candidate.items() if k not in {'single_target_source', '_strategy_projection', '_reference_context'}}
     if 'price_zones' in review_candidate:
         review_candidate['price_zones'] = [{**z, 'pivots': [
             {k:v for k,v in p.items() if k != 'confirmed_at'} for p in z.get('pivots', [])]}
@@ -538,6 +592,31 @@ def current_intraday_quote(ticker: str) -> tuple[float, str] | None:
     if age < -60 or age > 12 * 60 or not math.isfinite(price) or price <= 0:
         return None
     return price, timestamp.to_pydatetime().astimezone(timezone.utc).isoformat()
+
+
+def regular_session_open():
+    from scanner_engine import market_session_state
+    return market_session_state(datetime.now(timezone.utc))['is_open']
+
+
+def research_reference_quote(ticker):
+    """A last-known extended quote is display evidence, never order eligibility."""
+    frame = yf.Ticker(ticker).history(period='5d', interval='1m', prepost=True, auto_adjust=True, timeout=15)
+    if frame is None or frame.empty:
+        return None
+    frame = frame.dropna(subset=['Close'])
+    if frame.empty:
+        return None
+    at = pd.Timestamp(frame.index[-1])
+    if at.tzinfo is None:
+        return None
+    at = at.to_pydatetime().astimezone(timezone.utc)
+    age = (datetime.now(timezone.utc)-at).total_seconds()
+    price = float(frame['Close'].iloc[-1])
+    if age < 0 or not math.isfinite(price) or price <= 0:
+        return None
+    return dict(price=price, as_of=at.isoformat(), age_seconds=round(age),
+        source='yahoo_prepost_1m', fresh=age <= 720, eligible_for_entry=False)
 
 
 def levels(direction: str, entry: float, atr: float, minimum_rr: float) -> tuple[float, float, float]:
@@ -635,16 +714,16 @@ def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list
         return None
     timestamp = datetime.now(timezone.utc).isoformat()
     content = format_signal(candidate, dict(decision, action=execution_action), news, price, take_profit, stop_loss, risk_reward, timestamp)
-    result = api("POST", "/signals/strategy", json={
+    projection = {
         "market": "us-stock", "title": f"{execution_action} {ticker} | Paper signal", "content": content,
         "symbols": ticker, "tags": f"stock-scanner,paper-only,{execution_action.lower()}-signal",
-    })
+    }
     return {"ticker": ticker, "company": candidate["company"], "action": execution_action,
             "entry": price, "take_profit": take_profit, "stop_loss": stop_loss,
             "risk_reward": risk_reward, "target_plan": plan, "confidence": decision["confidence"],
             "time_horizon": decision["time_horizon"], "reason": decision["reason"],
             "relevant_news": news[:3], "timestamp": timestamp, "quote_at": quote_at,
-            "signal_id": result.get("signal_id"), "paper_quantity": 0,
+            "signal_id": None, 'strategy_projection': projection, "paper_quantity": 0,
             "paper_execution": "pending_entry" if execution_action in {'BUY','SHORT'} else "signal_or_pending_close",
             "message_type": "strategy"}
 
@@ -840,6 +919,12 @@ def run_scan() -> dict[str, Any]:
         response.raise_for_status()
         return response.json()
 
+    from signal_projection import retry_pending
+    try:
+        retry_pending(api)
+    except Exception as exc:
+        LOG.warning('signal_strategy_projection_retry_unavailable:%s', type(exc).__name__)
+
     universe = load_universe()
     symbols = sorted(universe)
     history_symbols = sorted(set(symbols + ["SPY", "QQQ"]))
@@ -862,13 +947,16 @@ def run_scan() -> dict[str, Any]:
     set_service_status("news", "ok" if ranked_candidates else "no_new",
                        f"shortlist={len(shortlist)} enriched={len(ranked_candidates)} rejected={len(news_rejected)}",
                        success=True)
-    candidates = ranked_candidates[:cfg["ai_candidate_limit"]]
+    in_session = regular_session_open()
+    candidates = ranked_candidates[:cfg['shortlist_limit'] if in_session else cfg['ai_candidate_limit']]
     cooldowns = state.get("cooldowns") if isinstance(state.get("cooldowns"), dict) else {}
     cutoff = time.time() - cfg["cooldown_hours"] * 3600
     cooldowns = {key: value for key, value in cooldowns.items() if float(value) >= cutoff}
     published, reviews, rejected = [], [], list(news_rejected)
-    reviewed_candidates, early_skips = 0, 0
+    reviewed_candidates, early_skips, selected_for_ai = 0, 0, 0
     for rank, candidate in enumerate(candidates, 1):
+        if selected_for_ai >= cfg['ai_candidate_limit']:
+            break
         ticker = candidate["ticker"]
         trace = final_ai.new_trace(scan_id, ticker, rank)
         trace_token = final_ai.TRACE.set(trace)
@@ -878,7 +966,17 @@ def run_scan() -> dict[str, Any]:
         quote = None
         try:
             news = candidate["news"]
-            # Same six candidates, no refill, no new session/calendar hard block.
+            if not in_session or not regular_session_open():
+                try:
+                    reference = research_reference_quote(ticker)
+                except Exception as exc:
+                    reference = None
+                    trace['reference_error'] = type(exc).__name__
+                if reference:
+                    quote = reference['price'], reference['as_of']
+                    candidate['_reference_context'] = reference
+                rejected.append({'ticker':ticker, 'reason':'pre_waiting_regular_session'})
+                continue
             quote = current_intraday_quote(ticker)
             if quote is None:
                 rejected.append({"ticker": ticker, "reason": "pre_no_fresh_quote"})
@@ -887,16 +985,20 @@ def run_scan() -> dict[str, Any]:
                 rejected.append({"ticker": ticker, "reason": "pre_duplicate_cooldown"})
                 continue
             try:
-                _candidate_target_plan(candidate, candidate["technical_direction"], quote[0], cfg, quote_at=quote[1])
+                plan = _candidate_target_plan(candidate, candidate["technical_direction"], quote[0], cfg, quote_at=quote[1])
             except ValueError as exc:
                 rejected.append({"ticker": ticker, "reason": "pre_" + str(exc)})
                 continue
             # Persist eligibility before calling a provider; the connection closes here.
             precheck_complete = True
+            selected_for_ai += 1
             trace["result"] = "eligible"
             final_ai.persist(trace)
             try:
-                decision = ai_review(candidate, news, context)
+                review_candidate = dict(candidate, daily_reference_close=candidate.get('entry'),
+                    daily_reference_as_of=candidate.get('price_as_of'), entry=quote[0],
+                    quote_at=quote[1], validated_target_plan=plan)
+                decision = ai_review(review_candidate, news, context)
                 set_service_status("ollama", "ok", f"Reviewed {ticker}", success=True)
             except Exception as exc:
                 set_service_status("ollama", "error", f"{ticker}:{type(exc).__name__}")
@@ -904,8 +1006,16 @@ def run_scan() -> dict[str, Any]:
             reviews.append({"ticker": ticker, "action": decision["action"], "confidence": decision["confidence"],
                             "news_sentiment": decision["news_sentiment"], "news_relevance": decision["news_relevance"],
                             "combined_rank_score": candidate["combined_rank_score"]})
+            failures = []
+            if decision['action']=='HOLD': failures.append('ai_hold')
+            if decision['confidence'] < cfg['min_confidence']: failures.append('ai_confidence_below_threshold')
+            if decision['news_relevance'] < .6: failures.append('ai_news_relevance_below_threshold')
+            trace['decision'] = {k:decision[k] for k in ('action','confidence','news_sentiment','news_relevance')}
+            trace['decision'].update(filter_failures=failures, confidence_threshold=cfg['min_confidence'],
+                relevance_threshold=.6, quote={'price':quote[0],'as_of':quote[1]},
+                daily_reference_close=candidate.get('entry'), daily_reference_as_of=candidate.get('price_as_of'))
             if decision["action"] == "HOLD" or decision["confidence"] < cfg["min_confidence"] or decision["news_relevance"] < .6:
-                rejected.append({"ticker": ticker, "reason": "ai_or_confidence_filter"})
+                rejected.append({"ticker": ticker, "reason": failures[0]})
                 continue
             if (decision["action"] == "BUY" and decision["news_sentiment"] < -.1) or (decision["action"] == "SELL" and decision["news_sentiment"] > .1):
                 rejected.append({"ticker": ticker, "reason": "news_sentiment_conflict"})
@@ -913,6 +1023,9 @@ def run_scan() -> dict[str, Any]:
             cooldown_key = f"{ticker}:{decision['action']}"
             if duplicate_in_cooldown(cooldowns, ticker, decision["action"], cfg["cooldown_hours"]):
                 rejected.append({"ticker": ticker, "reason": "duplicate_cooldown"})
+                continue
+            if not regular_session_open():
+                rejected.append({'ticker':ticker, 'reason':'post_waiting_regular_session'})
                 continue
             quote = current_intraday_quote(ticker)
             if quote is None:
@@ -924,11 +1037,19 @@ def run_scan() -> dict[str, Any]:
             if signal:
                 signal = _localize_telegram_signal(signal)
                 check_ai_budget()
-                lifecycle = record_signal(signal, candidate, decision, context, scan_id)
+                durable_candidate = dict(candidate, _strategy_projection=signal['strategy_projection'])
+                lifecycle = record_signal(signal, durable_candidate, decision, context, scan_id)
                 signal["lifecycle_id"] = lifecycle["id"]
                 signal["paper_execution"] = lifecycle["status"].lower()
                 published.append(signal)
                 cooldowns[cooldown_key] = time.time()
+                try:
+                    projection = api('POST', '/signals/strategy', json=dict(signal['strategy_projection'], scanner_signal_id=lifecycle['id']))
+                    signal['signal_id'] = projection.get('signal_id')
+                except Exception as exc:
+                    # The authoritative signal/order/outbox is already committed.
+                    # A retry uses this same signal ID, never a second order.
+                    LOG.warning('signal_strategy_projection_pending:%s:%s', lifecycle['id'], type(exc).__name__)
                 add_event(state, decision["action"],
                           f"{ticker} paper signal published ({signal['paper_execution']}); confidence {decision['confidence']:.0%}")
             else:
@@ -961,7 +1082,7 @@ def run_scan() -> dict[str, Any]:
     state.update(status="waiting", last_scan_at=time.time(), last_completed_at=time.time(),
                   universe_count=len(universe), data_count=max(0, len(histories) - 2),
                   technical_candidates_count=len(technical_candidates), shortlist_count=len(shortlist),
-                  candidates_count=len(candidates), ai_selected_count=len(candidates),
+                  candidates_count=len(candidates), ai_selected_count=selected_for_ai,
                   ai_candidates_count=reviewed_candidates, early_skips=early_skips, history_cache=cache_info,
                   ai_reviews=reviews[-12:], rejected=rejected[-20:], signals_published=len(published),
                  last_signal=published[-1] if published else state.get("last_signal"), cooldowns=cooldowns,

@@ -47,13 +47,16 @@ def time(value):
 
 def reason_stage(reason):
     reason = (reason or '').removeprefix('pre_')
+    if reason in ('waiting_regular_session', 'post_waiting_regular_session'):
+        return 'session_wait'
     if 'quote' in reason:
         return 'quote'
     if reason in {'insufficient_current_news', 'news_provider_unavailable_fail_closed'}:
         return 'news'
     if 'cooldown' in reason:
         return 'cooldown'
-    if reason in {'ai_or_confidence_filter', 'news_sentiment_conflict'}:
+    if reason in {'ai_or_confidence_filter', 'news_sentiment_conflict', 'ai_hold',
+                  'ai_confidence_below_threshold', 'ai_news_relevance_below_threshold'}:
         return 'ai_filter'
     if any(word in reason for word in ('zone', 'resistance', 'rounded', 'stop', 'risk_reward', 'target', 'structure', 'pivot')):
         return 'targets'
@@ -142,7 +145,7 @@ def report(conn, hours=48, now=None):
         FROM scanner_candidates WHERE stage='technical' AND created_at>=? AND created_at<=? ORDER BY id DESC''',
         (since, until), clipped, 'technical_details')
     journal = []
-    for stage in ('target_check','final'):
+    for stage in ('target_check','final','ai_decision'):
         journal.extend(_bounded(conn, '''SELECT id,scan_id,ticker,company,stage,status,reason,metrics_json,created_at
             FROM scanner_candidates WHERE stage=? AND created_at>=? AND created_at<=? ORDER BY id DESC''',
             (stage, since, until), clipped, stage))
@@ -182,11 +185,14 @@ def report(conn, hours=48, now=None):
             c.update(technical_recorded=True, direction=data.get('technical_direction'))
         elif row['stage'] == 'final' and c['rejection'] is None:
             c['rejection'] = row['reason']
+        elif row['stage'] == 'ai_decision':
+            c['ai_decision'] = {k:data.get(k) for k in ('action','confidence','news_sentiment','news_relevance',
+                'filter_failures','confidence_threshold','relevance_threshold','quote','daily_reference_close','daily_reference_as_of')}
         elif row['stage'] == 'target_check':
             # Allowlist only: no prompts, news content, source-input hashes or model output.
             check = {k: data.get(k) for k in ('phase', 'policy_version', 'strategy', 'action',
                 'observed_at', 'decided_at', 'outcome', 'rejection_reason', 'rejection_detail',
-                'quote', 'geometry', 'accepted_levels', 'evidence_gap', 'source_inputs')}
+                'quote', 'geometry', 'accepted_levels', 'evidence_gap', 'source_inputs', 'source_observed_at')}
             if check['source_inputs']:
                 check['source_inputs'] = {k: check['source_inputs'].get(k) for k in ('atr', 'data_as_of', 'zones')}
             c['target_checks'].append(check)
@@ -212,12 +218,14 @@ def report(conn, hours=48, now=None):
         if c is not None:
             c['signals'].append({k:s[k] for k in ('id','status','actual_entry','valid_until')})
             c['orders'].extend({k:o[k] for k in ('id','status','purpose')} for o in orders_by_signal.get(s['id'], []))
-    reasons, stages, quote_context = Counter(), Counter(), Counter()
+    reasons, stages, quote_context, waits = Counter(), Counter(), Counter(), Counter()
     shapes = set()
     for c in cases.values():
         c['target_checks'].sort(key=lambda r: r.get('observed_at') or '')
         c['rejection_stage'] = reason_stage(c['rejection']) if c['rejection'] else None
-        if c['rejection']:
+        if c['rejection_stage'] == 'session_wait':
+            waits[c['rejection']] += 1
+        elif c['rejection']:
             reasons[c['rejection']] += 1
             stages[c['rejection_stage']] += 1
         check_time = next((time(r['observed_at']) for r in c['target_checks'] if time(r['observed_at'])), time(c['at']))
@@ -258,6 +266,7 @@ def report(conn, hours=48, now=None):
             ai_validated=sum(any(r['validated'] for r in c['reviews']) for c in records),
             signals_qualified=len(accepted), entries=sum(s['actual_entry'] is not None for s in accepted)),
         rejection_reasons=dict(reasons), rejection_stages=dict(stages), quote_context=dict(quote_context),
+        session_waits=dict(waits),
         execution=dict(entry_orders=len(entry_orders), statuses=dict(Counter(o['status'] for o in entry_orders)),
             allocation_blocked=sum(s['status']=='RISK_BLOCKED' for s in accepted),
             fill_rate=sum(o['status']=='filled' for o in entry_orders)/len(entry_orders) if entry_orders else None),

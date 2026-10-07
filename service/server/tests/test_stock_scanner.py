@@ -4,6 +4,7 @@ import sys
 import tempfile
 import time
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -132,10 +133,11 @@ class StockScannerTests(unittest.TestCase):
         def news(ticker, company, max_age):
             seen.append(ticker)
             title = "Record profit growth" if ticker == "CCC" else "Company update"
-            return [{"title": title, "relevance": .9, "published_at": "2026-01-01T00:00:00Z"}]
+            return [{"title": title, "relevance": .9, "published_at": (stock_scanner.datetime.now(stock_scanner.timezone.utc)-stock_scanner.timedelta(seconds=1)).isoformat()}]
         with patch.object(stock_scanner, "_read_news_cache", return_value={}), \
              patch.object(stock_scanner, "_write_news_cache"), \
-             patch.object(stock_scanner, "fetch_recent_news", side_effect=news):
+             patch.object(stock_scanner, "fetch_recent_news", side_effect=news), \
+             patch('signal_news.existing_news', return_value={}):
             ranked, rejected = stock_scanner.enrich_and_rank_candidates(candidates, context, cfg)
         self.assertEqual(set(seen), {"AAA", "BBB", "CCC"})
         self.assertEqual(ranked[0]["ticker"], "CCC")
@@ -152,7 +154,8 @@ class StockScannerTests(unittest.TestCase):
                     "news_sentiment": -.4, "news_relevance": .9}
         signal = stock_scanner._paper_order(candidate, decision, [], (100, "now"),
                                             {"positions": [], "cash": 100000}, config(), api)
-        self.assertEqual(calls[0][0], "/signals/strategy")
+        self.assertFalse(calls)  # Preparation cannot publish before durable admission.
+        self.assertEqual(signal['strategy_projection']['market'], 'us-stock')
         self.assertNotIn("short", json.dumps(calls).lower())
         self.assertEqual(signal["paper_execution"], "signal_or_pending_close")
         self.assertEqual(signal["paper_quantity"], 0)
@@ -169,8 +172,8 @@ class StockScannerTests(unittest.TestCase):
         portfolio = {"positions": [{"market": "us-stock", "symbol": "MSFT", "side": "long",
                                     "quantity": 1, "entry_price": 110, "current_price": 100}], "cash": 100000}
         signal = stock_scanner._paper_order(candidate, decision, [], (100, "now"), portfolio, config(), api)
-        self.assertEqual(calls[0][0], "/signals/strategy")
-        self.assertNotIn("action", calls[0][1])
+        self.assertFalse(calls)
+        self.assertNotIn("action", signal['strategy_projection'])
         self.assertEqual(signal["paper_execution"], "signal_or_pending_close")
 
     def test_telegram_is_safely_disabled_without_credentials(self):
@@ -263,7 +266,7 @@ class StockScannerTests(unittest.TestCase):
                 return response
             api_session.request.side_effect = request
             news = [{"title": "Current relevant headline", "publisher": "Wire",
-                     "published_at": "2026-01-01T00:00:00+00:00", "url": "https://example.test/news",
+                     "published_at": stock_scanner.datetime.now(stock_scanner.timezone.utc).isoformat(), "url": "https://example.test/news",
                      "age_hours": 1, "relevance": 1}]
             decision = {"action": "BUY", "confidence": .91, "news_sentiment": .4, "news_relevance": .9,
                         "time_horizon": "1-4 weeks", "reason": "Trend, momentum and relevant news align."}
@@ -272,8 +275,9 @@ class StockScannerTests(unittest.TestCase):
                            "STOCK_SCANNER_AI_CANDIDATE_LIMIT": "1",
                            "STOCK_SCANNER_MIN_DOLLAR_VOLUME": "1000000", "STOCK_SCANNER_MIN_ATR_PCT": "0.1",
                            "STOCK_SCANNER_MIN_TECHNICAL_SCORE": "5"}
-            with patch.object(stock_scanner, "STATE_FILE", state_file), \
-                 patch.dict(os.environ, environment), \
+            with ExitStack() as stack:
+                contexts = [patch.object(stock_scanner, "STATE_FILE", state_file),
+                 patch.dict(os.environ, environment),
                  patch.object(stock_scanner, "load_universe", return_value={"AAPL": {"company": "Apple", "indexes": ["S&P 500"], "market_cap": 1e12}}), \
                  patch.object(stock_scanner, "load_historical_data", return_value=(histories, {"status": "cache_hit", "age_seconds": 1, "refreshed_symbols": 0})), \
                  patch.object(stock_scanner, "swing_zones", return_value=[{"low": p, "high": p, "touches": 1, "pivots": []} for p in (137,148,156,164)]), \
@@ -283,6 +287,8 @@ class StockScannerTests(unittest.TestCase):
                  patch.object(stock_scanner, "ai_review", return_value=decision), \
                  patch.object(stock_scanner, "current_intraday_quote", return_value=(140, "2026-01-01T00:00:00+00:00")), \
                  patch.object(stock_scanner, "_localize_telegram_signal", side_effect=lambda value: value | {"telegram_reason_he": "סיבה", "telegram_news_he": []}), \
+                 patch.object(stock_scanner, 'regular_session_open', return_value=True), \
+                 patch('signal_projection.retry_pending'), \
                  patch("scanner_engine.initialize_runtime"), \
                  patch("scanner_engine.lifecycle_settings", return_value={'active_strategy':'staged'}), \
                  patch("final_ai.persist"), \
@@ -290,7 +296,9 @@ class StockScannerTests(unittest.TestCase):
                  patch("scanner_engine.record_scan_news"), \
                  patch("scanner_engine.set_service_status"), \
                  patch("scanner_engine.record_signal", return_value={"id": 101, "status": "PENDING_ENTRY"}), \
-                 patch.object(stock_scanner.requests, "Session", return_value=api_session):
+                 patch.object(stock_scanner.requests, "Session", return_value=api_session)]
+                for context in contexts:
+                    stack.enter_context(context)
                 state = stock_scanner.run_scan()
             self.assertEqual(state["signals_published"], 1)
             self.assertEqual(orders[0]["market"], "us-stock")

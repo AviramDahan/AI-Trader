@@ -11,6 +11,11 @@ const reasonNames: Record<string, string> = {
   insufficient_current_news: 'אין די חדשות עדכניות', news_provider_unavailable_fail_closed: 'נתוני החדשות אינם זמינים',
   ai_or_confidence_filter: 'החלטת AI / ציון / רלוונטיות לא עברו', news_sentiment_conflict: 'סתירה בכיוון החדשות',
   pre_duplicate_cooldown: 'המתנה אחרי סיגנל קודם', duplicate_cooldown: 'המתנה אחרי סיגנל קודם',
+  pre_waiting_regular_session: 'ממתין למסחר הרגיל — לא פסילת איכות', post_waiting_regular_session: 'המסחר הרגיל הסתיים במהלך הבדיקה',
+  ai_hold: 'החלטת AI: המתנה', ai_confidence_below_threshold: 'ציון המודל מתחת לסף',
+  ai_news_relevance_below_threshold: 'רלוונטיות החדשות מתחת לסף',
+  target_buffer_reaches_entry: 'מרווח ההתנגדות משאיר את היעד בכניסה או מתחתיה',
+  target_rounds_to_or_below_entry: 'עיגול היעד מביא אותו לכניסה או מתחתיה',
 }
 const reasonText = (reason: string, he: boolean) => he ? reasonNames[reason] || reason : reason
 const stageNames: Record<string, string> = { quote: 'נתוני מחיר', news: 'חדשות', targets: 'מבנה / יעד / RR', ai_filter: 'סינון AI', cooldown: 'המתנה', other: 'אחר / חסרה ראיה' }
@@ -51,13 +56,14 @@ function Candidate({ row, he }: { row: Row, he: boolean }) {
       <li>{he ? 'סינון טכני' : 'Technical'}: {row.technical_recorded ? (he ? 'מועמד מתועד' : 'Candidate recorded') : (he ? 'לא זמין' : 'Unavailable')}</li>
       {row.target_checks.map((check: Row, i: number) => <li key={i}>
         <bdi>{check.phase} · {check.outcome} · {check.policy_version}</bdi> · {stamp(check.decided_at || check.observed_at)}
-        {check.rejection_reason && <p>{reasonText(`pre_${check.rejection_reason.replace(/^pre_/, '')}`, he)} <bdi>({check.rejection_reason})</bdi></p>}
+        {check.rejection_reason && <p>{reasonText(check.rejection_detail?.[0] || `pre_${check.rejection_reason.replace(/^pre_/, '')}`, he)} <bdi>({check.rejection_reason})</bdi></p>}
         <dl className="research-levels">
           <div><dt>{he ? 'מחיר ייחוס' : 'Reference price'}</dt><dd><bdi>{value(check.quote?.price)}</bdi></dd></div>
           <div><dt>{he ? 'זמן המחיר' : 'Quote timestamp'}</dt><dd>{stamp(check.quote?.as_of)}</dd></div>
           <div><dt>{he ? 'מועד נתוני המבנה' : 'Structure data as of'}</dt><dd><bdi>{check.source_inputs?.data_as_of || '—'}</bdi></dd></div>
           <div><dt>RR {he ? 'ברוטו אחרי עיגול' : 'gross after rounding'}</dt><dd><bdi>{value(check.accepted_levels?.rr?.[0] ?? check.geometry?.rr_rounded, 'R')}</bdi></dd></div>
         </dl>
+        {check.quote?.eligible_for_entry === false && <p className="scanner-note">{he ? 'מחיר לתצוגת מחקר בלבד; אינו מאשר כניסה.' : 'Research-only reference; does not authorize entry.'} {check.quote.fresh === false && (he ? 'זהו מחיר אחרון ידוע, לא מחיר טרי.' : 'Last-known quote, not fresh.')}</p>}
         <Levels check={check} he={he} />
         {!!check.rejection_detail?.length && <p><bdi>{check.rejection_detail.join(', ')}</bdi></p>}
         {!!check.source_inputs?.zones?.length && <details><summary>{he ? 'אזורי המבנה וראיות האישור שנשמרו' : 'Saved structure zones and confirmation evidence'}</summary>
@@ -67,6 +73,8 @@ function Candidate({ row, he }: { row: Row, he: boolean }) {
         {check.evidence_gap && <p className="scanner-warning">{he ? 'ראיות המבנה אינן מלאות' : 'Incomplete structure evidence'}: <bdi>{check.evidence_gap}</bdi></p>}
       </li>)}
       {row.reviews.map((review: Row, i: number) => <li key={`ai${i}`}>AI · <bdi>{review.result}</bdi> · {review.attempts} {he ? 'ניסיונות' : 'attempts'}{review.rejection && <> · {reasonText(review.rejection, he)}</>}</li>)}
+      {row.ai_decision && <li>{he ? 'החלטת AI שנשמרה' : 'Retained AI decision'}: <bdi>{row.ai_decision.action}</bdi> · {he ? 'ציון לא מכויל' : 'Uncalibrated score'}: <bdi>{value(row.ai_decision.confidence)}</bdi> · {he ? 'רלוונטיות' : 'Relevance'}: <bdi>{value(row.ai_decision.news_relevance)}</bdi>
+        {(row.ai_decision.filter_failures || []).map((reason: string) => <p key={reason}>{reasonText(reason, he)}</p>)}</li>}
       {row.signals.map((s: Row) => <li key={s.id}>{he ? 'זכאות סיגנל: אושר; ביצוע דמה' : 'Signal qualified; paper execution'}: <bdi>{s.status}</bdi> · {he ? 'כניסה בפועל' : 'Actual entry'}: <bdi>{value(s.actual_entry)}</bdi> · {he ? 'תוקף' : 'Valid until'}: {stamp(s.valid_until)}</li>)}
       {row.orders.map((o: Row) => <li key={`order${o.id}`}>{he ? 'פקודה' : 'Order'} <bdi>#{o.id} · {o.purpose} · {o.status}</bdi></li>)}
     </ol>
@@ -131,6 +139,7 @@ export function ResearchView({ he, mode = 'research', data, error = '', hours = 
         <p>{t('החסם הנפוץ בחלון', 'Most common recorded blocker')}: {reasons.length ? `${reasonText(reasons[0][0], he)} (${reasons[0][1]})` : t('אין חסימה מתועדת', 'No recorded blocker')}</p>
         <p className="scanner-note">{t('בדיקות חוזרות אינן הזדמנויות חדשות. השלבים מוצגים לפי הראיות שנשמרו ואינם בהכרח משפך מלא או מקונן.', 'Repeated checks are not new opportunities. Stages reflect retained evidence and are not necessarily a complete or nested funnel.')}</p>
         <p>{t('חסר מחיר בשעות מסחר רגילות', 'Missing quote during regular session')}: {data.quote_context.regular_session || 0} · {t('מחוץ לשעות מסחר רגילות', 'Outside regular session')}: {data.quote_context.outside_regular_session || 0}</p>
+        <p>{t('המתנה למסחר הרגיל — בנפרד מפסילות איכות', 'Waiting for regular session — separate from quality rejects')}: {Object.values(data.session_waits || {}).reduce((sum: number, n: any) => sum + Number(n), 0)}</p>
         <p>{t('חסימת הקצאה בסימולטור', 'Simulator allocation blocks')}: {data.execution.allocation_blocked} · {t('מילוי פקודות כניסה', 'Entry-order fill rate')}: {value(data.execution.fill_rate == null ? null : 100 * data.execution.fill_rate, '%')}</p>
         <p>{t('תשובות AI שעברו validation', 'AI responses validated')}: {counts.ai_validated ?? '—'} · {t('ניסיונות מתועדים, כולל שגיאות לפני בקשה', 'Recorded attempts, including pre-request failures')}: {counts.ai_attempt_records ?? '—'}</p>
       </>}

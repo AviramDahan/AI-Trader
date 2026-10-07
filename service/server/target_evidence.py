@@ -73,6 +73,10 @@ def capture(candidate, action, price, quote_at, phase, policy, strategy, source,
                           json.dumps(inputs, sort_keys=True, allow_nan=False).encode()).hexdigest(),
                       minimum_rr=2.0 if policy=='single_target_v2' else cfg.get('min_risk_reward'),
                       signal_link={'scan_id':trace['scan_id'],'ticker':trace['ticker']})
+        reference = candidate.get('_reference_context')
+        if reference:
+            record['quote'].update({k:reference[k] for k in ('source','fresh','age_seconds','eligible_for_entry')})
+        record['source_observed_at'] = candidate.get('history_fetched_at')
         if policy == 'single_target_v2' and evaluated:
             record['geometry'] = _geometry(price, inputs)
             if rejection == 'invalid_rounded_levels':
@@ -118,3 +122,28 @@ def persist_checks(conn, trace):
         LOG.warning('target_evidence_persist_failed:%s', type(exc).__name__)
     finally:
         conn.execute('RELEASE SAVEPOINT target_evidence')
+
+
+def persist_decision(conn, trace):
+    decision = trace.get('decision')
+    if not decision:
+        return
+    conn.execute('SAVEPOINT ai_decision_evidence')
+    try:
+        observation_id = trace['id'] + ':ai_decision'
+        rows = conn.execute("SELECT metrics_json FROM scanner_candidates WHERE scan_id=? AND ticker=? AND stage='ai_decision'",
+            (trace['scan_id'], trace['ticker'])).fetchall()
+        if any(json.loads(row['metrics_json']).get('observation_id') == observation_id for row in rows):
+            return
+        allowed = {k:decision[k] for k in ('action','confidence','news_sentiment','news_relevance',
+            'filter_failures','confidence_threshold','relevance_threshold','quote',
+            'daily_reference_close','daily_reference_as_of') if k in decision}
+        allowed['observation_id'] = observation_id
+        conn.execute("""INSERT INTO scanner_candidates(scan_id,ticker,company,stage,status,reason,metrics_json,created_at)
+            VALUES(?,?,NULL,'ai_decision','observed',NULL,?,?)""",
+            (trace['scan_id'], trace['ticker'], json.dumps(allowed, allow_nan=False), datetime.now(timezone.utc).isoformat()))
+    except Exception as exc:
+        conn.execute('ROLLBACK TO SAVEPOINT ai_decision_evidence')
+        LOG.warning('ai_decision_evidence_persist_failed:%s', type(exc).__name__)
+    finally:
+        conn.execute('RELEASE SAVEPOINT ai_decision_evidence')

@@ -81,8 +81,9 @@ def persist(trace):
              sum(a["latency"] for a in attempts), max(0,len(attempts)-1),trace["result"],
              trace["reject_reason"],int(trace["ai_call_saved"]),_total(attempts,"estimated_cost"),
              json.dumps(attempts),datetime.now(timezone.utc).isoformat()))
-        from target_evidence import persist_checks
+        from target_evidence import persist_checks, persist_decision
         persist_checks(conn, trace)
+        persist_decision(conn, trace)
         conn.commit()
     finally:
         conn.close()
