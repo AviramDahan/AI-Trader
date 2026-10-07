@@ -131,3 +131,31 @@ def test_admin_wire_format_preserves_original_timestamp_and_private_destination(
     assert RLM + 'תקלה: ' + LRI + 'invalid_json' + PDI in payload['text']
     assert payload['text'].splitlines()[-1] == 'Timestamp: 30/09/2026 15:02 (Israel)'
     assert row['message'].startswith('AI-Trader Admin\nתקלה: invalid_json')
+
+
+def test_external_health_alert_uses_same_format_and_remains_private(tmp_path, monkeypatch):
+    import importlib.util
+    import io
+    import json
+    spec = importlib.util.spec_from_file_location('rtl_health_fixture',
+        Path(__file__).resolve().parents[3] / 'scripts/cloud_admin_watch.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('BACKEND_URL', 'https://example.invalid')
+    monkeypatch.setenv('TELEGRAM_ADMIN_BOT_TOKEN', 'mock')
+    monkeypatch.setenv('TELEGRAM_ADMIN_CHAT_ID', 'private-test')
+    captured = []
+    def fake_open(request, **kwargs):
+        if isinstance(request, str):
+            raise OSError('simulated health outage')
+        captured.append(json.loads(request.data))
+        return io.BytesIO(b'{"ok":true}')
+    monkeypatch.setattr(module, 'urlopen', fake_open)
+    module.main()
+    module.main()  # Persistent failed state must not send another alert.
+    assert len(captured) == 1 and captured[0]['chat_id'] == 'private-test'
+    text = captured[0]['text']
+    assert text == telegram_text(text)
+    assert text.splitlines()[1].startswith(RLM)
+    assert text.splitlines()[-1].startswith('Timestamp: ')

@@ -55,6 +55,20 @@ def test_delivered_once_survives_restart(tmp_path):
     assert session.post.call_args.kwargs['data']['message_thread_id']==42
 
 
+def test_weekly_caption_bidi_without_network_or_delivery_changes(tmp_path):
+    from telegram_presentation import telegram_text, RLM, LRI, PDI
+    item, values = inputs(); session = Mock()
+    session.post.return_value.json.return_value = {'ok': True, 'result': {'message_id': 12}}
+    text = w.caption(item, 'https://t.me/+Example')
+    assert w.send_once(item, b'image', text, values, session, tmp_path/'fixture.sqlite')['status'] == 'sent'
+    payload = session.post.call_args.kwargs['data']
+    assert payload['caption'] == telegram_text(text, limit=1024)
+    assert payload['caption'].startswith(RLM)
+    assert LRI + 'Before Open' in payload['caption']
+    assert 'https://t.me/+Example' in payload['caption']
+    assert payload['message_thread_id'] == 42
+
+
 def test_uncertain_send_never_retried_blindly(tmp_path):
     item,values=inputs(); session=Mock(); session.post.side_effect=TimeoutError('secret URL')
     state=tmp_path/'state.sqlite'

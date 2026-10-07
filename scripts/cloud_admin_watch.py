@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.request import Request,urlopen
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'service'/'server'))
 from admin_messages import timestamped
+from telegram_presentation import telegram_text
 
 def main():
     state_path=Path('.admin-watch/state.json')
@@ -26,7 +27,7 @@ def main():
         token=os.environ['TELEGRAM_ADMIN_BOT_TOKEN']
         chat=os.environ['TELEGRAM_ADMIN_CHAT_ID']
         event_time=datetime.now(timezone.utc)
-        payload=json.dumps({'chat_id':chat,'text':timestamped('AI-Trader Admin\nבדיקת הבריאות החיצונית נכשלה: שרת/API/DB/ניטור/גיבוי. נדרשת בדיקה. אין שינוי אוטומטי לעסקאות.',event_time)}).encode()
+        payload=json.dumps({'chat_id':chat,'text':telegram_text(timestamped('AI-Trader Admin\nבדיקת הבריאות החיצונית נכשלה: שרת/API/DB/ניטור/גיבוי. נדרשת בדיקה. אין שינוי אוטומטי לעסקאות.',event_time))}).encode()
         request=Request('https://api.telegram.org/bot'+token+'/sendMessage',data=payload,headers={'Content-Type':'application/json'})
         try:
             with urlopen(request,timeout=15) as r:assert json.load(r)['ok']
