@@ -4,6 +4,7 @@ import { build } from 'esbuild'
 import { createRequire } from 'node:module'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
 
 const result = await build({ entryPoints: ['src/SignalResearch.tsx'], bundle: true, write: false,
   platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react', 'react/jsx-runtime'],
@@ -40,4 +41,9 @@ assert.ok(render({ data: null, error: 'HTTP 503' }).includes('role="alert"'))
 const english = render({ he: false, mode: 'summary' })
 assert.ok(english.includes('Most common recorded blocker'))
 assert.ok(!english.includes('research-candidate'))
-console.log('Signal research rendering: 15 assertions passed')
+// The generic mobile dashboard hides tables that have card alternatives.
+// Research tables have no such duplicate view and must remain scrollable.
+const styles = readFileSync('src/index.css', 'utf8')
+assert.match(styles, /\.signal-research \.scanner-table-wrap\s*\{[^}]*display:\s*block;[^}]*max-width:\s*100%;/)
+assert.ok(outcomes.includes('scanner-table-wrap') && outcomes.includes('Native'))
+console.log('Signal research rendering: 17 assertions passed')

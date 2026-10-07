@@ -3782,6 +3782,9 @@ html[dir='rtl'] .main-content {
   .scanner-comparison-cards { display: grid; gap: 10px; }
 }
 /* Retained decision evidence and percentage/R outcomes. */
+/* Research has no duplicate comparison-card view: retain its tables on mobile
+   and confine horizontal scrolling to the table wrapper, not the page. */
+.signal-research .scanner-table-wrap { display: block; max-width: 100%; }
 .research-header, .research-filters { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; justify-content: space-between; }
 .research-filters { justify-content: flex-start; margin-block: 1rem; }
 .signal-research select, .signal-research input { color: inherit; background: var(--bg-secondary, #162331); border: 1px solid var(--border-color, #425065); border-radius: 8px; padding: .45rem; }
