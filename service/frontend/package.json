@@ -2,6 +2,7 @@
   "name": "clawtrader-frontend",
   "version": "1.0.0",
   "scripts": {
+    "test:research": "node tests/signal-research.test.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview"

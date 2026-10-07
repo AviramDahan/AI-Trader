@@ -1,5 +1,5 @@
 """Public dashboard and controlled settings routes for the paper stock scanner."""
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Response, Query
 from pydantic import BaseModel
 
 from database import get_db_connection
@@ -39,6 +39,13 @@ def _require_scanner_manager(authorization: str):
 
 
 def register_scanner_routes(app: FastAPI) -> None:
+    @app.get("/api/scanner/research")
+    def scanner_research(hours: int = Query(48, ge=24, le=168)):
+        from signal_research import payload
+        if hours not in (24, 48, 168):
+            raise HTTPException(status_code=422, detail="Supported windows: 24, 48, 168 hours")
+        return payload(hours)
+
     @app.get("/api/scanner/dashboard")
     async def scanner_dashboard():
         payload = dashboard_payload()
