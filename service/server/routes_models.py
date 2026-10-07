@@ -68,6 +68,7 @@ class StrategyRequest(BaseModel):
     content: str
     symbols: Optional[str] = None
     tags: Optional[str] = None
+    scanner_signal_id: Optional[int] = None
     challenge_key: Optional[str] = None
     mission_key: Optional[str] = None
     team_key: Optional[str] = None

@@ -236,7 +236,7 @@ class DatabaseCursor:
             query = _adapt_sql_for_postgres(sql)
             should_capture_id = _should_append_returning_id(query)
             if should_capture_id:
-                table = re.match(r"INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)", query, re.I).group(1)
+                table = re.match(r"INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)", query.lstrip(), re.I).group(1)
                 # Several scanner state tables use a natural key, not an id.
                 self._cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=%s AND column_name='id'", (table,))
                 should_capture_id = self._cursor.fetchone() is not None

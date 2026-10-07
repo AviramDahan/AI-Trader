@@ -9,8 +9,13 @@ import pandas as pd
 ET = ZoneInfo("America/New_York")
 
 
-def _completed_daily(frame):
-    now_et = datetime.now(timezone.utc).astimezone(ET)
+def _completed_daily(frame, as_of=None):
+    observed = frame.attrs.get('history_fetched_at')
+    now = as_of or datetime.now(timezone.utc)
+    if observed is not None:
+        # A cached intraday snapshot cannot become final merely as time passes.
+        now = min(now, datetime.fromtimestamp(float(observed), timezone.utc))
+    now_et = now.astimezone(ET)
     # The same-day Yahoo bar is eligible only after the regular session has
     # completed and providers have had a small finalization buffer.
     cutoff = now_et.date() + timedelta(days=1) if now_et.time() >= time(16, 5) else now_et.date()

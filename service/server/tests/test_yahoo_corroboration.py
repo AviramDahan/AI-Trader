@@ -28,14 +28,18 @@ def test_primary_subject_with_structured_hint(title,hints,expected):
 def test_non_yahoo_keeps_existing_identity_behavior():
  assert resolve('Nvidia wins contract',['NVDA'],'investing')==[]
 
-def test_metadata_preserved_without_changing_scanner_input():
+def test_shared_news_fields_unchanged_and_scanner_provenance_preserved():
  from stock_scanner import fetch_recent_news
  payload={'news':[{'title':'Nvidia announces results','publisher':'Publisher','link':'https://example.com/story','providerPublishTime':1000,'relatedTickers':['NVDA','TSLA'],'summary':'Explicit source summary.'}]}
  session=Mock();session.get.return_value.json.return_value=payload
  with patch('stock_scanner.requests.Session',return_value=session),patch('stock_scanner.time.time',return_value=1001):old=fetch_recent_news('NVDA','Nvidia Corporation',168)
  new=normalize_news(payload,'NVDA','Nvidia Corporation',168,1001)
  assert new[0]['provider_tickers']==['NVDA','TSLA']
- assert [{k:v for k,v in r.items() if k not in ('provider_tickers','tickers')} for r in new]==old
+ metadata={'provider_tickers','tickers','relatedTickers','original_url','provenance'}
+ assert [{k:v for k,v in r.items() if k not in metadata} for r in new]==[{k:v for k,v in r.items() if k not in metadata} for r in old]
+ assert old[0]['relatedTickers']==['NVDA','TSLA'] and old[0]['original_url']==payload['news'][0]['link']
+ assert old[0]['provenance']==[{'ingestion_provider':'scanner_yahoo','original_url':payload['news'][0]['link'],
+   'publisher':'Publisher','published_at':old[0]['published_at']}]
  from news_events.providers import ExistingProvider,Config
  from datetime import datetime,timezone
  s=ExistingProvider(Config('yahoo_priority','','Publisher',rights='approved'),lambda *_:{}).normalize({**new[0],'id':new[0]['url'],'excerpt':new[0]['source_excerpt']},datetime.now(timezone.utc))

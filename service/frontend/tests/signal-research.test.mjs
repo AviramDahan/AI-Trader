@@ -41,9 +41,22 @@ assert.ok(render({ data: null, error: 'HTTP 503' }).includes('role="alert"'))
 const english = render({ he: false, mode: 'summary' })
 assert.ok(english.includes('Most common recorded blocker'))
 assert.ok(!english.includes('research-candidate'))
+const referenceData = { ...data, session_waits: { pre_waiting_regular_session: 9 }, records: [{ ...data.records[0],
+  rejection: 'pre_waiting_regular_session', ai_decision: { action: 'HOLD', confidence: .7, news_relevance: .8,
+    filter_failures: ['ai_hold', 'ai_confidence_below_threshold'] },
+  target_checks: [{ ...data.records[0].target_checks[0], rejection_reason: 'invalid_rounded_levels',
+    rejection_detail: ['target_buffer_reaches_entry'], quote: { price: 100, fresh: false, eligible_for_entry: false } }] }] }
+const reference = render({ data: referenceData })
+assert.ok(reference.includes('המתנה למסחר הרגיל — בנפרד מפסילות איכות'))
+assert.ok(reference.includes('מחיר לתצוגת מחקר בלבד; אינו מאשר כניסה.'))
+assert.ok(reference.includes('זהו מחיר אחרון ידוע, לא מחיר טרי.'))
+assert.ok(reference.includes('מרווח ההתנגדות משאיר את היעד בכניסה או מתחתיה'))
+assert.ok(reference.includes('ציון לא מכויל') && reference.includes('ציון המודל מתחת לסף'))
+assert.ok(reference.includes('החלטת AI: המתנה'))
+assert.ok(!reference.includes('NaN'))
 // The generic mobile dashboard hides tables that have card alternatives.
 // Research tables have no such duplicate view and must remain scrollable.
 const styles = readFileSync('src/index.css', 'utf8')
 assert.match(styles, /\.signal-research \.scanner-table-wrap\s*\{[^}]*display:\s*block;[^}]*max-width:\s*100%;/)
 assert.ok(outcomes.includes('scanner-table-wrap') && outcomes.includes('Native'))
-console.log('Signal research rendering: 17 assertions passed')
+console.log('Signal research rendering: 24 assertions passed')

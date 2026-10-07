@@ -82,7 +82,8 @@ def test_short_scanner_preserves_ai_decision_and_original_plan():
         s=stock_scanner._paper_order(candidate,decision,[],(100,'2026-09-28T13:30:00Z'),{},dict(min_risk_reward=2),api)
     assert s['action']=='SHORT' and s['take_profit']==95.15
     assert decision['action']=='SELL'
-    assert api.call_args.args==('POST','/signals/strategy')  # never the immediate-execution API
+    api.assert_not_called()  # Preparation is not publication or execution.
+    assert s['strategy_projection']['tags'].endswith('short-signal')
 
 
 class TestAutomaticShort(unittest.TestCase):
