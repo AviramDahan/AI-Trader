@@ -18,6 +18,8 @@ def visible(text):
     ('סימול: BRK.B', 'BRK.B'),
     ('פעולה: SELL — שורט מדומה', 'SELL'),
     ('חברה: First Solar (FSLR)', 'First Solar (FSLR)'),
+    ("חברה: McDonald's", "McDonald's"),
+    ('חברה: Lowe’s Companies', 'Lowe’s Companies'),
     ('תוצאה: -2.35% ברוטו', '-2.35%'),
     ('תוצאה: +1.25% נטו', '+1.25%'),
     ('יחס RR: 2.00R', 'RR: 2.00R'),

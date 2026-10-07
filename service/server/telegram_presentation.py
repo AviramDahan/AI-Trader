@@ -11,7 +11,7 @@ PDI = '\u2069'
 # Only Bidi_Control: preserve emoji ZWJ, variation selectors and combining marks.
 _CONTROLS = re.compile('[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]')
 _HEBREW = re.compile('[\u0590-\u05ff\ufb1d-\ufb4f]')
-_TOKEN = r'(?:[($€£+−@]|(?<![\u0590-\u05ff])-)?[A-Za-z0-9][A-Za-z0-9_.,:/%+\-−–@#$€£()\[\]=?&~]*'
+_TOKEN = r"(?:[($€£+−@]|(?<![\u0590-\u05ff])-)?[A-Za-z0-9][A-Za-z0-9_.,:'/’%+\-−–@#$€£()\[\]=?&~]*"
 _LTR_RUN = re.compile(r'https?://[^\s<>\u0590-\u05ff]+|' + _TOKEN + r'(?:[ \t]+' + _TOKEN + r')*')
 
 
