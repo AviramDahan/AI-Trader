@@ -142,6 +142,15 @@ def test_canonical_news_no_publication_requirement_and_no_writes(db):
         assert c.execute('SELECT count(*) FROM scanner_orders').fetchone()[0]==0
 
 
+def test_fresh_observation_on_older_canonical_event_is_not_lost(db):
+    with database.get_db_connection() as c:
+        seed_canonical(c)
+        c.execute("UPDATE ne_events SET created_at='2026-09-01T00:00:00Z'")
+        c.commit()
+    rows=signal_news.existing_news([dict(ticker='TEST',company='Synthetic Corporation')],72,NOW)
+    assert rows['TEST'][0]['published_at']=='2026-10-05T18:00:00+00:00'
+
+
 @pytest.mark.parametrize('damage',['identity','secondary','rights','conflict','future','stale','naive','retracted','unknown','backlog','opinion'])
 def test_canonical_fail_closed_guards(damage):
     row=canonical_fixture();event=json.loads(row['body_json']);s=event['sources'][0]

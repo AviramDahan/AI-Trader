@@ -75,10 +75,10 @@ def existing_news(candidates, max_age_hours, now=None):
         else:
             conn.execute('PRAGMA query_only=ON')
         rows = conn.execute('''SELECT event_id,body_json,status,reason,evidence_version,created_at,updated_at
-            FROM ne_events WHERE created_at>=? AND created_at<=? AND
+            FROM ne_events WHERE updated_at>=? AND updated_at<=? AND created_at<=? AND
             (status IN ('pending','analyzing','analyzed') OR (status='blocked' AND reason='stale_or_future'))
-            ORDER BY created_at DESC LIMIT ?''',
-            ((now-timedelta(hours=max_age_hours)).isoformat(), now.isoformat(), MAX_EVENTS+1)).fetchall()
+            ORDER BY updated_at DESC LIMIT ?''',
+            ((now-timedelta(hours=max_age_hours)).isoformat(), now.isoformat(), now.isoformat(), MAX_EVENTS+1)).fetchall()
         if len(rows) > MAX_EVENTS:
             LOG.warning('signal_news_snapshot_clipped:%s', MAX_EVENTS)
         for row in rows[:MAX_EVENTS]:
