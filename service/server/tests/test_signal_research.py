@@ -99,6 +99,32 @@ def test_invalid_money_or_quantity_never_yields_nan_or_infinite_metrics():
         json.dumps(r,allow_nan=False)
 
 
+def test_concurrent_refreshes_are_coalesced_and_failure_closes_connection(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from unittest.mock import Mock
+    research._CACHE.clear()
+    clock=[100.]
+    monkeypatch.setattr(research,'monotonic',lambda:clock[0])
+    conn=Mock()
+    monkeypatch.setattr(research,'get_db_connection',lambda:conn)
+    monkeypatch.setattr(research,'using_postgres',lambda:True)
+    read=Mock(return_value={'generated_at':'synthetic'})
+    monkeypatch.setattr(research,'report',read)
+    try:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results=list(pool.map(lambda _:research.payload(48), range(4)))
+        assert all(r==results[0] for r in results)
+        read.assert_called_once_with(conn,48)
+        conn.execute.assert_any_call('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
+        assert conn.close.call_count==1
+        clock[0]+=61
+        read.side_effect=RuntimeError('synthetic timeout')
+        with pytest.raises(RuntimeError):research.payload(48)
+        assert conn.close.call_count==2
+    finally:
+        research._CACHE.clear()
+
+
 def test_journal_repeats_sessions_missing_stages_and_allowlist(db):
     with database.get_db_connection() as c:
         c.execute('PRAGMA query_only=ON')

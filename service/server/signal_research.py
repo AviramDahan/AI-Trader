@@ -7,11 +7,16 @@ import json
 import math
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from threading import Lock
+from time import monotonic
 
 from database import get_db_connection, using_postgres
 from scanner_engine import market_session_state, scanner_agent_id
 
 ROW_LIMIT = 5000
+CACHE_SECONDS = 60
+_CACHE = {}
+_CACHE_LOCK = Lock()
 
 
 def loads(value):
@@ -261,13 +266,23 @@ def report(conn, hours=48, now=None):
 
 
 def payload(hours=48):
-    conn = get_db_connection()
-    try:
-        if using_postgres():
-            conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
-            conn.execute("SET LOCAL statement_timeout='8s'")
-        else:
-            conn.execute('PRAGMA query_only=ON')
-        return report(conn, hours)
-    finally:
-        conn.close()
+    if hours not in (24,48,168):
+        raise ValueError('Supported windows: 24, 48, 168 hours')
+    # Coalesce concurrent readers: one bounded snapshot per window per minute,
+    # with no background workers. Failed reads never overwrite a good cache.
+    with _CACHE_LOCK:
+        cached = _CACHE.get(hours)
+        if cached and monotonic()-cached[0] < CACHE_SECONDS:
+            return cached[1]
+        conn = get_db_connection()
+        try:
+            if using_postgres():
+                conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
+                conn.execute("SET LOCAL statement_timeout='8s'")
+            else:
+                conn.execute('PRAGMA query_only=ON')
+            result=report(conn, hours)
+            _CACHE[hours]=(monotonic(), result)
+            return result
+        finally:
+            conn.close()

@@ -5,7 +5,9 @@ The public scanner exposes ``GET /api/scanner/research?hours=24|48|168``.
 The status tab shows a decision summary, the research tab shows recorded
 candidate checks and saved levels, and results show percentage/R outcomes.
 The endpoint opens a read-only repeatable-read PostgreSQL transaction with an
-eight-second statement timeout. SQLite uses query_only. Each source is capped
+eight-second statement timeout. SQLite uses query_only. Concurrent readers
+share one cached snapshot per window for at most 60 seconds; generation time
+remains visible and failed refreshes are not cached. Each source is capped
 at 5,000 rows independently, including each journal stage; hitting the cap is
 explicit. Total scan/ticker observation and unique ticker counts use SQL across
 the full window. Detail-derived metrics are labelled as a bounded sample. The
