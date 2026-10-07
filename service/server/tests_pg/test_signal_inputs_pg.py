@@ -3,6 +3,7 @@ import sys
 import json
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import Mock
 import database
 import final_ai
 import signal_news
@@ -29,6 +30,9 @@ def test_pg_canonical_snapshot_reads_without_consuming_or_analyzing(pg,monkeypat
 
 def test_pg_duplicate_concurrent_projection_posts_one_display_no_trade(pg,monkeypatch):
     payload=seed_projection();before=accounting();client=isolated_client(monkeypatch)
+    import signal_projection
+    retry=Mock();signal_projection.retry_pending(retry)
+    assert retry.call_args.kwargs['json']==payload and accounting()==before
     with ThreadPoolExecutor(max_workers=2) as pool:
         results=list(pool.map(lambda _:client.post('/api/signals/strategy',
             headers={'Authorization':'Bearer synthetic'},json=payload),range(2)))

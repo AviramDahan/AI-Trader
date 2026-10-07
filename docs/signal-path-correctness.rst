@@ -49,6 +49,9 @@ No historical observations are rewritten and no existing orders are replayed.
   AI review or Telegram message. Recovery backups intentionally retain only
   their existing accounting/target-plan contract, not this display retry payload.
   No backup-format change is claimed.
+* The PostgreSQL insert-ID adapter recognizes leading whitespace consistently
+  with its existing INSERT detector. This narrowly fixes the multiline strategy
+  INSERT exercised by the complete concurrent application-route test.
 
 Verification and release
 ------------------------
