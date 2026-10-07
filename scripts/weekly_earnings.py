@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+import sys
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
@@ -23,6 +24,8 @@ from PIL import Image
 import requests
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'service' / 'server'))
+from telegram_presentation import telegram_text
 FEED = 'https://www.reddit.com/r/EarningsWhisper/new/.rss'
 STATE = ROOT / '.runtime' / 'weekly_earnings.sqlite'
 HEADERS = {'User-Agent': 'AI-Trader earnings calendar/1.0'}
@@ -120,7 +123,7 @@ def send_once(item, image, text, values, session, state=STATE, persist=None):
             persist('sending')  # Durable cloud claim BEFORE contacting Telegram.
         try:
             response = session.post(f'https://api.telegram.org/bot{token}/sendPhoto',
-                data={'chat_id':chat,'message_thread_id':topic,'caption':text},
+                data={'chat_id':chat,'message_thread_id':topic,'caption':telegram_text(text, limit=1024)},
                 files={'photo':('earnings.png',image,'image/png')},timeout=45)
             result = response.json()
         except Exception:

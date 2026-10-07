@@ -773,10 +773,11 @@ def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = No
         return "missing_credentials"
     try:
         from telegram_topics import destination_fields, with_news_community_link
+        from telegram_presentation import telegram_text
         session = requests.Session()
         session.trust_env = False
         response = session.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                                data={**destination_fields(chat_id, event_type), "text": with_news_community_link(message, event_type),
+                                data={**destination_fields(chat_id, event_type), "text": telegram_text(with_news_community_link(message, event_type)),
                                       "disable_web_page_preview": True}, timeout=15)
         response.raise_for_status()
         return "sent"

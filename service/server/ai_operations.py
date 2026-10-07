@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime, timezone
 import requests
 from admin_messages import timestamped
+from telegram_presentation import telegram_text
 
 
 def number(v):
@@ -195,7 +196,7 @@ def send_one():
     if not row:return
     try:
         r=requests.post('https://api.telegram.org/bot'+token+'/sendMessage',json={
-            'chat_id':chat,'text':timestamped(row['message'],row['created_at']),'disable_web_page_preview':True},timeout=(3,10))
+            'chat_id':chat,'text':telegram_text(timestamped(row['message'],row['created_at'])),'disable_web_page_preview':True},timeout=(3,10))
         r.raise_for_status()
         value=r.json()
         if not value.get('ok'):raise ValueError('telegram_rejected')

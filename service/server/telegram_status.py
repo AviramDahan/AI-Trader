@@ -13,6 +13,7 @@ import requests
 
 from database import get_db_connection
 from telegram_topics import destination_fields, thread_id_for_event
+from telegram_presentation import telegram_text, utf16_length
 
 
 UTC = timezone.utc
@@ -272,7 +273,7 @@ def signals_status_messages() -> list[str]:
     separator = "\n\n" + "─" * 18 + "\n\n"
     current: list[str] = []
     for line in lines:
-        projected = len(separator.join(current + [line]))
+        projected = utf16_length(telegram_text(separator.join(current + [line]), limit=100000))
         if current and projected > 3200:
             chunks.append(current)
             current = [line]
@@ -291,7 +292,7 @@ def signals_status_messages() -> list[str]:
             separator.join(chunk),
             _rtl(f"עודכן: {_ltr(updated)} (שעון ישראל)"),
         ) if value)
-        if len(message) > 4096:
+        if utf16_length(telegram_text(message, limit=100000)) > 4096:
             raise ValueError("A single Telegram signal-status page exceeds 4096 characters")
         pages.append(message)
     return pages
@@ -331,6 +332,7 @@ def _upsert_pinned_message(state_key: str, event_type: str, text: str) -> str:
     stamp = _now_z()
     if not token or not chat_id or not thread_id:
         return "missing_configuration"
+    text = telegram_text(text)
     content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("SELECT * FROM scanner_telegram_topic_state WHERE state_key=?", (state_key,))

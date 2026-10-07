@@ -61,3 +61,9 @@ class ChartTests(unittest.TestCase):
         self.assertEqual(call.kwargs["data"]["message_thread_id"],211)
         self.assertIn("TP1",call.kwargs["data"]["caption"])
         self.assertIn("כניסה בפועל",call.kwargs["data"]["caption"])
+        from telegram_presentation import telegram_text, RLM, LRI, PDI, utf16_length
+        caption = call.kwargs['data']['caption']
+        self.assertTrue(caption.startswith(RLM + LRI + 'TEST' + PDI))
+        self.assertIn(LRI + '$100.00' + PDI, caption)
+        self.assertEqual(telegram_text(caption, limit=1024), caption)
+        self.assertLessEqual(utf16_length(caption), 1024)
