@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 
 import { API_ORIGIN, useLanguage } from './appShared'
 import { positionMove, unifiedSignals, activeTargetIndexes } from './signalPresentation'
+import { SignalResearch } from './SignalResearch'
 
 type Dashboard = {
   market: { is_open: boolean }
@@ -45,7 +46,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const location = useLocation()
   const navigate = useNavigate()
   const requestedTab = new URLSearchParams(location.search).get('tab') || 'signals'
-  const tab = requestedTab === 'trades' ? 'signals' : ['signals', 'results', 'news', 'status'].includes(requestedTab) ? requestedTab : 'signals'
+  const tab = requestedTab === 'trades' ? 'signals' : ['signals', 'results', 'research', 'news', 'status'].includes(requestedTab) ? requestedTab : 'signals'
   const [data, setData] = useState<Dashboard | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -225,6 +226,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const tabs = [
     ['signals', text('סיגנלים', 'Signals')],
     ['results', text('תוצאות', 'Results')], ['news', text('חדשות', 'News')],
+    ['research', text('מחקר סיגנלים', 'Signal research')],
     ['status', text('מצב הסורק', 'Scanner status')],
   ]
 
@@ -303,6 +305,10 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     <nav className="scanner-tabs" aria-label={text('ניווט בדשבורד', 'Dashboard navigation')}>
       {tabs.map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => navigate(`/market?tab=${key}`)}>{label}</button>)}
     </nav>
+
+    {tab === 'research' && <SignalResearch he={he} />}
+    {tab === 'status' && <SignalResearch he={he} mode="summary" />}
+    {tab === 'results' && <SignalResearch he={he} mode="results" />}
 
     {tab === 'signals' && <div className="scanner-section">
       <h2>{text('פוזיציות פתוחות', 'Open positions')} <small>{unified.open.length}</small></h2>

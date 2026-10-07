@@ -3781,3 +3781,16 @@ html[dir='rtl'] .main-content {
   .scanner-table-wrap { display: none; }
   .scanner-comparison-cards { display: grid; gap: 10px; }
 }
+/* Retained decision evidence and percentage/R outcomes. */
+.research-header, .research-filters { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.research-filters { justify-content: flex-start; margin-block: 1rem; }
+.signal-research select, .signal-research input { color: inherit; background: var(--bg-secondary, #162331); border: 1px solid var(--border-color, #425065); border-radius: 8px; padding: .45rem; }
+.research-candidate { border: 1px solid var(--border-color, #425065); border-radius: 10px; margin-block: .75rem; padding: 1rem; overflow-wrap: anywhere; }
+.research-candidate summary { cursor: pointer; line-height: 1.8; }
+.research-levels { display: flex; flex-wrap: wrap; gap: 1rem; }
+.research-levels dd { margin: 0; }
+.research-level-chart { margin: .5rem 0; max-width: 540px; }
+.research-level-chart svg { width: 100%; height: auto; }
+.research-level-chart figcaption { font-size: .8rem; opacity: .75; }
+.research-timeline { padding-inline-start: 1.5rem; }
+.research-timeline > li { margin-block: .8rem; }
