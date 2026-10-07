@@ -13,6 +13,24 @@ import telegram_status
 
 
 class TelegramStatusTests(unittest.TestCase):
+    def test_create_and_edit_have_same_idempotent_bidi_presentation(self):
+        from telegram_presentation import telegram_text
+        text = 'סימול: NVDA\nתוצאה: -2.35%\nחברה: NVIDIA Corporation'
+        expected = telegram_text(text)
+        response = Mock(ok=True)
+        response.json.return_value = {'ok': True, 'result': {'message_id': 77}}
+        session = Mock(); session.post.return_value = response
+        with patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN': 'mock', 'TELEGRAM_CHAT_ID': 'public-test',
+                                     'TELEGRAM_SIGNALS_THREAD_ID': '211'}), \
+                patch.object(telegram_status.requests, 'Session', return_value=session):
+            self.assertEqual(telegram_status._upsert_pinned_message('fixture', 'signals_status', text), 'created')
+            self.assertEqual(telegram_status._upsert_pinned_message('fixture', 'signals_status', expected), 'updated')
+        self.assertEqual(session.post.call_count, 2)
+        for call in session.post.call_args_list:
+            self.assertEqual(call.kwargs['data']['text'], expected)
+            self.assertEqual(call.kwargs['data']['message_thread_id'], 211)
+            self.assertNotIn('parse_mode', call.kwargs['data'])
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.original_path = database._SQLITE_DB_PATH
