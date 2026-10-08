@@ -219,7 +219,7 @@ def companyfacts_comparisons(payload: dict, accession: str, accepted_at: str) ->
 class _Text(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.parts, self.skip = [], 0
+        self.parts, self.skip, self.length = [], 0, 0
 
     def handle_starttag(self, tag, attrs):
         if tag in {"script", "style"}:
@@ -230,8 +230,10 @@ class _Text(HTMLParser):
             self.skip -= 1
 
     def handle_data(self, data):
-        if not self.skip and sum(map(len, self.parts)) < 24000:
-            self.parts.append(data)
+        if not self.skip and self.length < 24000:
+            part = data[:24000-self.length]
+            self.parts.append(part)
+            self.length += len(part)
 
 
 def parse_8k_exhibit(raw: bytes) -> dict:
