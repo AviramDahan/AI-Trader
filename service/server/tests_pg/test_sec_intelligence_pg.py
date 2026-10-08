@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import database
 import sec_intelligence as si
+import sec_transport
 
 
 def test_schema7_snapshot_decisions_and_idempotent_migration(pg, monkeypatch):
@@ -37,3 +38,20 @@ def test_schema7_snapshot_decisions_and_idempotent_migration(pg, monkeypatch):
         assert connection.execute("SELECT MAX(version) n FROM schema_migrations").fetchone()["n"] == 7
         assert connection.execute("SELECT count(*) n FROM si_decisions").fetchone()["n"] == 1
         assert connection.execute("SELECT count(*) n FROM si_transactions").fetchone()["n"] == 1
+
+
+def test_shared_postgres_sec_clock_reserves_nonoverlapping_slots(pg, monkeypatch):
+    import json
+    import cloud_runtime
+    monkeypatch.setenv("AI_TRADER_CLOUD", "true")
+    monkeypatch.setattr(cloud_runtime, "guard_lease", lambda: None)
+    monkeypatch.setattr(sec_transport.time, "sleep", lambda _seconds: None)
+    sec_transport.reserve()
+    with database.get_db_connection() as connection:
+        first = json.loads(connection.execute(
+            "SELECT value_json FROM scanner_settings WHERE key='sec_request_slot'").fetchone()["value_json"])["next_at"]
+    sec_transport.reserve()
+    with database.get_db_connection() as connection:
+        second = json.loads(connection.execute(
+            "SELECT value_json FROM scanner_settings WHERE key='sec_request_slot'").fetchone()["value_json"])["next_at"]
+    assert second-first >= .5
