@@ -246,6 +246,27 @@ def test_snapshot_failure_does_not_commit_processed_job_or_transaction(isolated,
         assert conn.execute("SELECT count(*) n FROM si_company_snapshots").fetchone()["n"] == 0
 
 
+def test_processing_round_robin_prevents_active_issuer_starvation(isolated, monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setenv("NEWS_SEC_USER_AGENT", "Research Operator research@example.com")
+    uid, _ = si.save_universe({"AAPL": {"company": "Apple Inc.", "indexes": ["sp500"]},
+                               "MSFT": {"company": "Microsoft Corp.", "indexes": ["sp500"]}},
+                              {"0000320193": ["AAPL"], "0000789019": ["MSFT"]}, now)
+    for index in range(3):
+        si._queue_filing(filing(f"0000320193-26-{index+1:06d}", "10-Q", now-timedelta(minutes=5)),
+                         "0000320193", ["AAPL"], uid, now, [10])
+    si._queue_filing(filing("0000789019-26-000001", "10-Q", now-timedelta(minutes=5)),
+                     "0000789019", ["MSFT"], uid, now, [10])
+    monkeypatch.setattr(si, "fetch", lambda *_a, **_k: (b"synthetic", {}))
+    monkeypatch.setattr(si, "_filing_evidence", lambda job, raw, at: (
+        {"kind": "financial", "document_sha256": si._hash(raw), "comparisons": []}, []))
+    assert si.process_jobs(now, limit=2)["processed"] == 2
+    with isolated() as conn:
+        issuers = [r["issuer_cik"] for r in conn.execute(
+            "SELECT issuer_cik FROM si_filing_jobs WHERE status='processed'")]
+    assert set(issuers) == {"0000320193", "0000789019"}
+
+
 def test_xbrl_comparisons_reject_ytd_units_future_and_missing():
     accession = "0000320193-26-000001"
     current = {"accn": accession, "form": "10-Q", "filed": "2026-10-08", "start": "2026-07-01", "end": "2026-09-30", "val": 120}

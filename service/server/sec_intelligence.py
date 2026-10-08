@@ -666,9 +666,12 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
 def process_jobs(now: datetime | None = None, limit: int = 2) -> dict:
     now = now or datetime.now(timezone.utc)
     with get_db_connection() as conn:
-        jobs = [dict(r) for r in conn.execute("""SELECT * FROM si_filing_jobs WHERE
-            status IN ('queued','retry') AND (next_attempt_at IS NULL OR next_attempt_at<=?)
-            ORDER BY accepted_at DESC,first_seen_at,accession LIMIT ?""", (_z(now), min(max(limit, 1), 4)))]
+        jobs = [dict(r) for r in conn.execute("""WITH due AS (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY issuer_cik ORDER BY first_seen_at,accession) AS issuer_rank
+            FROM si_filing_jobs WHERE status IN ('queued','retry')
+            AND (next_attempt_at IS NULL OR next_attempt_at<=?))
+            SELECT * FROM due ORDER BY issuer_rank,first_seen_at,accession LIMIT ?""",
+            (_z(now), min(max(limit, 1), 4)))]
     processed, failures = 0, []
     for job in jobs:
         try:
