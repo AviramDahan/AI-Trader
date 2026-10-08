@@ -59,7 +59,7 @@ def test_pg_existing_candidate_counts_and_schema_unchanged(pg,monkeypatch):
     with database.get_db_connection() as c:
         assert c.execute("SELECT count(*) n FROM scanner_candidates WHERE stage='technical'").fetchone()['n']==1
         assert c.execute("SELECT count(*) n FROM scanner_candidates WHERE status='rejected'").fetchone()['n']==1
-        assert c.execute('SELECT max(version) n FROM schema_migrations').fetchone()['n']==6
+        assert c.execute('SELECT max(version) n FROM schema_migrations').fetchone()['n']==7
 
 
 def test_pg_signal_order_links_and_trading_backup_unchanged(pg,monkeypatch):

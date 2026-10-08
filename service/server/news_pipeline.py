@@ -268,16 +268,16 @@ def _request(url: str, state: dict[str, Any], user_agent: str) -> tuple[bytes | 
 
 
 def _sec_request(url: str, state: dict[str, Any], user_agent: str) -> tuple[bytes | None, dict[str, Any]]:
-    """Apply one shared SEC request cadence across map, feed and submissions."""
-    global SEC_LAST_REQUEST_AT
-    minimum_gap = _float_env("STOCK_SCANNER_SEC_REQUEST_GAP_SECONDS", .12, 0, 1)
-    with SEC_REQUEST_LOCK:
-        wait = minimum_gap - (time.monotonic() - SEC_LAST_REQUEST_AT)
-        if wait > 0:
-            time.sleep(wait)
-        result = _request(url, state, user_agent)
-        SEC_LAST_REQUEST_AT = time.monotonic()
-        return result
+    """Bounded official-only transport shared with structured SEC ingestion."""
+    from sec_transport import fetch
+    from retry_policy import DeferredProviderError
+    try:
+        body, meta = fetch(url, user_agent, max_bytes=4_000_000,
+                           etag=state.get("etag") or "", modified=state.get("last_modified") or "")
+    except DeferredProviderError as exc:
+        raise ProviderRateLimited("SEC temporarily unavailable", exc.retry_after_seconds) from exc
+    return body, {"etag": meta.get("etag", ""), "last_modified": meta.get("modified", ""),
+                  "not_modified": body is None}
 
 
 def _rss_items(content: bytes, provider: str, publisher: str, scope: str,

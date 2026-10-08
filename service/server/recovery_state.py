@@ -108,9 +108,9 @@ def export_postgres(url):
     with psycopg.connect(url,row_factory=dict_row) as conn:
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
         conn.execute("SET LOCAL statement_timeout='30000'")
-        # News-only v4 is additive; recovery still exports only active portfolio
-        # state. No news bodies, histories or review-cache rows enter backups.
-        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] not in (2,3,4,5,6):
+        # Schema 7 adds isolated SEC analytical tables; active-state recovery
+        # remains portfolio-only, with no filing bodies/history or prompts.
+        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] not in (2,3,4,5,6,7):
             raise ValueError('unsupported_source_schema')
         def select(table,condition,args=()):
             rows=conn.execute(sql.SQL('SELECT * FROM {} WHERE ').format(sql.Identifier(table))+condition,args).fetchall()

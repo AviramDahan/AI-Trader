@@ -2202,6 +2202,11 @@ def init_database():
         for statement in ddl.split(';'):
             if statement.strip():
                 cursor.execute(statement)
+        ddl = '\n'.join(line for line in (Path(__file__).parent / 'migrations' / '007_sec_intelligence.sql').read_text().splitlines()
+                        if not line.lstrip().startswith('--'))
+        for statement in ddl.split(';'):
+            if statement.strip():
+                cursor.execute(statement)
         conn.commit()
     elif previous_autocommit is not None:
         conn.autocommit = previous_autocommit

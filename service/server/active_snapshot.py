@@ -149,10 +149,10 @@ def import_data(data, url, *, allow_defaults=False, scanner_token=None):
         raise ValueError('legacy_hold_coverage_unknown_restore_refused')
     with psycopg.connect(url, row_factory=dict_row) as conn:
         conn.execute("SET LOCAL lock_timeout='5s'")
-        # v4 adds only isolated news-evidence tables. Portfolio schema and
-        # validation are identical; these new tables are NOT snapshot contents.
+        # Schema 7 SEC analytical tables remain outside active-state recovery;
+        # portfolio validation and clean-destination guards remain unchanged.
         schema = conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version']
-        if schema not in (2,3,4,5,6) or (data['version'] in (3,4) and schema < 6):
+        if schema not in (2,3,4,5,6,7) or (data['version'] in (3,4) and schema < 6):
             raise ValueError('unsupported_destination_schema')
         for key in ROLE_KEYS.values():
             if not conn.execute("SELECT pg_try_advisory_xact_lock(719322,%s) AS ok", (key,)).fetchone()["ok"]:

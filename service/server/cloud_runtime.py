@@ -9,15 +9,15 @@ import time
 from pathlib import Path
 
 ROLES = {
-    "scanner": "telegram_news_stream,stock_scanner,stock_position_news,stock_news_feed,stock_news_ai,stock_news_translation",
+    "scanner": "telegram_news_stream,stock_scanner,stock_sec_intelligence,stock_position_news,stock_news_feed,stock_news_ai,stock_news_translation",
     "monitor": "stock_signal_monitor,stock_quote_refresh",
     "telegram": "stock_telegram_outbox,stock_telegram_status",
 }
 ROLE_KEYS = {"scanner": 11, "monitor": 12, "telegram": 13}
 # Activation release: migration 006 is required. The prerequisite bridge
 # supports actual schemas 5/6 and is the only safe binary rollback target.
-SCHEMA_VERSION = 6
-SUPPORTED_SCHEMAS = (6,)
+SCHEMA_VERSION = 7
+SUPPORTED_SCHEMAS = (7,)
 SINGLE_TARGET_ROLLBACK_CAPABILITY = 'v2-format3-holds-legacy-v1'
 ACTIVE_LEASE = None
 
@@ -30,7 +30,7 @@ def assert_schema():
         row = conn.cursor().execute("SELECT MAX(version) AS version FROM schema_migrations").fetchone()
         if row["version"] not in SUPPORTED_SCHEMAS:
             raise RuntimeError("run_numbered_migrations_before_start")
-        if row['version'] == 6:
+        if row['version'] in (6, 7):
             # A version label alone is insufficient readiness evidence.
             columns = conn.execute("""SELECT table_name,column_name,is_nullable FROM information_schema.columns
                 WHERE table_schema=current_schema() AND table_name IN ('scanner_orders','scanner_signals','scanner_trades')""").fetchall()
@@ -40,6 +40,12 @@ def assert_schema():
                     ('scanner_signals','tp2'),('scanner_signals','tp3'),('scanner_signals','rr2'),('scanner_signals','rr3'),
                     ('scanner_trades','tp2'),('scanner_trades','tp3'))):
                 raise RuntimeError('single_target_schema_incomplete')
+        if row['version'] == 7:
+            tables = {r['table_name'] for r in conn.execute("""SELECT table_name FROM information_schema.tables
+                WHERE table_schema=current_schema() AND table_name LIKE 'si_%'""")}
+            if not {'si_universe_snapshots','si_filing_jobs','si_transactions',
+                    'si_company_snapshots','si_decisions','si_checkpoints'} <= tables:
+                raise RuntimeError('sec_intelligence_schema_incomplete')
 
 
 class RoleLease:

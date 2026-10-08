@@ -39,6 +39,12 @@ def _require_scanner_manager(authorization: str):
 
 
 def register_scanner_routes(app: FastAPI) -> None:
+    @app.get("/api/scanner/sec-intelligence/status")
+    def sec_intelligence_status(authorization: str = Header(None)):
+        _require_scanner_manager(authorization)
+        from sec_intelligence import coverage_status
+        return coverage_status()
+
     @app.get("/api/scanner/research")
     def scanner_research(hours: int = Query(48, ge=24, le=168)):
         from signal_research import payload

@@ -40,6 +40,7 @@ def clock(monkeypatch):
     Clock.instant = NOW
     monkeypatch.setattr(scanner, 'datetime', Clock)
     monkeypatch.setattr(targets, 'datetime', Clock)
+    monkeypatch.setattr(signal_news, 'datetime', Clock)
     monkeypatch.setattr(scanner.time, 'time', lambda: Clock.instant.timestamp())
     yield Clock
     Clock.instant = NOW

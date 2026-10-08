@@ -16,6 +16,7 @@ const reasonNames: Record<string, string> = {
   pre_waiting_regular_session: 'ממתין למסחר הרגיל — לא פסילת איכות', post_waiting_regular_session: 'המסחר הרגיל הסתיים במהלך הבדיקה',
   ai_hold: 'החלטת AI: המתנה', ai_confidence_below_threshold: 'ציון המודל מתחת לסף',
   ai_news_relevance_below_threshold: 'רלוונטיות החדשות מתחת לסף',
+  sec_material_conflict_hold: 'סתירה מהותית בנתוני SEC מאומתים — המתנה',
   target_buffer_reaches_entry: 'מרווח ההתנגדות משאיר את היעד בכניסה או מתחתיה',
   target_rounds_to_or_below_entry: 'עיגול היעד מביא אותו לכניסה או מתחתיה',
   non_positive_stop: 'הסטופ אינו מחיר חיובי', stop_not_below_entry: 'הסטופ אינו מתחת לכניסה',
@@ -63,6 +64,7 @@ function Candidate({ row, he }: { row: Row, he: boolean }) {
       <small>{stamp(row.at)} · {row.rejection ? candidateReason(row, he) : row.signals.length ? (he ? 'סיגנל נשמר' : 'Signal saved') : (he ? 'אין תוצאה סופית מתועדת' : 'No retained final result')}</small>
     </summary>
     <p>{he ? 'חלון מסחר בזמן הבדיקה' : 'Session at check'}: {row.session?.is_open ? (he ? 'פתוח' : 'Open') : row.session?.reason || '—'} · {he ? 'ניסיונות AI מתועדים' : 'Recorded AI attempts'}: {row.ai_attempts}</p>
+    {row.sec_decision && <p className="scanner-note">{he ? 'ראיית SEC בהחלטה' : 'SEC decision evidence'}: <bdi>{row.sec_decision.mode}</bdi> · {he ? 'דירוג בסיס' : 'Baseline rank'} <bdi>{value(row.sec_decision.baseline_rank_score)}</bdi> → {he ? 'דירוג משופר' : 'Enhanced rank'} <bdi>{value(row.sec_decision.enhanced_rank_score)}</bdi> · {he ? 'שינוי' : 'Adjustment'} <bdi>{value(row.sec_decision.sec_adjustment)}</bdi> · {he ? 'סיבה' : 'Reason'}: <bdi>{row.sec_decision.rejection_reason || (he ? 'המשיך לבדיקה' : 'Continued to review')}</bdi></p>}
     <ol className="research-timeline">
       <li>{he ? 'סינון טכני' : 'Technical'}: {row.technical_recorded ? (he ? 'מועמד מתועד' : 'Candidate recorded') : (he ? 'לא זמין' : 'Unavailable')}</li>
       {row.target_checks.map((check: Row, i: number) => <li key={i}>

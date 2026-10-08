@@ -154,19 +154,20 @@ def fetch_filing(url, user_agent):
     issuer, accession, _ = filing_url(url)
     url = raw_filing_url(url)
     deadline = time.monotonic() + MAX_SECONDS
-    # Share the existing SEC lock/rate limiter; at most one enrichment request
-    # per second, well below SEC's 10/s ceiling. No DB transaction during HTTP.
+    # Reserve from the same committed fair-access clock as all other SEC work.
+    # No database transaction remains open during the network read.
     import news_pipeline
+    from sec_transport import reserve
     with news_pipeline.SEC_REQUEST_LOCK:
         for redirect in range(3):
             if filing_url(url)[:2] != (issuer, accession):
                 raise EvidenceError('redirect_different_event')
             addresses = public_addresses('www.sec.gov')
-            wait = max(0, 1 - (time.monotonic() - news_pipeline.SEC_LAST_REQUEST_AT))
-            if time.monotonic() + wait >= deadline:
+            if time.monotonic() >= deadline:
                 raise EvidenceError('deadline', transient=True)
-            time.sleep(wait)
-            news_pipeline.SEC_LAST_REQUEST_AT = time.monotonic()
+            reserve()
+            if time.monotonic() >= deadline:
+                raise EvidenceError('deadline', transient=True)
             connection = PinnedHTTPS(addresses[0], min(3, deadline - time.monotonic()))
             expired = threading.Event()
             def expire():
