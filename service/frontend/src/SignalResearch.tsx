@@ -6,7 +6,9 @@ const value = (v: any, suffix = '') => v != null && Number.isFinite(Number(v)) ?
 const reasonNames: Record<string, string> = {
   pre_no_fresh_quote: 'אין מחיר ייחוס טרי', no_fresh_intraday_quote_or_market_closed: 'אין מחיר תוך־יומי טרי / שוק סגור',
   pre_no_forward_zone: 'אין אזור התנגדות קדמי', pre_nearest_resistance_below_2r: 'ההתנגדות הקרובה לפני 2R',
-  pre_entry_inside_unresolved_price_zone: 'הכניסה בתוך אזור לא פתור', pre_invalid_rounded_levels: 'רמות לא תקינות אחרי עיגול',
+  pre_entry_inside_unresolved_price_zone: 'הכניסה בתוך אזור לא פתור', pre_invalid_rounded_levels: 'רמות יעד/סטופ אינן תקינות',
+  pre_insufficient_confirmed_price_zones: 'אין מספיק אזורי מחיר מאושרים לתוכנית',
+  pre_price_structure_fails_risk_reward: 'מבנה היעדים אינו עומד בדרישות הסיכון־סיכוי',
   pre_no_structural_stop_anchor: 'אין עוגן סטופ מבני', pre_structural_stop_too_distant: 'הסטופ המבני רחוק מדי',
   insufficient_current_news: 'אין די חדשות עדכניות', news_provider_unavailable_fail_closed: 'נתוני החדשות אינם זמינים',
   ai_or_confidence_filter: 'החלטת AI / ציון / רלוונטיות לא עברו', news_sentiment_conflict: 'סתירה בכיוון החדשות',
@@ -16,8 +18,17 @@ const reasonNames: Record<string, string> = {
   ai_news_relevance_below_threshold: 'רלוונטיות החדשות מתחת לסף',
   target_buffer_reaches_entry: 'מרווח ההתנגדות משאיר את היעד בכניסה או מתחתיה',
   target_rounds_to_or_below_entry: 'עיגול היעד מביא אותו לכניסה או מתחתיה',
+  non_positive_stop: 'הסטופ אינו מחיר חיובי', stop_not_below_entry: 'הסטופ אינו מתחת לכניסה',
+  rounded_target_not_before_resistance: 'היעד לאחר עיגול אינו לפני ההתנגדות',
 }
 const reasonText = (reason: string, he: boolean) => he ? reasonNames[reason] || reason : reason
+const candidateReason = (row: Row, he: boolean) => {
+  // Use only a detail belonging to the same persisted rejection; no historical rewrite.
+  const check = [...(row.target_checks || [])].reverse().find((c: Row) =>
+    `pre_${String(c.rejection_reason || '').replace(/^pre_/, '')}` === row.rejection)
+  const detail = check?.rejection_detail?.find((code: string) => reasonNames[code])
+  return reasonText(detail || row.rejection, he)
+}
 const stageNames: Record<string, string> = { quote: 'נתוני מחיר', news: 'חדשות', targets: 'מבנה / יעד / RR', ai_filter: 'סינון AI', cooldown: 'המתנה', other: 'אחר / חסרה ראיה' }
 
 function Levels({ check, he }: { check: Row, he: boolean }) {
@@ -49,7 +60,7 @@ function Candidate({ row, he }: { row: Row, he: boolean }) {
   const stamp = (s: string) => s ? new Date(s).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
   return <details className="research-candidate">
     <summary><bdi>{row.ticker}</bdi> · <bdi>{row.company || '—'}</bdi> · <bdi>{row.direction || '—'}</bdi><br />
-      <small>{stamp(row.at)} · {row.rejection ? reasonText(row.rejection, he) : row.signals.length ? (he ? 'סיגנל נשמר' : 'Signal saved') : (he ? 'אין תוצאה סופית מתועדת' : 'No retained final result')}</small>
+      <small>{stamp(row.at)} · {row.rejection ? candidateReason(row, he) : row.signals.length ? (he ? 'סיגנל נשמר' : 'Signal saved') : (he ? 'אין תוצאה סופית מתועדת' : 'No retained final result')}</small>
     </summary>
     <p>{he ? 'חלון מסחר בזמן הבדיקה' : 'Session at check'}: {row.session?.is_open ? (he ? 'פתוח' : 'Open') : row.session?.reason || '—'} · {he ? 'ניסיונות AI מתועדים' : 'Recorded AI attempts'}: {row.ai_attempts}</p>
     <ol className="research-timeline">

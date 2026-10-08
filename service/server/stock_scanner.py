@@ -271,6 +271,19 @@ def _write_history_cache(histories: dict[str, pd.DataFrame], fetched_at: float) 
     temporary.replace(HISTORY_CACHE_FILE)
 
 
+def _history_coverage(histories, symbols, expected):
+    """Bounded diagnostics only; never alter cache eligibility or price data."""
+    requested = set(symbols)
+    missing = sorted(requested.difference(histories))
+    lagging = sorted(s for s in requested.intersection(histories)
+                     if pd.Timestamp(histories[s].index[-1]).date() < expected)
+    return dict(expected_session=expected.isoformat(), requested_symbols=len(requested),
+                current_symbols=len(requested)-len(missing)-len(lagging),
+                lagging_symbol_count=len(lagging), lagging_symbols=lagging[:50],
+                missing_symbol_count=len(missing), missing_symbols=missing[:50],
+                symbol_details_clipped=len(lagging)>50 or len(missing)>50)
+
+
 def load_historical_data(symbols: list[str], cfg: dict[str, Any]) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
     """Use a once-daily local OHLCV cache and fail closed on unusable refreshes."""
     cached, fetched_at = _read_history_cache()
@@ -286,13 +299,17 @@ def load_historical_data(symbols: list[str], cfg: dict[str, Any]) -> tuple[dict[
     if not refresh_symbols and cached_coverage >= .95:
         return {symbol: cached[symbol] for symbol in symbols if symbol in cached}, {
             "status": "cache_hit", "age_seconds": round(cache_age or 0), "refreshed_symbols": 0,
+            **_history_coverage(cached, symbols, expected),
         }
+    downloaded = {}
+    error_code = 'provider_refresh_failed'
     try:
         downloaded = _download_history(refresh_symbols)
         downloaded = {s: _finalize_download(f, now) for s, f in downloaded.items()}
         downloaded = {s: f for s, f in downloaded.items() if len(f) >= 65}
         required_coverage = .85 if len(refresh_symbols) >= 20 else 1.0
         if len(downloaded) / max(len(refresh_symbols), 1) < required_coverage:
+            error_code = 'incomplete_refresh'
             raise RuntimeError("Yahoo history refresh was incomplete")
         merged = dict(cached)
         merged.update(downloaded)
@@ -302,11 +319,18 @@ def load_historical_data(symbols: list[str], cfg: dict[str, Any]) -> tuple[dict[
             "status": "refreshed" if full_refresh else "incremental_refresh",
             "age_seconds": 0 if full_refresh else round(cache_age or 0),
             "refreshed_symbols": len(downloaded), "expected_session": expected.isoformat(),
+            **_history_coverage(merged, symbols, expected),
         }
-    except Exception:
+    except Exception as exc:
         if fetched_at and cache_age is not None and cache_age <= cfg["history_stale_after"] and cached_coverage >= .95:
+            coverage = _history_coverage(cached, symbols, expected)
+            status = ('refresh_failed_cache_current' if coverage['current_symbols']==len(requested)
+                      else 'partial_fallback' if coverage['current_symbols'] else 'stale_fallback')
             return {symbol: cached[symbol] for symbol in symbols if symbol in cached}, {
-                "status": "stale_fallback", "age_seconds": round(cache_age), "refreshed_symbols": 0,
+                "status": status, "age_seconds": round(cache_age), "refreshed_symbols": 0,
+                **coverage, "refresh_requested_symbols": len(refresh_symbols),
+                "refresh_received_symbols": len(downloaded),
+                "refresh_error_type": type(exc).__name__, "refresh_error_code": error_code,
             }
         raise RuntimeError("Historical data unavailable; scan stopped safely")
 

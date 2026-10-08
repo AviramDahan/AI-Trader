@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { API_ORIGIN, useLanguage } from './appShared'
 import { positionMove, unifiedSignals, activeTargetIndexes } from './signalPresentation'
 import { SignalResearch } from './SignalResearch'
+import { HistoryCacheStatus } from './HistoryCacheStatus'
 
 type Dashboard = {
   market: { is_open: boolean }
@@ -407,7 +408,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       <p>{text('סריקה אחרונה', 'Last scan')}: {activity.last_scan_at ? stamp(activity.last_scan_at * 1000) : '—'} · {text('סריקה הבאה', 'Next scan')}: {activity.next_scan_at ? stamp(activity.next_scan_at * 1000) : '—'}</p>
       <p>{text('ספק מחירים', 'Price provider')}: Yahoo Finance/yfinance · {text('המחירים עשויים להיות מושהים. סיגנל לא מתפרסם ללא מחיר תוך־יומי בן פחות מ־12 דקות.', 'Quotes may be delayed. No signal is published without an intraday quote fresher than 12 minutes.')}</p>
       <p>{text('רענון מחיר לתצוגה', 'Display quote refresh')}: {quoteInfo?.refresh_seconds || data?.settings?.quote_refresh_seconds || 30}s · {text('הדפדפן בודק את מטמון השרת כל 10 שניות. זהו מחיר דקה אחרון מספק חינמי, לא פיד בורסה מובטח בזמן אמת; מחיר אחרון נשמר גם בתקלה או כשהשוק סגור.', 'The browser checks the server cache every 10 seconds. This is the latest 1-minute quote from a free provider, not guaranteed exchange real-time; the last value is retained on failure or while the market is closed.')}</p>
-      <p>{text('מטמון היסטורי', 'History cache')}: {activity.history_cache?.status || '—'} · {text('גיל', 'age')} {Math.round((activity.history_cache?.age_seconds || 0) / 3600)}h</p>
+      <HistoryCacheStatus cache={activity.history_cache} he={he} />
       <p>{text('המשתמש והתיק הראשיים', 'Primary user and portfolio')}: <b>{primaryName}</b> · {text('המשתמש היחיד שמוצג בדשבורד', 'the only user exposed in the dashboard')}</p>
       <p>{text('מפתח טכני יציב', 'Stable technical key')}: <code>{data?.primary_user?.key || data?.scanner_name}</code> · Ollama: <code>{activity.model || '—'}</code></p>
     </div>}
