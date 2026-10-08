@@ -9,6 +9,21 @@ REASONS = {'stale_or_missing_bars', 'TimeoutError', 'ReadTimeout', 'ConnectTimeo
 STATUSES = {'ok','error','idle','market_closed','no_new','no_signals','waiting','degraded'}
 
 
+def component_failed(row, now):
+    """An on-demand model call is not a periodically heartbeating worker.
+
+    Explicit errors remain failures. Scanner/monitor worker liveness retains its
+    existing age gate; no model request is generated to refresh this status.
+    """
+    if row['status'] == 'error':
+        return True
+    if row['component'] == 'ollama':
+        return False
+    age = ((now-datetime.fromisoformat(row['last_attempt_at'].replace('Z','+00:00'))).total_seconds()
+           if row['last_attempt_at'] else 0)
+    return age > {'monitor':900,'quotes':900,'backup':7500,'scan':7200,'telegram':180}.get(row['component'],86400)
+
+
 def snapshot(row, now):
     row=dict(row)
     out={'status':row.get('status') if row.get('status') in STATUSES else 'unknown'}
@@ -48,6 +63,23 @@ def summary(context):
 
 def health_message(component, change, context, state):
     """Describe a successful backup, not merely an observer becoming healthy."""
+    if component == 'ollama' and change == 'recovery':
+        try:
+            success = datetime.fromisoformat(context[component]['last_success_at'])
+            failure = datetime.fromisoformat(state['last_failure']['at'])
+            recovered = datetime.fromisoformat(state['recovered_at'])
+            new_success = failure <= success <= recovered
+        except (KeyError, TypeError, ValueError):
+            new_success = False
+        if not new_success:
+            previous_status = state.get('last_failure', {}).get('context', {}).get(component, {}).get('status')
+            explanation = ('התראת חוסר הפעילות של AI לפי דרישה הוסרה.\n'
+                           'היעדר מועמד לניתוח אינו תקלה בשירות.\n'
+                           if previous_status == 'ok' else
+                           'רכיב AI אינו מדווח כשל כעת; הצלחת קריאה חדשה לא אומתה.\n')
+            return ('AI-Trader Admin\n' + explanation
+                    + 'אין כאן הוכחה לקריאת AI חדשה; לא בוצעה קריאת בדיקה יזומה.\n'
+                    + summary(context))
     if component == 'backup' and change == 'recovery':
         data = context.get('backup', {})
         try:

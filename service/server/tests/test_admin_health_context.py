@@ -118,3 +118,90 @@ def test_health_loop_enqueues_one_backup_recovery_to_private_queue(monkeypatch):
     ops.health()
     assert [c.args[0] for c in queue.call_args_list] == ['health:backup:1', 'health_recovered:backup:1']
     assert '✅ הגיבוי הצליח לאחר התקלה' in queue.call_args_list[1].args[1]
+
+
+def health_driver(monkeypatch, row, saved=None):
+    """Exercise the actual health loop with isolated state and no delivery."""
+    from unittest.mock import MagicMock, Mock
+    import ai_operations as ops
+    state = {'value': json.dumps(saved)} if saved else {}
+    class Clock(datetime):
+        @staticmethod
+        def now(tz): return NOW
+    def execute(sql, params=()):
+        result = MagicMock()
+        if sql.startswith('SELECT component'):
+            result.fetchall.return_value = [dict(row)]
+        elif sql.startswith('SELECT value_json'):
+            result.fetchone.return_value = {'value_json': state['value']} if state else None
+        elif sql.startswith('INSERT INTO scanner_settings'):
+            state['value'] = params[1]
+        else:
+            raise AssertionError(sql)
+        return result
+    db = MagicMock()
+    db.__enter__.return_value.execute.side_effect = execute
+    monkeypatch.setattr('database.get_db_connection', lambda: db)
+    monkeypatch.setattr(ops, 'datetime', Clock)
+    queue = Mock()
+    monkeypatch.setattr(ops, 'enqueue', queue)
+    return ops.health, queue, state
+
+
+def test_on_demand_ai_idle_age_is_not_a_service_failure(monkeypatch):
+    row = dict(component='ollama', status='ok', detail='Reviewed TEST',
+               last_attempt_at=(NOW-timedelta(days=3)).isoformat(),
+               last_success_at=(NOW-timedelta(days=3)).isoformat())
+    check, queue, state = health_driver(monkeypatch, row)
+    check(); check()
+    queue.assert_not_called()
+    assert not json.loads(state['value'])['active']
+
+
+def test_on_demand_ai_explicit_failure_still_alerts_and_real_success_recovers(monkeypatch):
+    row = dict(component='ollama', status='error', detail='ReadTimeout',
+               last_attempt_at=(NOW-timedelta(days=2)).isoformat(),
+               last_success_at=(NOW-timedelta(days=3)).isoformat())
+    check, queue, _ = health_driver(monkeypatch, row)
+    check(); check()
+    assert queue.call_count == 1 and queue.call_args.args[0] == 'health:ollama:1'
+    row.update(status='ok', last_attempt_at=NOW.isoformat(), last_success_at=NOW.isoformat())
+    check(); check()
+    assert queue.call_count == 2
+    assert 'השירות התאושש' in queue.call_args.args[1]
+
+
+def test_existing_idle_ai_alarm_clears_once_without_claiming_new_call(monkeypatch):
+    row = dict(component='ollama', status='ok', detail='Reviewed TEST',
+               last_attempt_at=(NOW-timedelta(days=3)).isoformat(),
+               last_success_at=(NOW-timedelta(days=3)).isoformat())
+    previous = dict(active=True, generation=4,
+                    last_failure={'at': (NOW-timedelta(hours=1)).isoformat(),
+                                  'context': {'ollama': {'status': 'ok'}}})
+    check, queue, state = health_driver(monkeypatch, row, previous)
+    check(); check()
+    assert queue.call_count == 1
+    assert queue.call_args.args[0] == 'health_recovered:ollama:4'
+    assert 'התראת חוסר הפעילות' in queue.call_args.args[1]
+    assert 'אין כאן הוכחה לקריאת AI חדשה' in queue.call_args.args[1]
+    assert 'השירות התאושש' not in queue.call_args.args[1]
+    assert not json.loads(state['value'])['active']
+
+
+def test_ai_unknown_failure_context_does_not_claim_inactivity_or_new_success():
+    context = {'ollama': snapshot({'status': 'ok'}, NOW)}
+    previous = {'last_failure': {'at': NOW.isoformat(), 'context': {}},
+                'recovered_at': NOW.isoformat()}
+    message = health_message('ollama', 'recovery', context, previous)
+    assert 'הצלחת קריאה חדשה לא אומתה' in message
+    assert 'התראת חוסר הפעילות' not in message
+    assert 'השירות התאושש' not in message
+
+
+def test_periodic_monitor_staleness_detection_unchanged(monkeypatch):
+    row = dict(component='monitor', status='ok', detail='',
+               last_attempt_at=(NOW-timedelta(seconds=901)).isoformat(),
+               last_success_at=(NOW-timedelta(seconds=901)).isoformat())
+    check, queue, _ = health_driver(monkeypatch, row)
+    check()
+    assert queue.call_args.args[0] == 'health:monitor:1'

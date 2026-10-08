@@ -220,15 +220,13 @@ def send_one():
 
 def health():
     from database import get_db_connection
-    from admin_health_context import snapshot, incident, health_message
+    from admin_health_context import snapshot, incident, health_message, component_failed
     now=datetime.now(timezone.utc)
     with get_db_connection() as conn:
         states=conn.execute('SELECT component,status,last_attempt_at,last_success_at,detail FROM scanner_service_status').fetchall()
     contexts={r['component']:snapshot(r,now) for r in states}
     for r in states:
-        age=(now-datetime.fromisoformat(r['last_attempt_at'].replace('Z','+00:00'))).total_seconds() if r['last_attempt_at'] else 0
-        stale=age>({'monitor':900,'quotes':900,'backup':7500,'scan':7200,'telegram':180}.get(r['component'],86400))
-        failed=r['status']=='error' or stale
+        failed=component_failed(r,now)
         key='admin_incident:'+r['component']
         with get_db_connection() as conn:
             old=conn.execute('SELECT value_json FROM scanner_settings WHERE key=?',(key,)).fetchone()

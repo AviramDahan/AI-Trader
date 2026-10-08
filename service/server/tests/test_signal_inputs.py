@@ -114,6 +114,56 @@ def test_partial_refresh_preserves_per_symbol_observation(clock,tmp_path,monkeyp
     assert restored['NEW'].attrs['history_fetched_at']==NOW.timestamp()
 
 
+def test_history_partial_fallback_reports_only_lagging_symbols_without_changing_data(clock,tmp_path,monkeypatch):
+    file = tmp_path/'cache.gz'
+    monkeypatch.setattr(scanner,'HISTORY_CACHE_FILE',file)
+    old_stamp = datetime(2026,10,2,20,10,tzinfo=timezone.utc).timestamp()
+    old = scanner._finalize_download(history().iloc[:-1],old_stamp)
+    new = scanner._finalize_download(history(),NOW.timestamp())
+    scanner._write_history_cache({'OLD':old,'NEW':new},NOW.timestamp())
+    before = file.read_bytes()
+    network = Mock(return_value={})
+    monkeypatch.setattr(scanner,'_download_history',network)
+    frames,info = scanner.load_historical_data(['OLD','NEW'],scanner.settings())
+    assert info['status']=='partial_fallback'
+    assert info['current_symbols']==1 and info['lagging_symbols']==['OLD']
+    assert info['expected_session']=='2026-10-05'
+    assert info['refresh_requested_symbols']==1 and info['refresh_received_symbols']==0
+    assert info['refresh_error_code']=='incomplete_refresh'
+    assert network.call_args.args==(['OLD'],)
+    assert file.read_bytes()==before
+    assert frames['OLD'].index[-1].date().isoformat()=='2026-10-02'
+    assert frames['OLD'].attrs['history_fetched_at']==old_stamp
+
+
+def test_history_failed_refresh_with_current_cache_not_reported_as_stale(clock,tmp_path,monkeypatch):
+    monkeypatch.setattr(scanner,'HISTORY_CACHE_FILE',tmp_path/'cache.gz')
+    stamp = NOW.timestamp()-72001
+    # Simulate a valid frozen completed observation whose TTL has just expired.
+    old = scanner._finalize_download(history(),NOW.timestamp())
+    scanner._write_history_cache({'TEST':old},stamp)
+    network = Mock(side_effect=RuntimeError('SECRET https://private.invalid/token'))
+    monkeypatch.setattr(scanner,'_download_history',network)
+    frames,info = scanner.load_historical_data(['TEST'],scanner.settings())
+    assert info['status']=='refresh_failed_cache_current' and info['current_symbols']==1
+    assert info['refresh_error_type']=='RuntimeError'
+    assert info['refresh_error_code']=='provider_refresh_failed'
+    assert 'SECRET' not in json.dumps(info) and 'https://' not in json.dumps(info)
+    assert frames['TEST'].attrs['history_fetched_at']==NOW.timestamp()
+
+
+def test_history_all_lagging_keeps_stale_fallback_and_original_observation(clock,tmp_path,monkeypatch):
+    monkeypatch.setattr(scanner,'HISTORY_CACHE_FILE',tmp_path/'cache.gz')
+    stamp = datetime(2026,10,2,20,10,tzinfo=timezone.utc).timestamp()
+    old = scanner._finalize_download(history().iloc[:-1],stamp)
+    scanner._write_history_cache({'OLD':old},stamp)
+    monkeypatch.setattr(scanner,'_download_history',Mock(return_value={}))
+    frames,info = scanner.load_historical_data(['OLD'],scanner.settings())
+    assert info['status']=='stale_fallback' and info['current_symbols']==0
+    assert info['lagging_symbols']==['OLD']
+    assert frames['OLD'].attrs['history_fetched_at']==stamp
+
+
 @pytest.mark.parametrize('at,day',[('2026-10-05T12:00:00Z','2026-10-02'),
     ('2026-10-05T20:04:59Z','2026-10-02'),('2026-10-05T20:05:00Z','2026-10-05'),
     ('2026-07-03T16:00:00Z','2026-07-02'),('2026-10-04T16:00:00Z','2026-10-02')])

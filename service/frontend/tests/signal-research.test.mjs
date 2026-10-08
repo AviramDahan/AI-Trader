@@ -54,9 +54,35 @@ assert.ok(reference.includes('מרווח ההתנגדות משאיר את היע
 assert.ok(reference.includes('ציון לא מכויל') && reference.includes('ציון המודל מתחת לסף'))
 assert.ok(reference.includes('החלטת AI: המתנה'))
 assert.ok(!reference.includes('NaN'))
+const invalidSummary = render({ data: { ...referenceData, records: [{ ...referenceData.records[0], rejection: 'pre_invalid_rounded_levels' }] } })
+assert.ok(/<small>[^<]*מרווח ההתנגדות משאיר את היעד בכניסה או מתחתיה/.test(invalidSummary))
+assert.ok(!invalidSummary.includes('רמות לא תקינות אחרי עיגול'))
+const unknownDetail = render({ data: { ...referenceData, records: [{ ...referenceData.records[0],
+  rejection: 'pre_invalid_rounded_levels', target_checks: [{ ...referenceData.records[0].target_checks[0], rejection_detail: ['unknown_future_code'] }] }] } })
+assert.ok(unknownDetail.includes('רמות יעד/סטופ אינן תקינות'))
+for (const reason of ['pre_insufficient_confirmed_price_zones','pre_price_structure_fails_risk_reward']) {
+  const labels = render({ data: { ...data, records: [{ ...data.records[0], rejection: reason }] } })
+  assert.ok(!new RegExp(`<small>[^<]*${reason}`).test(labels))
+}
+const conflictingDetail = render({ data: { ...referenceData, records: [{ ...referenceData.records[0],
+  rejection: 'pre_no_forward_zone' }] } })
+assert.ok(/<small>[^<]*אין אזור התנגדות קדמי/.test(conflictingDetail))
+const historyBundle = await build({ entryPoints: ['src/HistoryCacheStatus.tsx'], bundle: true, write: false,
+  platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react', 'react/jsx-runtime'] })
+const historyMod = { exports: {} }
+new Function('require', 'module', 'exports', historyBundle.outputFiles[0].text)(createRequire(import.meta.url), historyMod, historyMod.exports)
+const cacheView = cache => renderToStaticMarkup(createElement(historyMod.exports.HistoryCacheStatus, { he: true, cache }))
+const partialCache = cacheView({ status: 'partial_fallback', age_seconds: 18000, expected_session: '2026-10-07',
+  current_symbols: 518, requested_symbols: 520, lagging_symbols: ['PSKY','WBD'], lagging_symbol_count: 2,
+  refresh_error_code: 'incomplete_refresh', refresh_error_type: 'RuntimeError', refresh_received_symbols: 0, refresh_requested_symbols: 2 })
+assert.ok(partialCache.includes('נתונים עדכניים עם חוסרים נקודתיים'))
+assert.ok(partialCache.includes('518/520') && partialCache.includes('<bdi>PSKY, WBD</bdi>'))
+assert.ok(partialCache.includes('הספק לא החזיר כיסוי מלא לריענון') && partialCache.includes('0/2'))
+assert.ok(!cacheView(undefined).includes('0.0h'))
+assert.ok(cacheView({ status: 'stale_fallback' }).includes('נתונים היסטוריים ישנים'))
 // The generic mobile dashboard hides tables that have card alternatives.
 // Research tables have no such duplicate view and must remain scrollable.
 const styles = readFileSync('src/index.css', 'utf8')
 assert.match(styles, /\.signal-research \.scanner-table-wrap\s*\{[^}]*display:\s*block;[^}]*max-width:\s*100%;/)
 assert.ok(outcomes.includes('scanner-table-wrap') && outcomes.includes('Native'))
-console.log('Signal research rendering: 24 assertions passed')
+console.log('Signal research and history rendering: 35 assertions passed')
