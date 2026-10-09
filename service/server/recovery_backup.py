@@ -81,7 +81,18 @@ def backup(predeploy=False):
             import cloud_runtime
             if not hasattr(cloud_runtime, 'SEC_SCHEMA7_ROLLBACK_CAPABILITY'):
                 from sec_retention import prune_archived
-                retention = prune_archived(url, repo, sec_archive)
+                import psycopg
+                try:
+                    retention = prune_archived(url, repo, sec_archive)
+                except (psycopg.errors.LockNotAvailable, psycopg.errors.QueryCanceled) as exc:
+                    # Archive delivery succeeded; optional cleanup rolls back
+                    # atomically and defers without hiding the maintenance gap.
+                    retention = {'deferred': type(exc).__name__, 'deleted': {}}
+                from scanner_engine import set_service_status
+                set_service_status('sec_history_retention', 'degraded' if 'deferred' in retention else 'ok',
+                                   'SEC archive verified; cleanup deferred' if 'deferred' in retention
+                                   else 'SEC archive verified; protected history retention checked',
+                                   success='deferred' not in retention)
         history_bytes=sum(p.stat().st_size for p in (repo/'.git').rglob('*') if p.is_file())
         status={'success_at':now.isoformat(),**sizes,'retained_files':len(list(repo.glob('*/*.age'))),
                 'recovery_format':data['recovery_format'],

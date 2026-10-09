@@ -10,7 +10,7 @@ from psycopg import sql
 import pytest
 
 import sec_history as history
-from sec_schema7_compat import assert_sec_schema7
+from sec_schema7_compat import assert_sec_schema7, RETENTION_INDEX_SQL
 from test_recovery_holds import target_schema, initialize_empty, record, state
 
 
@@ -19,6 +19,8 @@ def complete_seven(url):
         version = conn.execute('SELECT max(version) FROM schema_migrations').fetchone()[0]
         if version == 6:
             conn.execute((Path(__file__).parent / 'fixtures/007_sec_intelligence.sql').read_text())
+            for statement in RETENTION_INDEX_SQL:
+                conn.execute(statement)
             conn.execute('INSERT INTO schema_migrations(version) VALUES(7)')
 
 
