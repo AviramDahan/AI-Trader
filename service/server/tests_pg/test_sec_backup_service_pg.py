@@ -34,6 +34,7 @@ def test_backup_archive_remote_confirmation_before_retention(pg, tmp_path, monke
     subprocess.run(['git', 'init', '--bare', str(remote)], check=True, capture_output=True)
     expected = 'git@github.com:synthetic/isolated-recovery.git'
     original_command = recovery_backup.command
+    pushes = []
 
     def transport(*args, cwd=None):
         args = list(args)
@@ -41,10 +42,16 @@ def test_backup_archive_remote_confirmation_before_retention(pg, tmp_path, monke
             original_command('git', 'clone', str(remote), args[3])
             original_command('git', 'remote', 'set-url', 'origin', expected, cwd=args[3])
             return b''
-        if args[:3] == ['git', 'push', 'origin'] and push_fails:
-            raise subprocess.CalledProcessError(1, ['git', 'push'])
+        if args[:3] == ['git', 'push', 'origin']:
+            pushes.append(True)
+            if push_fails:
+                raise subprocess.CalledProcessError(1, ['git', 'push'])
         if args[0] == 'git' and args[1] in ('fetch', 'push', 'ls-remote'):
             args[2] = str(remote)
+            if args[1] == 'fetch':
+                # Preserve origin's normal wildcard refspec: fetching a bare
+                # URL without it asks for HEAD, which an empty test remote lacks.
+                args.append('+refs/heads/*:refs/remotes/origin/*')
         return original_command(*args, cwd=cwd)
 
     monkeypatch.setattr(recovery_backup, 'command', transport)
@@ -76,4 +83,5 @@ def test_backup_archive_remote_confirmation_before_retention(pg, tmp_path, monke
             assert archive['retention']['deleted']['si_decisions'] == 1
             assert archive['retention']['checkpoints_preserved']
         assert json.loads((repo.parent / 'status.json').read_text()) == result
+    assert pushes == [True]  # failure injection must reach push, not fail earlier
     assert state() == portfolio  # neither archive nor retention debits/releases held cash
