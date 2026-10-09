@@ -1,57 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { LABELS, STATE_LABELS, STATIONS, type ActivityItem, type ActivityUpdate, type Station } from './systemActivityModel'
-
-export const CLUSTERS: Record<Station, { x: number; y: number; color: string }> = {
-  technical: { x: 205, y: 150, color: '#67cfff' }, targets: { x: 545, y: 115, color: '#f7c96b' },
-  evidence: { x: 950, y: 155, color: '#c3a2ff' }, ai: { x: 1040, y: 370, color: '#ff8ca9' },
-  signal: { x: 845, y: 575, color: '#72e2ba' }, order: { x: 480, y: 550, color: '#f8b87a' },
-  position: { x: 185, y: 485, color: '#50dccd' }, exit: { x: 185, y: 315, color: '#a4b5d2' },
-}
-export const NETWORK_LIMIT = 8
-export const COMPACT_CLUSTERS: typeof CLUSTERS = Object.fromEntries(STATIONS.map((s,n) => [s, {
-  ...CLUSTERS[s], x: n % 2 ? 286 : 94, y: 112 + Math.floor(n/2)*146,
-}])) as typeof CLUSTERS
-const centre = (compact: boolean) => compact ? { x: 190, y: 336 } : { x: 610, y: 340 }
-const hash = (s: string) => Array.from(s).reduce((a, c) => ((a * 31 + c.charCodeAt(0)) >>> 0), 7)
-export function buildNetwork(items: ActivityItem[], compact = false) {
-  return STATIONS.map(station => {
-    const cluster = (compact ? COMPACT_CLUSTERS : CLUSTERS)[station]
-    // Stable IDs, never random layout or fabricated stock nodes. Each cluster is bounded.
-    const group = items.filter(i => i.station === station).sort((a, b) => a.id.localeCompare(b.id))
-    const nodes = group.slice(0, NETWORK_LIMIT).map((item, index) => ({ item,
-      x: cluster.x + ((index % 3) - 1) * (compact ? 43 : 58) + (hash(item.id) % 7 - 3),
-      y: cluster.y + 2 + Math.floor(index / 3) * 30 + (hash(item.id + 'y') % 7 - 3),
-    }))
-    return { station, ...cluster, total: group.length, omitted: Math.max(0, group.length - nodes.length), nodes }
-  })
-}
-/** Decorative geometry only: no vertex or edge represents a stock or a passed gate. */
-export function buildConstellation(compact = false) {
-  return STATIONS.map(station => {
-    const c = (compact ? COMPACT_CLUSTERS : CLUSTERS)[station], count = compact ? 64 : 128
-    const points = Array.from({length: count}, (_,n) => {
-      const angle = n*2.39996 + hash(station)%10
-      const contour = .84 + .12*Math.sin(angle*3 + hash(station)%5)
-      const radius = Math.sqrt((n+.5)/count)*(compact ? 76 : 127)*contour
-      return {x:c.x+Math.cos(angle)*radius, y:c.y+Math.sin(angle)*radius*.7,
-        radius:n%31===0 ? 2.3 : n%9===0 ? 1.5 : .55+(n%3)*.3, opacity:.2+(n%7)*.09}
-    })
-    const edges = points.flatMap((p,n) => points.map((q,j)=>({q,j,d:(q.x-p.x)**2+(q.y-p.y)**2}))
-      .filter(v=>v.j!==n).sort((a,b)=>a.d-b.d).slice(0,4).filter(v=>v.j>n).map(v=>({a:p,b:v.q})))
-    return {station,...c,points,edges}
-  })
+import { CLUSTERS, COMPACT_CLUSTERS, buildNetwork, buildConstellation, buildEvidenceSweep, networkCentre as centre } from './systemNetworkGeometry'
+export { CLUSTERS, COMPACT_CLUSTERS, NETWORK_LIMIT, buildNetwork, buildConstellation, buildEvidenceSweep } from './systemNetworkGeometry'
+const Web3D = lazy(() => import('./SystemWeb3D'))
+// A GPU/chunk failure must not remove the retained data or stock controls.
+export class Network3DErrorBoundary extends Component<{children:ReactNode;fallback:ReactNode;he:boolean},{failed:boolean}> {
+  state={failed:false}
+  static getDerivedStateFromError(){return {failed:true}}
+  render(){return this.state.failed?<><p className="system-3d-fallback" role="status">{this.props.he?'תצוגת התלת־ממד לא נטענה; המפה הדו־ממדית נשארת זמינה.':'3D did not load; the 2D map remains available.'}</p>{this.props.fallback}</>:this.props.children}
 }
 const REST = { x: 610, y: 340 }
-// Cursor destinations are observed updates, never a tour of assumed pipeline stages.
-export function buildEvidenceSweep(items: ActivityItem[], updates: ActivityUpdate[], from = REST, compact = false) {
-  const known = new Map(items.map(i => [i.id, i]))
-  const visibleUpdates = updates.filter(u => known.get(u.item.id)?.station === u.item.station)
-  const shown = visibleUpdates.slice(0, 4)
-  const nodes = new Map(buildNetwork(items,compact).flatMap(c => c.nodes.map(n => [n.item.id, n] as const)))
-  const points = [from, ...shown.map(u => nodes.get(u.item.id) || (compact ? COMPACT_CLUSTERS : CLUSTERS)[u.item.station])]
-  return { path: points.map((p, n) => `${n ? 'L' : 'M'} ${p.x} ${p.y}`).join(' '),
-    end: points.at(-1)!, shown, omitted: visibleUpdates.length - shown.length }
-}
 
 export function SystemNetwork({ he, items, changed, updates = [], station, setStation, selected, select, available, marketOpen }: {
   he: boolean; items: ActivityItem[]; changed: Set<string>; station: Station | 'all'; setStation: (v: Station | 'all') => void
@@ -61,6 +19,7 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   const [motion, setMotion] = useState(true)
   const [compact, setCompact] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width:640px)').matches)
   const [zoom, setZoom] = useState(false)
+  const [threeD, setThreeD] = useState(true)
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
   const seenBatch = useRef('')
   const lastPoint = useRef(REST)
@@ -108,13 +67,7 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   const activate = (e: React.KeyboardEvent<SVGGElement>, action: () => void) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); action() }
   }
-  return <div className="system-network-panel">
-    <div className="system-network-heading"><div><span className="system-eyebrow">THE INTELLIGENCE WEB</span><h3>{t('רשת המניות', 'Stock network')}</h3></div>
-      <div className="system-network-controls"><button type="button" aria-pressed={zoom} onClick={()=>setZoom(v=>!v)}>{zoom?t('מפה מלאה','Full map'):t('התקרבות','Zoom in')}</button>
-      <button type="button" className="system-motion-toggle" aria-pressed={motion} onClick={() => setMotion(v => !v)}>{motion ? t('השהה תנועת עדכונים', 'Pause update motion') : t('הפעל תנועת עדכונים', 'Enable update motion')}</button></div>
-    </div>
-    <div className="system-network-readout"><span><i className={available?'connected':''}/>{available?t('עדכון מחזורי מחובר','PERIODIC FEED CONNECTED'):t('ממתין לנתונים תקינים','AWAITING VALID DATA')}</span><bdi>{String(items.length).padStart(2,'0')} {t('רשומות במדגם','SAMPLED RECORDS')}</bdi><span>{marketOpen === true ? t('מסחר פתוח','MARKET OPEN') : marketOpen === false ? t('מחוץ למסחר','OUTSIDE SESSION') : t('מצב שוק לא ידוע','SESSION UNKNOWN')}</span></div>
-    <div className={`system-web system-organic-web ${compact?'compact':''} ${moving ? 'evidence-motion-enabled' : ''}`}>
+  const flat = <div className={`system-web system-organic-web ${compact?'compact':''} ${moving ? 'evidence-motion-enabled' : ''}`}>
       <svg viewBox={viewBox} role="group" aria-label={t('מפת תחנות אינטראקטיבית — רשת מניות', 'Interactive station map — stock network')}>
         <defs>
           <radialGradient id="web-halo"><stop stopColor="#0e493f" stopOpacity=".55"/><stop offset="1" stopColor="#071013" stopOpacity="0"/></radialGradient>
@@ -164,6 +117,17 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
         </g>
       </svg>
     </div>
+  return <div className="system-network-panel">
+    <div className="system-network-heading"><div><span className="system-eyebrow">THE INTELLIGENCE WEB</span><h3>{t('רשת המניות', 'Stock network')}</h3></div>
+      <div className="system-network-controls">
+      <button type="button" aria-pressed={threeD} onClick={()=>{setThreeD(v=>!v);setZoom(false)}}>{threeD?t('תצוגת 2D','2D view'):t('תצוגת 3D','3D view')}</button>
+      <button type="button" aria-pressed={zoom} onClick={()=>setZoom(v=>!v)}>{zoom?t('מפה מלאה','Full map'):t('התקרבות','Zoom in')}</button>
+      <button type="button" className="system-motion-toggle" aria-pressed={motion} onClick={() => setMotion(v => !v)}>{motion ? t('השהה תנועת עדכונים', 'Pause update motion') : t('הפעל תנועת עדכונים', 'Enable update motion')}</button></div>
+    </div>
+    <div className="system-network-readout"><span><i className={available?'connected':''}/>{available?t('עדכון מחזורי מחובר','PERIODIC FEED CONNECTED'):t('ממתין לנתונים תקינים','AWAITING VALID DATA')}</span><bdi>{String(items.length).padStart(2,'0')} {t('רשומות במדגם','SAMPLED RECORDS')}</bdi><span>{marketOpen === true ? t('מסחר פתוח','MARKET OPEN') : marketOpen === false ? t('מחוץ למסחר','OUTSIDE SESSION') : t('מצב שוק לא ידוע','SESSION UNKNOWN')}</span></div>
+    {threeD ? <Network3DErrorBoundary he={he} fallback={flat}><Suspense fallback={flat}><Web3D he={he} items={items} compact={compact} station={station} setStation={setStation}
+      selected={selected} select={select} changed={changed} available={available} visible={visible} zoom={zoom}
+      moving={moving} sweepKey={sweep.key} updates={sweep.shown} fallback={flat} resetZoom={()=>setZoom(false)}/></Suspense></Network3DErrorBoundary> : flat}
     <div className="system-network-legend"><span><i className="system-legend-crawler"/>{t('העכביש: מצביע לעדכון מתועד שנקלט — לא מצב Worker בזמן אמת', 'Crawler: points to received evidence updates — not real-time worker activity')}</span><span><i className="system-legend-event"/>{t('הבהוב מניה: שינוי אמיתי במידע שנשמר', 'Stock glow: an actual retained-data change')}</span></div>
     <p className="system-network-update" role="status">{sweep.shown.length ? <>{t(moving ? 'נקלט עדכון' : 'העדכון האחרון שהוצג', moving ? 'Update received' : 'Last displayed update')}: <bdi>{sweep.shown.at(-1)!.item.ticker}</bdi> · {LABELS[sweep.shown.at(-1)!.item.station][he ? 0 : 1]} · <bdi>{sweep.shown.at(-1)!.item.at}</bdi>{sweep.omitted>0 && <> · {t(`ועוד ${sweep.omitted} עדכונים ברשימות`, `${sweep.omitted} more updates in the lists`)}</>}</> : t('ממתין לשינוי מתועד חדש — אין תנועה על טעינה או רענון ללא שינוי.', 'Waiting for new retained evidence — no motion on initial load or unchanged refresh.')}</p>
     <p className="system-reduced-note">{t('התנועה מושבתת בהתאם להעדפת תנועה מופחתת במכשיר.', 'Motion is disabled by your device’s reduced-motion preference.')}</p>

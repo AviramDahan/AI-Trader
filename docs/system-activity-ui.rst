@@ -60,8 +60,14 @@ Evidence contract
 * Browser-only stars are stored under ``ai_trader_visual_follow`` (at most
   100 tickers). They never edit the backend watchlist, scan priorities or
   trading policy. Tickers/names are escaped React text with bidi isolation.
-* The interactive SVG is a group with keyboard-operable station buttons,
-  not a single image that hides its controls from assistive technology.
+* The default map is a real, lazily loaded Three.js/WebGL2 scene. Stations,
+  silk and the eight-legged procedural spider have actual depth; drag/pinch
+  orbit and zoom the camera. There is no auto-rotation, idle particle motion,
+  model download, post-processing pipeline or external rendering service.
+  Stock and station labels are projected HTML buttons, remaining upright,
+  bidi-isolated and keyboard-operable. An explicit 2D toggle preserves the
+  existing SVG. Unsupported WebGL2, context loss, renderer errors and lazy
+  chunk/render failures fall back to that same interactive data view.
   Mobile station cards stack. Below 640px the graph uses a dedicated vertical,
   two-column station layout rather than a horizontally scrolling desktop map.
   Resizing resets cursor geometry without replaying consumed updates. Zoom is
@@ -69,8 +75,13 @@ Evidence contract
   restores the complete view. The decorative field is deterministic, capped at
   1024 vertices on desktop / 512 on mobile with at most four connections per
   vertex. These vertices are aria-hidden, non-interactive and never stock nodes.
-  No timer animates them. The shaded spider, lighting and silk are SVG/CSS;
-  rendering introduces no external assets, analytics or provider requests.
+  No timer animates them. 3D depth is presentation-only, not a ranking score.
+  Rendering is on-demand, with finite cursor sweeps capped at 30 frames/sec,
+  device pixel ratio 1.5 and 1.6 million backing-buffer pixels. Hidden and
+  offscreen scenes cancel animation; resizing/remounting does not replay a
+  consumed update. Unmount/context failure disposes GPU geometries/materials,
+  controls, observers, listeners and renderer. Decorative particles and lines
+  are aria-hidden, not additional stock/activity observations.
 
 Verification and release
 ------------------------
@@ -94,6 +105,20 @@ Combining it with ``&event-test=synthetic`` creates exactly one synthetic ALFA
 fixture update and shortens only the preview's research polling to two seconds.
 Subsequent responses keep that same event timestamp: they must not restart
 the crawler. This is a localhost fixture harness, not a provider/AI/trading call.
+
+``?renderer-test=unavailable`` uses a preview-only mock constructor to exercise
+the unsupported-GPU fallback. ``?renderer-test=context-loss`` adds a clearly
+labelled fixture button that invokes the actual WebGL context-loss extension;
+all nine synthetic records must remain available in 2D afterwards. Neither
+test introduces a production flag or a new API endpoint.
+
+The 3D bundle is separate from the main dashboard and loaded only when this
+view is opened. The current production build reports a roughly 575 KB / 146 KB
+gzip 3D chunk and Vite's existing 500 KB chunk-size warning (not suppressed).
+The remaining dashboard does not eagerly load Three.js. npm audit also reports
+five pre-existing advisories in unchanged Vite/esbuild/router/source-map
+dependencies; none is in Three.js or its newly introduced dependencies. No
+unrelated dependency upgrades are included here.
 
 This preview binds 127.0.0.1:4318, serves synthetic fixtures only and rejects
 non-GET requests. It is not live connectivity or Production E2E proof. The

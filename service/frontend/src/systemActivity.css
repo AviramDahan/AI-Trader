@@ -187,3 +187,44 @@
   .evidence-motion-enabled .system-crawler, .evidence-motion-enabled .system-crawler-leg { animation: none; offset-distance: 100%; }
   .system-reduced-note { display: block; }
 }
+
+/* Real 3D scene. HTML labels remain crisp, keyboard-operable and bidi-isolated. */
+.system-web3d { position: relative; isolation: isolate; background: radial-gradient(ellipse at 50% 52%,#12312b55 0,#070d12 47%,#04080c 100%); overflow: hidden; }
+.system-web3d::before { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 2; box-shadow: inset 0 0 100px #0006; }
+.system-web3d-stage { position: relative; width: 100%; height: clamp(540px,56vw,790px); direction: ltr; }
+.system-web3d-stage canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; outline: none; }
+.system-web3d-stage canvas:active { cursor: grabbing; }
+.system-3d-label-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.system-3d-label-layer button, .system-3d-core-label { position: absolute; left: 0; top: 0; visibility: hidden; will-change: transform; }
+.system-3d-label-layer button { pointer-events: auto; white-space: nowrap; font-family: inherit; cursor: pointer; }
+.system-3d-station { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 10px; min-height: 40px; font-size: 12px; direction: rtl; color: #c9e5de; border: 1px solid #ffffff12; background: #080f16ca; border-radius: 7px; box-shadow: 0 6px 18px #0004; }
+.system-3d-station small { font: 9px ui-monospace,monospace; opacity: .5; }
+.system-3d-station bdi { font: 10px ui-monospace,monospace; border-inline-start: 1px solid #ffffff20; padding-inline-start: 8px; }
+.system-3d-station em { font: 9px ui-monospace,monospace; opacity: .6; }
+.system-3d-station:hover, .system-3d-station[aria-pressed=true] { border-color: currentColor; background: #0a1b24ed; }
+.system-3d-stock { font: 600 11px ui-monospace,monospace !important; border: 1px solid #ffffff08; padding: 6px 8px; min-width: 44px; min-height: 32px; background: #060e16a8; border-radius: 6px; text-shadow: 0 0 10px currentColor; }
+.system-3d-stock:hover, .system-3d-stock[aria-pressed=true] { border-color: currentColor; background: #152632e8; }
+.system-3d-stock.state-blocked { box-shadow: inset 0 -1px #fb7185aa; }
+.system-3d-stock.state-uncertain { box-shadow: inset 0 -1px #fbbf24aa; }
+.system-3d-core-label { display: grid; gap: 6px; text-align: center; direction: ltr; color: #91b9ac; pointer-events: none; }
+.system-3d-core-label strong { font: 10px ui-monospace,monospace; letter-spacing: .3em; }
+.system-3d-core-label span { font: 7px ui-monospace,monospace; letter-spacing: .16em; opacity: .45; }
+.system-3d-hud { position: relative; z-index: 3; display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 13px 28px; border-top: 1px solid #ffffff0b; background: #04090ec7; color: #8aa59c; font-size: 10px; }
+.system-3d-hud > span { letter-spacing: .07em; color: #a5d0be; }
+.system-3d-hud p { margin: 0; color: #6e8b85; }
+.system-3d-hud > div { display: flex; gap: 6px; }
+.system-3d-hud button { min-width: 36px; min-height: 36px; padding: 6px 10px; background: #0d1820; color: #b1d6c8; border: 1px solid #ffffff12; border-radius: 6px; cursor: pointer; font-size: 11px; }
+.system-3d-hud button:hover { border-color: #7ee5cc88; }
+.system-3d-fallback, .system-3d-loading { margin: 0; padding: 12px 28px; color: #b7a578; font-size: 11px; line-height: 1.7; }
+.system-3d-loading { position: absolute; inset: 50% 0 auto; text-align: center; }
+@media(max-width:640px) {
+  .system-web3d-stage { height: 680px; }
+  .system-3d-station { gap: 5px; padding: 6px 7px; font-size: 10px; min-height: 36px; }
+  .system-3d-station bdi { padding-inline-start: 5px; font-size: 9px; }
+  .system-3d-stock { font-size: 10px !important; padding: 5px 6px; }
+  .system-3d-hud { padding: 12px; flex-wrap: wrap; gap: 9px; font-size: 9px; }
+  .system-3d-hud p { flex-basis: 100%; order: 3; }
+  .system-3d-core-label strong { font-size: 8px; }
+  .system-3d-core-label span { font-size: 6px; }
+  .system-network-controls { max-width: 180px; }
+}
