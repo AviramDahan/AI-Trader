@@ -4,6 +4,31 @@ from datetime import datetime,timezone,timedelta
 import threading
 
 
+def test_pg_verified_press_feed_recovers_once_without_backlog(pg,monkeypatch):
+    import json
+    from unittest.mock import Mock
+    from database import get_db_connection
+    from news_events.store import Store
+    from news_events.engine import Pipeline
+    from news_events.providers import Config,ProviderFailure
+    from news_events.press_feed import PressFeedProvider
+    now=datetime(2026,10,9,12,tzinfo=timezone.utc)
+    store=Store(get_db_connection,sandbox=True);store.install()
+    pipeline=Pipeline(store,{},lambda:(set(),set()),not_before=now-timedelta(days=1))
+    state=dict(terminal=True,status='requires_configuration',http_status=403,error='http_error',
+               last_success=(now-timedelta(days=1)).isoformat(),last_attempt=(now-timedelta(hours=2)).isoformat())
+    with store.transaction(True) as c:c.execute('INSERT INTO ne_provider_state VALUES(?,?)',('globenewswire',json.dumps(state)))
+    monkeypatch.setenv('NEWS_GLOBENEWSWIRE_ACTIVATED_AT',(now-timedelta(days=2)).isoformat())
+    request=Mock(side_effect=ProviderFailure('http_error',403,0,True))
+    provider=PressFeedProvider(Config('globenewswire','https://www.globenewswire.com/rss','GlobeNewswire',enabled=True,rights='approved'),Mock(request=request))
+    assert pipeline.collect([provider],now)['globenewswire']['terminal'] is True
+    restart=Pipeline(Store(get_db_connection,sandbox=True),{},pipeline.membership,not_before=pipeline.not_before)
+    restart.collect([provider],now+timedelta(days=1));assert request.call_count==1
+    with store.transaction() as c:
+        assert c.execute('SELECT count(*) n FROM ne_events').fetchone()['n']==0
+        assert c.execute('SELECT count(*) n FROM scanner_trades').fetchone()['n']==0
+
+
 def test_canonical_concurrency_restart_and_isolation(pg):
     from database import get_db_connection
     from news_events.store import Store

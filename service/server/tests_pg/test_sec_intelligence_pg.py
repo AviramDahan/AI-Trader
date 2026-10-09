@@ -4,6 +4,32 @@ from datetime import datetime, timedelta, timezone
 import database
 import sec_intelligence as si
 import sec_transport
+import json
+
+
+def test_pg_discovery_fair_capacity_and_checkpoint_restart(pg, monkeypatch):
+    from migrations import migrate
+    migrate(target_version=7)
+    now=datetime.now(timezone.utc)
+    mapping={str(i+1).zfill(10):[f'TEST{i}'] for i in range(10)}
+    universe={symbols[0]:{'company':symbols[0],'indexes':['sp500']} for symbols in mapping.values()}
+    visited=[]
+    def fetch(url,*_a,**_k):
+        cik=url.split('CIK')[1].split('.')[0];visited.append(cik)
+        rows=[{'accessionNumber':f'{cik}-26-{i+1:06d}','form':'4','acceptanceDateTime':si._z(now-timedelta(minutes=i+1)),'primaryDocument':'ownership.xml'} for i in range(5)]
+        return json.dumps({'cik':int(cik),'filings':{'recent':{k:[r[k] for r in rows] for k in rows[0]},'files':[]}}).encode(),{'etag':'v1'}
+    monkeypatch.setenv('NEWS_SEC_USER_AGENT','Research Operator research@example.com')
+    monkeypatch.setattr(si,'fetch',fetch);monkeypatch.setattr(si,'MAX_PENDING',4)
+    for turn in range(3):
+        si.discover_cycle(now+timedelta(minutes=turn),universe=universe,mapping=mapping)
+        with database.get_db_connection() as c:
+            queued=c.execute("SELECT count(*) n,count(DISTINCT issuer_cik) issuers FROM si_filing_jobs WHERE status='queued'").fetchone()
+            assert queued['n']<=4 and queued['issuers']>=2
+            c.execute("UPDATE si_filing_jobs SET status='processed' WHERE status='queued'");c.commit()
+    assert set(visited)==set(mapping)
+    with database.get_db_connection() as c:
+        assert c.execute('SELECT count(*) n FROM si_checkpoints WHERE catchup_active=1').fetchone()['n']==10
+        assert c.execute('SELECT count(*) n FROM scanner_fills').fetchone()['n']==0
 
 
 def test_postgres_rendered_form4_failure_recovers_without_replay(pg, monkeypatch):

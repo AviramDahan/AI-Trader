@@ -4,6 +4,7 @@ import importlib.util
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -417,6 +418,81 @@ def test_auto_universe_ingest_snapshot_time_fence_and_retry(isolated, monkeypatc
     assert len(si.current_evidence(decorated, datetime.now(timezone.utc), 72)) == 1
     assert si.current_evidence(decorated, accepted, 72) == []
     assert any("/submissions/" in url for url in seen_urls)
+
+
+def test_discovery_backpressure_fairness_no_skipped_issuers(isolated, monkeypatch):
+    now = datetime.now(timezone.utc)
+    symbols = [f'TEST{i}' for i in range(10)]
+    mapping = {str(i+1).zfill(10): [symbol] for i, symbol in enumerate(symbols)}
+    universe = {s: {'company': f'Test Company {i}', 'indexes': ['sp500']} for i, s in enumerate(symbols)}
+    seen = []
+    def fake_fetch(url, *_a, **_k):
+        cik = url.split('CIK')[1].split('.')[0]
+        seen.append(cik)
+        rows = [filing(f'{cik}-26-{i+1:06d}', '4', now-timedelta(minutes=i+1)) for i in range(8)]
+        return json.dumps({'cik': int(cik), 'filings': {'recent': {k: [r[k] for r in rows] for k in rows[0]}, 'files': []}}).encode(), {'etag': 'test'}
+    monkeypatch.setenv('NEWS_SEC_USER_AGENT', 'Research Operator research@example.com')
+    monkeypatch.setattr(si, 'fetch', fake_fetch)
+    monkeypatch.setattr(si, 'MAX_PENDING', 4)
+    for turn in range(3):
+        si.discover_cycle(now+timedelta(minutes=turn), universe=universe, mapping=mapping)
+        with isolated() as c:
+            jobs = c.execute("SELECT issuer_cik,count(*) n FROM si_filing_jobs WHERE status='queued' GROUP BY issuer_cik").fetchall()
+            assert sum(r['n'] for r in jobs) <= 4
+            assert len(jobs) >= 2, 'One busy issuer must not consume all queue capacity'
+            c.execute("UPDATE si_filing_jobs SET status='processed' WHERE status='queued'");c.commit()
+    assert set(seen) == set(mapping), 'Rotation must not skip unvisited issuers after a full queue'
+    with isolated() as c:
+        assert c.execute('SELECT count(*) n FROM si_checkpoints').fetchone()['n'] == 10
+        assert all(r['catchup_active'] for r in c.execute('SELECT catchup_active FROM si_checkpoints'))
+    coverage=si.coverage_status()
+    assert coverage['universe_issuers']==10 and coverage['checkpointed_issuers']==10
+    assert coverage['completed_issuer_checkpoints']==0
+
+
+def test_full_sec_queue_does_not_fetch_or_advance_discovery(isolated, monkeypatch):
+    now = datetime.now(timezone.utc)
+    universe = {'AAPL': {'company': 'Apple Inc.', 'indexes': ['sp500']}}
+    mapping = {'0000320193': ['AAPL']}
+    uid, _ = si.save_universe(universe, mapping, now)
+    si._queue_filing(filing('0000320193-26-000001', '4', now-timedelta(minutes=1)), '0000320193', ['AAPL'], uid, now, [1])
+    monkeypatch.setattr(si, 'MAX_PENDING', 1)
+    monkeypatch.setenv('NEWS_SEC_USER_AGENT', 'Research Operator research@example.com')
+    fetch = MagicMock();monkeypatch.setattr(si, 'fetch', fetch)
+    result = si.discover_cycle(now, universe=universe, mapping=mapping)
+    fetch.assert_not_called()
+    assert result['checked'] == 0 and result['queued'] == 0
+
+
+def test_partial_continuation_page_is_refetched_without_skips(isolated, monkeypatch):
+    now=datetime.now(timezone.utc)
+    cik='0000320193'
+    recent=filing(f'{cik}-26-000100','4',now-timedelta(minutes=1))
+    older=[filing(f'{cik}-26-{i:06d}','4',now-timedelta(days=i)) for i in range(1,4)]
+    page=[r for r in older]
+    calls=[]
+    def fetch(url,*_a,**kw):
+        calls.append((url,kw.get('etag')))
+        body={k:[r[k] for r in page] for k in page[0]} if 'submissions-' in url else {
+            'cik':320193,'filings':{'recent':{k:[v] for k,v in recent.items()},
+            'files':[{'name':f'CIK{cik}-submissions-001.json','filingTo':now.date().isoformat()}]}}
+        return json.dumps(body).encode(),{'etag':'feed-v1'}
+    monkeypatch.setattr(si,'fetch',fetch);monkeypatch.setattr(si,'MAX_PENDING',2)
+    monkeypatch.setenv('NEWS_SEC_USER_AGENT','Research Operator research@example.com')
+    universe={'AAPL':{'company':'Apple Inc.','indexes':['sp500']}}
+    for turn in range(2):
+        si.discover_cycle(now+timedelta(minutes=turn),universe=universe,mapping={cik:['AAPL']})
+        with isolated() as c:
+            if turn==0:
+                cp=c.execute('SELECT * FROM si_checkpoints').fetchone()
+                assert cp['catchup_active']==1 and not cp['last_accession']
+                assert not cp['older_file_index']
+            c.execute("UPDATE si_filing_jobs SET status='processed'");c.commit()
+    with isolated() as c:
+        assert c.execute('SELECT count(*) n FROM si_filing_jobs').fetchone()['n']==4
+        assert c.execute('SELECT catchup_active FROM si_checkpoints').fetchone()['catchup_active']==0
+    assert sum('submissions-001' in url for url,_ in calls)==2
+    assert all(not etag for url,etag in calls if 'submissions-' not in url)
 
 
 def test_amendment_requires_unique_parent_and_keeps_historical_snapshot(isolated, monkeypatch):

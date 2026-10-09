@@ -1,7 +1,7 @@
 """Official press feeds: provider-local activation fence, no routing decisions."""
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 from .model import timestamp
 from .providers import RSSProvider, ProviderFailure, Transport
@@ -12,6 +12,31 @@ class PressFeedProvider(RSSProvider):
         super().__init__(config, transport or Transport([urlsplit(config.endpoint).hostname],
             user_agent='AI-Trader/1.0 (+https://github.com/AviramDahan/AI-Trader)',read_timeout=10,
             prefer_ipv4=config.provider_id=='globenewswire'))
+
+    def recover_terminal(self, state, now):
+        """One delayed probe per verified 403 incident; never unblock new feeds.
+
+        Persisted before I/O by the collector. A failed probe stays terminal;
+        rights, metadata, unsafe-endpoint failures and first-use denials are
+        never recoverable here. Recovery fences out the outage backlog.
+        """
+        success = state.get('last_success')
+        if (not self.config.enabled or self.config.rights != 'approved' or
+                not state.get('terminal') or state.get('http_status') != 403 or
+                state.get('error') != 'http_error' or not success):
+            return None
+        checkpoint = json.loads(state.get('checkpoint_json') or '{}')
+        if checkpoint.get('access_recovery_for') == success:
+            return None
+        try:
+            attempted = datetime.fromisoformat(timestamp(state['last_attempt']))
+            if now < attempted + timedelta(hours=1):
+                return None
+        except (KeyError, TypeError, ValueError):
+            return None
+        checkpoint.update(access_recovery_for=success, recovery_not_before=timestamp(now))
+        return {**state, 'terminal': False, 'attempts': 0,
+                'checkpoint_json': json.dumps(checkpoint)}
 
     def fetch(self, state, now):
         boundary = os.getenv('NEWS_' + self.provider_id.upper() + '_ACTIVATED_AT', '')

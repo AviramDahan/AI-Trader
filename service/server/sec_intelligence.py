@@ -434,9 +434,17 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
     selected = (ciks[offset:] + ciks[:offset])[:limit]
     with get_db_connection() as conn:
         pending = conn.execute("SELECT count(*) n FROM si_filing_jobs WHERE status IN ('queued','retry')").fetchone()["n"]
-    budget = [max(0, MAX_PENDING - pending)]
-    queued, errors = 0, []
+    remaining = max(0, MAX_PENDING - pending)
+    # Allocate bounded fair shares, not the entire queue to the first issuer.
+    share = max(1, remaining // len(selected))
+    queued, errors, checked = 0, [], 0
     for cik in selected:
+        if not remaining:
+            errors.append("sec_filing_queue_capacity")
+            break  # No request or cursor advance for issuers not visited.
+        checked += 1
+        budget = [min(share, remaining)]
+        allowance = budget[0]
         with get_db_connection() as conn:
             checkpoint = conn.execute("SELECT * FROM si_checkpoints WHERE issuer_cik=?", (cik,)).fetchone()
         prior = dict(checkpoint) if checkpoint else {}
@@ -503,7 +511,15 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
                     conn.commit()
         except QueueFull:
             errors.append("sec_filing_queue_capacity")
-            break
+            # Partial recent/page ingestion is not a completed checkpoint.
+            # Keep the prior accession/page and force an unconditional refetch
+            # on its next fair turn; dedupe skips already retained accessions.
+            with get_db_connection() as conn:
+                conn.execute("""INSERT INTO si_checkpoints(issuer_cik,last_checked_at,catchup_active)
+                    VALUES(?,?,1) ON CONFLICT(issuer_cik) DO UPDATE SET
+                    last_checked_at=excluded.last_checked_at,catchup_active=1,
+                    retry_after=NULL,error_code=NULL""", (cik, _z(now)))
+                conn.commit()
         except Exception as exc:
             from retry_policy import DeferredProviderError
             delay = max(60, float(getattr(exc, "retry_after_seconds", 300))) if isinstance(exc, DeferredProviderError) else 300
@@ -514,14 +530,16 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
                     (cik, _z(now + timedelta(seconds=delay)), type(exc).__name__))
                 conn.commit()
             errors.append(type(exc).__name__)
+        finally:
+            remaining -= allowance - budget[0]
     with get_db_connection() as conn:
         conn.execute("""INSERT INTO scanner_settings(key,value_json,updated_at)
             VALUES('si_discovery_offset',?,?) ON CONFLICT(key) DO UPDATE SET
             value_json=excluded.value_json,updated_at=excluded.updated_at""",
-            (_json({"offset": (offset + limit) % len(ciks)}), _z(now)))
+            (_json({"offset": (offset + checked) % len(ciks)}), _z(now)))
         conn.commit()
     return {"status": "degraded" if errors else "ok", "queued": queued,
-            "checked": len(selected), "issuer_count": len(ciks), "errors": errors[:5],
+            "checked": checked, "issuer_count": len(ciks), "errors": list(dict.fromkeys(errors))[:5],
             "universe_snapshot_id": snapshot_id}
 
 
@@ -1079,9 +1097,16 @@ def coverage_status() -> dict:
         influenced = conn.execute("SELECT count(*) n FROM si_decisions WHERE sec_adjustment!=0").fetchone()["n"]
         alert_rows = conn.execute("""SELECT status,COUNT(*) n FROM scanner_telegram_outbox
             WHERE event_type='sec_intelligence' GROUP BY status""").fetchall()
+        checkpoints = {r['issuer_cik']: dict(r) for r in conn.execute(
+            'SELECT issuer_cik,last_checked_at,catchup_active FROM si_checkpoints')}
     members = json.loads(snapshot["members_json"]) if snapshot else {}
+    issuers = {v['issuer_cik'] for v in members.values() if v['mapping']=='verified'}
     return {"mode": mode(), "kill_switch": killed(), "universe_count": len(members),
             "mapped_count": sum(v["mapping"] == "verified" for v in members.values()),
+            "universe_issuers": len(issuers),
+            "checkpointed_issuers": sum(bool(checkpoints.get(cik,{}).get('last_checked_at')) for cik in issuers),
+            "completed_issuer_checkpoints": sum(bool(checkpoints.get(cik,{}).get('last_checked_at')) and
+                not checkpoints[cik]['catchup_active'] for cik in issuers),
             "universe_observed_at": snapshot["observed_at"] if snapshot else None,
             "pending_filings": pending, "retrying_filings": retrying,
             "unsupported_filings": unsupported, "mapping_or_provider_errors": errors,
