@@ -228,3 +228,81 @@
   .system-3d-core-label span { font-size: 6px; }
   .system-network-controls { max-width: 180px; }
 }
+
+/* Focus is navigation; only source-timestamped updates receive evidence highlights. */
+.system-web3d-stage { height: clamp(500px,42vw,620px); }
+.system-map-workspace { min-width: 0; }
+.system-map-workspace.has-selection { display: grid; grid-template-columns: minmax(0,1fr) 300px; align-items: stretch; }
+.system-quick-filters, .system-support-details, .system-full-journey { border: 1px solid #ffffff12; border-radius: 12px; background: #0a1119; margin-block: 12px; min-width: 0; }
+.system-quick-filters > summary, .system-support-details > summary, .system-full-journey > summary { cursor: pointer; padding: 14px 18px; font-size: 13px; color: #c1d0dc; }
+.system-quick-filters > summary small { margin-inline-start: 16px; color: #91a8b6; font-size: 12px; }
+.system-quick-filters .system-toolbar { padding: 0 18px 18px; }
+.system-support-details .system-services { margin: 0 12px 12px; }
+.system-support-details .system-stations { margin: 0 12px 12px; }
+.system-full-journey { scroll-margin-top: 14px; }
+.system-full-journey .system-journey { margin: 0; border-radius: 0 0 12px 12px; border-width: 1px 0 0; }
+.system-focus-card { padding: 22px; min-width: 0; border-inline-start: 1px solid #7ee5cc30; background: linear-gradient(155deg,#122329,#080e15); overflow-wrap: anywhere; }
+.system-focus-card > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.system-focus-card h3 { font: 600 26px ui-monospace,monospace; margin: 8px 0 5px; letter-spacing: .04em; }
+.system-focus-card header p { font-size: 13px; line-height: 1.5; margin: 0 0 14px; color: #a3b8c5; }
+.system-focus-card header button { background: #ffffff06; border: 1px solid #ffffff20; border-radius: 9px; color: #c8dcd4; cursor: pointer; font-size: 22px; min-width: 44px; min-height: 44px; }
+.system-state-badge { display: inline-flex; border: 1px solid #7d99af55; color: #bacedd; background: #66809912; padding: 7px 10px; border-radius: 8px; font-size: 12px; }
+.system-state-badge.state-blocked { color: #ffadb4; border-color: #fb718555; background: #fb71850b; }
+.system-state-badge.state-waiting, .system-state-badge.state-uncertain { color: #ffe09b; border-color: #fbbf2455; background: #fbbf240b; }
+.system-state-badge.state-open { color: #b4ffe6; border-color: #7ee5cc55; background: #7ee5cc0b; }
+.system-focus-station { font-size: 15px; font-weight: 600; margin: 16px 0 8px; }
+.system-focus-reason { font-size: 13px; color: #b4c5d0; line-height: 1.7; margin: 0 0 12px; }
+.system-focus-card time { font-size: 11px; line-height: 1.6; color: #99aebc; }
+.system-focus-levels { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; border-block: 1px solid #ffffff13; padding-block: 18px; margin-block: 18px; }
+.system-focus-levels dt { font-size: 11px; color: #96adba; }
+.system-focus-levels dd { font: 600 19px ui-monospace,monospace; color: #d5eee6; margin: 6px 0 0; }
+.system-focus-details { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 10px 12px; color: #c5f3e3; border: 1px solid #7ee5cc55; background: #7ee5cc09; border-radius: 9px; font-size: 13px; cursor: pointer; }
+.system-3d-stock { display: flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px !important; padding: 6px 9px; background: #071019de; border-color: #ffffff20; }
+.system-3d-stock > span { font-size: 17px; }
+.system-web3d.is-focused .system-3d-stock:not([aria-pressed=true]) { opacity: .35; }
+.system-3d-stock[aria-pressed=true] { box-shadow: 0 0 24px #7ee5cc22; opacity: 1; }
+.system-3d-station { font-size: 13px; direction: inherit; }
+.system-graph-stock text { font-size: 12px; }
+.system-state-key { display: flex; flex-wrap: wrap; gap: 12px 20px; padding: 12px 28px; color: #a4b9c5; font-size: 12px; }
+.system-state-key > span { display: flex; align-items: center; gap: 6px; }
+.system-state-key bdi { font-size: 17px; font-family: ui-monospace,monospace; }
+.system-state-key .state-blocked bdi { color: #fb7185; }
+.system-state-key .state-uncertain bdi, .system-state-key .state-waiting bdi { color: #fbbf24; }
+.system-state-key .state-open bdi { color: #7ee5cc; }
+.system-new-evidence { border-color: currentColor; box-shadow: 0 0 18px #7ee5cc44; animation: system-arrival 1.6s ease-out 1; }
+.system-network-update { font-size: 12px; }
+.system-update-received { color: #d0f8e8; background: #7ee5cc0d; border-inline-start-color: #7ee5cc; }
+.system-network-controls button { font-size: 12px; }
+@media(max-width:1000px) {
+  .system-map-workspace.has-selection { grid-template-columns: minmax(0,1fr); }
+  .system-focus-card { border-inline-start: 0; border-top: 1px solid #7ee5cc30; }
+}
+@media(max-width:640px) {
+  .system-web3d-stage { height: 520px; }
+  .system-3d-stock { font-size: 12px !important; padding: 5px 7px; gap: 4px; }
+  .system-3d-station { max-width: 155px; min-height: 40px; font-size: 12px; white-space: normal !important; }
+  .system-3d-station small { display: none; }
+  .system-3d-station bdi { font-size: 10px; flex-shrink: 0; }
+  .system-3d-station span { line-height: 1.35; }
+  .system-network-heading { gap: 8px; }
+  .system-network-heading h3 { font-size: 14px; }
+  .system-network-controls { max-width: 158px; }
+  .system-network-controls button { font-size: 11px; min-height: 38px; padding: 6px 8px; }
+  .system-state-key { padding: 12px; gap: 8px 13px; font-size: 11px; }
+  .system-quick-filters > summary, .system-support-details > summary, .system-full-journey > summary { padding: 13px 12px; }
+  .system-focus-card { position: fixed; inset-inline: 12px; bottom: max(12px,env(safe-area-inset-bottom)); z-index: 100; padding: 14px; max-height: 43dvh; overflow-y: auto; border: 1px solid #7ee5cc66; border-radius: 16px; background: #0b171ff5; box-shadow: 0 -12px 60px #0009; backdrop-filter: blur(16px); }
+  .system-map-workspace.detail-open .system-focus-card { display: none; }
+  .system-focus-card > header { gap: 8px; }
+  .system-focus-card h3 { font-size: 22px; margin-block: 5px 3px; }
+  .system-focus-card header p { font-size: 12px; margin-bottom: 7px; }
+  .system-focus-station { display: inline; font-size: 12px; margin-inline-start: 8px; }
+  .system-state-badge { padding: 5px 8px; font-size: 11px; }
+  .system-focus-reason { font-size: 12px; line-height: 1.5; margin-block: 8px 6px; }
+  .system-focus-levels { gap: 9px; padding-block: 10px; margin-block: 10px; }
+  .system-focus-levels dd { font-size: 17px; margin-top: 3px; }
+  .system-context dl { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+  .system-context dl > div { display: block; font-size: 10px; }
+  .system-context dl > div:last-child { grid-column: auto; }
+  .system-context dd { text-align: start; font-size: 12px; margin-top: 7px; overflow-wrap: anywhere; }
+}
+@media(prefers-reduced-motion:reduce) { .system-new-evidence { animation: none; } }

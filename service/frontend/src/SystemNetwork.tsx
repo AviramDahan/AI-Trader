@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { LABELS, STATE_LABELS, STATIONS, type ActivityItem, type ActivityUpdate, type Station } from './systemActivityModel'
+import { LABELS, STATE_LABELS, STATE_SYMBOLS, STATIONS, type ActivityItem, type ActivityUpdate, type Station } from './systemActivityModel'
 import { CLUSTERS, COMPACT_CLUSTERS, buildNetwork, buildConstellation, buildEvidenceSweep, networkCentre as centre } from './systemNetworkGeometry'
 export { CLUSTERS, COMPACT_CLUSTERS, NETWORK_LIMIT, buildNetwork, buildConstellation, buildEvidenceSweep } from './systemNetworkGeometry'
 const Web3D = lazy(() => import('./SystemWeb3D'))
@@ -14,7 +14,7 @@ const REST = { x: 610, y: 340 }
 export function SystemNetwork({ he, items, changed, updates = [], station, setStation, selected, select, available, marketOpen }: {
   he: boolean; items: ActivityItem[]; changed: Set<string>; station: Station | 'all'; setStation: (v: Station | 'all') => void
   updates?: ActivityUpdate[]
-  selected: string | null; select: (v: string) => void; available: boolean; marketOpen: boolean | undefined
+  selected: string | null; select: (v: string|null) => void; available: boolean; marketOpen: boolean | undefined
 }) {
   const [motion, setMotion] = useState(true)
   const [compact, setCompact] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width:640px)').matches)
@@ -61,8 +61,9 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   }, [motion, visible, available])
   useEffect(() => () => window.clearTimeout(timer.current), [])
   const moving = sweep.active && motion && visible && available
-  const focus = station !== 'all' ? (compact ? COMPACT_CLUSTERS : CLUSTERS)[station] : core
-  const viewBox = zoom ? `${focus.x-(compact?115:250)} ${focus.y-(compact?125:165)} ${compact?230:500} ${compact?250:330}` : compact ? '0 0 380 672' : '0 0 1200 720'
+  const focus = clusters.flatMap(c=>c.nodes).find(n=>n.item.id===selected) || (station !== 'all' ? (compact ? COMPACT_CLUSTERS : CLUSTERS)[station] : core)
+  const viewBox = zoom || selected ? `${focus.x-(compact?115:250)} ${focus.y-(compact?125:165)} ${compact?230:500} ${compact?250:330}` : compact ? '0 0 380 672' : '0 0 1200 720'
+  const updatedStations=new Set(available?items.filter(i=>changed.has(i.id)).map(i=>i.station):[])
   const t = (a: string, b: string) => he ? a : b
   const activate = (e: React.KeyboardEvent<SVGGElement>, action: () => void) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); action() }
@@ -93,11 +94,11 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
               onClick={() => select(n.item.id)} onKeyDown={e => activate(e, () => select(n.item.id))}>
               <title>{`${n.item.ticker} · ${n.item.company} · ${STATE_LABELS[n.item.state][he ? 0 : 1]}`}</title>
               <circle className="system-stock-hit" cx={n.x} cy={n.y} r="23"/><circle className="system-stock-glow" cx={n.x} cy={n.y} r="6" filter="url(#web-node-glow)"/><circle className="system-stock-orbit" cx={n.x} cy={n.y} r="8"/><circle className="system-stock-dot" cx={n.x} cy={n.y} r="3.8"/>
-              <text x={n.x} y={n.y + 19} textAnchor="middle" direction="ltr">{n.item.ticker.slice(0, 10)}</text>
+              <text x={n.x} y={n.y + 19} textAnchor="middle" direction="ltr">{STATE_SYMBOLS[n.item.state]} {n.item.ticker.slice(0, 10)}</text>
             </g>
           </g>)}
           <foreignObject x={c.x - (compact?84:100)} y={c.y - (compact?54:78)} width={compact?168:200} height="44">
-            <button type="button" className="system-cluster-button" dir={he ? 'rtl' : 'ltr'} aria-pressed={station === c.station} aria-label={`${LABELS[c.station][he ? 0 : 1]}: ${c.total}`}
+            <button type="button" className={`system-cluster-button ${updatedStations.has(c.station)?'system-new-evidence':''}`} dir={he ? 'rtl' : 'ltr'} aria-pressed={station === c.station} aria-label={`${LABELS[c.station][he ? 0 : 1]}: ${c.total}`}
               onClick={() => {setStation(station === c.station ? 'all' : c.station);setZoom(false)}}><span className="system-cluster-index" aria-hidden="true">{String(STATIONS.indexOf(c.station)+1).padStart(2,'0')}</span><span>{LABELS[c.station][he ? 0 : 1]}</span><bdi>{c.total}</bdi></button>
           </foreignObject>
           {!!c.omitted && <text className="system-omitted" x={c.x} y={c.y + 100} textAnchor="middle">+{c.omitted} {t('ברשימת התחנה', 'in station list')}</text>}
@@ -121,15 +122,16 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
     <div className="system-network-heading"><div><span className="system-eyebrow">THE INTELLIGENCE WEB</span><h3>{t('רשת המניות', 'Stock network')}</h3></div>
       <div className="system-network-controls">
       <button type="button" aria-pressed={threeD} onClick={()=>{setThreeD(v=>!v);setZoom(false)}}>{threeD?t('תצוגת 2D','2D view'):t('תצוגת 3D','3D view')}</button>
-      <button type="button" aria-pressed={zoom} onClick={()=>setZoom(v=>!v)}>{zoom?t('מפה מלאה','Full map'):t('התקרבות','Zoom in')}</button>
+      <button type="button" aria-pressed={zoom || !!selected} onClick={()=>{if(selected){select(null);setZoom(false)}else setZoom(v=>!v)}}>{zoom || selected?t('מפה מלאה','Full map'):t('התקרבות','Zoom in')}</button>
       <button type="button" className="system-motion-toggle" aria-pressed={motion} onClick={() => setMotion(v => !v)}>{motion ? t('השהה תנועת עדכונים', 'Pause update motion') : t('הפעל תנועת עדכונים', 'Enable update motion')}</button></div>
     </div>
     <div className="system-network-readout"><span><i className={available?'connected':''}/>{available?t('עדכון מחזורי מחובר','PERIODIC FEED CONNECTED'):t('ממתין לנתונים תקינים','AWAITING VALID DATA')}</span><bdi>{String(items.length).padStart(2,'0')} {t('רשומות במדגם','SAMPLED RECORDS')}</bdi><span>{marketOpen === true ? t('מסחר פתוח','MARKET OPEN') : marketOpen === false ? t('מחוץ למסחר','OUTSIDE SESSION') : t('מצב שוק לא ידוע','SESSION UNKNOWN')}</span></div>
     {threeD ? <Network3DErrorBoundary he={he} fallback={flat}><Suspense fallback={flat}><Web3D he={he} items={items} compact={compact} station={station} setStation={setStation}
       selected={selected} select={select} changed={changed} available={available} visible={visible} zoom={zoom}
-      moving={moving} sweepKey={sweep.key} updates={sweep.shown} fallback={flat} resetZoom={()=>setZoom(false)}/></Suspense></Network3DErrorBoundary> : flat}
+      moving={moving} sweepKey={sweep.key} updates={sweep.shown} fallback={flat} resetZoom={()=>{setZoom(false);select(null)}}/></Suspense></Network3DErrorBoundary> : flat}
+    <div className="system-state-key" aria-label={t('מקרא מצב המניות','Stock state legend')}>{(['blocked','waiting','uncertain','open'] as const).map(s=><span className={`system-state-badge state-${s}`} key={s}><bdi aria-hidden="true">{STATE_SYMBOLS[s]}</bdi>{STATE_LABELS[s][he?0:1]}</span>)}</div>
     <div className="system-network-legend"><span><i className="system-legend-crawler"/>{t('העכביש: מצביע לעדכון מתועד שנקלט — לא מצב Worker בזמן אמת', 'Crawler: points to received evidence updates — not real-time worker activity')}</span><span><i className="system-legend-event"/>{t('הבהוב מניה: שינוי אמיתי במידע שנשמר', 'Stock glow: an actual retained-data change')}</span></div>
-    <p className="system-network-update" role="status">{sweep.shown.length ? <>{t(moving ? 'נקלט עדכון' : 'העדכון האחרון שהוצג', moving ? 'Update received' : 'Last displayed update')}: <bdi>{sweep.shown.at(-1)!.item.ticker}</bdi> · {LABELS[sweep.shown.at(-1)!.item.station][he ? 0 : 1]} · <bdi>{sweep.shown.at(-1)!.item.at}</bdi>{sweep.omitted>0 && <> · {t(`ועוד ${sweep.omitted} עדכונים ברשימות`, `${sweep.omitted} more updates in the lists`)}</>}</> : t('ממתין לשינוי מתועד חדש — אין תנועה על טעינה או רענון ללא שינוי.', 'Waiting for new retained evidence — no motion on initial load or unchanged refresh.')}</p>
+    <p className={`system-network-update ${moving&&available?'system-update-received':''}`} role="status">{sweep.shown.length ? <><strong>{t(moving ? 'נקלט עדכון' : 'העדכון האחרון שהוצג', moving ? 'Update received' : 'Last displayed update')}</strong>: <bdi>{sweep.shown.at(-1)!.item.ticker}</bdi> · {LABELS[sweep.shown.at(-1)!.item.station][he ? 0 : 1]} · <time dateTime={sweep.shown.at(-1)!.item.at!} title={sweep.shown.at(-1)!.item.at!}><bdi>{new Date(sweep.shown.at(-1)!.item.at!).toLocaleTimeString(he?'he-IL':'en-GB')}</bdi></time>{sweep.omitted>0 && <> · {t(`ועוד ${sweep.omitted} עדכונים ברשימות`, `${sweep.omitted} more updates in the lists`)}</>}</> : t('ממתין לשינוי מתועד חדש — אין תנועה על טעינה או רענון ללא שינוי.', 'Waiting for new retained evidence — no motion on initial load or unchanged refresh.')}</p>
     <p className="system-reduced-note">{t('התנועה מושבתת בהתאם להעדפת תנועה מופחתת במכשיר.', 'Motion is disabled by your device’s reduced-motion preference.')}</p>
     <details className="system-network-note"><summary>{t('איך לקרוא את הרשת','How to read the network')}</summary><p className="system-footnote">{t('לחצו על סימול לפתיחת המסלול, או על שם תחנה לסינון. קורים הם שיוך לתחנה, לא הוכחה למעבר בין שלבים. נקודות הרקע דקורטיביות. עד 8 רשומות בכל אשכול; כל יתר המדגם ברשימות למטה.', 'Select a ticker for its journey, or a station name to filter. Wires mean station membership, not proof of passed stages. Background points are decorative. Up to 8 records per cluster; remaining sampled records are listed below.')}</p></details>
   </div>

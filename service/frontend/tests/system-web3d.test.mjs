@@ -14,7 +14,7 @@ const load=name=> {
   return m.exports
 }
 const {buildActivity}=load('systemActivityModel')
-const {buildSpatialNetwork,evidenceDestinations,evidencePosition,WEB3D_BUDGET}=load('systemWeb3DModel')
+const {buildSpatialNetwork,evidenceDestinations,evidencePosition,focusDestination,placeLabel,WEB3D_BUDGET}=load('systemWeb3DModel')
 const {createSilk,createSpider,disposeObject}=load('systemWeb3DScene')
 const items=buildActivity(fixtureResearch,fixtureDashboard),unchanged=JSON.stringify(items)
 let assertions=0
@@ -29,6 +29,12 @@ for(const compact of [false,true]) {
   const crowded=buildSpatialNetwork(Array.from({length:100},(_,n)=>({...items[0],id:`synthetic:${n}`})),compact)
   equal(crowded[0].nodes.length,8);equal(crowded[0].omitted,92)
   equal(buildSpatialNetwork([],compact).flatMap(c=>c.nodes),[])
+  equal(focusDestination(items,null,compact),null)
+  equal(focusDestination(items,'missing',compact),null)
+  equal(focusDestination(items,graph[0].nodes[0].item.id,compact),graph[0].nodes[0].point)
+  const denseItems=Array.from({length:100},(_,n)=>({...items[0],id:`synthetic:${n}`}))
+  const omitted=denseItems.find(i=>!crowded[0].nodes.some(n=>n.item.id===i.id))
+  equal(focusDestination(denseItems,omitted.id,compact),crowded[0].point)
   const updates=items.map(i=>({key:i.id,item:i}))
   equal(evidenceDestinations(items,updates,compact).length,4)
   equal(evidenceDestinations([],updates,compact),[])
@@ -66,6 +72,12 @@ equal(evidencePosition(points,2),points[1]);equal(evidencePosition(points,-1),po
 equal(evidencePosition(points,NaN),points[0]);equal(evidencePosition([],0),{x:0,y:0,z:60})
 equal(evidencePosition([points[1]],.5),points[1]);check(evidencePosition(points,.5).z>80)
 equal(WEB3D_BUDGET.sweepMs,3200);check(WEB3D_BUDGET.pixelRatio<=1.5);equal(WEB3D_BUDGET.frameInterval,1000/30)
+equal(WEB3D_BUDGET.focusMs,450)
+const occupied=[]
+equal(placeLabel(100,100,55,44,380,520,occupied),{x:100,y:100})
+equal(placeLabel(133,100,55,44,380,520,occupied),{x:133,y:150})
+const edge=placeLabel(2,2,55,44,380,520,occupied)
+check(edge.x>=31.5&&edge.y>=26)
 const source=readFileSync('src/SystemWeb3D.tsx','utf8'),sceneSource=readFileSync('src/systemWeb3DScene.ts','utf8')
 check(!source.includes('fetch(')&&!sceneSource.includes('fetch('))
 check(!source.includes('setInterval(')&&!source.includes('Math.random('))
@@ -74,5 +86,9 @@ check(source.includes('renderer.dispose()') && source.includes('renderer.forceCo
 check(source.includes('webglcontextlost') && source.includes('setFailed(true)'))
 check(source.includes("visibilityState==='hidden'") && source.includes('IntersectionObserver'))
 check(source.includes('reduced.matches') && source.includes('WEB3D_BUDGET.maxPixels'))
-check(source.includes('seenKey=p.sweepKey') && source.includes('if(animation) requestRender()'))
+check(source.includes('seenKey=p.sweepKey') && source.includes('if(animation||flight) requestRender()'))
+check(source.includes('p.selected!==previousSelected') && source.includes('focusDestination(p.items,p.selected,compact)'))
+check(source.includes('element.dataset.cameraMotion') && source.includes('element.dataset.motion'))
+check(source.includes('controls.removeEventListener(\'start\',manual)'))
+check(source.includes('props.changed]')) // finite highlight cleared without a new provider snapshot
 console.log(`3D geometry, evidence destinations, bounds and GPU-resource disposal: ${assertions} assertions passed`)

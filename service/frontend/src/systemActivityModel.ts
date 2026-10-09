@@ -8,6 +8,8 @@ export type ActivityItem = {
   at: string | null; reason: string | null; kind: 'candidate' | 'signal' | 'position'
   record?: Row; signal?: Row; trade?: Row; outcome?: Row
 }
+// Presentation symbols, never approval/profit indicators; closed includes expiry.
+export const STATE_SYMBOLS: Record<ActivityItem['state'],string> = {recorded:'·',blocked:'×',waiting:'…',uncertain:'?',open:'●',closed:'■'}
 
 export const finite = (n: unknown): number | null => n != null && n !== '' && typeof n !== 'boolean' && Number.isFinite(Number(n)) ? Number(n) : null
 export const timestamp = (s: unknown): number => typeof s === 'string' && Number.isFinite(Date.parse(s)) ? Date.parse(s) : 0

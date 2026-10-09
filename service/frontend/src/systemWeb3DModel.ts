@@ -22,6 +22,20 @@ export function evidenceDestinations(items: ActivityItem[], updates: ActivityUpd
     return cluster.nodes.find(n=>n.item.id===u.item.id)?.point || cluster.point
   })
 }
+export function focusDestination(items:ActivityItem[],id:string|null,compact=false):Point3|null {
+  const item=items.find(i=>i.id===id)
+  if(!item)return null
+  const cluster=buildSpatialNetwork(items,compact).find(c=>c.station===item.station)!
+  return cluster.nodes.find(n=>n.item.id===id)?.point || cluster.point
+}
+/** Presentation-only label offsets. Never moves the underlying evidence nodes. */
+export function placeLabel(x:number,y:number,w:number,h:number,width:number,height:number,occupied:{x:number;y:number;w:number;h:number}[]) {
+  const overlaps=(p:{x:number;y:number})=>occupied.some(r=>Math.abs(p.x-r.x)<(w+r.w)/2+4&&Math.abs(p.y-r.y)<(h+r.h)/2+4)
+  const offsets=[[0,0],[0,h+6],[0,-h-6],[w+6,0],[-w-6,0],[w+6,h+6],[-w-6,h+6],[0,2*(h+6)],[0,-2*(h+6)]]
+  const candidates=offsets.map(([dx,dy])=>({x:Math.max(w/2+4,Math.min(width-w/2-4,x+dx)),y:Math.max(h/2+4,Math.min(height-h/2-4,y+dy))}))
+  const result=candidates.find(p=>!overlaps(p))||candidates[0]
+  occupied.push({...result,w,h});return result
+}
 /** Small visual arc between observed destinations; does not infer intermediate gates. */
 export function evidencePosition(points: Point3[], progress: number): Point3 {
   if(!points.length) return {x:0,y:0,z:60}
@@ -30,4 +44,4 @@ export function evidencePosition(points: Point3[], progress: number): Point3 {
   const n=Math.min(points.length-2,Math.floor(t)), f=t-n, a=points[n], b=points[n+1]
   return {x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f,z:a.z+(b.z-a.z)*f+Math.sin(f*Math.PI)*24}
 }
-export const WEB3D_BUDGET = { pixelRatio:1.5, maxPixels:1_600_000, frameInterval:1000/30, sweepMs:3200, stations:STATIONS.length }
+export const WEB3D_BUDGET = { pixelRatio:1.5, maxPixels:1_600_000, frameInterval:1000/30, sweepMs:3200, focusMs:450, stations:STATIONS.length }

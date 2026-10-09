@@ -18,8 +18,8 @@ const load = name => {
   new Function('require','module','exports',result.outputFiles.find(f => f.path.endsWith(name+'.js')).text)(createRequire(import.meta.url), m, m.exports)
   return m.exports
 }
-const { buildActivity, activityRevision, detectActivityUpdates, finite } = load('systemActivityModel')
-const { SystemActivityView } = load('SystemActivity')
+const { buildActivity, activityRevision, detectActivityUpdates, finite, STATE_SYMBOLS } = load('systemActivityModel')
+const { SystemActivityView, StockFocus, activityLevels } = load('SystemActivity')
 const { buildNetwork, buildConstellation, COMPACT_CLUSTERS, buildEvidenceSweep, NETWORK_LIMIT, SystemNetwork } = load('SystemNetwork')
 let assertions = 0
 const check = v => { assert.ok(v); assertions++ }
@@ -166,4 +166,24 @@ check(networkSource.includes('seenBatch.current = key') && networkSource.include
 const component = readFileSync('src/SystemActivity.tsx','utf8')
 check(!/method:\s*['"](?:POST|PUT|DELETE)/.test(component))
 check(component.includes('controller.abort()') && component.includes('inFlight') && component.includes("visibilityState === 'hidden'"))
+const focus=(item,props={})=>renderToStaticMarkup(createElement(StockFocus,{item,he:true,stale:false,onClose:()=>{},onDetails:()=>{},...props}))
+const focusHtml=focus(stock('HOTL'))
+check(focusHtml.includes('תקציר המניה במיקוד')&&focusHtml.includes('פתח ראיות מלאות')&&focusHtml.includes('בטל מיקוד'))
+check(focusHtml.includes('100.00')&&focusHtml.includes('97.00')&&focusHtml.includes('106.00')&&focusHtml.includes('2.00R'))
+check(!focusHtml.includes('TP1')&&!focusHtml.includes('TP3')&&!focusHtml.includes('$'))
+check(focus(stock('ECHO')).includes('סיגנל כשיר; הקצאת הדמה חסומה'))
+check(focus(stock('GOLF')).includes('אי־ודאות בהתאוששות'))
+check(focus(stock('FOXT')).includes('ממתין')&&!focus(stock('FOXT')).includes('כניסה בפועל'))
+check(focus(stock('ALFA')).includes('—')&&!focus(stock('ALFA')).includes('0.00R'))
+check(focus(stock('ALFA'),{stale:true}).includes('מידע שמור'))
+check(focus(stock('HOTL'),{he:false}).includes('Focused stock summary'))
+check(focus({...stock('ALFA'),company:'<script>bad</script>',reason:'<img>'}).includes('&lt;script&gt;'))
+equal(activityLevels(stock('HOTL')).activeTarget,106)
+equal(STATE_SYMBOLS.closed,'■');equal(STATE_SYMBOLS.uncertain,'?')
+check(html.includes('system-quick-filters')&&html.includes('system-support-details')&&html.includes('system-full-journey'))
+check(!/<details class="system-full-journey"[^>]*\sopen/.test(html)) // selection alone does not unfold/scroll full evidence
+check(network({selected:'trade:40'}).includes('מפה מלאה'))
+check(network({}).includes('system-state-key'))
+check(component.includes('}, [detailsOpen])')&&!component.includes('}, [selected])\n  const filtered'))
+check(css.includes('height: 520px')&&css.includes('max-height: 43dvh'))
 console.log(`System activity model + RTL rendering: ${assertions} assertions passed`)

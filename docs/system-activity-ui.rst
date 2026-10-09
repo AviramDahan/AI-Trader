@@ -86,6 +86,21 @@ Evidence contract
 Verification and release
 ------------------------
 
+Selecting a stock focuses its retained node (or its station when capped), with
+a finite 450ms camera transition. This is navigation, not new activity: it does
+not move the evidence spider or claim a worker transition. Reduced motion jumps
+directly to the view; manual orbit cancels camera travel. A compact summary
+shows the recorded state, reason, source timestamp and available levels beside
+the map on desktop and in a dismissible, nonmodal bottom card on mobile. Missing
+levels remain unavailable, not zero. Full evidence opens only on request;
+selecting a node no longer scrolls the page automatically. Search, service
+details and station lists are collapsible, without removing retained records.
+The mobile 3D map is 520px high, with larger ticker labels and state symbols
+alongside words (colour is not the only signal). Closed does not imply profit
+or successful execution. Actual received changes briefly highlight their
+current station and display their original source time, not the render time.
+All original stale/future/reconnection/duplicate guards remain unchanged.
+
 Run from ``service/frontend``::
 
     npm run test:activity
