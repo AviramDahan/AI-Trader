@@ -904,8 +904,10 @@ def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = No
     if not token or not chat_id:
         return "missing_credentials"
     try:
-        from telegram_topics import destination_fields, with_news_community_link
+        from telegram_topics import destination_fields, thread_id_for_event, with_news_community_link
         from telegram_presentation import telegram_text
+        if event_type == 'sec_intelligence' and thread_id_for_event(event_type) is None:
+            return json.dumps({'terminal': True, 'reason': 'sec_topic_not_configured'})
         session = requests.Session()
         session.trust_env = False
         response = session.post(f"https://api.telegram.org/bot{token}/sendMessage",
@@ -1115,7 +1117,8 @@ def run_scan() -> dict[str, Any]:
             if signal:
                 signal = _localize_telegram_signal(signal)
                 check_ai_budget()
-                durable_candidate = dict(candidate, _strategy_projection=signal['strategy_projection'])
+                durable_candidate = dict(candidate, _strategy_projection=signal['strategy_projection'],
+                                         sec_decision_mode=cfg['sec_intelligence_mode'])
                 lifecycle = record_signal(signal, durable_candidate, decision, context, scan_id)
                 signal["lifecycle_id"] = lifecycle["id"]
                 signal["paper_execution"] = lifecycle["status"].lower()

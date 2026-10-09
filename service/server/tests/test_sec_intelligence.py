@@ -75,6 +75,112 @@ def test_research_controls_are_configurable_but_safety_bounded(monkeypatch):
         si.process_jobs(datetime.now(timezone.utc))
 
 
+@pytest.mark.parametrize("mode,accepted_age,expected", [
+    ("paper", 5, 1), ("off", 5, 0), ("shadow", 5, 0), ("paper", 500, 0),
+])
+def test_material_sec_alert_is_fresh_paper_only_and_deduplicated(
+        isolated, monkeypatch, mode, accepted_age, expected):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setenv("SEC_INTELLIGENCE_MODE", mode)
+    monkeypatch.setenv("STOCK_SCANNER_TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_SEC_INTELLIGENCE_THREAD_ID", "345")
+    monkeypatch.setenv("SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE", si._z(now-timedelta(hours=8)))
+    monkeypatch.setenv("NEWS_SEC_USER_AGENT", "Research Operator research@example.com")
+    uid, _ = si.save_universe({"AAPL": {"company": "Apple Inc.", "indexes": ["sp500"]}},
+                              {"0000320193": ["AAPL"]}, now)
+    accession = "0000320193-26-000120"
+    si._queue_filing(filing(accession, "10-Q", now-timedelta(minutes=accepted_age)),
+                     "0000320193", ["AAPL"], uid, now, [10])
+    fact = {"metric": "revenue", "namespace": "us-gaap", "tag": "Revenues", "unit": "USD",
+            "start": "2026-07-01", "end": "2026-09-30", "value": 120,
+            "previous": {"value": 100}, "change_pct": 20, "reason": "comparable_prior"}
+    monkeypatch.setattr(si, "fetch", lambda *_a, **_k: (b"synthetic", {}))
+    monkeypatch.setattr(si, "_filing_evidence", lambda *_a, **_k: (
+        {"kind": "financial", "document_sha256": "synthetic", "comparisons": [fact]}, []))
+    assert si.process_jobs(now)["processed"] == 1
+    assert si.process_jobs(now)["processed"] == 0
+    with isolated() as conn:
+        rows = list(conn.execute("SELECT * FROM scanner_telegram_outbox WHERE event_type='sec_intelligence'"))
+    assert len(rows) == expected
+    if rows:
+        assert rows[0]["dedupe_key"] == f"sec-intelligence:{accession}"
+        assert "חברה: Apple Inc." in rows[0]["message"]
+        assert "20.0%" in rows[0]["message"]
+        assert "https://" not in rows[0]["message"]
+
+
+def test_sec_publication_excludes_weak_purchase_and_unlinked_amendment(isolated):
+    now = datetime.now(timezone.utc)
+    uid, _ = si.save_universe({"AAPL": {"company": "Apple Inc.", "indexes": ["sp500"]}},
+                              {"0000320193": ["AAPL"]}, now)
+    for suffix, category in ((121, "purchase"), (122, "amendment_unlinked")):
+        accession = f"0000320193-26-{suffix:06d}"
+        si._queue_filing(filing(accession, "4" if suffix == 121 else "4/A", now),
+                         "0000320193", ["AAPL"], uid, now, [10])
+        tx = si.parse_form4(ownership_xml(form="4" if suffix == 121 else "4/A"),
+                            accession, "0000320193")["transactions"][0]
+        with isolated() as conn:
+            conn.execute("""INSERT INTO si_transactions(event_id,accession,issuer_cik,transaction_key,
+                transaction_at,owners_json,category,body_json,effective_available_at)
+                VALUES(?,?,?,?,?,?,?,?,?)""",
+                (tx["event_id"], accession, "0000320193", tx["transaction_key"],
+                 tx["transaction_at"], json.dumps(tx["owners"]), category, json.dumps(tx), si._z(now)))
+            job = dict(conn.execute("SELECT * FROM si_filing_jobs WHERE accession=?", (accession,)).fetchone())
+            assert si._material_public_fact(job, {"kind": "ownership"}, conn) is None
+
+
+def test_sec_signal_explanation_is_paper_only_and_does_not_expose_source_link():
+    from scanner_engine import _signal_sec_telegram_block
+    candidate = {"sec_decision_mode": "paper", "sec_adjustment": .02,
+                 "sec_intelligence": {"coverage": "verified", "components": {"insider": .02, "filing": 0},
+                                      "facts": [{"kind": "verified_purchase", "accepted_at": "2026-10-09T10:00:00Z",
+                                                 "source_url": "https://www.sec.gov/secret-example"}]}}
+    rendered = _signal_sec_telegram_block({"technical_json": json.dumps(candidate)})
+    assert "שינוי דירוג: +0.02" in rendered
+    assert "לא אומת ביצוע בשוק הפתוח" in rendered
+    assert "https://" not in rendered
+    candidate["sec_decision_mode"] = "shadow"
+    assert _signal_sec_telegram_block({"technical_json": json.dumps(candidate)}) == ""
+
+
+def test_queued_sec_alert_is_cancelled_after_kill_switch_without_sending(isolated, monkeypatch):
+    import scanner_engine
+    import stock_scanner
+    monkeypatch.setenv("SEC_INTELLIGENCE_MODE", "paper")
+    monkeypatch.setenv("SEC_INTELLIGENCE_KILL_SWITCH", "true")
+    monkeypatch.setenv("STOCK_SCANNER_TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_SEC_INTELLIGENCE_THREAD_ID", "345")
+    monkeypatch.setattr(stock_scanner, "send_telegram", lambda *_a, **_k: pytest.fail("public_send_on_kill"))
+    with isolated() as conn:
+        assert scanner_engine.enqueue_telegram(conn.cursor(), "sec-intelligence:synthetic",
+                                               "sec_intelligence", "synthetic")
+        conn.commit()
+    scanner_engine.process_telegram_outbox()
+    with isolated() as conn:
+        row = conn.execute("SELECT status,last_error FROM scanner_telegram_outbox WHERE dedupe_key=?",
+                           ("sec-intelligence:synthetic",)).fetchone()
+    assert row["status"] == "cancelled" and row["last_error"] == "sec_publication_disabled"
+
+
+def test_sec_alert_uses_dedicated_existing_telegram_sender(isolated, monkeypatch):
+    import scanner_engine
+    import stock_scanner
+    sent = []
+    monkeypatch.setenv("SEC_INTELLIGENCE_MODE", "paper")
+    monkeypatch.setenv("SEC_INTELLIGENCE_KILL_SWITCH", "false")
+    monkeypatch.setenv("STOCK_SCANNER_TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_SEC_INTELLIGENCE_THREAD_ID", "345")
+    monkeypatch.setattr(stock_scanner, "send_telegram", lambda message, cfg, event_type: (
+        sent.append((message, event_type)) or "sent"))
+    with isolated() as conn:
+        assert scanner_engine.enqueue_telegram(conn.cursor(), "sec-intelligence:synthetic",
+                                               "sec_intelligence", "הודעת בדיקה מקומית")
+        conn.commit()
+    assert scanner_engine.process_telegram_outbox()["sent"] == 1
+    assert sent == [("הודעת בדיקה מקומית", "sec_intelligence")]
+    assert scanner_engine.process_telegram_outbox()["sent"] == 0
+
+
 def test_mapping_is_exact_and_url_is_bounded(isolated):
     universe = {"AAPL": {"company": "Apple Inc.", "indexes": ["sp500"]},
                 "DUPE": {"company": "Ambiguous", "indexes": ["sp500"]}}

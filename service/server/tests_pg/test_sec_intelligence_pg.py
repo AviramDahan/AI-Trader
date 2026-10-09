@@ -55,3 +55,34 @@ def test_shared_postgres_sec_clock_reserves_nonoverlapping_slots(pg, monkeypatch
         second = json.loads(connection.execute(
             "SELECT value_json FROM scanner_settings WHERE key='sec_request_slot'").fetchone()["value_json"])["next_at"]
     assert second-first >= .5
+
+
+def test_postgres_sec_publication_is_atomic_and_once_per_accession(pg, monkeypatch):
+    from migrations import migrate
+    migrate(target_version=7)
+    now = datetime.now(timezone.utc)
+    monkeypatch.setenv("SEC_INTELLIGENCE_MODE", "paper")
+    monkeypatch.setenv("STOCK_SCANNER_TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_SEC_INTELLIGENCE_THREAD_ID", "345")
+    monkeypatch.setenv("SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE", si._z(now-timedelta(hours=1)))
+    monkeypatch.setenv("NEWS_SEC_USER_AGENT", "Isolated Test Operator test@example.com")
+    uid, _ = si.save_universe({"AAPL": {"company": "Apple Inc.", "indexes": ["sp500"]}},
+                              {"0000320193": ["AAPL"]}, now)
+    accession = "0000320193-26-000099"
+    row = {"accessionNumber": accession, "form": "10-Q",
+           "acceptanceDateTime": si._z(now-timedelta(minutes=5)), "primaryDocument": "report.htm"}
+    assert si._queue_filing(row, "0000320193", ["AAPL"], uid, now, [10])
+    fact = {"metric": "revenue", "namespace": "us-gaap", "tag": "Revenues", "unit": "USD",
+            "start": "2026-07-01", "end": "2026-09-30", "value": 120,
+            "previous": {"value": 100}, "change_pct": 20, "reason": "comparable_prior"}
+    monkeypatch.setattr(si, "fetch", lambda *_a, **_k: (b"synthetic", {}))
+    monkeypatch.setattr(si, "_filing_evidence", lambda *_a, **_k: (
+        {"kind": "financial", "document_sha256": "synthetic", "comparisons": [fact]}, []))
+    assert si.process_jobs(now)["processed"] == 1
+    assert si.process_jobs(now)["processed"] == 0
+    with database.get_db_connection() as connection:
+        rows = connection.execute("SELECT dedupe_key,status FROM scanner_telegram_outbox WHERE event_type=?",
+                                  ("sec_intelligence",)).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["dedupe_key"] == f"sec-intelligence:{accession}"
+    assert rows[0]["status"] == "pending"

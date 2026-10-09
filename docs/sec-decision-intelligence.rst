@@ -83,8 +83,52 @@ baseline path remains subject to its original gates.
 Immutable decisions store scan ID, ticker, mode, snapshot/evidence IDs, scores,
 decision time and a rejection reason. Signals retain the SEC snapshot in their
 existing technical JSON; the UI explains support/opposition, rank change and
-official source date/link. Operational coverage is manager-authenticated at
-``/api/scanner/sec-intelligence/status``. No filing is posted merely on ingest.
+official source date/link. In paper mode, a qualifying signal's existing
+Telegram message also carries a bounded Hebrew SEC explanation, rank change
+and reporting date; no filing URL is put in the public message. Operational
+coverage is manager-authenticated at ``/api/scanner/sec-intelligence/status``.
+
+Dedicated SEC Forum topic
+-------------------------
+
+``📑 דיווחי SEC מהותיים`` is a separate optional public Telegram topic. It is
+not a new scanner, AI review or order path. The scanner queues an alert through
+the existing durable Telegram outbox in the same transaction that records a
+fresh verified filing. The existing Telegram worker delivers it with the
+``sec_intelligence`` route and one accession-level dedupe key. One issuer
+filing with multiple share-class tickers therefore produces at most one alert.
+No document is posted merely because it was collected. A verified non-
+derivative P/acquired purchase must have either at least two independent
+buyer groups or at least 1 million in verified transaction value; explicitly
+scheduled/private transactions do not qualify for this public purchase alert.
+The message never claims a public-market discretionary trade. A 10-Q/K
+comparison must cross the bounded material-change research threshold and
+remain unit/period comparable. Text-only 8-K guidance is retained as decision
+evidence but is not published to this topic without a validated quantitative
+comparison. These public-notice rules are conservative anti-noise controls,
+not an empirical edge claim.
+
+Public SEC alerts require *all* of: ``SEC_INTELLIGENCE_MODE=paper``, kill
+switch off, existing Telegram enabled, a valid dedicated
+``TELEGRAM_SEC_INTELLIGENCE_THREAD_ID``, and an explicit UTC
+``SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE``. The filing acceptance time must be at
+or after that cutover and within the configured 1–24-hour freshness window
+(default 6 hours) when processing finishes. Off/shadow, missing configuration,
+stale catch-up and backfill remain silent. Pending SEC alerts are cancelled if
+the mode is turned off, the kill switch is set or the dedicated topic becomes
+unavailable before dispatch. The topic has no fallback to General or the
+stock-news topic. Source URLs stay in evidence/UI and are removed at the
+public-news presentation boundary. Coverage status includes SEC alert counts
+by delivery state; it does not treat ``sent`` alone as reader-side proof.
+
+After a separately approved schema-7-compatible release, the operator can run
+``python scripts/configure_sec_intelligence_topic.py`` once via the protected
+deployment channel. The script creates only this topic (or verifies its
+configured ID), writes the ignored server ``.env`` and sends no public post.
+After an uncertain Telegram creation or an interrupted ``.env`` write, inspect
+the chat/topic before rerunning: Telegram does not provide an idempotency key
+for topic creation. Set the UTC cutover to the actual approved activation time;
+do not backdate it or replay old filings.
 
 Forward comparison, not backtest
 --------------------------------
@@ -109,7 +153,11 @@ release path and schema-7-capable rollback image must be available *before*
 any future approval to activate ``shadow`` or ``paper``. Do not bypass the
 schema guard, roll the database back or claim the old schema-6 image can run
 against schema 7. Rollback of a safe future release means setting the mode to
-``off`` for new decisions and returning only to a schema-7-compatible image.
+``off`` for new decisions and returning only to a schema-7-compatible image
+that understands ``sec_intelligence`` outbox rows (or after all such rows are
+drained/cancelled with an audited procedure). An older unknown-event router
+could otherwise misroute a queued SEC alert to General. The compatibility
+image is a release prerequisite, not something this branch has already built.
 It never rewrites existing paper orders or positions.
 
 The existing encrypted ACTIVE-state recovery continues to preserve the paper

@@ -720,6 +720,108 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
                  data_confidence, adjustment, status, _json(payload), _json(evidence_ids), POLICY))
 
 
+def _material_public_fact(job: dict, evidence: dict, conn) -> str | None:
+    """A conservative factual summary, never an investment recommendation."""
+    if evidence.get("kind") == "ownership":
+        rows = [json.loads(row["body_json"]) for row in conn.execute(
+            "SELECT body_json FROM si_transactions WHERE accession=? AND category='purchase'",
+            (job["accession"],))]
+        # Joint reporting owners and retry rows do not create independent buys.
+        unique = []
+        for tx in rows:
+            owners = {str(owner["cik"]) for owner in tx.get("owners", [])}
+            signature = (tx.get("transaction_at"), tx.get("security", "").lower(),
+                         tx.get("shares"), tx.get("price"), tx.get("table"))
+            if any(item["signature"] == signature and item["owners"] & owners for item in unique):
+                continue
+            unique.append({"signature": signature, "owners": owners, "tx": tx})
+        eligible = [item for item in unique if item["tx"].get("purchase_policy_bucket") ==
+                    "execution_character_unknown" and item["tx"].get("value") is not None]
+        value = sum(item["tx"]["value"] for item in eligible)
+        owner_groups = []
+        for item in eligible:
+            owners = item["owners"]
+            overlaps = [group for group in owner_groups if group & owners]
+            for group in overlaps:
+                owner_groups.remove(group)
+            owner_groups.append(owners | set().union(*overlaps))
+        # Notification floor is intentionally stricter than decision evidence.
+        # It is an uncalibrated anti-noise control, not an edge claim.
+        if value < 1_000_000 and len(owner_groups) < 2:
+            return None
+        return ("דווחו עסקאות רכישה P/acquired במניות רגילות שאינן נגזרות. "
+                "אופי הביצוע אינו מאומת כעסקה בשוק הפתוח; אין בכך לבדו המלצת קנייה.")
+    if evidence.get("kind") != "financial":
+        return None
+    controls = research_controls()
+    metrics = {"revenue": "הכנסות", "operating_income": "רווח תפעולי",
+               "operating_margin": "מרווח תפעולי", "operating_cash_flow": "תזרים מפעילות שוטפת",
+               "cash": "מזומן", "current_debt": "חוב שוטף", "long_term_debt": "חוב לטווח ארוך"}
+    material = []
+    for fact in evidence.get("comparisons", []):
+        if fact.get("reason") != "comparable_prior" or fact.get("metric") not in metrics:
+            continue
+        pct, pp = fact.get("change_pct"), fact.get("change_pp")
+        if ((pct is not None and abs(pct) >= controls["material_change_pct"] and
+             (fact.get("previous") or {}).get("value", 0) > 0) or
+                (pp is not None and abs(pp) >= controls["material_margin_pp"])):
+            material.append(fact)
+    if not material:
+        return None
+    fact = max(material, key=lambda row: abs(row.get("change_pp") if row.get("change_pp") is not None
+                                             else row.get("change_pct") or 0))
+    delta = fact.get("change_pp") if fact.get("change_pp") is not None else fact["change_pct"]
+    units = "נקודות אחוז" if fact.get("change_pp") is not None else "%"
+    direction = "עלו" if delta > 0 else "ירדו"
+    return (f"{metrics[fact['metric']]} {direction} ב־{abs(delta):.1f}{units} "
+            f"בהשוואה לתקופה תואמת שהוגדרה בדיווח. "
+            "זהו נתון חשבונאי, לא תחזית לתשואה.")
+
+
+def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn) -> bool:
+    """Queue only fresh, material, verified SEC facts in paper mode.
+
+    Off/shadow, an unset topic or an unset cutover cannot publish. This runs in
+    the same transaction as the processed filing and uses the existing outbox.
+    """
+    from telegram_topics import thread_id_for_event
+    if (mode() != "paper" or killed() or
+            os.getenv("STOCK_SCANNER_TELEGRAM_ENABLED", "false").lower() != "true" or
+            thread_id_for_event("sec_intelligence") is None):
+        return False
+    boundary = os.getenv("SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE", "").strip()
+    if not boundary:
+        return False
+    try:
+        accepted, cutover = _time(job["accepted_at"]), _time(boundary)
+        age_limit = min(24, max(1, int(os.getenv("SEC_INTELLIGENCE_PUBLIC_MAX_AGE_HOURS", "6"))))
+    except (ValueError, TypeError):
+        return False
+    if accepted < cutover or not 0 <= (at-accepted).total_seconds() <= age_limit*3600:
+        return False
+    fact = _material_public_fact(job, evidence, conn)
+    if not fact:
+        return False
+    from zoneinfo import ZoneInfo
+    from scanner_engine import enqueue_telegram
+    tickers = json.loads(job["tickers_json"])
+    if not tickers:
+        return False
+    universe_row = conn.execute("SELECT members_json FROM si_universe_snapshots WHERE id=?",
+                                (job["universe_snapshot_id"],)).fetchone()
+    members = json.loads(universe_row["members_json"]) if universe_row else {}
+    if any((members.get(ticker) or {}).get("issuer_cik") != job["issuer_cik"] for ticker in tickers):
+        return False
+    company = str(members[tickers[0]]["company"])[:180]
+    local_time = accepted.astimezone(ZoneInfo("Asia/Jerusalem")).strftime("%d/%m/%Y %H:%M")
+    correction = " — תיקון לדיווח קודם" if job["form"].endswith("/A") else ""
+    message = (f"📑 דיווח SEC מהותי{correction}\n\n"
+               f"חברה: {company}\nסימול: {', '.join(tickers[:3])}\n\n{fact}\n\n"
+               f"דווח: {local_time} (שעון ישראל)")
+    return enqueue_telegram(conn.cursor(), f"sec-intelligence:{job['accession']}",
+                            "sec_intelligence", message, published_at=job["accepted_at"])
+
+
 def process_jobs(now: datetime | None = None, limit: int = 2) -> dict:
     research_controls()  # A config error must not mark a valid filing unsupported.
     now = now or datetime.now(timezone.utc)
@@ -773,6 +875,7 @@ def process_jobs(now: datetime | None = None, limit: int = 2) -> dict:
                                              ("purchase", _json(tx), tx["event_id"]))
                 _update_snapshots(job["issuer_cik"], json.loads(job["tickers_json"]),
                                   job["universe_snapshot_id"], processed_at, conn)
+                _enqueue_material_public_alert(job, evidence, processed_at, conn)
                 conn.commit()
             processed += 1
         except Exception as exc:
@@ -913,6 +1016,8 @@ def coverage_status() -> dict:
         retrying = conn.execute("SELECT count(*) n FROM si_filing_jobs WHERE status='retry'").fetchone()["n"]
         last = conn.execute("SELECT MAX(processed_at) at FROM si_filing_jobs WHERE status='processed'").fetchone()["at"]
         influenced = conn.execute("SELECT count(*) n FROM si_decisions WHERE sec_adjustment!=0").fetchone()["n"]
+        alert_rows = conn.execute("""SELECT status,COUNT(*) n FROM scanner_telegram_outbox
+            WHERE event_type='sec_intelligence' GROUP BY status""").fetchall()
     members = json.loads(snapshot["members_json"]) if snapshot else {}
     return {"mode": mode(), "kill_switch": killed(), "universe_count": len(members),
             "mapped_count": sum(v["mapping"] == "verified" for v in members.values()),
@@ -920,4 +1025,5 @@ def coverage_status() -> dict:
             "pending_filings": pending, "retrying_filings": retrying,
             "unsupported_filings": unsupported, "mapping_or_provider_errors": errors,
             "last_processed_at": last, "influenced_decisions": influenced,
+            "public_sec_alerts": {row["status"]: row["n"] for row in alert_rows},
             "request_limit_per_second": 2, "policy_version": POLICY}

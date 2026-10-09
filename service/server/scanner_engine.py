@@ -329,6 +329,33 @@ def _telegram_rtl(value: str) -> str:
     return "\u200f" + value
 
 
+def _signal_sec_telegram_block(signal: dict[str, Any]) -> str:
+    candidate = _loads(signal.get('technical_json'), {}) if isinstance(signal.get('technical_json'), str) else signal.get('technical_json') or {}
+    sec = candidate.get('sec_intelligence') or {}
+    if candidate.get('sec_decision_mode') != 'paper' or sec.get('coverage') != 'verified':
+        return ''
+    facts = sec.get('facts') or []
+    if not facts:
+        return ''
+    adjustment = float(candidate.get('sec_adjustment') or 0)
+    components = sec.get('components') or {}
+    insider = float(components.get('insider') or 0)
+    filing = float(components.get('filing') or 0)
+    support = (['רכישות בעלי עניין'] if insider > 0 else []) + (['שינוי פיננסי חיובי'] if filing > 0 else [])
+    opposition = (['שינוי פיננסי שלילי'] if filing < 0 else []) + (['סתירה מהותית בין הראיות'] if sec.get('material_conflict') else [])
+    labels = {'verified_purchase': 'עסקאות P/acquired מאומתות במניות רגילות; לא אומת ביצוע בשוק הפתוח',
+              'comparable_financials': 'שינוי מהותי במדד פיננסי בר־השוואה',
+              'specific_guidance_update': 'עדכון תחזית מפורש; ללא השוואה כמותית מאומתת'}
+    fact = next((labels[item['kind']] for item in facts if item.get('kind') in labels), 'נתון מובנה מאומת')
+    date = str(facts[0].get('accepted_at') or '')[:10]
+    return _telegram_rtl(
+        f"בדיקת SEC: {fact}. "
+        f"שינוי דירוג: {adjustment:+.2f} (ציון מחקרי, לא הסתברות). "
+        f"תמך: {', '.join(support) if support else 'לא זוהה'}; "
+        f"סייג: {', '.join(opposition) if opposition else 'לא זוהה'}. "
+        f"תאריך הדיווח: {date or 'לא זמין'}.")
+
+
 def _signal_telegram_message(signal: dict[str, Any]) -> str:
     from single_target_policy import is_v2
     plan = signal.get('target_plan') or _loads(signal.get('technical_json'), {}).get('target_plan')
@@ -354,7 +381,8 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
             f'ציון מודל לא־מכויל: {ltr(confidence_text)}',
             'סיבה:\n' + (bounded(signal.get('reason_he') or signal.get('reason'), 900) or 'לא זמין'),
             'חדשות רלוונטיות:\n' + ('\n'.join('• ' + t for t in titles if t) or 'לא זמין')]
-        return '\n\n'.join(_telegram_rtl(line) for line in lines)
+        sec_block = _signal_sec_telegram_block(signal)
+        return ('\n\n'.join([*(_telegram_rtl(line) for line in lines), *([sec_block] if sec_block else [])]))[:4000]
     reason = str(signal.get("reason_he") or "הסיבה נבדקה על ידי הסורק.").strip()
     reason = "\n\n".join(part.strip() for part in re.split(r"(?<=[.!?])\s+", reason) if part.strip())
     news = _loads(signal.get("news_json"), []) if isinstance(signal.get("news_json"), str) else signal.get("news") or []
@@ -362,7 +390,7 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
     news_text = "\n\n".join(f"• {title}" for title in titles if title) or "אין"
     action = {"BUY": "קנייה", "SELL": "מכירה", "HOLD": "החזקה", "SHORT": "פתיחת שורט מדומה"}.get(signal["action"], signal["action"])
     if signal['action'] == 'SHORT':
-        return '\n\n'.join(_telegram_rtl(line) for line in [
+        text = '\n\n'.join(_telegram_rtl(line) for line in [
             'AI-Trader — מסחר מדומה בלבד', f"סימול: {_telegram_ltr(str(signal['ticker'])[:32])}",
             f"חברה: {str(signal.get('company') or '')[:100]}", f'פעולה: {action}',
             f"כניסה מתוכננת: {signal['planned_entry']:.2f}", f"סטופ: {signal['original_stop']:.2f}",
@@ -373,6 +401,8 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
             'הפוזיציה אינה פעילה לפני כניסה תקפה. אין מודל השאלת מניות או עלויות השאלה.',
             f"ציון מודל לא־מכויל: {signal['confidence']:.0%}",
             'סיבה:\n' + reason[:450], 'חדשות רלוונטיות:\n' + news_text[:450]])
+        sec_block = _signal_sec_telegram_block(signal)
+        return (text + ('\n\n' + sec_block if sec_block else ''))[:4000]
     prices = {
         "entry": f"${float(signal['planned_entry']):.2f}",
         "stop": f"${float(signal['original_stop']):.2f}",
@@ -381,7 +411,7 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
         "tp3": f"${float(signal['tp3']):.2f}",
     }
     confidence = f"{float(signal['confidence']):.0%}"
-    return "\n\n".join([
+    text = "\n\n".join([
         _telegram_rtl(f"{_telegram_ltr('AI-Trader')} — מסחר מדומה בלבד | אות מסחר חזק חדש"),
         "\n".join((
             _telegram_rtl(f"סימול: {_telegram_ltr(signal['ticker'])}"),
@@ -401,7 +431,9 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
         )),
         _telegram_rtl(f"סיבה:\n{reason}"),
         _telegram_rtl(f"חדשות רלוונטיות:\n{news_text}"),
-    ])[:4000]
+    ])
+    sec_block = _signal_sec_telegram_block(signal)
+    return (text + ('\n\n' + sec_block if sec_block else ''))[:4000]
 
 
 def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: dict[str, Any],
@@ -1348,6 +1380,15 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
     portfolio_changed = False
     for row in rows:
         cfg = settings()
+        if row['event_type'] == 'sec_intelligence':
+            from sec_intelligence import killed, mode
+            from telegram_topics import thread_id_for_event
+            if mode() != 'paper' or killed() or thread_id_for_event('sec_intelligence') is None:
+                conn = get_db_connection()
+                conn.execute("""UPDATE scanner_telegram_outbox SET status='cancelled',
+                    last_error='sec_publication_disabled' WHERE id=? AND status='sending'""", (row['id'],))
+                conn.commit(); conn.close()
+                continue
         enabled = bool(cfg.get("telegram_enabled"))
         if row["event_type"] in {"entry", "entry_chart"}:
             enabled = enabled and bool(cfg.get("telegram_entry_alerts"))
