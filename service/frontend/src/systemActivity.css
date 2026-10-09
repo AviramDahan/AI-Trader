@@ -296,6 +296,9 @@
 .system-station-flow { max-width: 960px; margin-inline: auto; padding: 24px; }
 .system-flow-intro { display: grid; gap: 6px; padding-bottom: 22px; color: #b5cdd8; font-size: 14px; }
 .system-flow-intro small { font-size: 12px; line-height: 1.6; color: #8ea7b8; }
+.system-flow-intro details { color: #a3b8c8; font-size: 13px; line-height: 1.65; }
+.system-flow-intro summary, .system-context summary, .system-sample-warning summary { cursor: pointer; }
+.system-flow-intro p, .system-sample-warning p { margin-bottom: 0; line-height: 1.7; }
 .system-flow-station { position: relative; border: 1px solid #ffffff10; border-radius: 14px; margin-block: 0 14px; background: linear-gradient(130deg,#111e27,#0a121b); }
 .system-flow-station.is-expanded { border-color: #7ee5cc45; }
 .system-flow-heading { width: 100%; display: grid; grid-template-columns: 42px minmax(0,1fr) auto 16px; align-items: center; gap: 14px; padding: 18px; color: #e2edf2; background: transparent; border: 0; border-radius: 14px; text-align: start; font: inherit; cursor: pointer; }
@@ -349,4 +352,68 @@
   .system-flow-chip { padding: 8px 10px; }
   .system-flow-records { padding: 0 10px 12px; }
   .system-flow-record .system-stock { padding: 10px; }
+}
+
+/* Phone-first reading: one stock per row; explanations unfold rather than shrink. */
+@media(max-width:640px) {
+  .system-activity { line-height: 1.65; }
+  .system-title { gap: 14px; margin-top: 18px; }
+  .system-title > div:first-child > .system-eyebrow { display: none; }
+  .system-title h2 { font-size: 26px; line-height: 1.35; letter-spacing: -.02em; }
+  .system-title p { font-size: 15px; line-height: 1.65; }
+  .system-connection { font-size: 14px; gap: 8px; padding: 12px 14px; }
+  .system-connection small { flex-basis: 100%; margin-inline-start: 0; font-size: 12px; line-height: 1.7; opacity: 1; color: #a5b7c5; }
+  .system-quick-filters > summary, .system-support-details > summary, .system-full-journey > summary { font-size: 15px; min-height: 48px; }
+  .system-quick-filters > summary small { font-size: 12px; }
+  .system-toolbar label { font-size: 14px; }
+  .system-toolbar input:not([type=checkbox]), .system-toolbar select { font-size: 16px; min-height: 48px; }
+  .system-view-switch button { font-size: 14px; min-height: 48px; }
+  .system-station-flow { padding: 18px 12px; }
+  .system-flow-intro { gap: 10px; padding: 0 4px 20px; font-size: 15px; }
+  .system-flow-intro details { font-size: 13px; }
+  .system-flow-intro summary { min-height: 36px; }
+  .system-flow-station { margin-bottom: 18px; }
+  .system-flow-heading { grid-template-columns: minmax(0,1fr) auto 16px; gap: 12px; padding: 18px 16px; }
+  .system-flow-step { display: none; }
+  .system-flow-heading strong { font-size: 17px; line-height: 1.5; }
+  .system-flow-heading .system-flow-name > small { font-size: 14px; }
+  .system-flow-station:not(.is-expanded) .system-flow-name > small { display: none; }
+  .system-flow-count { display: flex; align-items: center; gap: 6px; }
+  .system-flow-count bdi { font-size: 17px; }
+  .system-flow-count small { font-size: 12px; margin: 0; }
+  .system-flow-preview { display: grid; grid-template-columns: minmax(0,1fr); gap: 10px; padding: 0 16px 16px; }
+  .system-flow-chip { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,2fr); width: 100%; min-height: 52px; padding: 12px 14px; gap: 14px; }
+  .system-flow-chip bdi { font-size: 16px; overflow-wrap: anywhere; }
+  .system-flow-chip span { font-size: 14px; line-height: 1.6; text-align: end; }
+  .system-flow-more, .system-flow-empty { font-size: 14px; }
+  .system-flow-records { padding: 0 12px 16px; }
+  .system-flow-record .system-stock { margin-inline: 0; padding: 6px; }
+  .system-flow-record .system-stock-select { gap: 10px; padding-inline-end: 44px; }
+  .system-flow-record .system-stock-select strong { font-size: 18px; }
+  .system-flow-record .system-stock-select span, .system-flow-record .system-stock-select small { font-size: 14px; line-height: 1.7; }
+  .system-flow-record .system-stock-select time { font-size: 12px; line-height: 1.7; }
+  .system-focus-card { padding: 18px; }
+  .system-focus-card header p { font-size: 14px; line-height: 1.7; }
+  .system-focus-station { display: block; margin: 12px 0; font-size: 14px; }
+  .system-state-badge { display: inline-block; font-size: 14px; padding: 7px 10px; line-height: 1.6; }
+  .system-focus-reason { font-size: 15px; line-height: 1.75; margin-block: 14px; }
+  .system-focus-card > time { display: block; font-size: 13px; line-height: 1.7; }
+  .system-focus-levels { gap: 18px 12px; padding-block: 18px; margin-block: 18px; }
+  .system-focus-levels dt { font-size: 13px; }
+  .system-focus-levels dd { font-size: 21px; }
+  .system-focus-details { min-height: 48px; font-size: 14px; }
+  .system-context { padding: 20px 16px; }
+  .system-context summary { min-height: 44px; font-size: 15px; }
+  .system-context dl { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
+  .system-context dl > div { font-size: 13px; line-height: 1.7; }
+  .system-context dl > div:last-child { grid-column: 1 / -1; }
+  .system-context dd { font-size: 16px; margin-top: 8px; }
+  .system-context p, .system-session-note, .system-footnote, .system-sample-warning { font-size: 14px; line-height: 1.75; }
+  .system-sample-warning > summary { min-height: 44px; }
+  .system-journey { padding: 18px 14px; font-size: 14px; line-height: 1.75; }
+  .system-journey-timeline p { font-size: 14px; line-height: 1.75; }
+  .system-journey-timeline time { font-size: 12px; }
+  .system-services { grid-template-columns: minmax(0,1fr); }
+  .system-services > div { font-size: 14px; }
+  .system-services small { font-size: 12px; line-height: 1.7; }
 }

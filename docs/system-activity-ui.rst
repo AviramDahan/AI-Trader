@@ -102,6 +102,15 @@ unchanged. The separate "3D map" switch mounts the existing graph only on
 request; the default station view has no canvas, GPU scene or overlapping
 bottom sheet. Switching views does not fetch, create or replay any activity.
 
+Phone readability uses one full-width ticker/state row per stock, 14--17px
+primary text and 48px or larger primary touch targets. Collapsed station
+headings omit check descriptions on phones; opening the station reveals them.
+Scope, polling and progression explanations are disclosed on request, not
+deleted. Capped-sample, unavailable/stale and outside-session notices remain
+visible. Source timestamps have their own line, and mobile summary stats use
+two columns with a full-width scan timestamp. No data selection, state mapping,
+network polling, execution or update-marker guards are changed by this layout.
+
 Run from ``service/frontend``::
 
     npm run test:activity

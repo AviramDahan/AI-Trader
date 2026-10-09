@@ -143,10 +143,11 @@ export function SystemActivityView({ he, research, dashboard, error = '', items 
       </div>
       <aside className="system-context"><details><summary>{t('מה רואים כאן?', 'What is shown?')}</summary>
         <p>{t('מניה מופיעה בתחנה לפי התיעוד האחרון שלה. זה אינו אומר שהיא עברה את כל התחנות הקודמות או שה־Worker מטפל בה כרגע. סימון עדכון מציין רק שינוי מתועד חדש שנקלט בתצוגה.', 'A stock is placed by its latest retained evidence, not proof that earlier stages passed or a worker is processing it now. An update marker indicates only new retained evidence received by the view.')}</p>
+        <p>{t('מחקר מתרענן כל דקה; מצב הסורק כל 30 שניות. זה אינו זרם עסקאות בזמן אמת.', 'Research refreshes every minute; scanner status every 30 seconds. This is not a real-time trade feed.')}</p>
+        <p>{t('מוצגת הסריקה האחרונה שנשמרה לכל מניה במדגם, לצד הסיגנלים והפוזיציות. זו אינה רשימת כל ה־Universe. סימון כוכב נשמר רק בדפדפן ואינו משנה watchlist או מסחר.', 'Latest retained scan per sampled stock, alongside signals and positions. Not the entire universe. Stars are browser-only and do not change the watchlist or trading.')}</p>
         </details><dl><div><dt>{t('מניות במדגם התחנות', 'Stocks in station sample')}</dt><dd>{new Set(filtered.map(i => i.ticker)).size}</dd></div>
           <div><dt>{t('פוזיציות דמה פתוחות', 'Open paper positions')}</dt><dd>{dashboard ? items.filter(i => i.state === 'open').length : '—'}</dd></div>
           <div><dt>{t('מחזור סריקה אחרון', 'Last scan')}</dt><dd><bdi>{stamp(dashboard?.activity?.last_scan_at ? new Date(dashboard.activity.last_scan_at*1000).toISOString() : null, he)}</bdi></dd></div></dl>
-        <p className="system-footnote">{t('מחקר מתרענן כל דקה; מצב הסורק כל 30 שניות. זה אינו זרם עסקאות בזמן אמת.', 'Research refreshes every minute; scanner status every 30 seconds. This is not a real-time trade feed.')}</p>
         {open === false && <p className="system-session-note">{t('מחוץ למסחר: האיסוף יכול להמשיך. כניסה ממתינה אינה פוזיציה פעילה.', 'Outside session: collection can continue. A waiting entry is not an active position.')}</p>}
       </aside>
     </div>
@@ -157,8 +158,7 @@ export function SystemActivityView({ he, research, dashboard, error = '', items 
         return <div key={component}><strong>{label(names[component],he)}</strong><bdi>{service?.status || t('לא מתועד','Not recorded')}</bdi><small>{t('הצלחה אחרונה','Last success')}: {stamp(service?.last_success_at,he)}</small></div>
       })}
     </div></details>
-    <p className="system-footnote">{t('מוצגת הסריקה האחרונה שנשמרה לכל מניה במדגם, לצד הסיגנלים והפוזיציות. זו אינה רשימת כל ה־Universe. סימון כוכב נשמר רק בדפדפן ואינו משנה watchlist או מסחר.', 'Latest retained scan per sampled stock, alongside signals and positions. Not the entire universe. Stars are browser-only and do not change the watchlist or trading.')}</p>
-    {!!research?.records_clipped || !!research?.clipped?.length ? <p className="scanner-warning">{t('המדגם מוגבל: חלק מפרטי ההיסטוריה לא נכללו. אין להסיק שאין פעילות במניה שלא מופיעה.', 'Sample is capped: some history is omitted. An absent ticker does not prove inactivity.')}</p> : null}
+    {!!research?.records_clipped || !!research?.clipped?.length ? <details className="system-sample-warning scanner-warning"><summary>{t('מדגם מוגבל — לא כל ההיסטוריה מוצגת', 'Capped sample — not all history is shown')}</summary><p>{t('המדגם מוגבל: חלק מפרטי ההיסטוריה לא נכללו. אין להסיק שאין פעילות במניה שלא מופיעה.', 'Sample is capped: some history is omitted. An absent ticker does not prove inactivity.')}</p></details> : null}
     {!research && !error && <p role="status">{t('טוען את תיעוד התחנות…', 'Loading station evidence…')}</p>}
     {view==='map' && <details className="system-support-details"><summary>{t('רשומות התחנות', 'Station records')} <bdi>{filtered.length}</bdi></summary>
       <StationFlow he={he} items={filtered} station={station} selected={selected} select={setSelected} followed={followed} follow={follow}
@@ -194,7 +194,7 @@ export function StationFlow({he,items,station,selected,select,followed,follow,ch
     previousStation.current=current?.station || null
   },[selected])
   return <div ref={root} className="system-station-flow" aria-label={t('תחנות ומניות','Stations & stocks')}>
-    <div className="system-flow-intro"><span>{t('מיקום לפי התיעוד האחרון','Location by latest evidence')}</span><small>{t('לחצו על מניה לפרטים. תחנות קודמות אינן בהכרח אישור מעבר.','Select a stock for details. Earlier stages do not necessarily imply approval.')}</small></div>
+    <div className="system-flow-intro"><span>{t('לחצו על מניה לפרטים','Select a stock for details')}</span><details><summary>{t('מיקום מתועד, לא מעבר מאומת','Retained location, not verified progression')}</summary><p>{t('מיקום לפי התיעוד האחרון. תחנות קודמות אינן בהכרח אישור מעבר.','Location by latest evidence. Earlier stages do not necessarily imply approval.')}</p></details></div>
     {STATIONS.filter(s=>station==='all'||station===s).map(s=>{
       const group=items.filter(i=>i.station===s), chosen=group.find(i=>i.id===selected)
       const isOpen=!!expanded[s] || !!chosen
@@ -204,7 +204,7 @@ export function StationFlow({he,items,station,selected,select,followed,follow,ch
         <button type="button" className="system-flow-heading" aria-expanded={isOpen} aria-controls={`station-records-${s}`}
           onClick={()=>{setExpanded(v=>({...v,[s]:!isOpen}));if(chosen)select(null)}}>
           <span className="system-flow-step" aria-hidden="true">{String(STATIONS.indexOf(s)+1).padStart(2,'0')}</span>
-          <span><strong>{label(LABELS[s],he)}</strong><small>{label(STATION_HELP[s],he)}</small></span>
+          <span className="system-flow-name"><strong>{label(LABELS[s],he)}</strong><small>{label(STATION_HELP[s],he)}</small></span>
           <span className="system-flow-count"><bdi>{group.length}</bdi><small>{t('רשומות','records')}</small></span>
           <span className="system-flow-chevron" aria-hidden="true">{isOpen?'−':'+'}</span>
         </button>
@@ -219,10 +219,11 @@ export function StationFlow({he,items,station,selected,select,followed,follow,ch
           {visible.map(i=><div key={i.id} className="system-flow-record">
             <article className={`system-stock state-${i.state} ${changed.has(i.id)?'system-arrival':''}`}>
               <button type="button" className="system-stock-select" aria-pressed={selected===i.id} onClick={()=>select(selected===i.id?null:i.id)}>
-                <strong><bdi>{i.ticker}</bdi></strong><span><bdi>{i.company || t('שם חברה לא נשמר','Company name not retained')}</bdi></span>
+                <strong><bdi>{i.ticker}</bdi></strong>{selected===i.id ? <small>{t('פרטים פתוחים — לחצו לסגירה','Details open — select to close')}</small> : <>
+                <span><bdi>{i.company || t('שם חברה לא נשמר','Company name not retained')}</bdi></span>
                 <small>{label(STATE_LABELS[i.state],he)} · {i.kind==='position'?(i.trade?.legacy_position_id?'Legacy':'Native'):i.kind==='signal'?t('סיגנל','Signal'):t('סריקה','Scan')}</small>
                 {i.reason && <small className="system-stock-reason">{reason(i.reason,he)}</small>}
-                <time dateTime={i.at||undefined}>{stamp(i.at,he)}</time>
+                <time dateTime={i.at||undefined}>{stamp(i.at,he)}</time></>}
               </button>
               <button className="system-follow" type="button" aria-pressed={followed.includes(i.ticker)} aria-label={`${t('מעקב בתצוגה','Visual follow')}: ${i.ticker}`} onClick={()=>follow(i.ticker)}>{followed.includes(i.ticker)?'★':'☆'}</button>
             </article>
