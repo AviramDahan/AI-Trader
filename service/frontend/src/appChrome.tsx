@@ -149,6 +149,7 @@ export function Sidebar() {
     { path: '/market?tab=signals', icon: '📊', label: language === 'he' ? 'סיגנלים' : 'Signals' },
     { path: '/market?tab=results', icon: '📈', label: language === 'he' ? 'תוצאות' : 'Results' },
     { path: '/market?tab=research', icon: '🔎', label: language === 'he' ? 'מחקר סיגנלים' : 'Signal research' },
+    { path: '/market?tab=live', icon: '◉', label: language === 'he' ? 'המערכת בפעולה' : 'System in motion' },
     { path: '/market?tab=news', icon: '🗞️', label: language === 'he' ? 'חדשות' : 'News' },
     { path: '/market?tab=status', icon: '⚙️', label: language === 'he' ? 'מצב הסורק' : 'Scanner status' },
   ]

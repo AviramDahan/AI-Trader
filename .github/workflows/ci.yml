@@ -48,3 +48,6 @@ jobs:
       - name: Unified signals presentation regression
         working-directory: service/frontend
         run: node test-signal-presentation.cjs
+      - name: System activity read-only projection and RTL rendering
+        working-directory: service/frontend
+        run: npm run test:activity

@@ -17,6 +17,8 @@ jobs:
         working-directory: service/frontend
       - run: npm run test:research
         working-directory: service/frontend
+      - run: npm run test:activity
+        working-directory: service/frontend
   postgres:
     runs-on: ubuntu-latest
     services:
