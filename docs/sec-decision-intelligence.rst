@@ -163,12 +163,50 @@ Do not return to the older schema-6-only image, rewind the database or treat
 the kill switch as a binary rollback. The bridge never rewrites paper orders
 or positions. SEC alerts cancelled during bridge rollback are not replayed.
 
-The existing encrypted ACTIVE-state recovery continues to preserve the paper
-portfolio and recovery holds on schema 7; it intentionally excludes analytical
-filing bodies, historical rank rows, news and prompts. A full PostgreSQL
-backup is required if preserving the SEC analytical history across disaster
-recovery is operationally required. Loss of that history results in unknown
-coverage until recollected and must not be presented as negative evidence.
+The existing encrypted ACTIVE-state recovery preserves the paper portfolio
+and recovery holds. A separate SEC-only companion archive (format 1, schema
+7) now preserves all six analytical SEC tables, including immutable decisions,
+transaction identities, amendments, dated universe membership and discovery
+checkpoints. It contains no unrelated news, prompts, credentials or full DB.
+Release and rollback bridge both export/read this companion. Before migration
+007, absent SEC coverage is explicit; an absent archive is not proof of zero
+filings. ACTIVE recovery formats 2/3/4 are unchanged. Their capture time and
+the companion's capture time are separate; this is not one cross-module
+transaction or a point-in-time backup of the entire database.
+
+Each companion is exported through one repeatable-read, read-only transaction
+and a bounded server cursor, encrypted in at most 1 MiB chunks using real age.
+An encrypted manifest verifies counts and checksums; unchanged chunks reuse
+ciphertext under the same recipient. Only ciphertext and non-sensitive
+paths/checksums reach disk and the existing private recovery Git repository.
+Manifest pointers retain 24 hourly / 7 daily / 4 weekly / latest predeploy
+coverage. Old Git objects are not rewritten or securely erased; historical
+repository size still grows and the existing size warning remains necessary.
+
+``SEC_INTELLIGENCE_HISTORY_DAYS=400`` (allowed 400..730) bounds live analytical
+history, not trading thresholds or the shorter scoring windows. Only after
+the encrypted companion is pushed and the exact remote Git commit verified
+can the activation backup process prune at most 200 old, unchanged rows per
+table per run. Active Native/Shadow positions, pending/uncertain orders,
+current snapshot dependencies, amendment links, queued/retry jobs, and all
+discovery checkpoints are protected. Cleanup uses short non-waiting SEC-only
+locks; contention defers it atomically and reports degraded maintenance.
+The rollback bridge archives but never prunes. Backfill older than the retention
+horizon cannot re-enter discovery after pruning; it is unavailable context,
+not negative evidence or a new filing. Earlier decisions remain recoverable
+from the encrypted archive and are never re-evaluated retrospectively.
+
+For disaster recovery, restore ACTIVE state first using its existing guarded
+tool. With all workers stopped and all role leases free, restore the trusted
+SEC companion into empty, fully validated schema-7 SEC tables using:
+``python service/server/sec_history.py --repo PRIVATE_RECOVERY_CHECKOUT
+--manifest sec/manifests/HASH.age --identity PROTECTED_OPERATOR_IDENTITY
+--database-url-file PROTECTED_URL_FILE --workers-stopped``.
+Decryption stays in memory; no private identity belongs on the source server.
+Restore is atomic, validates references/counts/hashes, rejects a nonempty
+destination and queues no publication, trades or fills. It retains original
+processing times and checkpoints instead of relabelling backfill as fresh.
+This companion is intentionally not a full-system recovery of news or prompts.
 
 One-time operator configuration after a separately approved migration/release:
 set a genuine ``NEWS_SEC_USER_AGENT`` with contact email; keep the shared gap

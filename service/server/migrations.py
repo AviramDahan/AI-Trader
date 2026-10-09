@@ -27,6 +27,10 @@ def migrate(target_version=7):
                 if version == 5:
                     control.execute((Path(__file__).parent / 'news_events' / 'schema.sql').read_text())
                 control.execute((Path(__file__).parent / "migrations" / filename).read_text())
+                if version == 7:
+                    from sec_schema7_compat import RETENTION_INDEX_SQL
+                    for statement in RETENTION_INDEX_SQL:
+                        control.execute(statement)
                 control.execute("INSERT INTO schema_migrations(version) VALUES(%s)", (version,))
 
 

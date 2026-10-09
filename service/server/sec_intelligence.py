@@ -351,6 +351,11 @@ def _queue_filing(row: dict, cik: str, symbols: list[str], snapshot_id: str,
         accepted_at = _z(_time(accepted))
         if _time(accepted_at) > seen + timedelta(minutes=10):
             raise ValueError("future_acceptance_time")
+        from sec_history import history_days
+        if _time(accepted_at) < seen - timedelta(days=history_days()):
+            # Archived/pruned accessions must not be recollected as fresh jobs.
+            # This is an explicit storage/context boundary, not negative evidence.
+            return False
         url = _source_url(cik, accession, str(row.get("primaryDocument") or ""))
     except (TypeError, ValueError):
         accepted_at = None
