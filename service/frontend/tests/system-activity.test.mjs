@@ -19,7 +19,7 @@ const load = name => {
   return m.exports
 }
 const { buildActivity, activityRevision, detectActivityUpdates, finite, STATE_SYMBOLS } = load('systemActivityModel')
-const { SystemActivityView, StockFocus, activityLevels } = load('SystemActivity')
+const { SystemActivityView, StockFocus, StationFlow, activityLevels } = load('SystemActivity')
 const { buildNetwork, buildConstellation, COMPACT_CLUSTERS, buildEvidenceSweep, NETWORK_LIMIT, SystemNetwork } = load('SystemNetwork')
 let assertions = 0
 const check = v => { assert.ok(v); assertions++ }
@@ -57,8 +57,8 @@ equal(activityRevision(stock('HOTL')),activityRevision(buildActivity({...researc
 check(activityRevision(stock('GOLF')) !== activityRevision({...stock('GOLF'),state:'waiting'}))
 const render = props => renderToStaticMarkup(createElement(SystemActivityView,{he:true,research,dashboard,...props}))
 const html = render({selected:'trade:40'})
-check(html.includes('המערכת בפעולה') && html.includes('מפת תחנות אינטראקטיבית'))
-check(html.includes('role="button"') && html.includes('tabindex="0"'))
+check(html.includes('מה קורה במערכת?') && html.includes('תחנות ומניות'))
+check(html.includes('aria-expanded="true"') && html.includes('station-records-position'))
 check(html.includes('dir="rtl"') && html.includes('<bdi>HOTL</bdi>'))
 check(html.includes('יתרה מהפוזיציה') && html.includes('100.00%'))
 check(html.includes('ממומש נטו') && html.includes('חלק פתוח ברוטו'))
@@ -186,5 +186,33 @@ check(!/<details class="system-full-journey"[^>]*\sopen/.test(html)) // selectio
 check(network({selected:'trade:40'}).includes('מפה מלאה'))
 check(network({}).includes('system-state-key'))
 check(component.includes('}, [detailsOpen])')&&!component.includes('}, [selected])\n  const filtered'))
-check(css.includes('height: 520px')&&css.includes('max-height: 43dvh'))
+check(css.includes('height: 520px')&&!css.includes('position: fixed'))
+// Default is readable retained-station records; WebGL is opt-in, not hidden background work.
+const plain=render({})
+check(plain.includes('system-station-flow')&&!plain.includes('system-network-panel')&&!plain.includes('<canvas'))
+check(plain.includes('מפת תלת־ממד')&&plain.includes('לחצו על מניה לפרטים'))
+check(plain.includes('הקצאת דמה חסומה')&&plain.includes('תיעוד בלבד'))
+check(plain.includes('תחנות קודמות אינן בהכרח אישור מעבר'))
+equal((plain.match(/class="system-flow-station /g)||[]).length,8)
+equal((plain.match(/class="system-flow-chip /g)||[]).length,9)
+check(html.includes('system-flow-focus') && !html.includes('system-map-workspace has-selection'))
+check(plain.includes('אין רשומות במדגם') === false) // all eight fixture stations populated
+const flow=(props={})=>renderToStaticMarkup(createElement(StationFlow,{he:true,items,station:'all',selected:null,select:()=>{},followed:[],follow:()=>{},changed:new Set(),stale:false,onDetails:()=>{},...props}))
+check(flow({items:[]}).includes('אין רשומות במדגם'))
+equal((flow({station:'order'}).match(/class="system-flow-station /g)||[]).length,1)
+check(!flow({station:'order'}).includes('HOTL'))
+check(flow({selected:'signal:1'}).includes('סיגנל כשיר; הקצאת הדמה חסומה'))
+check(flow({selected:'signal:3'}).includes('אי־ודאות בהתאוששות'))
+check(flow({he:false}).includes('Waiting for entry or resolution'))
+check(flow({changed:new Set(['trade:40'])}).includes('system-arrival'))
+const manyRows=Array.from({length:100},(_,n)=>({...stock('HOTL'),id:`row:${n}`,ticker:`ROW${n}`}))
+const capped=flow({items:manyRows,selected:'row:99'})
+equal((capped.match(/class="system-flow-record"/g)||[]).length,9)
+check(capped.includes('ROW99')&&capped.includes('הצג את כל 100 הרשומות'))
+check(css.includes('.system-flow-records[hidden] { display: none; }'))
+for(const generated_at of [null,'invalid','2099-01-01T00:00:00Z']) {
+  const unavailable=render({research:{...research,generated_at},changed:new Set(['trade:40'])})
+  check(unavailable.includes('זמן התמונה לא תקין')&&!unavailable.includes('system-arrival'))
+}
+check(!render({error:'HTTP 503',changed:new Set(['trade:40'])}).includes('system-arrival'))
 console.log(`System activity model + RTL rendering: ${assertions} assertions passed`)

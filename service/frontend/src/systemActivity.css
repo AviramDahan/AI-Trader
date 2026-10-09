@@ -290,8 +290,7 @@
   .system-network-controls button { font-size: 11px; min-height: 38px; padding: 6px 8px; }
   .system-state-key { padding: 12px; gap: 8px 13px; font-size: 11px; }
   .system-quick-filters > summary, .system-support-details > summary, .system-full-journey > summary { padding: 13px 12px; }
-  .system-focus-card { position: fixed; inset-inline: 12px; bottom: max(12px,env(safe-area-inset-bottom)); z-index: 100; padding: 14px; max-height: 43dvh; overflow-y: auto; border: 1px solid #7ee5cc66; border-radius: 16px; background: #0b171ff5; box-shadow: 0 -12px 60px #0009; backdrop-filter: blur(16px); }
-  .system-map-workspace.detail-open .system-focus-card { display: none; }
+  .system-focus-card { position: static; padding: 16px; border: 1px solid #7ee5cc40; border-radius: 12px; background: #0b171f; }
   .system-focus-card > header { gap: 8px; }
   .system-focus-card h3 { font-size: 22px; margin-block: 5px 3px; }
   .system-focus-card header p { font-size: 12px; margin-bottom: 7px; }
@@ -306,3 +305,66 @@
   .system-context dd { text-align: start; font-size: 12px; margin-top: 7px; overflow-wrap: anywhere; }
 }
 @media(prefers-reduced-motion:reduce) { .system-new-evidence { animation: none; } }
+
+/* Information-first station view: no GPU or overlapping detail sheet by default. */
+.system-view-switch { display: flex; gap: 6px; width: fit-content; max-width: 100%; margin: 18px 0; padding: 4px; border: 1px solid #ffffff12; border-radius: 12px; background: #080f17; }
+.system-view-switch button { min-height: 44px; padding: 10px 20px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #8fa4b6; font: inherit; font-size: 13px; cursor: pointer; }
+.system-view-switch button[aria-pressed=true] { background: #17312f; border-color: #7ee5cc33; color: #d3fff0; }
+.system-station-workspace { min-width: 0; }
+.system-station-flow { max-width: 960px; margin-inline: auto; padding: 24px; }
+.system-flow-intro { display: grid; gap: 6px; padding-bottom: 22px; color: #b5cdd8; font-size: 14px; }
+.system-flow-intro small { font-size: 12px; line-height: 1.6; color: #8ea7b8; }
+.system-flow-station { position: relative; border: 1px solid #ffffff10; border-radius: 14px; margin-block: 0 14px; background: linear-gradient(130deg,#111e27,#0a121b); }
+.system-flow-station.is-expanded { border-color: #7ee5cc45; }
+.system-flow-heading { width: 100%; display: grid; grid-template-columns: 42px minmax(0,1fr) auto 16px; align-items: center; gap: 14px; padding: 18px; color: #e2edf2; background: transparent; border: 0; border-radius: 14px; text-align: start; font: inherit; cursor: pointer; }
+.system-flow-step { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid #7ee5cc22; border-radius: 12px; color: #8db9ad; background: #7ee5cc05; font: 13px ui-monospace,monospace; }
+.system-flow-heading strong { display: block; font-size: 16px; font-weight: 600; }
+.system-flow-heading small { display: block; color: #8ea4b4; font-size: 12px; line-height: 1.6; margin-top: 4px; }
+.system-flow-count { min-width: 44px; text-align: center; }
+.system-flow-count bdi { font: 18px ui-monospace,monospace; color: #cee2de; }
+.system-flow-count small { font-size: 10px; }
+.system-flow-chevron { color: #8aa8a5; font-size: 20px; }
+.system-flow-preview { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 18px 18px; }
+.system-flow-chip { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; max-width: 100%; padding: 8px 12px; border: 1px solid #ffffff18; border-radius: 9px; background: #080f18; color: #c4d6e2; font: inherit; cursor: pointer; text-align: start; }
+.system-flow-chip bdi { font: 600 13px ui-monospace,monospace; }
+.system-flow-chip span { color: #9caebf; font-size: 11px; overflow-wrap: anywhere; }
+.system-flow-chip.state-blocked { border-inline-start: 3px solid #fb7185; }
+.system-flow-chip.state-blocked span { color: #ffadb4; }
+.system-flow-chip.state-waiting, .system-flow-chip.state-uncertain { border-inline-start: 3px solid #fbbf24; }
+.system-flow-chip.state-waiting span, .system-flow-chip.state-uncertain span { color: #ffe09b; }
+.system-flow-chip.state-open { border-inline-start: 3px solid #7ee5cc; }
+.system-flow-chip.state-open span { color: #a8f7da; }
+.system-flow-more { min-height: 44px; padding: 8px 12px; background: transparent; color: #a8c8bb; font: inherit; font-size: 12px; border: 1px dashed #7ee5cc33; border-radius: 9px; cursor: pointer; }
+.system-flow-empty { font-size: 12px; color: #8195a6; padding: 0 2px; }
+.system-flow-records { padding: 0 18px 18px; }
+.system-flow-records[hidden] { display: none; }
+.system-flow-record .system-stock { padding: 12px; margin-block: 8px; border-radius: 10px; }
+.system-flow-record .system-stock-select { gap: 5px; }
+.system-flow-record .system-stock-select strong { font-size: 16px; }
+.system-flow-record .system-stock-select span { font-size: 13px; }
+.system-flow-record .system-stock-select small { font-size: 12px; line-height: 1.6; }
+.system-flow-focus { margin-block: 8px 20px; min-width: 0; }
+.system-flow-focus .system-focus-card { position: static; border: 1px solid #7ee5cc33; border-radius: 12px; }
+.system-flow-focus .system-full-journey { margin-bottom: 0; }
+.system-flow-records .system-follow { min-width: 44px; min-height: 44px; }
+.system-flow-heading:focus-visible, .system-flow-chip:focus-visible, .system-view-switch button:focus-visible { outline: 2px solid #7ee5cc; outline-offset: 3px; }
+@media(max-width:640px) {
+  .system-title h2 { font-size: 27px; }
+  .system-title p { font-size: 13px; margin-block: 6px; }
+  .system-view-switch { width: 100%; }
+  .system-view-switch button { flex: 1; padding: 9px 10px; }
+  .system-station-flow { padding: 16px 10px; }
+  .system-flow-intro { padding: 0 4px 16px; font-size: 13px; }
+  .system-flow-intro small { font-size: 11px; }
+  .system-flow-heading { grid-template-columns: 32px minmax(0,1fr) 32px 12px; gap: 8px; padding: 14px 12px; }
+  .system-flow-heading strong { font-size: 14px; }
+  .system-flow-heading small { font-size: 12px; }
+  .system-flow-step { width: 30px; height: 34px; border-radius: 8px; font-size: 11px; }
+  .system-flow-count { min-width: 0; }
+  .system-flow-count bdi { font-size: 16px; }
+  .system-flow-count small { font-size: 9px; }
+  .system-flow-preview { gap: 6px; padding: 0 12px 12px; }
+  .system-flow-chip { padding: 8px 10px; }
+  .system-flow-records { padding: 0 10px 12px; }
+  .system-flow-record .system-stock { padding: 10px; }
+}

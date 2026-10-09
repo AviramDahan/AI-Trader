@@ -60,7 +60,7 @@ Evidence contract
 * Browser-only stars are stored under ``ai_trader_visual_follow`` (at most
   100 tickers). They never edit the backend watchlist, scan priorities or
   trading policy. Tickers/names are escaped React text with bidi isolation.
-* The default map is a real, lazily loaded Three.js/WebGL2 scene. Stations,
+* The optional map is a real, lazily loaded Three.js/WebGL2 scene. Stations,
   silk and the eight-legged procedural spider have actual depth; drag/pinch
   orbit and zoom the camera. There is no auto-rotation, idle particle motion,
   model download, post-processing pipeline or external rendering service.
@@ -91,16 +91,28 @@ a finite 450ms camera transition. This is navigation, not new activity: it does
 not move the evidence spider or claim a worker transition. Reduced motion jumps
 directly to the view; manual orbit cancels camera travel. A compact summary
 shows the recorded state, reason, source timestamp and available levels beside
-the map on desktop and in a dismissible, nonmodal bottom card on mobile. Missing
-levels remain unavailable, not zero. Full evidence opens only on request;
-selecting a node never jumps to the full journey. On mobile it frames the map
-header so the selected label remains above the card, including in 2D. Search, service
-details and station lists are collapsible, without removing retained records.
+the map on desktop and underneath it on mobile. No fixed sheet obscures content.
+Missing levels remain unavailable, not zero. Full evidence opens only on request;
+selecting a node never jumps to the full journey. Search and service details
+are collapsible, without removing retained records.
 The mobile 3D map is 520px high, with larger ticker labels and state symbols
 alongside words (colour is not the only signal). Closed does not imply profit
 or successful execution. Actual received changes briefly highlight their
 current station and display their original source time, not the render time.
 All original stale/future/reconnection/duplicate guards remain unchanged.
+
+The default is now an information-first vertical station view, on both phone
+and desktop. Each of the eight station rows names its checks, counts retained
+records (not unique tickers or successful passages) and previews up to three
+stocks with explicit state words. Selection expands that station and puts the
+stock summary and requested evidence inline beneath its record. Earlier stages
+are never inferred to have passed. Allocation-blocked signals are labelled as
+paper-allocation blocks, not quality rejection. The expanded list caps at eight
+records, retains any selected record beyond that cap and offers all remaining
+records explicitly. Browser-only stars and search/window/station filters are
+unchanged. The separate "3D map" switch mounts the existing graph only on
+request; the default station view has no canvas, GPU scene or overlapping
+bottom sheet. Switching views does not fetch, create or replay any activity.
 
 Run from ``service/frontend``::
 
@@ -128,8 +140,8 @@ labelled fixture button that invokes the actual WebGL context-loss extension;
 all nine synthetic records must remain available in 2D afterwards. Neither
 test introduces a production flag or a new API endpoint.
 
-The 3D bundle is separate from the main dashboard and loaded only when this
-view is opened. The current production build reports a roughly 575 KB / 146 KB
+The 3D bundle is separate from the main dashboard and loaded only when the
+optional map is opened. The current production build reports a roughly 577 KB / 147 KB
 gzip 3D chunk and Vite's existing 500 KB chunk-size warning (not suppressed).
 The remaining dashboard does not eagerly load Three.js. npm audit also reports
 five pre-existing advisories in unchanged Vite/esbuild/router/source-map
