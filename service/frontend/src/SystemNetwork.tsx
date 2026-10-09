@@ -62,7 +62,7 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   useEffect(() => () => window.clearTimeout(timer.current), [])
   const moving = sweep.active && motion && visible && available
   const focus = clusters.flatMap(c=>c.nodes).find(n=>n.item.id===selected) || (station !== 'all' ? (compact ? COMPACT_CLUSTERS : CLUSTERS)[station] : core)
-  const viewBox = zoom || selected ? `${focus.x-(compact?115:250)} ${focus.y-(compact?125:165)} ${compact?230:500} ${compact?250:330}` : compact ? '0 0 380 672' : '0 0 1200 720'
+  const viewBox = zoom || selected ? `${focus.x-(compact?115:250)} ${focus.y-(compact?(selected?50:125):165)} ${compact?230:500} ${compact?250:330}` : compact ? '0 0 380 672' : '0 0 1200 720'
   const updatedStations=new Set(available?items.filter(i=>changed.has(i.id)).map(i=>i.station):[])
   const t = (a: string, b: string) => he ? a : b
   const activate = (e: React.KeyboardEvent<SVGGElement>, action: () => void) => {

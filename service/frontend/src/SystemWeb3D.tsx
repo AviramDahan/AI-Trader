@@ -69,7 +69,8 @@ export default function SystemWeb3D(props:Props) {
       element.dataset.cameraMotion='resting'
     }
     const focus=(point:Point3,animate=true)=> {
-      const endTarget=vec(point),endEye=endTarget.clone().add(new THREE.Vector3(30,40,compact?850:650))
+      // Frame the selected node above the nonmodal mobile summary, not behind it.
+      const endTarget=vec(point).add(new THREE.Vector3(0,compact?-220:0,0)),endEye=endTarget.clone().add(new THREE.Vector3(30,40,compact?850:650))
       if(animate&&canMove()&&canDraw()) {
         flight={eye:camera.position.clone(),target:controls.target.clone(),endEye,endTarget,start:performance.now()}
       } else {flight=null;camera.position.copy(endEye);controls.target.copy(endTarget);controls.update()}

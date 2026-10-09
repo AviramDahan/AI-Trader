@@ -92,4 +92,5 @@ check(source.includes('element.dataset.cameraMotion') && source.includes('elemen
 check(source.includes('controls.removeEventListener(\'start\',manual)'))
 check(source.includes('props.changed]')) // finite highlight cleared without a new provider snapshot
 check(source.includes('if(point&&flight)requestRender()')) // sidebar resize preserves finite focus travel
+check(source.includes('compact?-220:0')) // mobile card must not occlude the selected node
 console.log(`3D geometry, evidence destinations, bounds and GPU-resource disposal: ${assertions} assertions passed`)
