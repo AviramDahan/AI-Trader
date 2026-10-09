@@ -71,6 +71,8 @@ def test_research_controls_are_configurable_but_safety_bounded(monkeypatch):
     monkeypatch.setenv("SEC_INTELLIGENCE_ADJUSTMENT_CAP", "0.11")
     with pytest.raises(ValueError, match="invalid_sec_intelligence_adjustment_cap"):
         si.research_controls()
+    with pytest.raises(ValueError, match="invalid_sec_intelligence_adjustment_cap"):
+        si.process_jobs(datetime.now(timezone.utc))
 
 
 def test_mapping_is_exact_and_url_is_bounded(isolated):

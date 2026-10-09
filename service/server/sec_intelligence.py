@@ -382,6 +382,7 @@ def _user_agent() -> str:
 
 def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) -> dict:
     """Round robin over the entire configured universe, never a watchlist."""
+    research_controls()  # Reject invalid policy before network or checkpoint writes.
     now = now or datetime.now(timezone.utc)
     from stock_scanner import load_universe
     from news_pipeline import _sec_ticker_map
@@ -720,6 +721,7 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
 
 
 def process_jobs(now: datetime | None = None, limit: int = 2) -> dict:
+    research_controls()  # A config error must not mark a valid filing unsupported.
     now = now or datetime.now(timezone.utc)
     with get_db_connection() as conn:
         jobs = [dict(r) for r in conn.execute("""WITH due AS (
