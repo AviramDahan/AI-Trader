@@ -1,0 +1,112 @@
+name: SEC schema compatibility images (no deployment)
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sec-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  images:
+    # The activation PR proves BOTH exact images. A bridge-only PR cannot
+    # execute the future producer; its skipped job is not compatibility proof.
+    if: github.head_ref == 'codex/sec-decision-intelligence' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Resolve exact bridge and activation sources
+        run: |
+          set -euo pipefail
+          git fetch origin codex/sec-schema7-bridge codex/sec-decision-intelligence
+          bridge=$(git rev-parse origin/codex/sec-schema7-bridge)
+          activation=$(git rev-parse origin/codex/sec-decision-intelligence)
+          test "$(git rev-parse HEAD)" = "$activation"
+          git merge-base --is-ancestor "$bridge" "$activation"
+          git worktree add --detach /tmp/sec-bridge "$bridge"
+          git worktree add --detach /tmp/sec-baseline 7e4645d3dce440e1415019049dbf9cc06cac0cd1
+          mkdir -p /tmp/sec-proof /tmp/sec-artifacts
+          chmod 777 /tmp/sec-proof
+          printf '%s\n' "$bridge" > /tmp/sec-artifacts/bridge-sha.txt
+          printf '%s\n' "$activation" > /tmp/sec-artifacts/activation-sha.txt
+      - name: Actual migration-script failure, rollback and guarded resume harness
+        run: |
+          set -euo pipefail
+          python3 scripts/test_sec_migration.py -v 2>&1 | tee /tmp/sec-artifacts/migration-harness.txt
+      - name: Build complete immutable Linux applications
+        run: |
+          set -euo pipefail
+          bridge=$(cat /tmp/sec-artifacts/bridge-sha.txt)
+          activation=$(cat /tmp/sec-artifacts/activation-sha.txt)
+          docker build --build-arg BUILD_SHA="$bridge" --label org.opencontainers.image.revision="$bridge" -t sec-bridge:proof /tmp/sec-bridge
+          docker build --build-arg BUILD_SHA="$activation" --label org.opencontainers.image.revision="$activation" -t sec-activation:proof .
+          docker build --build-arg BUILD_SHA=7e4645d3dce440e1415019049dbf9cc06cac0cd1 -t sec-baseline:proof /tmp/sec-baseline
+          docker image inspect sec-bridge:proof sec-activation:proof sec-baseline:proof --format '{{.Id}} {{json .Config.Env}}' | python3 -c 'import sys,json; result=[]
+          for line in sys.stdin:
+            image,env=line.strip().split(" ",1)
+            result.append({"image_id":image,"build_sha":next(v.split("=",1)[1] for v in json.loads(env) if v.startswith("BUILD_SHA="))})
+          print(json.dumps(result,indent=2))' > /tmp/sec-artifacts/images.json
+      - name: Real migration, failed deployment, compatible rollback, age restore and restart
+        run: |
+          set -euo pipefail
+          trap 'if test -f /tmp/sec-proof/results.jsonl; then cp /tmp/sec-proof/results.jsonl /tmp/sec-artifacts/results.jsonl; fi' EXIT
+          docker network create --internal sec-proof
+          docker run -d --name sec-proof-pg --network sec-proof --memory=768m -e POSTGRES_USER=isolated -e POSTGRES_PASSWORD=disposable -e POSTGRES_DB=isolated postgres:17-bookworm
+          for i in $(seq 1 30); do docker exec sec-proof-pg pg_isready -U isolated && break; sleep 2; done
+          docker exec sec-proof-pg createdb -U isolated restored
+          docker exec sec-proof-pg createdb -U isolated invalid_schema
+          probe() {
+            docker run --rm --network sec-proof --memory=768m --cpus=2 \
+              -e AI_TRADER_CLOUD=true -e DATABASE_URL="postgresql://isolated:disposable@sec-proof-pg:5432/${3:-isolated}" \
+              -e STOCK_SCANNER_ENABLED=false -e TELEGRAM_NEWS_STREAM_ENABLED=false \
+              -e STOCK_SCANNER_TELEGRAM_ENABLED=false -e STOCK_SCANNER_TELEGRAM_PORTFOLIO_STATUS_ENABLED=false \
+              -e SEC_INTELLIGENCE_MODE=off \
+              -v "$PWD/scripts/sec_schema7_image_probe.py:/probe.py:ro" -v /tmp/sec-proof:/proof \
+              --entrypoint python "$1" /probe.py "$2"
+          }
+          migrate() {
+            docker run --rm --network sec-proof --memory=768m \
+              -e AI_TRADER_CLOUD=true -e DATABASE_URL="postgresql://isolated:disposable@sec-proof-pg:5432/${1:-isolated}" \
+              -e STOCK_SCANNER_ENABLED=false -e TELEGRAM_NEWS_STREAM_ENABLED=false -e SEC_INTELLIGENCE_MODE=off \
+              sec-activation:proof migrate
+          }
+          probe sec-baseline:proof seed
+          probe sec-bridge:proof prepare
+          probe sec-baseline:proof baseline_return
+          migrate
+          if docker run --rm --network none --entrypoint python sec-activation:proof -c 'raise SystemExit(7)'; then exit 1; fi
+          probe sec-bridge:proof immediate_failure
+          probe sec-bridge:proof immediate_failure
+          probe sec-baseline:proof baseline_refused
+          probe sec-activation:proof activate
+          if docker run --rm --network none --entrypoint python sec-activation:proof -c 'raise SystemExit(7)'; then exit 1; fi
+          probe sec-bridge:proof rollback
+          probe sec-bridge:proof restart
+          migrate restored
+          probe sec-bridge:proof restore restored
+          probe sec-bridge:proof restart restored
+          probe sec-bridge:proof exit restored
+          probe sec-activation:proof forward restored
+          probe sec-bridge:proof exit
+          probe sec-activation:proof forward
+          migrate invalid_schema
+          probe sec-activation:proof corrupt_schema invalid_schema
+          probe sec-bridge:proof invalid_schema_refused invalid_schema
+          probe sec-activation:proof invalid_schema_refused invalid_schema
+          cp /tmp/sec-proof/results.jsonl /tmp/sec-artifacts/results.jsonl
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sec-schema7-compatibility-evidence
+          path: /tmp/sec-artifacts/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove disposable test containers and network
+        if: always()
+        run: |
+          docker rm -f sec-proof-pg 2>/dev/null || true
+          docker network rm sec-proof 2>/dev/null || true

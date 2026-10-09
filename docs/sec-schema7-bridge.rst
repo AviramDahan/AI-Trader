@@ -21,3 +21,22 @@ keep the image available to the release mechanism. Verify encrypted backup,
 accounting, recovery holds, single-role leases and readiness before and after
 each step. A schema-7 migration and SEC activation are **not** authorized by
 this bridge release itself.
+
+Isolated release evidence
+------------------------
+
+``SEC schema compatibility images (no deployment)`` runs on the activation
+PR and builds this exact bridge, the exact activation HEAD and the prior
+schema-6 application. It requires this bridge to be an ancestor of activation.
+The bridge PR's skipped image job is not evidence; the executed activation
+run and its ``images.json`` identify both tested code SHAs and image IDs.
+
+The internal-only PostgreSQL test covers the actual migration role CLI,
+failure immediately after 007, compatible rollback/restart, retained V1/V2,
+Legacy and Shadow positions plus an expired recovery hold, real age recovery
+to an empty isolated database, continued exits and duplicate protection.
+Both binaries reject a schema-7 database missing a required index. A separate
+test invokes the actual Bash transition script with command doubles and
+proves failure/rollback/resume without repeating DDL. Only filtered phase
+results and image metadata are uploaded; temporary identities and snapshots
+are not artifacts. No production worker or external provider is involved.
