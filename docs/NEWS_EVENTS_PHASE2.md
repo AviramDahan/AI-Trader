@@ -255,3 +255,20 @@ public trial: Investing timezone/rights, Globe access/rights, PR license,
 Benzinga license/credential, TipRanks contract/credential.
 Do not merge this branch into main: main auto-deploys production. Preserve Phase
 1 measurements and scheduled live-market validation until explicit approval.
+# Verified press-feed access recovery
+
+A previously successful, currently enabled and rights-approved press feed may
+perform one delayed recovery probe after a terminal HTTP 403, at least one hour
+after its last attempt. The incident marker is persisted before I/O, including
+across interruption/restart; another denial remains terminal, not an endless
+retry. Unverified feeds, credentials/rights errors, unsafe endpoints and invalid
+metadata are not unblocked. A recovery timestamp fences out the outage backlog.
+Successful collection clears stale HTTP/error/backoff telemetry through the
+existing collector and reports the transition to Admin only. No alternate host,
+IP, scraping, bot impersonation or licensing bypass is used.
+
+FTC keeps its three official RSS endpoints and existing conditional cache,
+publication timestamps and backoff. Like BLS, it sends the existing configured
+operator contact User-Agent when available, retaining the generic fallback.
+This is genuine application identification, not browser impersonation; no new
+credentials, provider configuration or alternate access route is introduced.

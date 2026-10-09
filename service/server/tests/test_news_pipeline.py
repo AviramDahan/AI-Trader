@@ -1116,6 +1116,42 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertTrue(rows[0]["headline_only"])
         self.assertEqual(news_pipeline._parse_time(rows[0]["published_at"]), self.clock)
 
+    def test_ftc_uses_configured_operator_identity_without_changing_feed_contract(self):
+        xml = b"""<rss><channel><item><title>FTC announces settlement</title>
+        <link>https://www.ftc.gov/news-events/news/press-releases/test</link>
+        <pubDate>Mon, 14 Sep 2026 12:00:00 GMT</pubDate>
+        <description>Official release excerpt.</description></item></channel></rss>"""
+        url = "https://www.ftc.gov/feeds/press-release.xml"
+        state = {"checkpoint_json": json.dumps({"feeds": {url: {"etag": "previous"}}})}
+        with patch.dict(os.environ, {"NEWS_SEC_USER_AGENT": "AI-Trader test test@example.com"}), \
+             patch.object(news_pipeline, "_request", return_value=(xml, {"etag": "current"})) as request:
+            result = news_pipeline._fetch_ftc(state, self.clock)
+        self.assertEqual(request.call_count, 3)
+        self.assertEqual(request.call_args_list[0].args, (url, {"etag": "previous"},
+                                                        "AI-Trader test test@example.com"))
+        self.assertTrue(all(call.args[2] == "AI-Trader test test@example.com"
+                            for call in request.call_args_list))
+        self.assertTrue(all(call.args[0].startswith("https://www.ftc.gov/feeds/")
+                            for call in request.call_args_list))
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["checkpoint"]["feeds"][url]["etag"], "current")
+        self.assertIsNone(result["checkpoint"]["feeds"][url]["error"])
+        self.assertEqual(result["items"][0]["publisher"], "U.S. Federal Trade Commission (FTC)")
+        self.assertEqual(news_pipeline._parse_time(result["items"][0]["published_at"]), self.clock)
+        self.assertFalse(self.rows("SELECT id FROM scanner_news"))
+        self.assertFalse(self.rows("SELECT id FROM scanner_telegram_outbox"))
+
+    def test_ftc_without_operator_identity_retains_generic_fallback(self):
+        with patch.dict(os.environ, {"NEWS_SEC_USER_AGENT": ""}), \
+             patch.object(news_pipeline, "_request", return_value=(None, {"etag": "unchanged"})) as request:
+            result = news_pipeline._fetch_ftc({}, self.clock)
+        self.assertEqual(request.call_count, 3)
+        self.assertTrue(all(call.args[2] == news_pipeline.OFFICIAL_USER_AGENT
+                            for call in request.call_args_list))
+        self.assertEqual(result["status"], "not_modified")
+        self.assertEqual(result["items"], [])
+
     def test_atom_uses_original_published_time_and_skips_missing_timestamp(self):
         atom = b"""<feed xmlns="http://www.w3.org/2005/Atom">
         <entry><title>Old official release</title><link href="https://official.test/old"/>

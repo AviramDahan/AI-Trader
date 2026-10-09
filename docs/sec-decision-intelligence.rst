@@ -161,6 +161,16 @@ do not backdate it or replay old filings.
 Forward comparison, not backtest
 --------------------------------
 
+Discovery under backpressure assigns a bounded share of the existing queue to
+each visited issuer. A partial submissions block/continuation page retains
+its prior accession/page checkpoint and forces a refetch on the next turn;
+already retained accessions dedupe. Rotation advances only past issuers
+actually visited, not past the rest of an interrupted batch. A full queue
+performs no filing-discovery request. The 600-job ceiling, eight-issuer batch,
+processing cadence and shared SEC request limit remain unchanged.
+Status reports distinguish mapped universe issuers, checkpointed issuers and
+completed issuer checkpoints: ticker mapping alone is not filing coverage.
+
 ``python scripts/sec_intelligence_compare.py --hours 168`` reads retained
 ``si_decisions`` and compares baseline, insider-only, filing-only and combined
 top-25 selections at the same scan timestamps. It reports actually executed

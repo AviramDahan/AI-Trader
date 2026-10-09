@@ -55,6 +55,30 @@ def test_standard_identifying_ua_is_press_only():
     assert PressFeedProvider(cfg).transport.timeout == 12
     assert RSSProvider(cfg).transport.read_timeout is None
 
+
+@pytest.mark.parametrize('change', [
+    {'last_success': None}, {'http_status': 401}, {'http_status': 404},
+    {'error': 'unsafe_endpoint'}, {'error': 'source_metadata_invalid'},
+    {'last_attempt': NOW.isoformat()}, {'last_attempt': 'invalid'},
+    {'checkpoint_json': '{"access_recovery_for":"verified"}'},
+])
+def test_terminal_recovery_never_weakens_unverified_or_other_failures(change):
+    from datetime import timedelta
+    cfg=Config('globenewswire','https://www.globenewswire.com/rss','Globe',enabled=True,rights='approved')
+    state=dict(terminal=True,http_status=403,error='http_error',last_success='verified',
+               last_attempt=(NOW-timedelta(hours=2)).isoformat())
+    state.update(change)
+    assert PressFeedProvider(cfg).recover_terminal(state,NOW) is None
+
+
+@pytest.mark.parametrize('enabled,rights', [(False,'approved'),(True,'review_required')])
+def test_recovery_requires_current_approval(enabled,rights):
+    from datetime import timedelta
+    cfg=Config('globenewswire','https://www.globenewswire.com/rss','Globe',enabled=enabled,rights=rights)
+    state=dict(terminal=True,http_status=403,error='http_error',last_success='verified',
+               last_attempt=(NOW-timedelta(hours=2)).isoformat())
+    assert PressFeedProvider(cfg).recover_terminal(state,NOW) is None
+
 @pytest.mark.parametrize('read_timeout', [None, 10])
 def test_read_timeout_applied_without_changing_connect_limit(monkeypatch, read_timeout):
     import news_events.providers as mod

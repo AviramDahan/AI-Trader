@@ -146,6 +146,47 @@ def test_provider_change_admin_only_and_no_unchanged_notice(monkeypatch):
     sender.reset_mock();notify_changes(after,after,NOW);sender.assert_not_called()
 
 
+@pytest.mark.parametrize('outcome', ['success', 'denied', 'crash'])
+def test_verified_globe_403_single_recovery_probe_and_outage_fence(env, monkeypatch, outcome):
+    from news_events.press_feed import PressFeedProvider
+    from news_events.provider_config import notify_changes
+    import ai_operations
+    p,s,_=env
+    prior={'status':'requires_configuration','terminal':True,'http_status':403,'error':'http_error',
+           'attempts':2,'last_success':(NOW-timedelta(days=1)).isoformat(),
+           'last_attempt':(NOW-timedelta(hours=2)).isoformat(),'next_at':NOW.isoformat()}
+    with s.transaction(True) as c:c.execute('INSERT INTO ne_provider_state VALUES(?,?)',('globenewswire',json.dumps(prior)))
+    monkeypatch.setenv('NEWS_GLOBENEWSWIRE_ACTIVATED_AT',(NOW-timedelta(days=2)).isoformat())
+    cfg=Config('globenewswire','https://www.globenewswire.com/rss','GlobeNewswire',enabled=True,rights='approved')
+    # Entire outage feed predates the recovery probe: no event/job/message.
+    xml=b'<rss><channel><item><title>Apple Inc. reports results</title><link>https://www.globenewswire.com/old</link><pubDate>Sun, 27 Sep 2026 11:59:00 GMT</pubDate></item></channel></rss>'
+    request=Mock(return_value=xml)
+    if outcome=='denied':request.side_effect=ProviderFailure('http_error',403,0,True)
+    if outcome=='crash':request.side_effect=KeyboardInterrupt()
+    provider=PressFeedProvider(cfg,Mock(request=request))
+    if outcome=='crash':
+        with pytest.raises(KeyboardInterrupt):p.collect([provider],NOW)
+        result=json.loads(rows(s,"SELECT state_json FROM ne_provider_state WHERE provider_id='globenewswire'")[0]['state_json'])
+    else:result=p.collect([provider],NOW)['globenewswire']
+    assert request.call_count==1
+    assert not rows(s,'SELECT * FROM ne_events')
+    assert not rows(s,'SELECT * FROM ne_analysis')
+    assert not rows(s,'SELECT * FROM ne_delivery')
+    if outcome=='success':
+        assert result['status']=='ok' and result['http_status'] is None
+        assert result['error'] is None and result['attempts']==0 and result['retry_after']==0
+        assert result['terminal'] is False
+        sender=Mock();monkeypatch.setattr(ai_operations,'enqueue',sender)
+        notify_changes({'globenewswire':prior},{'globenewswire':result},NOW)
+        assert 'HTTP: 403' not in sender.call_args.args[1]
+        assert 'ENABLED' in sender.call_args.args[1]
+    else:
+        assert result['terminal'] is True
+        restarted=Pipeline(Store(s.connect,sandbox=True),UNIVERSE,p.membership,not_before=p.not_before)
+        restarted.collect([provider],NOW+timedelta(days=1))
+        assert request.call_count==1, 'failed/interrupted probe must not loop after restart'
+
+
 def test_provider_404_recovery_clears_error_telemetry_and_admin(env,monkeypatch):
     from news_events.provider_config import notify_changes
     import ai_operations

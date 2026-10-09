@@ -409,13 +409,16 @@ def _fetch_fda(state: dict[str, Any], at: datetime) -> dict[str, Any]:
 
 
 def _fetch_ftc(state: dict[str, Any], at: datetime) -> dict[str, Any]:
+    # Use the already configured operator identity, as BLS does. FTC rejects
+    # the generic agent despite publishing these unchanged official feeds.
+    user_agent = feed_settings()["sec_user_agent"] or OFFICIAL_USER_AGENT
     feeds = (
         ("https://www.ftc.gov/feeds/press-release.xml", "U.S. Federal Trade Commission (FTC)"),
         ("https://www.ftc.gov/feeds/press-release-consumer-protection.xml", "FTC Consumer Protection"),
         ("https://www.ftc.gov/feeds/press-release-competition.xml", "FTC Competition"),
     )
     return _fetch_rss_collection(state, "ftc", feeds,
-                                 OFFICIAL_USER_AGENT,
+                                 user_agent,
                                  at,
                                  "Official FTC press-release RSS metadata; no forced ticker assignment", "industry")
 
