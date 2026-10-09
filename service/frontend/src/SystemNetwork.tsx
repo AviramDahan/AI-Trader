@@ -81,7 +81,7 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
           {field.map(c => <g key={c.station} style={{ color: c.color }} opacity={station !== 'all' && station !== c.station ? .2 : 1}>
             {c.edges.map((e,n)=><path key={`e${n}`} d={`M ${e.a.x} ${e.a.y} L ${e.b.x} ${e.b.y}`}/>)}
             {c.points.map((p,n)=><circle key={`p${n}`} cx={p.x} cy={p.y} r={p.radius} fill={c.color} opacity={p.opacity}/>)}
-            {[0,1,2,3,4].map(n=><path key={`s${n}`} className="system-silk" d={`M ${core.x+(n-2)*6} ${core.y} C ${core.x+(c.x-core.x)*.32} ${c.y+(n-2)*24} ${c.x+(n-2)*14} ${core.y+(c.y-core.y)*.75} ${c.x+(n-2)*10} ${c.y}`}/>)}
+            {[0,1,2].map(n=><path key={`s${n}`} className="system-silk" d={`M ${core.x+(n-1)*6} ${core.y} C ${core.x+(c.x-core.x)*.32} ${c.y+(n-1)*24} ${c.x+(n-1)*14} ${core.y+(c.y-core.y)*.75} ${c.x+(n-1)*10} ${c.y}`}/>)}
           </g>)}
         </g>
         <g className="system-network-core" aria-hidden="true"><circle cx={core.x} cy={core.y} r={compact?38:65}/><circle className="system-core-ring" cx={core.x} cy={core.y} r={compact?48:81}/><text x={core.x} y={core.y+(compact?63:99)} textAnchor="middle">AI TRADER</text><text x={core.x} y={core.y+(compact?76:114)} textAnchor="middle" className="system-core-sub">EVIDENCE / NOT EXECUTION</text></g>
@@ -104,7 +104,7 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
         </g>)}
         {/* A finite cursor sweep to newly observed evidence, not a trade or worker trace. */}
         <g key={sweep.key} aria-hidden="true" className="system-crawler" style={{ offsetPath: `path('${sweep.path}')`, offsetDistance: moving ? undefined : '100%' }}>
-          <g transform={`scale(${compact ? .7 : 1.3})`} filter="url(#spider-shadow)">
+          <g transform={`scale(${compact ? .43 : .8})`} filter="url(#spider-shadow)">
             <circle className="system-crawler-aura" r="47"/>
             {Array.from({ length: 8 }, (_, n) => { const side=n<4?-1:1,row=n%4,y=(row-1.5)*7,kneeY=[-29,-13,14,31][row],tipY=[-51,-30,32,52][row],kneeX=[26,39,38,27][row],tipX=[49,60,57,45][row]
               return <g key={n} className={`system-crawler-leg leg-${n}`}><path className="spider-leg-shadow" d={`M ${side*8} ${y} L ${side*kneeX} ${kneeY} L ${side*tipX} ${tipY}`}/><path className="spider-leg-metal" d={`M ${side*8} ${y} L ${side*kneeX} ${kneeY} L ${side*tipX} ${tipY}`}/><circle cx={side*kneeX} cy={kneeY} r="1.8" fill="#8fcec3"/></g>

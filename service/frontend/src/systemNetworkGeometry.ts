@@ -26,7 +26,7 @@ export function buildNetwork(items: ActivityItem[], compact = false) {
 /** Decorative geometry only: no vertex or edge represents a stock or a passed gate. */
 export function buildConstellation(compact = false) {
   return STATIONS.map(station => {
-    const c = (compact ? COMPACT_CLUSTERS : CLUSTERS)[station], count = compact ? 64 : 128
+    const c = (compact ? COMPACT_CLUSTERS : CLUSTERS)[station], count = compact ? 40 : 80
     const points = Array.from({length: count}, (_,n) => {
       const angle = n*2.39996 + geometryHash(station)%10
       const contour = .84 + .12*Math.sin(angle*3 + geometryHash(station)%5)
@@ -35,7 +35,7 @@ export function buildConstellation(compact = false) {
         radius:n%31===0 ? 2.3 : n%9===0 ? 1.5 : .55+(n%3)*.3, opacity:.2+(n%7)*.09}
     })
     const edges = points.flatMap((p,n) => points.map((q,j)=>({q,j,d:(q.x-p.x)**2+(q.y-p.y)**2}))
-      .filter(v=>v.j!==n).sort((a,b)=>a.d-b.d).slice(0,4).filter(v=>v.j>n).map(v=>({a:p,b:v.q})))
+      .filter(v=>v.j!==n).sort((a,b)=>a.d-b.d).slice(0,3).filter(v=>v.j>n).map(v=>({a:p,b:v.q})))
     return {station,...c,points,edges}
   })
 }

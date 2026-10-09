@@ -37,15 +37,15 @@ export function createSilk(compact: boolean) {
     group.add(new THREE.Points(particles,glow))
     const index=new Map(c.points.map((p,n)=>[p,n]))
     const edges=c.edges.flatMap(e=>[points[index.get(e.a)!],points[index.get(e.b)!]])
-    const threads=new THREE.LineBasicMaterial({color:c.color,transparent:true,opacity:.22,depthWrite:false})
-    threads.userData.baseOpacity=.22
+    const threads=new THREE.LineBasicMaterial({color:c.color,transparent:true,opacity:.16,depthWrite:false})
+    threads.userData.baseOpacity=.16
     group.add(new THREE.LineSegments(lineGeometry(edges),threads))
     const end=vec(spatialPoint(c,c.station,compact))
-    for(let n=0;n<6;n++) {
-      const start=new THREE.Vector3((n-2.5)*5,0,24)
-      const curve=new THREE.CubicBezierCurve3(start,new THREE.Vector3(end.x*.3,end.y*.16+(n-2.5)*20,100),
-        new THREE.Vector3(end.x*.7,end.y*.9,end.z+(n-2.5)*12),end.clone().add(new THREE.Vector3((n-2.5)*4,0,0)))
-      const material=new THREE.LineBasicMaterial({color:c.color,transparent:true,opacity:.16,depthWrite:false});material.userData.baseOpacity=.16
+    for(let n=0;n<3;n++) {
+      const start=new THREE.Vector3((n-1)*5,0,24)
+      const curve=new THREE.CubicBezierCurve3(start,new THREE.Vector3(end.x*.3,end.y*.16+(n-1)*20,100),
+        new THREE.Vector3(end.x*.7,end.y*.9,end.z+(n-1)*12),end.clone().add(new THREE.Vector3((n-1)*4,0,0)))
+      const material=new THREE.LineBasicMaterial({color:c.color,transparent:true,opacity:.11,depthWrite:false});material.userData.baseOpacity=.11
       group.add(new THREE.Line(lineGeometry(curve.getPoints(28)),material))
     }
   }
@@ -91,6 +91,6 @@ export function createSpider(compact: boolean) {
     root.add(leg);legs.push(leg)
   }
   for(const side of [-1,1]) root.add(segment(new THREE.Vector3(side*5,20,12),new THREE.Vector3(side*10,28,9),1,.35,armour))
-  root.scale.setScalar(compact?1.9:1.5);root.position.set(0,0,60)
+  root.scale.setScalar(compact?1.05:.9);root.position.set(0,0,60)
   return {root,legs}
 }

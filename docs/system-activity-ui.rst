@@ -73,7 +73,7 @@ Evidence contract
   Resizing resets cursor geometry without replaying consumed updates. Zoom is
   presentation-only and targets the selected station or map centre; Full map
   restores the complete view. The decorative field is deterministic, capped at
-  1024 vertices on desktop / 512 on mobile with at most four connections per
+  640 vertices on desktop / 320 on mobile with at most three connections per
   vertex. These vertices are aria-hidden, non-interactive and never stock nodes.
   No timer animates them. 3D depth is presentation-only, not a ranking score.
   Rendering is on-demand, with finite cursor sweeps capped at 30 frames/sec,

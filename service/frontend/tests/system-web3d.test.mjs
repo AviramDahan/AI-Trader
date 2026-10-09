@@ -43,7 +43,8 @@ for(const compact of [false,true]) {
     if(o.geometry){geometries.add(o.geometry);vertexCount+=o.geometry.attributes.position.count}
     if(o.material)materials.add(o.material)
   })
-  equal(particleCount,compact?582:1184)
+  equal(particleCount,compact?390:800)
+  check([...silk.groups.values()].every(g=>g.children.filter(c=>c.type==='Line').length===3))
   check(vertexCount<15000)
   geometries.forEach(g=>g.addEventListener('dispose',()=>disposedGeometries++))
   let disposedMaterials=0
@@ -51,6 +52,7 @@ for(const compact of [false,true]) {
   disposeObject(silk.root)
   equal(disposedGeometries,geometries.size);equal(disposedMaterials,materials.size);equal(silk.root.children.length,0)
   const spider=createSpider(compact)
+  equal(spider.root.scale.toArray(),Array(3).fill(compact?1.05:.9))
   equal(spider.legs.length,8);equal(spider.root.position.toArray(),[0,0,60])
   check(spider.legs.every(l=>l.children.length===4))
   const stored=spider.root.children[0].geometry
