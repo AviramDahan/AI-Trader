@@ -40,3 +40,15 @@ test invokes the actual Bash transition script with command doubles and
 proves failure/rollback/resume without repeating DDL. Only filtered phase
 results and image metadata are uploaded; temporary identities and snapshots
 are not artifacts. No production worker or external provider is involved.
+
+SEC companion archive
+---------------------
+
+On a complete schema 7, the existing encrypted backup also exports the six
+SEC tables into a separate version-1 companion archive. This bridge can read
+and restore that archive into empty SEC tables with all worker leases free.
+It does not run SEC history cleanup. ACTIVE-state recovery formats and the
+portfolio restore boundary are unchanged. Archives are chunked, ciphertext-
+only, and deduplicated in the existing private backup repository; index files
+contain only paths/checksums, never source facts. No full database/credentials
+or unrelated news history are uploaded.
