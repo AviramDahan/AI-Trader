@@ -148,17 +148,20 @@ No production migration/config change is authorized by this implementation.
 Schema 7 is cumulative and the cloud runtime correctly refuses schema 6.
 The existing ``hetzner-deploy.sh`` deliberately blocks an image whose schema
 version differs from the active image. Thus **do not merge/deploy this branch
-through that script as-is**. A separately reviewed compatibility/migration
-release path and schema-7-capable rollback image must be available *before*
-any future approval to activate ``shadow`` or ``paper``. Do not bypass the
-schema guard, roll the database back or claim the old schema-6 image can run
-against schema 7. Rollback of a safe future release means setting the mode to
-``off`` for new decisions and returning only to a schema-7-compatible image
-that understands ``sec_intelligence`` outbox rows (or after all such rows are
-drained/cancelled with an audited procedure). An older unknown-event router
-could otherwise misroute a queued SEC alert to General. The compatibility
-image is a release prerequisite, not something this branch has already built.
-It never rewrites existing paper orders or positions.
+through that script as-is**. The prerequisite bridge is PR #39. It retains
+the normal schema-6 migration target, can read a complete schema 7, and
+fail-closes queued SEC alerts so they cannot fall through to General. The
+dedicated ``deploy/migrate-sec-intelligence.sh`` is an operator-approved
+transition only: it requires the actual bridge image, exact main SHA and
+successful release checks, an encrypted predeploy backup, exclusive deploy
+lock, all writers stopped for migration 007 and the SEC mode ``off``. It
+supports explicit resume on validated schema 7 without rerunning DDL. The
+normal deployment schema guard remains intact. Its command-double tests
+exercise failure after migration, bridge rollback and safe resume; Linux
+PostgreSQL/image tests and operator approval are still required before use.
+Do not return to the older schema-6-only image, rewind the database or treat
+the kill switch as a binary rollback. The bridge never rewrites paper orders
+or positions. SEC alerts cancelled during bridge rollback are not replayed.
 
 The existing encrypted ACTIVE-state recovery continues to preserve the paper
 portfolio and recovery holds on schema 7; it intentionally excludes analytical
