@@ -266,3 +266,9 @@ metadata are not unblocked. A recovery timestamp fences out the outage backlog.
 Successful collection clears stale HTTP/error/backoff telemetry through the
 existing collector and reports the transition to Admin only. No alternate host,
 IP, scraping, bot impersonation or licensing bypass is used.
+
+FTC keeps its three official RSS endpoints and existing conditional cache,
+publication timestamps and backoff. Like BLS, it sends the existing configured
+operator contact User-Agent when available, retaining the generic fallback.
+This is genuine application identification, not browser impersonation; no new
+credentials, provider configuration or alternate access route is introduced.
