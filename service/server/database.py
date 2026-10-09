@@ -238,7 +238,9 @@ class DatabaseCursor:
             if should_capture_id:
                 table = re.match(r"INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)", query.lstrip(), re.I).group(1)
                 # Several scanner state tables use a natural key, not an id.
-                self._cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=%s AND column_name='id'", (table,))
+                self._cursor.execute("""SELECT 1 FROM information_schema.columns
+                    WHERE table_schema=current_schema() AND table_name=%s AND column_name='id'
+                    AND data_type IN ('smallint','integer','bigint')""", (table,))
                 should_capture_id = self._cursor.fetchone() is not None
             if should_capture_id:
                 query = f"{query.strip().rstrip(';')} RETURNING id"
@@ -2199,6 +2201,11 @@ def init_database():
         # the same additive DDL so both engines exercise identical news state.
         from pathlib import Path
         ddl = (Path(__file__).parent / 'migrations' / '004_news_evidence.sql').read_text()
+        for statement in ddl.split(';'):
+            if statement.strip():
+                cursor.execute(statement)
+        ddl = '\n'.join(line for line in (Path(__file__).parent / 'migrations' / '007_sec_intelligence.sql').read_text().splitlines()
+                        if not line.lstrip().startswith('--'))
         for statement in ddl.split(';'):
             if statement.strip():
                 cursor.execute(statement)

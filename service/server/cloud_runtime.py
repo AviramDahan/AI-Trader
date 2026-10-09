@@ -9,16 +9,15 @@ import time
 from pathlib import Path
 
 ROLES = {
-    "scanner": "telegram_news_stream,stock_scanner,stock_position_news,stock_news_feed,stock_news_ai,stock_news_translation",
+    "scanner": "telegram_news_stream,stock_scanner,stock_sec_intelligence,stock_position_news,stock_news_feed,stock_news_ai,stock_news_translation",
     "monitor": "stock_signal_monitor,stock_quote_refresh",
     "telegram": "stock_telegram_outbox,stock_telegram_status",
 }
 ROLE_KEYS = {"scanner": 11, "monitor": 12, "telegram": 13}
-# Activation release: migration 006 is required. The prerequisite bridge
-# supports actual schemas 5/6 and is the only safe binary rollback target.
-SCHEMA_VERSION = 6
-SUPPORTED_SCHEMAS = (6, 7)
-SEC_SCHEMA7_ROLLBACK_CAPABILITY = 'sec-schema7-readers-no-producers'
+# SEC activation requires complete migration 007. The prerequisite bridge
+# accepts schemas 6/7 and is the only compatible binary rollback target.
+SCHEMA_VERSION = 7
+SUPPORTED_SCHEMAS = (7,)
 SINGLE_TARGET_ROLLBACK_CAPABILITY = 'v2-format3-holds-legacy-v1'
 ACTIVE_LEASE = None
 

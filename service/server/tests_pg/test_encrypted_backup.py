@@ -43,4 +43,4 @@ def test_encrypted_dump_restore(pg,tmp_path):
     assert decrypt.returncode==result.returncode==0, 'isolated restore failed'
     with psycopg.connect(pg) as conn:
         assert conn.execute("SELECT value_json FROM scanner_settings WHERE key='backup-proof'").fetchone()[0]=='{"test":true}'
-        assert conn.execute('SELECT max(version) FROM schema_migrations').fetchone()[0]==6
+        assert conn.execute('SELECT max(version) FROM schema_migrations').fetchone()[0]==7

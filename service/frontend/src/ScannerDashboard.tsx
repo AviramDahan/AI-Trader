@@ -418,6 +418,26 @@ export function ScannerDashboard({ token }: { token: string | null }) {
 function Empty({ text }: { text: string }) { return <div className="scanner-empty">{text}</div> }
 function Stat({ label, value }: { label: string, value: string }) { return <div className="scanner-stat"><span>{label}</span><strong>{value}</strong></div> }
 
+function SecSignalEvidence({ signal, he }: { signal: Record<string, any>, he: boolean }) {
+  const sec = signal.technical_json?.sec_intelligence
+  if (!sec || !signal.technical_json?.sec_snapshot_id) return null
+  const adjustment = Number(signal.technical_json.sec_adjustment || 0)
+  const facts: Record<string, any>[] = Array.isArray(sec.facts) ? sec.facts.slice(0, 4) : []
+  const safeUrl = (raw: any) => {
+    try { const url = new URL(String(raw)); return url.protocol === 'https:' && url.hostname === 'www.sec.gov' ? url.href : null }
+    catch { return null }
+  }
+  return <details className="signal-secondary"><summary>{he ? 'ראיות SEC שהשתתפו בדירוג' : 'SEC evidence used in ranking'}</summary>
+    <p>{he ? 'מצב כיסוי' : 'Coverage'}: {sec.coverage || 'unknown'} · {he ? 'שינוי דירוג' : 'Rank adjustment'}: <bdi>{adjustment >= 0 ? '+' : ''}{adjustment.toFixed(3)}</bdi> · {he ? 'מדיניות' : 'Policy'}: <bdi>{sec.policy_version}</bdi></p>
+    <p>{adjustment > 0 ? (he ? 'תמיכה מוגבלת ומאומתת; אינה הבטחת תשואה.' : 'Bounded verified support; not a return forecast.') : adjustment < 0 ? (he ? 'נמצאה ראיה מתנגדת.' : 'Opposing evidence recorded.') : (he ? 'לא נוספה תרומת ניקוד; מידע חסר אינו הוכחה שלילית.' : 'No rank adjustment; missing data is not negative evidence.')}</p>
+    <ul>{facts.map((fact, index) => <li key={`${fact.accession}-${index}`}>
+      {fact.kind === 'verified_purchase' ? (he ? 'רכישות P מאומתות שאינן נגזר' : 'Verified non-derivative P acquisitions') : fact.kind === 'comparable_financials' ? (he ? 'מדדים פיננסיים בני השוואה' : 'Comparable financial metrics') : (he ? 'עדכון guidance מפורש' : 'Specific guidance update')}
+      {' · '}{fact.accepted_at ? new Date(fact.accepted_at).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'}
+      {safeUrl(fact.source_url) && <> · <a href={safeUrl(fact.source_url)!} target="_blank" rel="noreferrer">{he ? 'דיווח מקור' : 'Source filing'}</a></>}
+    </li>)}</ul>
+  </details>
+}
+
 function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }) {
   const news = Array.isArray(signal.news_json) ? signal.news_json : []
   const basis = signal.confidence_basis || {}
@@ -436,6 +456,7 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
     <div className="scanner-signal-body">
       <em className="signal-status-label">{statusLabels[signal.status] || signal.status}</em>
       {signal.policy_version && <p>{he ? 'זכאות הסיגנל: אושר; ביצוע דמה נפרד' : 'Signal qualified; paper execution is separate'} · {signal.execution_status} · {signal.position_activated ? (he ? 'כניסה בוצעה' : 'Entry filled') : (he ? 'הפוזיציה לא הופעלה' : 'Position not activated')}</p>}
+      <SecSignalEvidence signal={signal} he={he} />
       <span className="signal-summary-levels">
         <span><small>{he ? 'מחיר אחרון' : 'Last price'}{signal.price_stale ? (he ? ' · ישן' : ' · stale') : ''}</small><b dir="ltr">{fmtPrice(signal.current_price)}</b></span>
         <span><small>{he ? 'כניסה' : 'Entry'}</small><b dir="ltr">{fmtPrice(movementEntry)}</b></span>

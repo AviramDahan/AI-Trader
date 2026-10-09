@@ -25,8 +25,7 @@ def no_external_requests(monkeypatch):
     monkeypatch.setattr(requests.sessions.Session,'request',blocked)
 
 
-@pytest.fixture
-def pg(monkeypatch):
+def _isolated_pg(monkeypatch, target_version):
     url=os.getenv('TEST_POSTGRES_URL')
     if not url:
         pytest.skip('TEST_POSTGRES_URL not set; PostgreSQL NOT verified')
@@ -44,8 +43,19 @@ def pg(monkeypatch):
     monkeypatch.setattr(database,'DATABASE_URL',scoped)
     monkeypatch.setenv('PGOPTIONS','-c search_path='+name)
     try:
-        migrations.migrate()
+        migrations.migrate(target_version=target_version)
         yield scoped
     finally:
         with psycopg.connect(url,autocommit=True) as admin:
             admin.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(name)))
+
+
+@pytest.fixture
+def pg(monkeypatch):
+    yield from _isolated_pg(monkeypatch, 7)
+
+
+@pytest.fixture
+def pg_v6(monkeypatch):
+    """Preserve the historic schema-6 release-gate tests independently."""
+    yield from _isolated_pg(monkeypatch, 6)

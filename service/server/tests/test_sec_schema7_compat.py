@@ -39,6 +39,6 @@ class Schema7BridgeTests(unittest.TestCase):
             assert_sec_schema7(self.connection(missing_constraint=('si_filing_jobs','f',
                 ('universe_snapshot_id',),'si_universe_snapshots')))
 
-    def test_bridge_keeps_normal_migration_target_at_six(self):
-        self.assertEqual(cloud_runtime.SCHEMA_VERSION, 6)
-        self.assertEqual(cloud_runtime.SUPPORTED_SCHEMAS, (6, 7))
+    def test_activation_requires_complete_seven(self):
+        self.assertEqual(cloud_runtime.SCHEMA_VERSION, 7)
+        self.assertEqual(cloud_runtime.SUPPORTED_SCHEMAS, (7,))

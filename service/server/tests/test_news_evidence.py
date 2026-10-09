@@ -147,6 +147,7 @@ class NewsEvidenceTests(unittest.TestCase):
         connection.getresponse.side_effect = slow_headers
         with patch.object(evidence, 'MAX_SECONDS', .04), \
              patch.object(news_pipeline, 'SEC_LAST_REQUEST_AT', 0), \
+             patch('sec_transport.reserve', return_value=None), \
              patch.object(evidence, 'PinnedHTTPS', return_value=connection), \
              patch.object(evidence, 'public_addresses', return_value=['8.8.8.8']), \
              self.assertRaisesRegex(evidence.EvidenceError, 'deadline'):

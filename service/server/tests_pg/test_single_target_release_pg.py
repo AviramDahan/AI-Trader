@@ -4,7 +4,7 @@ import database
 from single_target_release import assert_transition_schema
 
 
-def test_complete_006_readonly_does_not_rewrite_history(pg):
+def test_complete_006_readonly_does_not_rewrite_history(pg_v6):
     with database.get_db_connection() as db:
         before = [dict(r) for r in db.execute('SELECT * FROM schema_migrations ORDER BY version')]
     assert_transition_schema(6)
@@ -31,14 +31,14 @@ def test_complete_006_readonly_does_not_rewrite_history(pg):
     'ALTER TABLE scanner_trades ALTER COLUMN tp2 SET NOT NULL',
     'ALTER TABLE scanner_trades ALTER COLUMN tp3 SET NOT NULL',
 ])
-def test_resume_rejects_incomplete_history_or_006_effects(pg, damage):
+def test_resume_rejects_incomplete_history_or_006_effects(pg_v6, damage):
     with database.get_db_connection() as db:
         db.execute(damage)
     with pytest.raises(RuntimeError, match='single_target_'):
         assert_transition_schema(6)
 
 
-def test_preflight_connection_is_enforced_readonly(pg, monkeypatch):
+def test_preflight_connection_is_enforced_readonly(pg_v6, monkeypatch):
     import contextlib
     original = database.get_db_connection
     @contextlib.contextmanager

@@ -56,7 +56,8 @@ def reason_stage(reason):
     if 'cooldown' in reason:
         return 'cooldown'
     if reason in {'ai_or_confidence_filter', 'news_sentiment_conflict', 'ai_hold',
-                  'ai_confidence_below_threshold', 'ai_news_relevance_below_threshold'}:
+                  'ai_confidence_below_threshold', 'ai_news_relevance_below_threshold',
+                  'sec_material_conflict_hold'}:
         return 'ai_filter'
     if any(word in reason for word in ('zone', 'resistance', 'rounded', 'stop', 'risk_reward', 'target', 'structure', 'pivot')):
         return 'targets'
@@ -155,6 +156,11 @@ def report(conn, hours=48, now=None):
     technical_count = conn.execute('''SELECT COUNT(*) n FROM (SELECT scan_id,ticker FROM scanner_candidates
         WHERE stage='technical' AND created_at>=? AND created_at<=? GROUP BY scan_id,ticker) recorded''',
         (since,until)).fetchone()['n']
+    sec_decisions = _bounded(conn, '''SELECT scan_id,ticker,mode,baseline_rank_score,
+        sec_adjustment,insider_adjustment,filing_adjustment,enhanced_rank_score,sec_snapshot_id,
+        review_baseline_score,review_enhanced_score,rejection_reason,decided_at
+        FROM si_decisions WHERE decided_at>=? AND decided_at<=? ORDER BY decided_at DESC''',
+        (since, until), clipped, 'sec_decisions')
     reviews = _bounded(conn, '''SELECT review_id,scan_id,ticker,result,reject_reason,attempts_json,updated_at
         FROM scanner_final_ai_telemetry WHERE updated_at>=? AND updated_at<=? ORDER BY id DESC''',
         (since, until), clipped, 'reviews')
@@ -203,6 +209,13 @@ def report(conn, hours=48, now=None):
             direction=None,technical_recorded=True,rejection=None,target_checks=[],reviews=[],signals=[],orders=[]))
         c['technical_recorded']=True
         c['company']=c['company'] or row['company']
+    for row in sec_decisions:
+        c = cases.get((row['scan_id'], row['ticker']))
+        if c is not None:
+            c['sec_decision'] = {k:row[k] for k in ('mode','baseline_rank_score',
+                'sec_adjustment','insider_adjustment','filing_adjustment',
+                'enhanced_rank_score','sec_snapshot_id','review_baseline_score','review_enhanced_score',
+                'rejection_reason','decided_at')}
     for row in reviews:
         c = cases.get((row['scan_id'], row['ticker']))
         if c is not None:

@@ -25,7 +25,7 @@ class TelegramTopicRoutingTests(unittest.TestCase):
     def test_news_source_links_removed_but_community_and_non_news_unchanged(self):
         body='כותרת\n\nTelegram @financialjuice: https://t.me/financialjuice/136481\nמקור: https://example.com/news?a=1\n\nפורסם: 28/09/2026 04:10'
         with patch.dict(os.environ, {'TELEGRAM_COMMUNITY_URL':'https://t.me/+testInvite'}):
-            for event in ('market_news','position_news','watchlist_news','watchlist_news_correction','stock_news','correction','news_status'):
+            for event in ('market_news','position_news','watchlist_news','watchlist_news_correction','stock_news','correction','news_status','sec_intelligence'):
                 result=with_news_community_link(body,event)
                 self.assertNotIn('https://t.me/financialjuice/',result)
                 self.assertNotIn('https://example.com/',result)
@@ -57,7 +57,7 @@ class TelegramTopicRoutingTests(unittest.TestCase):
 
     def test_community_footer_covers_every_news_route_only_once(self):
         with patch.dict(os.environ, {'TELEGRAM_COMMUNITY_URL':'https://t.me/+testInvite'}):
-            for event in ('market_news','position_news','watchlist_news','watchlist_news_correction','stock_news','correction','news_status'):
+            for event in ('market_news','position_news','watchlist_news','watchlist_news_correction','stock_news','correction','news_status','sec_intelligence'):
                 message = with_news_community_link('חדשות', event)
                 self.assertIn('https://t.me/+testInvite', message)
                 self.assertEqual(with_news_community_link(message, event), message)
@@ -119,6 +119,39 @@ class TelegramTopicRoutingTests(unittest.TestCase):
             self.assertEqual(thread_id_for_event("stock_news"), 101)
             self.assertEqual(thread_id_for_event("new_signal"), 202)
             self.assertEqual(thread_id_for_event("tp"), 202)
+
+    def test_sec_topic_never_falls_back_to_general_or_other_news(self):
+        with patch.dict(os.environ, {"TELEGRAM_NEWS_THREAD_ID": "101",
+                                  "TELEGRAM_STOCK_NEWS_THREAD_ID": "102",
+                                  "TELEGRAM_SEC_INTELLIGENCE_THREAD_ID": ""}, clear=True):
+            self.assertIsNone(thread_id_for_event("sec_intelligence"))
+        with patch.dict(os.environ, {"TELEGRAM_SEC_INTELLIGENCE_THREAD_ID": "303"}, clear=True):
+            self.assertEqual(destination_fields("-1001", "sec_intelligence"),
+                             {"chat_id": "-1001", "message_thread_id": 303})
+
+    def test_sec_sender_fails_closed_without_dedicated_thread(self):
+        import stock_scanner
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "test", "TELEGRAM_CHAT_ID": "-1001",
+                                  "TELEGRAM_SEC_INTELLIGENCE_THREAD_ID": ""}, clear=True), \
+                patch.object(stock_scanner.requests, "Session") as session:
+            result = stock_scanner.send_telegram("דיווח", {"telegram_enabled": True}, "sec_intelligence")
+        self.assertIn('sec_topic_not_configured', result)
+        session.return_value.post.assert_not_called()
+
+    def test_sec_sender_uses_dedicated_thread_and_hides_source_link(self):
+        import stock_scanner
+        session = Mock()
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "test", "TELEGRAM_CHAT_ID": "-1001",
+                                  "TELEGRAM_SEC_INTELLIGENCE_THREAD_ID": "303",
+                                  "TELEGRAM_COMMUNITY_URL": "https://t.me/+testInvite"}, clear=True), \
+                patch.object(stock_scanner.requests, "Session", return_value=session):
+            result = stock_scanner.send_telegram("דיווח מהותי\nמקור: https://www.sec.gov/example",
+                                                 {"telegram_enabled": True}, "sec_intelligence")
+        self.assertEqual(result, "sent")
+        fields = session.post.call_args.kwargs["data"]
+        self.assertEqual(fields["message_thread_id"], 303)
+        self.assertNotIn("sec.gov", fields["text"])
+        self.assertIn("https://t.me/+testInvite", fields["text"])
 
 
 if __name__ == "__main__":
