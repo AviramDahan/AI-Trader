@@ -390,18 +390,23 @@ def test_paper_sec_evidence_reaches_existing_pending_order_without_yahoo(isolate
         conn.execute("INSERT INTO agents(name,token,cash) VALUES('us-stock-scanner','test-token',100000)")
         conn.commit()
     universe = {"AAPL": {"company": "Apple Inc.", "indexes": ["sp500"], "market_cap": 1e12}}
+    universe.update({f"T{i:02}": {"company": f"Synthetic {i}", "indexes": ["sp500"],
+                               "market_cap": 1e9} for i in range(25)})
     uid, _ = si.save_universe(universe, {"0000320193": ["AAPL"]}, now)
     si._queue_filing(filing("0000320193-26-000001", "4", accepted), "0000320193", ["AAPL"], uid, now, [10])
     monkeypatch.setattr(si, "fetch", lambda *_a, **_k: (ownership_xml(), {}))
     assert si.process_jobs(now)["processed"] == 1
 
     candidate = {"ticker": "AAPL", "company": "Apple Inc.", "technical_score": 5,
-                 "technical_direction": "BUY", "average_dollar_volume": 1e9,
+                 "technical_direction": "BUY", "average_dollar_volume": 1e8,
                  "atr": 2, "atr_pct": 2, "entry": 100, "price_as_of": si._z(now),
                  "price_zones": [{"low": p, "high": p, "touches": 1, "pivots": []} for p in (98, 104, 108, 112)]}
     monkeypatch.setattr(stock_scanner, "load_universe", lambda: universe)
-    monkeypatch.setattr(stock_scanner, "load_historical_data", lambda *_: ({"AAPL": 1, "SPY": 1, "QQQ": 1}, {"status": "test"}))
-    monkeypatch.setattr(stock_scanner, "analyze_history", lambda *_: dict(candidate))
+    monkeypatch.setattr(stock_scanner, "load_historical_data", lambda *_: (
+        {symbol: 1 for symbol in [*universe, "SPY", "QQQ"]}, {"status": "test"}))
+    monkeypatch.setattr(stock_scanner, "analyze_history", lambda symbol, *_: dict(
+        candidate, ticker=symbol, company=universe[symbol]["company"],
+        average_dollar_volume=1e8 if symbol == "AAPL" else 2e8))
     monkeypatch.setattr(stock_scanner, "_market_context", lambda *_: {})
     monkeypatch.setattr(stock_scanner, "_read_news_cache", lambda: {})
     monkeypatch.setattr(stock_scanner, "_write_news_cache", lambda *_: None)
@@ -412,8 +417,13 @@ def test_paper_sec_evidence_reaches_existing_pending_order_without_yahoo(isolate
     monkeypatch.setattr(stock_scanner, "_candidate_target_plan", lambda *_a, **_k: structure_plan(
         "BUY", 100, 2, candidate["price_zones"], 2))
     monkeypatch.setattr(stock_scanner, "_localize_telegram_signal", lambda value: value)
-    monkeypatch.setattr(stock_scanner, "ai_review", lambda *_: {"action": "BUY", "confidence": .91,
-        "news_sentiment": .2, "news_relevance": 0.0, "time_horizon": "1-4 weeks", "reason": "Synthetic verified SEC evidence"})
+    reviews = []
+    def fake_review(review_candidate, *_):
+        reviews.append(review_candidate["ticker"])
+        return {"action": "BUY", "confidence": .91, "news_sentiment": .2,
+                "news_relevance": 0.0, "time_horizon": "1-4 weeks",
+                "reason": "Synthetic verified SEC evidence"}
+    monkeypatch.setattr(stock_scanner, "ai_review", fake_review)
     monkeypatch.setattr(ai_budget, "check", lambda: None)
     monkeypatch.setattr(final_ai, "configuration", lambda: ("mock", "mock"))
     monkeypatch.setattr(final_ai, "persist", lambda *_: None)
@@ -423,6 +433,7 @@ def test_paper_sec_evidence_reaches_existing_pending_order_without_yahoo(isolate
                                                     json=lambda: {"signal_id": 11})))
     state = stock_scanner.run_scan()
     assert state["signals_published"] == expected
+    assert reviews == (["AAPL"] if mode == "paper" else [])
     with isolated() as conn:
         signal = conn.execute("SELECT technical_json,status FROM scanner_signals").fetchone()
         if expected:
@@ -432,4 +443,6 @@ def test_paper_sec_evidence_reaches_existing_pending_order_without_yahoo(isolate
             assert signal is None
         assert conn.execute("SELECT count(*) n FROM scanner_orders WHERE status='pending'").fetchone()["n"] == expected
         assert conn.execute("SELECT count(*) n FROM scanner_fills").fetchone()["n"] == 0
-        assert conn.execute("SELECT count(*) n FROM si_decisions WHERE mode=?", (mode,)).fetchone()["n"] == int(mode != "off")
+        assert conn.execute("SELECT count(*) n FROM si_decisions WHERE mode=?", (mode,)).fetchone()["n"] == (26 if mode != "off" else 0)
+        if mode == "shadow":
+            assert conn.execute("SELECT rejection_reason FROM si_decisions WHERE ticker='AAPL'").fetchone()["rejection_reason"] == "outside_shortlist"
