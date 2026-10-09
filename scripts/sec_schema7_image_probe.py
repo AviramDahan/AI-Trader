@@ -172,6 +172,14 @@ def backup():
     encrypted, _sizes = recovery.encrypted_bytes(data, recipient)
     (ROOT / "synthetic.age").write_bytes(encrypted)
     assert recovery.decrypt(ROOT / "synthetic.age", key) == data
+    import sec_history
+    archive = sec_history.export_archive(os.environ['DATABASE_URL'], ROOT / 'sec-archive', recipient)
+    if schema() == 7:
+        assert archive is not None
+        (ROOT / 'sec-manifest').write_text(archive['manifest_path'])
+        (ROOT / 'sec-archive-digest').write_text(sec_digest())
+    else:
+        assert archive is None  # schema 6 is absent coverage, not an empty archive
     return data
 
 
@@ -260,6 +268,11 @@ def main(phase):
         with database.get_db_connection() as conn:
             assert conn.execute("SELECT COUNT(*) n FROM scanner_telegram_outbox").fetchone()["n"] == 0
             assert conn.execute("SELECT COUNT(*) n FROM si_decisions").fetchone()["n"] == 0
+        import sec_history
+        sec_history.restore_archive(ROOT / 'sec-archive', (ROOT / 'sec-manifest').read_text(),
+            ROOT / 'synthetic-identity', os.environ['DATABASE_URL'], workers_stopped=True)
+        assert sec_digest() == (ROOT / 'sec-archive-digest').read_text()
+        unchanged('portfolio')
         assert record("V2HOLD")["status"] == "DUPLICATE_BLOCKED"
         with database.get_db_connection() as conn:
             notices = conn.execute("SELECT event_type FROM scanner_telegram_outbox").fetchall()
@@ -294,6 +307,33 @@ def main(phase):
         unchanged("exited")
         accounting()
         leases()
+    elif phase == 'history_retention':
+        import sec_history
+        import sec_retention
+        sys.path.insert(0, '/app/service/server/tests_pg')
+        from test_sec_history_pg import seed, confirmed
+        cloud.assert_schema()
+        seed(os.environ['DATABASE_URL'])
+        before = state()
+        recipient = subprocess.check_output(['age-keygen', '-y', str(ROOT / 'synthetic-identity')]).decode().strip()
+        repo = ROOT / 'retained-sec-archive'
+        archive = sec_history.export_archive(os.environ['DATABASE_URL'], repo, recipient)
+        (ROOT / 'retained-sec-manifest').write_text(archive['manifest_path'])
+        (ROOT / 'retained-sec-digest').write_text(sec_digest())
+        confirmed(repo, archive)  # real Git round-trip to an isolated local bare remote
+        result = sec_retention.prune_archived(os.environ['DATABASE_URL'], repo, archive)
+        assert all(result['deleted'][table] == 1 for table in sec_history.TABLES if table != 'si_checkpoints')
+        assert state() == before
+        accounting()
+    elif phase == 'history_restore':
+        import sec_history
+        bridge()
+        sec_history.restore_archive(ROOT / 'retained-sec-archive', (ROOT / 'retained-sec-manifest').read_text(),
+            ROOT / 'synthetic-identity', os.environ['DATABASE_URL'], workers_stopped=True)
+        assert sec_digest() == (ROOT / 'retained-sec-digest').read_text()
+        with database.get_db_connection() as conn:
+            for table in ('scanner_accounts', 'scanner_orders', 'scanner_trades', 'scanner_fills', 'scanner_telegram_outbox'):
+                assert conn.execute('SELECT COUNT(*) n FROM ' + table).fetchone()['n'] == 0
     elif phase in ("baseline_refused", "invalid_schema_refused"):
         try:
             cloud.assert_schema()

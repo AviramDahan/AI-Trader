@@ -59,6 +59,7 @@ jobs:
           for i in $(seq 1 30); do docker exec sec-proof-pg pg_isready -U isolated && break; sleep 2; done
           docker exec sec-proof-pg createdb -U isolated restored
           docker exec sec-proof-pg createdb -U isolated invalid_schema
+          docker exec sec-proof-pg createdb -U isolated history_restored
           probe() {
             docker run --rm --network sec-proof --memory=768m --cpus=2 \
               -e AI_TRADER_CLOUD=true -e DATABASE_URL="postgresql://isolated:disposable@sec-proof-pg:5432/${3:-isolated}" \
@@ -93,6 +94,9 @@ jobs:
           probe sec-activation:proof forward restored
           probe sec-bridge:proof exit
           probe sec-activation:proof forward
+          probe sec-activation:proof history_retention
+          migrate history_restored
+          probe sec-bridge:proof history_restore history_restored
           migrate invalid_schema
           probe sec-activation:proof corrupt_schema invalid_schema
           probe sec-bridge:proof invalid_schema_refused invalid_schema
