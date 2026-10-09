@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { LABELS, STATE_LABELS, STATE_SYMBOLS, type ActivityItem, type ActivityUpdate, type Station } from './systemActivityModel'
-import { buildSpatialNetwork, evidenceDestinations, evidencePosition, focusDestination, placeLabel, WEB3D_BUDGET, type Point3 } from './systemWeb3DModel'
+import { buildSpatialNetwork, evidenceDestinations, evidencePosition, focusDestination, placeLabel, spiderHeading, WEB3D_BUDGET, type Point3 } from './systemWeb3DModel'
 import { createSilk, createSpider, disposeObject, lineGeometry, vec } from './systemWeb3DScene'
 
 type Props = {
@@ -108,8 +108,8 @@ export default function SystemWeb3D(props:Props) {
         const progress=Math.min(1,(now-animation.start)/WEB3D_BUDGET.sweepMs)
         const point=evidencePosition(animation.points,progress);spider.root.position.copy(vec(point))
         const tangent=evidencePosition(animation.points,Math.min(1,progress+.02))
-        if(progress<1) spider.root.rotation.z=Math.atan2(-(tangent.x-point.x),tangent.y-point.y)
-        spider.legs.forEach((leg,n)=>leg.rotation.z=progress<1?Math.sin(now*.012+n*Math.PI/2)*.09:0)
+        if(progress<1) spider.root.rotation.z=spiderHeading(point,tangent,spider.root.rotation.z)
+        spider.pose(now-animation.start,progress<1)
         if(progress>=1) animation=null
       }
       element.dataset.motion=animation?'active':'resting'
@@ -122,7 +122,7 @@ export default function SystemWeb3D(props:Props) {
     function requestRender() { if(!raf&&canDraw())raf=window.requestAnimationFrame(draw) }
     const finish=()=> {
       if(animation) spider.root.position.copy(vec(animation.points.at(-1)!))
-      animation=null;spider.legs.forEach(leg=>leg.rotation.z=0);element.dataset.motion='resting'
+      animation=null;spider.pose();element.dataset.motion='resting'
     }
     const update=(p:Props)=> {
       // Rebuild bounded stock geometry only, not the decorative field or renderer.

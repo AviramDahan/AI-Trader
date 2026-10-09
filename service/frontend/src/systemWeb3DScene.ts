@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { buildConstellation, geometryHash } from './systemNetworkGeometry'
-import { spatialPoint, type Point3 } from './systemWeb3DModel'
+import { spatialPoint, spiderStep, type Point3 } from './systemWeb3DModel'
 
 export const vec = (p: Point3) => new THREE.Vector3(p.x,p.y,p.z)
 export function disposeObject(root: THREE.Object3D) {
@@ -66,31 +66,80 @@ function segment(a: THREE.Vector3,b: THREE.Vector3,r1: number,r2: number,materia
 }
 /** Procedural 3D articulated spider, self-contained; no model downloads. */
 export function createSpider(compact: boolean) {
-  const root=new THREE.Group(),legs:THREE.Group[]=[]
-  const shell=new THREE.MeshStandardMaterial({color:'#163b36',metalness:.78,roughness:.32})
-  const armour=new THREE.MeshStandardMaterial({color:'#416861',metalness:.8,roughness:.26})
-  const joint=new THREE.MeshStandardMaterial({color:'#b9d3c3',metalness:.7,roughness:.28})
-  const eye=new THREE.MeshStandardMaterial({color:'#f3b0df',emissive:'#db56b4',emissiveIntensity:2.2,roughness:.2})
+  const root=new THREE.Group(),body=new THREE.Group(),legs:THREE.Group[]=[]
+  root.name='evidence-spider';body.name='spider-shell';root.add(body)
+  const shell=new THREE.MeshStandardMaterial({color:'#183338',metalness:.45,roughness:.38})
+  const armour=new THREE.MeshStandardMaterial({color:'#49676a',metalness:.65,roughness:.3})
+  const joint=new THREE.MeshStandardMaterial({color:'#a5c9bc',metalness:.55,roughness:.32})
+  const trim=new THREE.MeshStandardMaterial({color:'#6ec6b3',emissive:'#163b32',emissiveIntensity:.3,metalness:.5,roughness:.35})
+  const eye=new THREE.MeshStandardMaterial({color:'#b5ffe7',emissive:'#52c4a4',emissiveIntensity:1.1,roughness:.25})
+  // Shared geometry: poses move rigid links, never allocate GPU buffers per frame.
+  const sphere=new THREE.SphereGeometry(1,24,16),eyeGeometry=new THREE.SphereGeometry(1,12,8)
+  const jointGeometry=new THREE.SphereGeometry(1,10,8)
+  const upperGeometry=new THREE.CylinderGeometry(1.15,1.7,1,10),lowerGeometry=new THREE.CylinderGeometry(.35,1.1,1,10)
   const oval=(x:number,y:number,z:number,sx:number,sy:number,sz:number,material:THREE.Material)=> {
-    const mesh=new THREE.Mesh(new THREE.SphereGeometry(1,24,16),material);mesh.position.set(x,y,z);mesh.scale.set(sx,sy,sz);root.add(mesh);return mesh
+    const mesh=new THREE.Mesh(sphere,material);mesh.position.set(x,y,z);mesh.scale.set(sx,sy,sz);body.add(mesh);return mesh
   }
-  oval(0,-12,8,13,21,11,shell);oval(0,12,10,10,12,9,armour)
-  // Raised seams give the shell visible form as the camera rotates.
+  // Broad abdomen, distinct thorax and forward head: readable silhouette, not a needle.
+  oval(0,-13,9,14.5,18,11,shell);oval(0,9,11,10.5,11,8,armour);oval(0,22,11,7,6,5,shell)
+  oval(0,-1,10,7,4,6,armour)
+  // Thin raised panel seams; no texture/model downloads or bloom pass.
   for(const side of [-1,1]) {
-    const seam=new THREE.CatmullRomCurve3([new THREE.Vector3(side*2,6,17),new THREE.Vector3(side*8,-8,20),new THREE.Vector3(side*7,-23,16)])
-    root.add(new THREE.Mesh(new THREE.TubeGeometry(seam,12,.45,5,false),joint))
+    const seam=new THREE.CatmullRomCurve3([new THREE.Vector3(side*4,0,17),new THREE.Vector3(side*10,-12,18),new THREE.Vector3(side*6,-27,14)])
+    body.add(new THREE.Mesh(new THREE.TubeGeometry(seam,12,.35,5,false),trim))
   }
-  for(const x of [-4,4]) oval(x,19,17,2.4,2.4,2,eye)
+  const spine=new THREE.CatmullRomCurve3([new THREE.Vector3(0,-28,15),new THREE.Vector3(0,-13,20.3),new THREE.Vector3(0,0,17)])
+  body.add(new THREE.Mesh(new THREE.TubeGeometry(spine,12,.25,5,false),joint))
+  for(const [x,y,z,size] of [[-2,25,15.5,1.35],[2,25,15.5,1.35],[-4.8,23,14.6,.9],[4.8,23,14.6,.9],[-3.4,20.5,15.6,.75],[3.4,20.5,15.6,.75],[-5.8,20.5,13,.6],[5.8,20.5,13,.6]]) {
+    const mesh=new THREE.Mesh(eyeGeometry,eye);mesh.name='spider-eye';mesh.position.set(x,y,z);mesh.scale.setScalar(size);body.add(mesh)
+  }
+  const up=new THREE.Vector3(0,1,0),delta=new THREE.Vector3()
+  const align=(mesh:THREE.Mesh,a:THREE.Vector3,b:THREE.Vector3)=> {
+    delta.copy(b).sub(a);mesh.scale.y=delta.length()
+    mesh.position.copy(a).add(b).multiplyScalar(.5)
+    mesh.quaternion.setFromUnitVectors(up,delta.normalize())
+  }
+  const rigs:{hip:THREE.Vector3;restKnee:THREE.Vector3;restFoot:THREE.Vector3;upperLength:number;lowerLength:number;upper:THREE.Mesh;lower:THREE.Mesh;knee:THREE.Mesh;foot:THREE.Mesh}[]=[]
   for(let n=0;n<8;n++) {
     const side=n<4?-1:1,row=n%4,y=(1.5-row)*8
-    const a=new THREE.Vector3(side*8,y,9),b=new THREE.Vector3(side*[27,38,37,28][row],[29,13,-14,-31][row],22)
-    const c=new THREE.Vector3(side*[55,67,64,51][row],[52,30,-32,-52][row],-1)
-    const leg=new THREE.Group();leg.add(segment(a,b,1.9,1.35,armour),segment(b,c,1.2,.25,shell))
-    const knee=new THREE.Mesh(new THREE.SphereGeometry(2,10,8),joint);knee.position.copy(b);leg.add(knee)
-    const foot=new THREE.Mesh(new THREE.SphereGeometry(.65,8,6),joint);foot.position.copy(c);leg.add(foot)
+    const a=new THREE.Vector3(side*9,y,10),b=new THREE.Vector3(side*[27,36,36,27][row],[29,13,-14,-31][row],25)
+    const c=new THREE.Vector3(side*[54,62,59,49][row],[52,30,-32,-52][row],-2)
+    const leg=new THREE.Group();leg.name=`spider-leg-${n}`
+    const upper=new THREE.Mesh(upperGeometry,armour),lower=new THREE.Mesh(lowerGeometry,shell)
+    const hip=new THREE.Mesh(jointGeometry,joint);hip.name=`spider-hip-${n}`;hip.position.copy(a);hip.scale.setScalar(1.8)
+    const knee=new THREE.Mesh(jointGeometry,joint);knee.name=`spider-knee-${n}`;knee.scale.setScalar(1.9)
+    const foot=new THREE.Mesh(jointGeometry,trim);foot.name=`spider-foot-${n}`;foot.scale.set(.65,1.15,.65)
+    leg.add(upper,lower,hip,knee,foot)
     root.add(leg);legs.push(leg)
+    const upperLength=a.distanceTo(b),lowerLength=b.distanceTo(c)
+    leg.userData.lengths={upper:upperLength,lower:lowerLength}
+    rigs.push({hip:a,restKnee:b,restFoot:c,upperLength,lowerLength,upper,lower,knee,foot})
   }
-  for(const side of [-1,1]) root.add(segment(new THREE.Vector3(side*5,20,12),new THREE.Vector3(side*10,28,9),1,.35,armour))
+  for(const side of [-1,1]) {
+    body.add(segment(new THREE.Vector3(side*3.5,25,9),new THREE.Vector3(side*6,30,7),.8,.55,armour))
+    body.add(segment(new THREE.Vector3(side*6,30,7),new THREE.Vector3(side*3,32,6),.55,.2,joint))
+  }
+  const footTarget=new THREE.Vector3(),axis=new THREE.Vector3(),pole=new THREE.Vector3(),kneePoint=new THREE.Vector3()
+  const pose=(elapsedMs=0,moving=false)=> {
+    rigs.forEach((r,n)=> {
+      const step=spiderStep(elapsedMs,n,moving)
+      footTarget.copy(r.restFoot);footTarget.y+=step.stride;footTarget.z+=step.lift
+      axis.copy(footTarget).sub(r.hip)
+      const distance=Math.max(.0001,Math.min(axis.length(),r.upperLength+r.lowerLength-.0001));axis.normalize()
+      // Two-link inverse kinematics: lengths and hips stay fixed while the foot lifts.
+      const along=(r.upperLength*r.upperLength-r.lowerLength*r.lowerLength+distance*distance)/(2*distance)
+      const height=Math.sqrt(Math.max(0,r.upperLength*r.upperLength-along*along))
+      pole.copy(r.restKnee).sub(r.hip);pole.addScaledVector(axis,-pole.dot(axis)).normalize()
+      kneePoint.copy(r.hip).addScaledVector(axis,along).addScaledVector(pole,height)
+      footTarget.copy(r.hip).addScaledVector(axis,distance)
+      r.knee.position.copy(kneePoint);r.foot.position.copy(footTarget)
+      align(r.upper,r.hip,kneePoint);align(r.lower,kneePoint,footTarget)
+    })
+    const elapsed=Number.isFinite(elapsedMs)?Math.max(0,elapsedMs):0
+    body.position.z=moving?Math.sin(elapsed*Math.PI/320)*.65:0
+    body.rotation.x=moving?Math.sin(elapsed*Math.PI/640)*.012:0
+  }
+  pose()
   root.scale.setScalar(compact?1.05:.9);root.position.set(0,0,60)
-  return {root,legs}
+  return {root,legs,pose}
 }

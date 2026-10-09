@@ -83,6 +83,16 @@ Evidence contract
   controls, observers, listeners and renderer. Decorative particles and lines
   are aria-hidden, not additional stock/activity observations.
 
+  The optional 3D spider has a compact articulated silhouette, separate abdomen,
+  thorax and head, subtle panel seams and eight small eyes. Eight two-link legs
+  keep their hips and link lengths fixed; a deterministic alternating gait lifts
+  the feet and bends the knees only during an evidence sweep. Heading turns use
+  the shortest angle rather than snapping. The pose returns to rest on completion,
+  pause, hidden state or unavailable data. It is presentation, not a claim about
+  execution. Shared geometries/materials are reused for every pose and disposed
+  once; no animation creates new GPU buffers or downloads models/textures.
+  The overall desktop/mobile footprint and all data/motion guards stay unchanged.
+
 Verification and release
 ------------------------
 
@@ -141,7 +151,7 @@ all nine synthetic records must remain available in 2D afterwards. Neither
 test introduces a production flag or a new API endpoint.
 
 The 3D bundle is separate from the main dashboard and loaded only when the
-optional map is opened. The current production build reports a roughly 577 KB / 147 KB
+optional map is opened. The current frontend build reports a roughly 580 KB / 148 KB
 gzip 3D chunk and Vite's existing 500 KB chunk-size warning (not suppressed).
 The remaining dashboard does not eagerly load Three.js. npm audit also reports
 five pre-existing advisories in unchanged Vite/esbuild/router/source-map

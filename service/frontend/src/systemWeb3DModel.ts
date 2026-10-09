@@ -45,3 +45,22 @@ export function evidencePosition(points: Point3[], progress: number): Point3 {
   return {x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f,z:a.z+(b.z-a.z)*f+Math.sin(f*Math.PI)*24}
 }
 export const WEB3D_BUDGET = { pixelRatio:1.5, maxPixels:1_600_000, frameInterval:1000/30, sweepMs:3200, focusMs:450, stations:STATIONS.length }
+
+/** Decorative gait only. Four alternating feet swing; the others stay in stance.
+ * Uses sweep-relative time, never a timer or a claim of worker/trade activity. */
+export function spiderStep(elapsedMs:number,leg:number,moving:boolean) {
+  if(!moving)return {stride:0,lift:0}
+  const elapsed=Number.isFinite(elapsedMs)?Math.max(0,elapsedMs):0
+  const phase=(elapsed/640+((leg%4)%2+(leg<4?0:1))*.5)%1
+  if(phase<.62)return {stride:4-8*phase/.62,lift:0}
+  const swing=(phase-.62)/.38,ease=swing*swing*(3-2*swing)
+  return {stride:-4+8*ease,lift:Math.sin(swing*Math.PI)*5}
+}
+
+/** Keep orientation when stationary; interpolate the shortest turn on a real sweep. */
+export function spiderHeading(from:Point3,to:Point3,current:number) {
+  const dx=to.x-from.x,dy=to.y-from.y
+  if(Math.hypot(dx,dy)<.0001)return current
+  const desired=Math.atan2(-dx,dy),delta=Math.atan2(Math.sin(desired-current),Math.cos(desired-current))
+  return current+delta*.28
+}
