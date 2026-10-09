@@ -283,6 +283,12 @@ def test_xbrl_comparisons_reject_ytd_units_future_and_missing():
     share_rows = si.companyfacts_comparisons(outstanding, accession, "2026-10-08T12:00:00Z")
     assert len(share_rows) == 1 and share_rows[0]["metric"] == "shares_outstanding"
     assert share_rows[0]["namespace"] == "dei" and share_rows[0]["change_pct"] == 20
+    payload["facts"]["us-gaap"]["OperatingIncomeLoss"] = {"units": {"USD": [
+        {**current, "val": 30}, {**good, "val": 20}]}}
+    margin = [r for r in si.companyfacts_comparisons(payload, accession, "2026-10-08T12:00:00Z")
+              if r["metric"] == "operating_margin"]
+    assert len(margin) == 1 and margin[0]["value"] == 25
+    assert margin[0]["previous"]["value"] == 20 and margin[0]["change_pp"] == 5
 
 
 def test_pre_shortlist_ranking_can_promote_verified_outsider():

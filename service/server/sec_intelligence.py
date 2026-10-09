@@ -213,6 +213,29 @@ def companyfacts_comparisons(payload: dict, accession: str, accepted_at: str) ->
                     else:
                         row["reason"] = "zero_denominator"
                 result.append(row)
+    matched = {}
+    for row in result:
+        if row["metric"] in {"revenue", "operating_income"} and row["reason"] == "comparable_prior":
+            matched.setdefault((row.get("start"), row.get("end")), {}).setdefault(row["metric"], row)
+    for (start, end), pair in matched.items():
+        revenue, operating = pair.get("revenue"), pair.get("operating_income")
+        if not revenue or not operating:
+            continue
+        prior_revenue, prior_operating = revenue["previous"], operating["previous"]
+        if (revenue["value"] <= 0 or prior_revenue["value"] <= 0
+                or (prior_revenue["accession"], prior_revenue["start"], prior_revenue["end"])
+                != (prior_operating["accession"], prior_operating["start"], prior_operating["end"])):
+            continue
+        current_margin = 100 * operating["value"] / revenue["value"]
+        prior_margin = 100 * prior_operating["value"] / prior_revenue["value"]
+        result.append({"metric": "operating_margin", "namespace": "derived", "tag": "operating_income/revenue",
+                       "unit": "percent", "start": start, "end": end, "accession": accession,
+                       "value": round(current_margin, 3), "previous": {
+                           "value": round(prior_margin, 3), "accession": prior_revenue["accession"],
+                           "start": prior_revenue["start"], "end": prior_revenue["end"]},
+                       "change_pp": round(current_margin-prior_margin, 3),
+                       "reason": "comparable_prior", "source_url": source_url,
+                       "source_facts": [revenue["tag"], operating["tag"]]})
     return result[:40]
 
 
