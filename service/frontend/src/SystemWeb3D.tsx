@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { LABELS, STATE_LABELS, STATE_SYMBOLS, type ActivityItem, type ActivityUpdate, type Station } from './systemActivityModel'
-import { buildSpatialNetwork, evidenceDestinations, evidencePosition, focusDestination, placeLabel, spiderHeading, WEB3D_BUDGET, type Point3 } from './systemWeb3DModel'
-import { createSilk, createSpider, disposeObject, lineGeometry, vec } from './systemWeb3DScene'
+import { LABELS, STATE_LABELS, STATE_SYMBOLS, type ActivityItem, type Station } from './systemActivityModel'
+import { buildSpatialNetwork, focusDestination, placeLabel, WEB3D_BUDGET, type Point3 } from './systemWeb3DModel'
+import { createSilk, disposeObject, lineGeometry, vec } from './systemWeb3DScene'
 
 type Props = {
   he:boolean; items:ActivityItem[]; compact:boolean; station:Station|'all'; setStation:(s:Station|'all')=>void
   selected:string|null; select:(id:string)=>void; changed:Set<string>; available:boolean; visible:boolean; zoom:boolean
-  moving:boolean; sweepKey:string; updates:ActivityUpdate[]; fallback:ReactNode; resetZoom:()=>void
+  fallback:ReactNode; resetZoom:()=>void
 }
 type Runtime = { update:(p:Props)=>void; home:()=>void; rotate:(direction:number)=>void }
 export default function SystemWeb3D(props:Props) {
@@ -26,7 +26,6 @@ export default function SystemWeb3D(props:Props) {
     try { renderer=new THREE.WebGLRenderer({alpha:true,antialias:true,powerPreference:'low-power'}) }
     catch { setFailed(true);return }
     let disposed=false,raf=0,width=1,height=1,frames=0,lastFrame=-Infinity,inView=true
-    let animation:{points:Point3[];start:number}|null=null,seenKey=latest.current.sweepKey
     let previousZoom=false,previousStation:Station|'all'='all',previousSelected:string|null=null
     let flight:{eye:THREE.Vector3;target:THREE.Vector3;endEye:THREE.Vector3;endTarget:THREE.Vector3;start:number}|null=null
     const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(42,1,1,5000)
@@ -38,7 +37,7 @@ export default function SystemWeb3D(props:Props) {
     scene.add(new THREE.HemisphereLight('#bce5da','#0b1620',2.2))
     const keyLight=new THREE.DirectionalLight('#ddfff1',3.8);keyLight.position.set(-240,300,550);scene.add(keyLight)
     const rimLight=new THREE.DirectionalLight('#6b91cf',2.7);rimLight.position.set(360,-120,-100);scene.add(rimLight)
-    const silk=createSilk(compact),spider=createSpider(compact);scene.add(silk.root,spider.root)
+    const silk=createSilk(compact);scene.add(silk.root)
     const core=new THREE.Group()
     for(const radius of [86,96,103]) {
       const ring=new THREE.Mesh(new THREE.TorusGeometry(radius,.3,4,96),new THREE.MeshBasicMaterial({color:'#548c7e',transparent:true,opacity:.26}))
@@ -53,9 +52,7 @@ export default function SystemWeb3D(props:Props) {
     controls.minPolarAngle=.75;controls.maxPolarAngle=2.25;controls.minAzimuthAngle=-.9;controls.maxAzimuthAngle=.9
     controls.minDistance=compact?420:320;controls.maxDistance=compact?2500:2300
     const reduced=window.matchMedia('(prefers-reduced-motion:reduce)')
-    // Only the explicitly labelled synthetic preview may force motion for QA.
-    const forcedMotion=!!document.querySelector('link[href="/synthetic-motion.css"]')
-    const canMove=()=>!reduced.matches||forcedMotion
+    const canMove=()=>!reduced.matches
     const canDraw=()=>!disposed&&document.visibilityState!=='hidden'&&inView
     const home=()=> {
       flight=null;element.dataset.cameraMotion='resting'
@@ -95,7 +92,7 @@ export default function SystemWeb3D(props:Props) {
     const draw=(now:number)=> {
       raf=0
       if(!canDraw()) return
-      if(now-lastFrame<WEB3D_BUDGET.frameInterval && (animation||flight)) {requestRender();return}
+      if(now-lastFrame<WEB3D_BUDGET.frameInterval && flight) {requestRender();return}
       lastFrame=now
       if(flight) {
         const progress=Math.min(1,(now-flight.start)/WEB3D_BUDGET.focusMs),ease=1-Math.pow(1-progress,3)
@@ -104,26 +101,13 @@ export default function SystemWeb3D(props:Props) {
         controls.update()
       }
       element.dataset.cameraMotion=flight?'active':'resting'
-      if(animation) {
-        const progress=Math.min(1,(now-animation.start)/WEB3D_BUDGET.sweepMs)
-        const point=evidencePosition(animation.points,progress);spider.root.position.copy(vec(point))
-        const tangent=evidencePosition(animation.points,Math.min(1,progress+.02))
-        if(progress<1) spider.root.rotation.z=spiderHeading(point,tangent,spider.root.rotation.z)
-        spider.pose(now-animation.start,progress<1)
-        if(progress>=1) animation=null
-      }
-      element.dataset.motion=animation?'active':'resting'
       projectLabels()
-      try {renderer.render(scene,camera)} catch {finish();setFailed(true);return}
+      try {renderer.render(scene,camera)} catch {setFailed(true);return}
       frames++
       element.dataset.renderFrames=String(frames);element.dataset.drawCalls=String(renderer.info.render.calls)
-      if(animation||flight) requestRender()
+      if(flight) requestRender()
     }
     function requestRender() { if(!raf&&canDraw())raf=window.requestAnimationFrame(draw) }
-    const finish=()=> {
-      if(animation) spider.root.position.copy(vec(animation.points.at(-1)!))
-      animation=null;spider.pose();element.dataset.motion='resting'
-    }
     const update=(p:Props)=> {
       // Rebuild bounded stock geometry only, not the decorative field or renderer.
       scene.remove(stocks);disposeObject(stocks);stocks=new THREE.Group();scene.add(stocks)
@@ -157,16 +141,6 @@ export default function SystemWeb3D(props:Props) {
           else material.opacity=Math.min(1,(material.userData.baseOpacity||.22)*(dim?.22:fresh?1.8:1))
         })
       }
-      if(p.sweepKey && p.sweepKey!==seenKey) {
-        seenKey=p.sweepKey
-        const destinations=evidenceDestinations(p.items,p.updates,compact)
-        if(p.moving && p.available && p.visible && inView && destinations.length) {
-          const points=[{...spider.root.position},...destinations]
-          if(canMove()) animation={points,start:performance.now()}
-          else {animation=null;spider.root.position.copy(vec(points.at(-1)!))}
-        }
-      }
-      if(!p.moving||!p.available||!p.visible) finish()
       if(p.selected!==previousSelected) {
         previousSelected=p.selected
         const point=focusDestination(p.items,p.selected,compact)
@@ -191,9 +165,9 @@ export default function SystemWeb3D(props:Props) {
       // Opening the desktop summary resizes the canvas; do not skip its focus transition.
       if(point&&flight)requestRender();else if(point)focus(point,false);else if(!previousZoom)home();else requestRender()
     }
-    const lose=(event:Event)=>{event.preventDefault();finish();finishCamera();setFailed(true)}
-    const visibility=()=>{if(document.visibilityState==='hidden'){finish();finishCamera();window.cancelAnimationFrame(raf);raf=0}else requestRender()}
-    const reduce=()=>{if(!canMove()){finish();finishCamera()}requestRender()}
+    const lose=(event:Event)=>{event.preventDefault();finishCamera();setFailed(true)}
+    const visibility=()=>{if(document.visibilityState==='hidden'){finishCamera();window.cancelAnimationFrame(raf);raf=0}else requestRender()}
+    const reduce=()=>{if(!canMove())finishCamera();requestRender()}
     const manual=()=>{flight=null;element.dataset.cameraMotion='resting'}
     controls.addEventListener('start',manual)
     controls.addEventListener('change',requestRender)
@@ -202,7 +176,7 @@ export default function SystemWeb3D(props:Props) {
     const observer=new ResizeObserver(resize);observer.observe(element)
     const intersection=new IntersectionObserver(entries=> {
       inView=entries[0]?.isIntersecting??false
-      if(!inView){finish();finishCamera();window.cancelAnimationFrame(raf);raf=0}else requestRender()
+      if(!inView){finishCamera();window.cancelAnimationFrame(raf);raf=0}else requestRender()
     });intersection.observe(element)
     runtime.current={update,home,rotate:direction=>{manual();controls.rotateLeft(direction*.18);controls.update();requestRender()}}
     resize();update(latest.current);element.dataset.renderer='webgl2';setReady(true)
@@ -214,7 +188,7 @@ export default function SystemWeb3D(props:Props) {
       disposeObject(scene);renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove()
     }
   },[compact,failed])
-  useEffect(()=>{runtime.current?.update(props)},[props.items,props.selected,props.station,props.zoom,props.moving,props.sweepKey,props.available,props.visible,props.changed])
+  useEffect(()=>{runtime.current?.update(props)},[props.items,props.selected,props.station,props.zoom,props.available,props.visible,props.changed])
   if(failed)return <><p className="system-3d-fallback" role="status">{t('תלת־ממד אינו זמין במכשיר זה. המפה הדו־ממדית והנתונים נשארים זמינים.','3D is unavailable on this device. The 2D map and data remain available.')}</p>{fallback}</>
   return <div className={`system-web3d ${compact?'compact':''} ${selected?'is-focused':''}`} role="group" aria-label={t('מפת תחנות אינטראקטיבית — רשת מניות בתלת־ממד','Interactive station map — 3D stock network')}>
     <div className="system-web3d-stage" ref={host}>

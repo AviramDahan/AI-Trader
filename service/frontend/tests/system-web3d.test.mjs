@@ -14,8 +14,8 @@ const load=name=> {
   return m.exports
 }
 const {buildActivity}=load('systemActivityModel')
-const {buildSpatialNetwork,evidenceDestinations,evidencePosition,focusDestination,placeLabel,spiderStep,spiderHeading,WEB3D_BUDGET}=load('systemWeb3DModel')
-const {createSilk,createSpider,disposeObject}=load('systemWeb3DScene')
+const {buildSpatialNetwork,evidenceDestinations,evidencePosition,focusDestination,placeLabel,WEB3D_BUDGET}=load('systemWeb3DModel')
+const {createSilk,disposeObject}=load('systemWeb3DScene')
 const items=buildActivity(fixtureResearch,fixtureDashboard),unchanged=JSON.stringify(items)
 let assertions=0
 const equal=(a,b)=>{assert.deepEqual(a,b);assertions++}
@@ -57,56 +57,7 @@ for(const compact of [false,true]) {
   materials.forEach(m=>m.addEventListener('dispose',()=>disposedMaterials++))
   disposeObject(silk.root)
   equal(disposedGeometries,geometries.size);equal(disposedMaterials,materials.size);equal(silk.root.children.length,0)
-  const spider=createSpider(compact)
-  equal(spider.root.scale.toArray(),Array(3).fill(compact?1.05:.9))
-  equal(spider.legs.length,8);equal(spider.root.position.toArray(),[0,0,60])
-  check(spider.legs.every(l=>l.children.length===5))
-  const meshes=[],spiderGeometry=new Set(),spiderMaterials=new Set()
-  spider.root.traverse(o=>{if(o.isMesh){meshes.push(o);spiderGeometry.add(o.geometry);spiderMaterials.add(o.material)}})
-  equal(meshes.filter(m=>m.name==='spider-eye').length,8)
-  check(meshes.length<65);check(spiderGeometry.size<=12);check(spiderMaterials.size<=5)
-  const restFeet=spider.legs.map(l=>l.children[4].position.clone()),hips=spider.legs.map(l=>l.children[2].position.clone())
-  const shell=spider.root.getObjectByName('spider-shell')
-  for(let ms=0;ms<=3200;ms+=32) {
-    spider.pose(ms,true)
-    spider.legs.forEach((l,n)=> {
-      const [upper,lower,hip,knee,foot]=l.children
-      check(hip.position.equals(hips[n]))
-      check(Math.abs(hip.position.distanceTo(knee.position)-l.userData.lengths.upper)<1e-8)
-      check(Math.abs(knee.position.distanceTo(foot.position)-l.userData.lengths.lower)<1e-8)
-      check(Math.abs(upper.scale.y-l.userData.lengths.upper)<1e-8 && Math.abs(lower.scale.y-l.userData.lengths.lower)<1e-8)
-      check(foot.position.z>=restFeet[n].z-1e-8 && foot.position.z<=restFeet[n].z+5+1e-8)
-      check(Math.abs(foot.position.y-restFeet[n].y)<=4+1e-8)
-    })
-    check(meshes.every(m=>spiderGeometry.has(m.geometry)&&spiderMaterials.has(m.material)))
-  }
-  spider.pose()
-  equal(shell.position.toArray(),[0,0,0]);equal(shell.rotation.x,0)
-  spider.legs.forEach((l,n)=>check(l.children[4].position.distanceTo(restFeet[n])<1e-8))
-  const bounds=new THREE.Box3().setFromObject(spider.root)
-  check(bounds.getSize(new THREE.Vector3()).x<(compact?140:120)) // compact footprint, not a giant mascot
-  check(meshes.every(m=>m.matrixWorld.elements.every(Number.isFinite)))
-  let releases=0,materialReleases=0
-  spiderGeometry.forEach(g=>g.addEventListener('dispose',()=>releases++))
-  spiderMaterials.forEach(m=>m.addEventListener('dispose',()=>materialReleases++))
-  disposeObject(spider.root);equal(releases,spiderGeometry.size);equal(materialReleases,spiderMaterials.size);equal(spider.root.children.length,0)
 }
-
-for(let n=0;n<8;n++) {
-  equal(spiderStep(100,n,false),{stride:0,lift:0})
-  equal(spiderStep(NaN,n,true),spiderStep(0,n,true))
-  equal(spiderStep(-100,n,true),spiderStep(0,n,true))
-  for(const ms of [0,32,397,512,639,640,900,3200]) {
-    const step=spiderStep(ms,n,true);check(Math.abs(step.stride)<=4 && step.lift>=0 && step.lift<=5)
-    const repeated=spiderStep(ms+640,n,true)
-    check(Math.abs(step.stride-repeated.stride)<1e-10 && Math.abs(step.lift-repeated.lift)<1e-10)
-  }
-}
-equal(spiderStep(0,0,true),spiderStep(0,5,true)) // alternating opposite-side tetrapods
-check(spiderStep(0,0,true).stride!==spiderStep(0,4,true).stride)
-equal(spiderHeading({x:0,y:0},{x:0,y:0},1.1),1.1)
-check(Math.abs(spiderHeading({x:0,y:0},{x:.001,y:-1},3.14)-3.14)<.002)
-equal(spiderHeading({x:0,y:0},{x:-1,y:0},0),Math.PI/2*.28)
 equal(JSON.stringify(items),unchanged) // visual model never mutates source data
 const points=[{x:0,y:0,z:60},{x:30,y:40,z:100}]
 equal(evidencePosition(points,0),points[0]);equal(evidencePosition(points,1),points[1])
@@ -128,13 +79,15 @@ check(source.includes('renderer.dispose()') && source.includes('renderer.forceCo
 check(source.includes('webglcontextlost') && source.includes('setFailed(true)'))
 check(source.includes("visibilityState==='hidden'") && source.includes('IntersectionObserver'))
 check(source.includes('reduced.matches') && source.includes('WEB3D_BUDGET.maxPixels'))
-check(source.includes('seenKey=p.sweepKey') && source.includes('if(animation||flight) requestRender()'))
+check(source.includes('if(flight) requestRender()')) // finite camera navigation only
 check(source.includes('p.selected!==previousSelected') && source.includes('focusDestination(p.items,p.selected,compact)'))
-check(source.includes('element.dataset.cameraMotion') && source.includes('element.dataset.motion'))
+check(source.includes('element.dataset.cameraMotion'))
 check(source.includes('controls.removeEventListener(\'start\',manual)'))
 check(source.includes('props.changed]')) // finite highlight cleared without a new provider snapshot
 check(source.includes('if(point&&flight)requestRender()')) // sidebar resize preserves finite focus travel
 check(source.includes('compact?-220:0')) // mobile card must not occlude the selected node
-check(source.includes('spider.pose(now-animation.start,progress<1)') && source.includes('spider.pose()'))
-check(!source.includes('leg.rotation')) // jointed links, no whole-leg pendulum animation
+check(!source.includes('spider') && !sceneSource.includes('createSpider'))
+check(!source.includes('animation.points') && !source.includes('sweepKey'))
+equal(load('systemWeb3DScene').createSpider,undefined)
+equal(load('systemWeb3DModel').spiderStep,undefined)
 console.log(`3D geometry, evidence destinations, bounds and GPU-resource disposal: ${assertions} assertions passed`)

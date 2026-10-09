@@ -73,14 +73,11 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   const activate = (e: React.KeyboardEvent<SVGGElement>, action: () => void) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); action() }
   }
-  const flat = <div className={`system-web system-organic-web ${compact?'compact':''} ${moving ? 'evidence-motion-enabled' : ''}`}>
+  const flat = <div className={`system-web system-organic-web ${compact?'compact':''}`}>
       <svg viewBox={viewBox} role="group" aria-label={t('מפת תחנות אינטראקטיבית — רשת מניות', 'Interactive station map — stock network')}>
         <defs>
           <radialGradient id="web-halo"><stop stopColor="#0e493f" stopOpacity=".55"/><stop offset="1" stopColor="#071013" stopOpacity="0"/></radialGradient>
-          <radialGradient id="spider-body"><stop stopColor="#475c61"/><stop offset=".48" stopColor="#15272d"/><stop offset="1" stopColor="#040b10"/></radialGradient>
-          <linearGradient id="spider-metal" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#b6fff0"/><stop offset=".4" stopColor="#479d93"/><stop offset="1" stopColor="#193745"/></linearGradient>
           <filter id="web-node-glow" x="-150%" y="-150%" width="400%" height="400%"><feGaussianBlur stdDeviation="2.8"/></filter>
-          <filter id="spider-shadow" x="-100%" y="-100%" width="300%" height="300%"><feDropShadow dx="0" dy="5" stdDeviation="5" floodColor="#000" floodOpacity=".9"/></filter>
         </defs>
         <g aria-hidden="true" className="system-web-decoration">
           <ellipse cx={core.x} cy={core.y} rx={compact?160:490} ry={compact?260:320} fill="url(#web-halo)" />
@@ -108,19 +105,6 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
           </foreignObject>
           {!!c.omitted && <text className="system-omitted" x={c.x} y={c.y + 100} textAnchor="middle">+{c.omitted} {t('ברשימת התחנה', 'in station list')}</text>}
         </g>)}
-        {/* A finite cursor sweep to newly observed evidence, not a trade or worker trace. */}
-        <g key={sweep.key} aria-hidden="true" className="system-crawler" style={{ offsetPath: `path('${sweep.path}')`, offsetDistance: moving ? undefined : '100%' }}>
-          <g transform={`scale(${compact ? .43 : .8})`} filter="url(#spider-shadow)">
-            <circle className="system-crawler-aura" r="47"/>
-            {Array.from({ length: 8 }, (_, n) => { const side=n<4?-1:1,row=n%4,y=(row-1.5)*7,kneeY=[-29,-13,14,31][row],tipY=[-51,-30,32,52][row],kneeX=[26,39,38,27][row],tipX=[49,60,57,45][row]
-              return <g key={n} className={`system-crawler-leg leg-${n}`}><path className="spider-leg-shadow" d={`M ${side*8} ${y} L ${side*kneeX} ${kneeY} L ${side*tipX} ${tipY}`}/><path className="spider-leg-metal" d={`M ${side*8} ${y} L ${side*kneeX} ${kneeY} L ${side*tipX} ${tipY}`}/><circle cx={side*kneeX} cy={kneeY} r="1.8" fill="#8fcec3"/></g>
-            })}
-            <ellipse cy="12" rx="12" ry="20" className="system-crawler-body"/><path className="spider-shell" d="M 0 -5 Q -10 8 -6 23 M 0 -5 Q 10 8 6 23"/>
-            <ellipse cy="-12" rx="10" ry="12" className="system-crawler-head"/>
-            <path className="spider-shell" d="M -5 -22 L -7 -29 M 5 -22 L 7 -29"/>
-            <circle cx="-4" cy="-17" r="2.1" fill="#f4b6df"/><circle cx="4" cy="-17" r="2.1" fill="#f4b6df"/>
-          </g>
-        </g>
       </svg>
     </div>
   return <div ref={panel} className="system-network-panel">
@@ -128,16 +112,15 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
       <div className="system-network-controls">
       <button type="button" aria-pressed={threeD} onClick={()=>{setThreeD(v=>!v);setZoom(false)}}>{threeD?t('תצוגת 2D','2D view'):t('תצוגת 3D','3D view')}</button>
       <button type="button" aria-pressed={zoom || !!selected} onClick={()=>{if(selected){select(null);setZoom(false)}else setZoom(v=>!v)}}>{zoom || selected?t('מפה מלאה','Full map'):t('התקרבות','Zoom in')}</button>
-      <button type="button" className="system-motion-toggle" aria-pressed={motion} onClick={() => setMotion(v => !v)}>{motion ? t('השהה תנועת עדכונים', 'Pause update motion') : t('הפעל תנועת עדכונים', 'Enable update motion')}</button></div>
+      <button type="button" className="system-motion-toggle" aria-pressed={motion} onClick={() => setMotion(v => !v)}>{motion ? t('השהה סימון עדכונים', 'Pause update markers') : t('הפעל סימון עדכונים', 'Enable update markers')}</button></div>
     </div>
     <div className="system-network-readout"><span><i className={available?'connected':''}/>{available?t('עדכון מחזורי מחובר','PERIODIC FEED CONNECTED'):t('ממתין לנתונים תקינים','AWAITING VALID DATA')}</span><bdi>{String(items.length).padStart(2,'0')} {t('רשומות במדגם','SAMPLED RECORDS')}</bdi><span>{marketOpen === true ? t('מסחר פתוח','MARKET OPEN') : marketOpen === false ? t('מחוץ למסחר','OUTSIDE SESSION') : t('מצב שוק לא ידוע','SESSION UNKNOWN')}</span></div>
     {threeD ? <Network3DErrorBoundary he={he} fallback={flat}><Suspense fallback={flat}><Web3D he={he} items={items} compact={compact} station={station} setStation={setStation}
       selected={selected} select={select} changed={changed} available={available} visible={visible} zoom={zoom}
-      moving={moving} sweepKey={sweep.key} updates={sweep.shown} fallback={flat} resetZoom={()=>{setZoom(false);select(null)}}/></Suspense></Network3DErrorBoundary> : flat}
+      fallback={flat} resetZoom={()=>{setZoom(false);select(null)}}/></Suspense></Network3DErrorBoundary> : flat}
     <div className="system-state-key" aria-label={t('מקרא מצב המניות','Stock state legend')}>{(['blocked','waiting','uncertain','open'] as const).map(s=><span className={`system-state-badge state-${s}`} key={s}><bdi aria-hidden="true">{STATE_SYMBOLS[s]}</bdi>{STATE_LABELS[s][he?0:1]}</span>)}</div>
-    <div className="system-network-legend"><span><i className="system-legend-crawler"/>{t('העכביש: מצביע לעדכון מתועד שנקלט — לא מצב Worker בזמן אמת', 'Crawler: points to received evidence updates — not real-time worker activity')}</span><span><i className="system-legend-event"/>{t('הבהוב מניה: שינוי אמיתי במידע שנשמר', 'Stock glow: an actual retained-data change')}</span></div>
+    <div className="system-network-legend"><span><i className="system-legend-event"/>{t('סימון מניה: שינוי מתועד שנקלט — לא מצב Worker בזמן אמת', 'Stock marker: a received retained-data change — not real-time worker activity')}</span></div>
     <p className={`system-network-update ${moving&&available?'system-update-received':''}`} role="status">{sweep.shown.length ? <><strong>{t(moving ? 'נקלט עדכון' : 'העדכון האחרון שהוצג', moving ? 'Update received' : 'Last displayed update')}</strong>: <bdi>{sweep.shown.at(-1)!.item.ticker}</bdi> · {LABELS[sweep.shown.at(-1)!.item.station][he ? 0 : 1]} · <time dateTime={sweep.shown.at(-1)!.item.at!} title={sweep.shown.at(-1)!.item.at!}><bdi>{new Date(sweep.shown.at(-1)!.item.at!).toLocaleTimeString(he?'he-IL':'en-GB')}</bdi></time>{sweep.omitted>0 && <> · {t(`ועוד ${sweep.omitted} עדכונים ברשימות`, `${sweep.omitted} more updates in the lists`)}</>}</> : t('ממתין לשינוי מתועד חדש — אין תנועה על טעינה או רענון ללא שינוי.', 'Waiting for new retained evidence — no motion on initial load or unchanged refresh.')}</p>
-    <p className="system-reduced-note">{t('התנועה מושבתת בהתאם להעדפת תנועה מופחתת במכשיר.', 'Motion is disabled by your device’s reduced-motion preference.')}</p>
     <details className="system-network-note"><summary>{t('איך לקרוא את הרשת','How to read the network')}</summary><p className="system-footnote">{t('לחצו על סימול לפתיחת המסלול, או על שם תחנה לסינון. קורים הם שיוך לתחנה, לא הוכחה למעבר בין שלבים. נקודות הרקע דקורטיביות. עד 8 רשומות בכל אשכול; כל יתר המדגם ברשימות למטה.', 'Select a ticker for its journey, or a station name to filter. Wires mean station membership, not proof of passed stages. Background points are decorative. Up to 8 records per cluster; remaining sampled records are listed below.')}</p></details>
   </div>
 }

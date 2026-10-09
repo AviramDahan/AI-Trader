@@ -35,33 +35,21 @@ Evidence contract
   partial-position weights. Realized net is separate from open gross; stale
   completed-bar marks are labelled. No cash, dollar P&L, allocation amounts,
   account-return sum or new performance computation is displayed.
-* Initial loading and unchanged polling do not trigger evidence glows. A short arrival glow
-  reflects a changed retained revision, not an invented transfer or ongoing
-  worker activity. It is suppressed after errors and for stale snapshots;
-  reduced-motion users see no animation.
-  The spider is a finite cursor sweep to a newly observed, timestamped evidence
-  update. There is no continuous/idle animation. Only changed retained records
-  with an advancing source timestamp within 150 seconds can trigger a sweep;
-  newly exposed rows must also postdate the viewer baseline. Initial load,
-  identical polling, invalid/future/old timestamps and reconnection establish
-  or preserve a baseline instead of replaying work. Filter changes never create
-  updates. A sweep visits at most four visible update destinations, never assumed
-  intermediate stages, and reports omitted updates. A destination outside the
-  eight-node graph cap points to its actual station, not a fabricated node.
-  This is a cursor to data received by the view, NOT real-time worker processing
-  or a reconstruction of unobserved transitions. Updates while motion is paused,
-  hidden or unavailable are consumed, not replayed when viewing resumes.
-  Each sweep stops within 3.2 seconds and honours reduced motion. Decorative
-  background points do not represent additional stocks.
-  Every selectable ticker node comes from retained evidence. Wires indicate
-  current station membership, not unrecorded successful stages. The graph
-  shows at most eight nodes per cluster, with an explicit omitted count and
-  the remaining records available in the station lists.
+* Initial loading and unchanged polling do not trigger evidence glows. A short
+  arrival glow marks changed retained data, not ongoing worker activity.
+  The spider has been removed from both 3D and SVG, including its model, gait,
+  motion path rendering and styles. There is no moving evidence cursor.
+  Source-time, stale/future/invalid/reconnection guards remain unchanged.
+  Latest received update metadata keeps its source timestamp and explicit
+  omitted count. Paused/hidden batches are consumed rather than replayed.
+  Decorative background points are not stocks. Wires mean current station
+  membership, never unrecorded successful stages. All retained records remain
+  available through the station view/lists; graph nodes cap at eight per cluster.
 * Browser-only stars are stored under ``ai_trader_visual_follow`` (at most
   100 tickers). They never edit the backend watchlist, scan priorities or
   trading policy. Tickers/names are escaped React text with bidi isolation.
 * The optional map is a real, lazily loaded Three.js/WebGL2 scene. Stations,
-  silk and the eight-legged procedural spider have actual depth; drag/pinch
+  silk and station nodes have actual depth; drag/pinch
   orbit and zoom the camera. There is no auto-rotation, idle particle motion,
   model download, post-processing pipeline or external rendering service.
   Stock and station labels are projected HTML buttons, remaining upright,
@@ -76,29 +64,19 @@ Evidence contract
   640 vertices on desktop / 320 on mobile with at most three connections per
   vertex. These vertices are aria-hidden, non-interactive and never stock nodes.
   No timer animates them. 3D depth is presentation-only, not a ranking score.
-  Rendering is on-demand, with finite cursor sweeps capped at 30 frames/sec,
+  Rendering is on-demand, with finite camera navigation capped at 30 frames/sec,
   device pixel ratio 1.5 and 1.6 million backing-buffer pixels. Hidden and
-  offscreen scenes cancel animation; resizing/remounting does not replay a
-  consumed update. Unmount/context failure disposes GPU geometries/materials,
+  offscreen scenes cancel camera navigation. Unmount/context failure disposes GPU geometries/materials,
   controls, observers, listeners and renderer. Decorative particles and lines
   are aria-hidden, not additional stock/activity observations.
 
-  The optional 3D spider has a compact articulated silhouette, separate abdomen,
-  thorax and head, subtle panel seams and eight small eyes. Eight two-link legs
-  keep their hips and link lengths fixed; a deterministic alternating gait lifts
-  the feet and bends the knees only during an evidence sweep. Heading turns use
-  the shortest angle rather than snapping. The pose returns to rest on completion,
-  pause, hidden state or unavailable data. It is presentation, not a claim about
-  execution. Shared geometries/materials are reused for every pose and disposed
-  once; no animation creates new GPU buffers or downloads models/textures.
-  The overall desktop/mobile footprint and all data/motion guards stay unchanged.
 
 Verification and release
 ------------------------
 
 Selecting a stock focuses its retained node (or its station when capped), with
 a finite 450ms camera transition. This is navigation, not new activity: it does
-not move the evidence spider or claim a worker transition. Reduced motion jumps
+not claim a worker transition. Reduced motion jumps
 directly to the view; manual orbit cancels camera travel. A compact summary
 shows the recorded state, reason, source timestamp and available levels beside
 the map on desktop and underneath it on mobile. No fixed sheet obscures content.
@@ -135,14 +113,10 @@ For isolated visual QA only::
 
     node tests/preview-system-activity.mjs
 
-The optional localhost-only ``?motion-test=synthetic`` preview applies a
-fixture-only stylesheet for testing animation when the browser has reduced
-motion enabled. Its banner explicitly identifies the forced synthetic test.
-It never changes system preferences or production reduced-motion handling.
-Combining it with ``&event-test=synthetic`` creates exactly one synthetic ALFA
-fixture update and shortens only the preview's research polling to two seconds.
-Subsequent responses keep that same event timestamp: they must not restart
-the crawler. This is a localhost fixture harness, not a provider/AI/trading call.
+The optional localhost-only ``?event-test=synthetic`` preview creates one
+synthetic ALFA update and shortens only research polling to two seconds.
+Subsequent responses retain that timestamp and must not produce a new update.
+This is a fixture harness, not a provider, AI or trading call.
 
 ``?renderer-test=unavailable`` uses a preview-only mock constructor to exercise
 the unsupported-GPU fallback. ``?renderer-test=context-loss`` adds a clearly
@@ -151,7 +125,7 @@ all nine synthetic records must remain available in 2D afterwards. Neither
 test introduces a production flag or a new API endpoint.
 
 The 3D bundle is separate from the main dashboard and loaded only when the
-optional map is opened. The current frontend build reports a roughly 580 KB / 148 KB
+optional map is opened. The current frontend build reports a roughly 562 KB / 143 KB
 gzip 3D chunk and Vite's existing 500 KB chunk-size warning (not suppressed).
 The remaining dashboard does not eagerly load Three.js. npm audit also reports
 five pre-existing advisories in unchanged Vite/esbuild/router/source-map

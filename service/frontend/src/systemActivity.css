@@ -118,26 +118,12 @@
 .system-graph-stock.state-uncertain .system-stock-dot { fill: #fbbf24; }
 .system-graph-stock:hover .system-stock-hit, .system-graph-stock:focus .system-stock-hit, .system-graph-stock.selected .system-stock-hit { fill: #ffffff08; stroke: currentColor; stroke-width: 1; }
 .system-organic-web .system-omitted { font-size: 9px; fill: #8d9aab; }
-.system-crawler { offset-distance: 0%; offset-rotate: auto; transform-box: fill-box; transform-origin: center; pointer-events: none; }
-.system-crawler-aura { fill: #75e2c902; stroke: #75e2c908; }
-.system-crawler-leg { transform-origin: 0 0; }
-.spider-leg-shadow { fill: none; stroke: #03080a; stroke-width: 5; stroke-linejoin: round; stroke-linecap: round; }
-.spider-leg-metal { fill: none; stroke: url(#spider-metal); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
-.system-crawler-body, .system-crawler-head { fill: url(#spider-body); stroke: #60a498; stroke-width: .8; }
-.spider-shell { fill: none; stroke: #79cbbb; stroke-width: .6; opacity: .65; }
-.evidence-motion-enabled .system-crawler { animation: system-evidence-sweep 3.2s linear 1 forwards; }
-.evidence-motion-enabled .system-crawler-leg { animation: system-visual-step 650ms ease-in-out 6 alternate; }
-.evidence-motion-enabled .system-crawler-leg:nth-of-type(even) { animation-delay: -325ms; }
-@keyframes system-evidence-sweep { from { offset-distance: 0%; } to { offset-distance: 100%; } }
-@keyframes system-visual-step { from { transform: rotate(-7deg); } to { transform: rotate(7deg); } }
 .system-network-legend { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 12px 28px 0; border-top: 1px solid #ffffff0b; font-size: 10px; color: #8e9eaa; }
 .system-network-legend > span { display: flex; align-items: center; gap: 7px; }
 .system-network-legend i { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
-.system-legend-crawler { background: #f4b6df; }
 .system-legend-event { background: #7ee5cc; }
 .system-network-note { padding: 0 28px 16px; color: #8493a2; font-size: 11px; }
 .system-network-note summary { cursor: pointer; }
-.system-reduced-note { display: none; padding-inline: 28px; color: #aab9c7; font-size: 11px; }
 .system-network-update { color: #b2c4cc; margin: 10px 28px; padding: 10px 12px; border-inline-start: 2px solid #7ee5cc55; background: #7ee5cc04; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 .system-context { padding: 18px 28px; background: #0a1016; border-color: #ffffff0b; }
 .system-context h3, .system-context p { font-size: 12px; }
@@ -182,10 +168,6 @@
   .system-network-update { margin-inline: 12px; font-size: 10px; }
   .system-services { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .system-journey { padding: 16px; }
-}
-@media (prefers-reduced-motion:reduce) {
-  .evidence-motion-enabled .system-crawler, .evidence-motion-enabled .system-crawler-leg { animation: none; offset-distance: 100%; }
-  .system-reduced-note { display: block; }
 }
 
 /* Real 3D scene. HTML labels remain crisp, keyboard-operable and bidi-isolated. */
