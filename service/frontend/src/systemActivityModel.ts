@@ -93,6 +93,20 @@ export function activityRevision(item: ActivityItem): string {
     item.trade?.current_stop, item.outcome?.exit_types])
 }
 
+export type ActivityUpdate = { key: string; item: ActivityItem }
+/** New retained evidence since the viewer baseline, never a reconstruction of unseen work. */
+export function detectActivityUpdates(previous: ActivityItem[] | null, current: ActivityItem[], baselineAt: number, now: number): ActivityUpdate[] {
+  if (!previous || !baselineAt || now < baselineAt) return []
+  const known = new Map(previous.map(i => [i.id, i]))
+  return current.filter(i => {
+    const at = timestamp(i.at), old = known.get(i.id)
+    if (!at || at > now || now - at > 150000) return false
+    if (!old) return at >= baselineAt // historical rows newly exposed by a capped report aren't live events
+    return at > timestamp(old.at) && activityRevision(i) !== activityRevision(old)
+  }).sort((a,b) => timestamp(a.at) - timestamp(b.at) || a.id.localeCompare(b.id))
+    .map(item => ({ key: `${item.id}:${item.at}`, item }))
+}
+
 export const LABELS: Record<Station, [string, string]> = {
   technical: ['סריקה וטכני', 'Scan & technical'], targets: ['יעדים ו־RR', 'Targets & RR'],
   evidence: ['חדשות ו־SEC', 'News & SEC'], ai: ['סקירת AI', 'AI review'],

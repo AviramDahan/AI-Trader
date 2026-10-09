@@ -39,11 +39,20 @@ Evidence contract
   reflects a changed retained revision, not an invented transfer or ongoing
   worker activity. It is suppressed after errors and for stale snapshots;
   reduced-motion users see no animation.
-  The organic network also includes an explicitly labelled decorative spider:
-  its continuous visual tour is NOT scanner execution, progress, or an actual
-  trade transition. It traverses occupied clusters only, stops on errors,
-  stale/missing data, hidden pages or the pause control, and honours reduced
-  motion. Decorative background points do not represent additional stocks.
+  The spider is a finite cursor sweep to a newly observed, timestamped evidence
+  update. There is no continuous/idle animation. Only changed retained records
+  with an advancing source timestamp within 150 seconds can trigger a sweep;
+  newly exposed rows must also postdate the viewer baseline. Initial load,
+  identical polling, invalid/future/old timestamps and reconnection establish
+  or preserve a baseline instead of replaying work. Filter changes never create
+  updates. A sweep visits at most four visible update destinations, never assumed
+  intermediate stages, and reports omitted updates. A destination outside the
+  eight-node graph cap points to its actual station, not a fabricated node.
+  This is a cursor to data received by the view, NOT real-time worker processing
+  or a reconstruction of unobserved transitions. Updates while motion is paused,
+  hidden or unavailable are consumed, not replayed when viewing resumes.
+  Each sweep stops within 3.2 seconds and honours reduced motion. Decorative
+  background points do not represent additional stocks.
   Every selectable ticker node comes from retained evidence. Wires indicate
   current station membership, not unrecorded successful stages. The graph
   shows at most eight nodes per cluster, with an explicit omitted count and
@@ -74,6 +83,10 @@ The optional localhost-only ``?motion-test=synthetic`` preview applies a
 fixture-only stylesheet for testing animation when the browser has reduced
 motion enabled. Its banner explicitly identifies the forced synthetic test.
 It never changes system preferences or production reduced-motion handling.
+Combining it with ``&event-test=synthetic`` creates exactly one synthetic ALFA
+fixture update and shortens only the preview's research polling to two seconds.
+Subsequent responses keep that same event timestamp: they must not restart
+the crawler. This is a localhost fixture harness, not a provider/AI/trading call.
 
 This preview binds 127.0.0.1:4318, serves synthetic fixtures only and rejects
 non-GET requests. It is not live connectivity or Production E2E proof. The

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { API_ORIGIN } from './appShared'
 import { activeTargetIndexes } from './signalPresentation'
 import { SystemNetwork } from './SystemNetwork'
-import { activityRevision, buildActivity, finite, LABELS, REASONS, recordTime, STATE_LABELS, STATIONS, timestamp, type ActivityItem, type Row, type Station } from './systemActivityModel'
+import { buildActivity, detectActivityUpdates, finite, LABELS, REASONS, recordTime, STATE_LABELS, STATIONS, timestamp, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
 import './systemActivity.css'
 
 const label = (names: [string, string], he: boolean) => names[he ? 0 : 1]
@@ -23,12 +23,14 @@ export function SystemActivity({ he, dashboard, dashboardError = '' }: { he: boo
   const [followed, setFollowed] = useState<string[]>(readFollowed)
   const [onlyFollowed, setOnlyFollowed] = useState(false)
   const [changed, setChanged] = useState<Set<string>>(new Set())
-  const previous = useRef<Map<string, string> | null>(null)
+  const [updates, setUpdates] = useState<ActivityUpdate[]>([])
+  const previous = useRef<ActivityItem[] | null>(null)
+  const baselineAt = useRef(0)
   const items = useMemo(() => buildActivity(research, dashboard), [research, dashboard])
   useEffect(() => {
     const controller = new AbortController()
     let active = true, inFlight = false
-    setResearch(null); setError(''); previous.current = null
+    setResearch(null); setError(''); previous.current = null; baselineAt.current = 0; setUpdates([]); setChanged(new Set())
     const refresh = async () => {
       if (inFlight || document.visibilityState === 'hidden') return
       inFlight = true
@@ -47,13 +49,16 @@ export function SystemActivity({ he, dashboard, dashboardError = '' }: { he: boo
     return () => { active = false; controller.abort(); window.clearInterval(interval); document.removeEventListener('visibilitychange', visible) }
   }, [hours])
   useEffect(() => {
-    const revisions = new Map(items.map(i => [i.id, activityRevision(i)]))
-    // Initial load and a failed poll never masquerade as new live activity.
-    const changes = previous.current && !error && !dashboardError
-      ? new Set(items.filter(i => previous.current!.get(i.id) !== revisions.get(i.id)).map(i => i.id)) : new Set<string>()
-    if (research && dashboard && !error && !dashboardError) previous.current = revisions
-    setChanged(changes)
-    const timer = window.setTimeout(() => setChanged(new Set()), 1800)
+    const now = Date.now(), generated = timestamp(research?.generated_at)
+    // First load, failed/stale snapshots and reconnection establish a baseline, not a replay.
+    if (!research || !dashboard || error || dashboardError || !generated || generated > now || now-generated > 150000) {
+      previous.current = null; baselineAt.current = 0; setUpdates([]); setChanged(new Set()); return
+    }
+    const observed = detectActivityUpdates(previous.current, items, baselineAt.current, now)
+    previous.current = items; baselineAt.current = now
+    setUpdates(observed)
+    setChanged(new Set(observed.map(v => v.item.id)))
+    const timer = window.setTimeout(() => setChanged(new Set()), 4000)
     return () => window.clearTimeout(timer)
   }, [items, research, dashboard, error, dashboardError])
   const follow = (symbol: string) => setFollowed(current => {
@@ -62,13 +67,14 @@ export function SystemActivity({ he, dashboard, dashboardError = '' }: { he: boo
     return next
   })
   return <SystemActivityView he={he} research={research} dashboard={dashboard} error={error || dashboardError}
-    items={items} changed={changed} hours={hours} setHours={setHours} ticker={ticker} setTicker={setTicker}
+    items={items} changed={changed} updates={updates} hours={hours} setHours={setHours} ticker={ticker} setTicker={setTicker}
     station={station} setStation={setStation} selected={selected} setSelected={setSelected}
     followed={followed} follow={follow} onlyFollowed={onlyFollowed} setOnlyFollowed={setOnlyFollowed} />
 }
 
 type ViewProps = {
   he: boolean; research: Row | null; dashboard: Row | null; error?: string; items?: ActivityItem[]; changed?: Set<string>
+  updates?: ActivityUpdate[]
   hours?: number; setHours?: (v: number) => void; ticker?: string; setTicker?: (v: string) => void
   station?: Station | 'all'; setStation?: (v: Station | 'all') => void
   selected?: string | null; setSelected?: (v: string | null) => void; followed?: string[]; follow?: (v: string) => void
@@ -76,6 +82,7 @@ type ViewProps = {
 }
 
 export function SystemActivityView({ he, research, dashboard, error = '', items = buildActivity(research, dashboard), changed = new Set(),
+  updates = [],
   hours = 24, setHours = () => {}, ticker = '', setTicker = () => {}, station = 'all', setStation = () => {},
   selected = null, setSelected = () => {}, followed = [], follow = () => {}, onlyFollowed = false, setOnlyFollowed = () => {} }: ViewProps) {
   const t = (a: string, b: string) => he ? a : b
@@ -99,10 +106,10 @@ export function SystemActivityView({ he, research, dashboard, error = '', items 
     </header>
     {error && <p className="scanner-warning" role="alert">{t('העדכון נכשל. אין להסיק פעילות חדשה מהמידע השמור.', 'Refresh failed. Retained data is not new activity.')} <bdi>{error}</bdi></p>}
     <div className="system-overview">
-      <SystemNetwork he={he} items={filtered} changed={changed} station={station} setStation={setStation}
-        selected={selected} select={setSelected} available={!!research && !!dashboard && !error && !old} marketOpen={open} />
+      <SystemNetwork he={he} items={filtered} changed={changed} updates={updates} station={station} setStation={setStation}
+        selected={selected} select={setSelected} available={!!research && !!dashboard && timestamp(generated)>0 && timestamp(generated)<=Date.now() && !error && !old} marketOpen={open} />
       <aside className="system-context"><h3>{t('מה רואים כאן?', 'What is shown?')}</h3>
-        <p>{t('כל צומת מניה מבוסס על רשומה שנשמרה. הבהוב קצר מציין שינוי מתועד; העכביש הוא אנימציה חזותית נפרדת, לא הוכחה לסריקה או עסקה.', 'Every stock node represents a retained record. A brief glow means evidence changed; the crawler is a separate visual animation, not proof of a scan or trade.')}</p>
+        <p>{t('כל צומת מניה מבוסס על רשומה שנשמרה. העכביש מצביע רק על שינוי מתועד חדש שנקלט בתצוגה, ועומד כשאין שינוי. זו אינה הוכחה שה־Worker מטפל כרגע במניה או שכל השלבים עברו.', 'Every stock node represents a retained record. The crawler points only to new retained evidence received by the view and rests when unchanged. This does not prove a worker is currently processing that stock or all stages passed.')}</p>
         <dl><div><dt>{t('מניות במדגם התחנות', 'Stocks in station sample')}</dt><dd>{new Set(filtered.map(i => i.ticker)).size}</dd></div>
           <div><dt>{t('פוזיציות דמה פתוחות', 'Open paper positions')}</dt><dd>{dashboard ? items.filter(i => i.state === 'open').length : '—'}</dd></div>
           <div><dt>{t('מחזור סריקה אחרון', 'Last scan')}</dt><dd><bdi>{stamp(dashboard?.activity?.last_scan_at ? new Date(dashboard.activity.last_scan_at*1000).toISOString() : null, he)}</bdi></dd></div></dl>

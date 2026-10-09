@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { LABELS, STATE_LABELS, STATIONS, type ActivityItem, type Station } from './systemActivityModel'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { LABELS, STATE_LABELS, STATIONS, type ActivityItem, type ActivityUpdate, type Station } from './systemActivityModel'
 
 export const CLUSTERS: Record<Station, { x: number; y: number; color: string }> = {
   technical: { x: 205, y: 150, color: '#67cfff' }, targets: { x: 545, y: 115, color: '#f7c96b' },
@@ -21,36 +21,62 @@ export function buildNetwork(items: ActivityItem[]) {
     return { station, ...cluster, total: group.length, omitted: Math.max(0, group.length - nodes.length), nodes }
   })
 }
-// A visual tour of occupied clusters, not a trace of worker execution or trade progression.
-export function crawlerRoute(items: ActivityItem[]): string {
-  const occupied = STATIONS.filter(s => items.some(i => i.station === s)).map(s => CLUSTERS[s])
-  const points = [{ x: 610, y: 340 }, ...occupied, { x: 610, y: 340 }]
-  return points.map((p, n) => `${n ? 'L' : 'M'} ${p.x} ${p.y}`).join(' ')
+const REST = { x: 610, y: 340 }
+// Cursor destinations are observed updates, never a tour of assumed pipeline stages.
+export function buildEvidenceSweep(items: ActivityItem[], updates: ActivityUpdate[], from = REST) {
+  const known = new Map(items.map(i => [i.id, i]))
+  const visibleUpdates = updates.filter(u => known.get(u.item.id)?.station === u.item.station)
+  const shown = visibleUpdates.slice(0, 4)
+  const nodes = new Map(buildNetwork(items).flatMap(c => c.nodes.map(n => [n.item.id, n] as const)))
+  const points = [from, ...shown.map(u => nodes.get(u.item.id) || CLUSTERS[u.item.station])]
+  return { path: points.map((p, n) => `${n ? 'L' : 'M'} ${p.x} ${p.y}`).join(' '),
+    end: points.at(-1)!, shown, omitted: visibleUpdates.length - shown.length }
 }
 
-export function SystemNetwork({ he, items, changed, station, setStation, selected, select, available, marketOpen }: {
+export function SystemNetwork({ he, items, changed, updates = [], station, setStation, selected, select, available, marketOpen }: {
   he: boolean; items: ActivityItem[]; changed: Set<string>; station: Station | 'all'; setStation: (v: Station | 'all') => void
+  updates?: ActivityUpdate[]
   selected: string | null; select: (v: string) => void; available: boolean; marketOpen: boolean | undefined
 }) {
   const [motion, setMotion] = useState(true)
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
+  const seenBatch = useRef('')
+  const lastPoint = useRef(REST)
+  const timer = useRef<number | undefined>()
+  const [sweep, setSweep] = useState({ key: '', path: 'M 610 340 L 610 340', active: false, shown: [] as ActivityUpdate[], omitted: 0 })
   useEffect(() => {
     const update = () => setVisible(document.visibilityState !== 'hidden')
     document.addEventListener('visibilitychange', update)
     return () => document.removeEventListener('visibilitychange', update)
   }, [])
   const clusters = useMemo(() => buildNetwork(items), [items])
-  const route = useMemo(() => crawlerRoute(items), [items])
-  const moving = motion && visible && available && items.length > 0
+  useEffect(() => {
+    const key = updates.map(u => u.key).join('|')
+    if (!key || key === seenBatch.current) return
+    seenBatch.current = key // discarded/paused/hidden batches aren't replayed when viewing resumes
+    const next = buildEvidenceSweep(items, updates, lastPoint.current)
+    if (!motion || !visible || !available || !next.shown.length) return
+    window.clearTimeout(timer.current)
+    lastPoint.current = { x: next.end.x, y: next.end.y }
+    setSweep({ key, path: next.path, shown: next.shown, omitted: next.omitted, active: true })
+    timer.current = window.setTimeout(() => setSweep(v => ({ ...v, active: false })), 3200)
+  }, [updates, items, motion, visible, available])
+  useEffect(() => {
+    if (!motion || !visible || !available) {
+      window.clearTimeout(timer.current); setSweep(v => v.active ? { ...v, active: false } : v)
+    }
+  }, [motion, visible, available])
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+  const moving = sweep.active && motion && visible && available
   const t = (a: string, b: string) => he ? a : b
   const activate = (e: React.KeyboardEvent<SVGGElement>, action: () => void) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); action() }
   }
   return <div className="system-network-panel">
     <div className="system-network-heading"><div><span className="system-eyebrow">NEURAL WEB / RETAINED EVIDENCE</span><h3>{t('רשת המניות', 'Stock network')}</h3></div>
-      <button type="button" className="system-motion-toggle" aria-pressed={motion} onClick={() => setMotion(v => !v)}>{motion ? t('השהה תנועה חזותית', 'Pause visual motion') : t('הפעל תנועה חזותית', 'Enable visual motion')}</button>
+      <button type="button" className="system-motion-toggle" aria-pressed={motion} onClick={() => setMotion(v => !v)}>{motion ? t('השהה תנועת עדכונים', 'Pause update motion') : t('הפעל תנועת עדכונים', 'Enable update motion')}</button>
     </div>
-    <div className={`system-web system-organic-web ${moving ? 'visual-motion-enabled' : ''}`}>
+    <div className={`system-web system-organic-web ${moving ? 'evidence-motion-enabled' : ''}`}>
       <svg viewBox="0 0 1200 720" role="group" aria-label={t('מפת תחנות אינטראקטיבית — רשת מניות', 'Interactive station map — stock network')}>
         <defs><radialGradient id="web-halo"><stop stopColor="#2dd4bf" stopOpacity=".13"/><stop offset="1" stopColor="#2dd4bf" stopOpacity="0"/></radialGradient></defs>
         <g aria-hidden="true" className="system-web-decoration">
@@ -82,8 +108,8 @@ export function SystemNetwork({ he, items, changed, station, setStation, selecte
           </foreignObject>
           {!!c.omitted && <text className="system-omitted" x={c.x} y={c.y + 140} textAnchor="middle">+{c.omitted} {t('ברשימת התחנה', 'in station list')}</text>}
         </g>)}
-        {/* Decorative crawler. Explicitly separate from the event-driven arrival highlight. */}
-        <g aria-hidden="true" className="system-crawler" style={{ offsetPath: `path('${route}')` }}>
+        {/* A finite cursor sweep to newly observed evidence, not a trade or worker trace. */}
+        <g key={sweep.key} aria-hidden="true" className="system-crawler" style={{ offsetPath: `path('${sweep.path}')`, offsetDistance: moving ? undefined : '100%' }}>
           <circle className="system-crawler-aura" r="28"/>
           {Array.from({ length: 8 }, (_, n) => { const side = n < 4 ? -1 : 1, row = n % 4, y = (row - 1.5) * 5
             return <path key={n} className={`system-crawler-leg leg-${n}`} d={`M ${side*5} ${y} Q ${side*15} ${y-6} ${side*(23-row)} ${y+9} L ${side*(29-row)} ${y+14}`} />
@@ -93,7 +119,8 @@ export function SystemNetwork({ he, items, changed, station, setStation, selecte
         <text className="system-network-session" x="610" y="687" textAnchor="middle">{marketOpen === true ? t('מסחר פתוח', 'Market open') : marketOpen === false ? t('מחוץ למסחר', 'Outside session') : t('מצב שוק לא ידוע', 'Session unknown')} · {items.length} {t('רשומות במדגם', 'sample records')}</text>
       </svg>
     </div>
-    <div className="system-network-legend"><span><i className="system-legend-crawler"/>{t('העכביש: אנימציה חזותית בלבד — לא מצב Worker', 'Crawler: visual animation only — not worker activity')}</span><span><i className="system-legend-event"/>{t('הבהוב מניה: שינוי אמיתי במידע שנשמר', 'Stock glow: an actual retained-data change')}</span></div>
+    <div className="system-network-legend"><span><i className="system-legend-crawler"/>{t('העכביש: מצביע לעדכון מתועד שנקלט — לא מצב Worker בזמן אמת', 'Crawler: points to received evidence updates — not real-time worker activity')}</span><span><i className="system-legend-event"/>{t('הבהוב מניה: שינוי אמיתי במידע שנשמר', 'Stock glow: an actual retained-data change')}</span></div>
+    <p className="system-network-update" role="status">{sweep.shown.length ? <>{t(moving ? 'נקלט עדכון' : 'העדכון האחרון שהוצג', moving ? 'Update received' : 'Last displayed update')}: <bdi>{sweep.shown.at(-1)!.item.ticker}</bdi> · {LABELS[sweep.shown.at(-1)!.item.station][he ? 0 : 1]} · <bdi>{sweep.shown.at(-1)!.item.at}</bdi>{sweep.omitted>0 && <> · {t(`ועוד ${sweep.omitted} עדכונים ברשימות`, `${sweep.omitted} more updates in the lists`)}</>}</> : t('ממתין לשינוי מתועד חדש — אין תנועה על טעינה או רענון ללא שינוי.', 'Waiting for new retained evidence — no motion on initial load or unchanged refresh.')}</p>
     <p className="system-reduced-note">{t('התנועה מושבתת בהתאם להעדפת תנועה מופחתת במכשיר.', 'Motion is disabled by your device’s reduced-motion preference.')}</p>
     <p className="system-footnote system-network-note">{t('לחצו על סימול לפתיחת המסלול, או על שם תחנה לסינון. קורים הם שיוך לתחנה, לא הוכחה למעבר בין שלבים. נקודות הרקע דקורטיביות. עד 8 רשומות בכל אשכול; כל יתר המדגם ברשימות למטה.', 'Select a ticker for its journey, or a station name to filter. Wires mean station membership, not proof of passed stages. Background points are decorative. Up to 8 records per cluster; remaining sampled records are listed below.')}</p>
   </div>
