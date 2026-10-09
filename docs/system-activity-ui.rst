@@ -35,10 +35,19 @@ Evidence contract
   partial-position weights. Realized net is separate from open gross; stale
   completed-bar marks are labelled. No cash, dollar P&L, allocation amounts,
   account-return sum or new performance computation is displayed.
-* Initial loading and unchanged polling do not animate. A short arrival glow
+* Initial loading and unchanged polling do not trigger evidence glows. A short arrival glow
   reflects a changed retained revision, not an invented transfer or ongoing
   worker activity. It is suppressed after errors and for stale snapshots;
   reduced-motion users see no animation.
+  The organic network also includes an explicitly labelled decorative spider:
+  its continuous visual tour is NOT scanner execution, progress, or an actual
+  trade transition. It traverses occupied clusters only, stops on errors,
+  stale/missing data, hidden pages or the pause control, and honours reduced
+  motion. Decorative background points do not represent additional stocks.
+  Every selectable ticker node comes from retained evidence. Wires indicate
+  current station membership, not unrecorded successful stages. The graph
+  shows at most eight nodes per cluster, with an explicit omitted count and
+  the remaining records available in the station lists.
 * Browser-only stars are stored under ``ai_trader_visual_follow`` (at most
   100 tickers). They never edit the backend watchlist, scan priorities or
   trading policy. Tickers/names are escaped React text with bidi isolation.
@@ -60,6 +69,11 @@ Run from ``service/frontend``::
 For isolated visual QA only::
 
     node tests/preview-system-activity.mjs
+
+The optional localhost-only ``?motion-test=synthetic`` preview applies a
+fixture-only stylesheet for testing animation when the browser has reduced
+motion enabled. Its banner explicitly identifies the forced synthetic test.
+It never changes system preferences or production reduced-motion handling.
 
 This preview binds 127.0.0.1:4318, serves synthetic fixtures only and rejects
 non-GET requests. It is not live connectivity or Production E2E proof. The

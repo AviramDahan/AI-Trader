@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { API_ORIGIN } from './appShared'
 import { activeTargetIndexes } from './signalPresentation'
+import { SystemNetwork } from './SystemNetwork'
 import { activityRevision, buildActivity, finite, LABELS, REASONS, recordTime, STATE_LABELS, STATIONS, timestamp, type ActivityItem, type Row, type Station } from './systemActivityModel'
 import './systemActivity.css'
 
@@ -98,31 +99,10 @@ export function SystemActivityView({ he, research, dashboard, error = '', items 
     </header>
     {error && <p className="scanner-warning" role="alert">{t('העדכון נכשל. אין להסיק פעילות חדשה מהמידע השמור.', 'Refresh failed. Retained data is not new activity.')} <bdi>{error}</bdi></p>}
     <div className="system-overview">
-      <div className="system-web" aria-label={t('מפת תחנות אינטראקטיבית', 'Interactive station map')}>
-        <svg viewBox="0 0 600 430" role="group" aria-label={t('רשת שלבי המערכת — לחצו על תחנה לסינון', 'System station network — select a station to filter')}>
-          <defs><radialGradient id="system-glow"><stop stopColor="#2dd4bf" stopOpacity=".20"/><stop offset="1" stopColor="#2dd4bf" stopOpacity="0"/></radialGradient></defs>
-          <circle cx="300" cy="215" r="180" fill="url(#system-glow)"/>
-          {[90,145,190].map(r => <circle key={r} cx="300" cy="215" r={r} className="system-orbit"/>)}
-          {STATIONS.map((s, n) => { const angle = (n * 45 - 90) * Math.PI / 180, x = 300 + 205 * Math.cos(angle), y = 215 + 157 * Math.sin(angle)
-            const count = filtered.filter(i => i.station === s).length
-            const fresh = !error && !old && filtered.some(i => i.station === s && changed.has(i.id))
-            return <g key={s} className={fresh ? 'system-arrival' : ''}>
-              <line x1="300" y1="215" x2={x} y2={y} className={`system-spoke ${station === s ? 'selected' : ''}`} />
-              <g role="button" tabIndex={0} aria-label={`${label(LABELS[s], he)}: ${count}`} aria-pressed={station === s}
-                onClick={() => setStation(station === s ? 'all' : s)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setStation(station === s ? 'all' : s) } }} className="system-node">
-                <rect x={x-67} y={y-26} width="134" height="52" rx="14" className={station === s ? 'selected' : ''}/>
-                <text x={x} y={y-4} textAnchor="middle">{label(LABELS[s], he)}</text><text x={x} y={y+15} textAnchor="middle" className="system-node-count">{count}</text>
-              </g>
-            </g>
-          })}
-          <circle cx="300" cy="215" r="57" className="system-core"/>
-          <text x="300" y="205" textAnchor="middle" className="system-core-label">AI TRADER</text>
-          <text x="300" y="226" textAnchor="middle">{open === true ? t('השוק פתוח', 'Market open') : open === false ? t('השוק סגור', 'Market closed') : t('מצב שוק לא ידוע', 'Session unknown')}</text>
-          <text x="300" y="243" textAnchor="middle" className="system-core-sub">PAPER ONLY</text>
-        </svg>
-      </div>
+      <SystemNetwork he={he} items={filtered} changed={changed} station={station} setStation={setStation}
+        selected={selected} select={setSelected} available={!!research && !!dashboard && !error && !old} marketOpen={open} />
       <aside className="system-context"><h3>{t('מה רואים כאן?', 'What is shown?')}</h3>
-        <p>{t('הבהוב קצר מציין שינוי מתועד מאז העדכון הקודם. אין תנועה מדומה ואין הנחה שכל התחנות עברו.', 'A brief glow means retained evidence changed since the previous update. No simulated motion or assumed passed stages.')}</p>
+        <p>{t('כל צומת מניה מבוסס על רשומה שנשמרה. הבהוב קצר מציין שינוי מתועד; העכביש הוא אנימציה חזותית נפרדת, לא הוכחה לסריקה או עסקה.', 'Every stock node represents a retained record. A brief glow means evidence changed; the crawler is a separate visual animation, not proof of a scan or trade.')}</p>
         <dl><div><dt>{t('מניות במדגם התחנות', 'Stocks in station sample')}</dt><dd>{new Set(filtered.map(i => i.ticker)).size}</dd></div>
           <div><dt>{t('פוזיציות דמה פתוחות', 'Open paper positions')}</dt><dd>{dashboard ? items.filter(i => i.state === 'open').length : '—'}</dd></div>
           <div><dt>{t('מחזור סריקה אחרון', 'Last scan')}</dt><dd><bdi>{stamp(dashboard?.activity?.last_scan_at ? new Date(dashboard.activity.last_scan_at*1000).toISOString() : null, he)}</bdi></dd></div></dl>

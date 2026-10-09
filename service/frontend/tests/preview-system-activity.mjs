@@ -24,8 +24,12 @@ const server = createServer((request,response) => {
   }
   if(path === '/preview.js') {response.setHeader('Content-Type','application/javascript');response.end(js);return}
   if(path === '/preview.css') {response.setHeader('Content-Type','text/css');response.end(css);return}
+  // Opt-in fixture-only animation test, without changing OS/browser preferences.
+  // The production CSS still strictly respects prefers-reduced-motion.
+  if(path === '/synthetic-motion.css') {response.setHeader('Content-Type','text/css');response.end('.visual-motion-enabled .system-crawler{animation:system-visual-tour 42s linear infinite}.visual-motion-enabled .system-crawler-leg{animation:system-visual-step 650ms ease-in-out infinite alternate}.system-reduced-note{display:none}');return}
   if(path !== '/') {response.writeHead(404);response.end();return}
   response.setHeader('Content-Type','text/html; charset=utf-8')
-  response.end(`<!doctype html><html lang="he" dir="rtl" data-theme="dark"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI-Trader — תצוגת בדיקה סינתטית</title><link rel="stylesheet" href="/preview.css"></head><body><div style="background:#372b10;color:#fde68a;padding:12px;text-align:center;font:14px sans-serif">תצוגת בדיקה מקומית · נתונים סינתטיים בלבד · לא Production</div><main id="root" style="max-width:1400px;margin:auto;padding:24px"></main><script src="/preview.js"></script></body></html>`)
+  const motionTest = new URL(request.url,'http://127.0.0.1:4318').searchParams.get('motion-test') === 'synthetic'
+  response.end(`<!doctype html><html lang="he" dir="rtl" data-theme="dark"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI-Trader — תצוגת בדיקה סינתטית</title><link rel="stylesheet" href="/preview.css">${motionTest ? '<link rel="stylesheet" href="/synthetic-motion.css">' : ''}</head><body><div style="background:#372b10;color:#fde68a;padding:12px;text-align:center;font:14px sans-serif">תצוגת בדיקה מקומית · נתונים סינתטיים בלבד · לא Production${motionTest ? ' · בדיקת אנימציה יזומה על fixtures בלבד' : ''}</div><main id="root" style="max-width:1400px;margin:auto;padding:24px"></main><script src="/preview.js"></script></body></html>`)
 })
 server.listen(4318,'127.0.0.1',()=>console.log('Synthetic read-only UI preview: http://127.0.0.1:4318'))

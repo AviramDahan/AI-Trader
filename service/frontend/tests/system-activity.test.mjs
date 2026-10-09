@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
 import { candidate, fixtureResearch as research, fixtureDashboard as dashboard } from './system-activity-fixtures.mjs'
 
-const result = await build({ entryPoints: ['src/SystemActivity.tsx','src/systemActivityModel.ts'], bundle: true, write: false,
+const result = await build({ entryPoints: ['src/SystemActivity.tsx','src/systemActivityModel.ts','src/SystemNetwork.tsx'], bundle: true, write: false,
   outdir: 'unused', platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react','react/jsx-runtime'],
   plugins: [{ name: 'isolated-render', setup(b) {
     b.onResolve({ filter: /^\.\/appShared$/ }, () => ({ path: 'stub', namespace: 'stub' }))
@@ -20,6 +20,7 @@ const load = name => {
 }
 const { buildActivity, activityRevision, finite } = load('systemActivityModel')
 const { SystemActivityView } = load('SystemActivity')
+const { buildNetwork, crawlerRoute, NETWORK_LIMIT, SystemNetwork } = load('SystemNetwork')
 let assertions = 0
 const check = v => { assert.ok(v); assertions++ }
 const equal = (a,b) => { assert.deepEqual(a,b); assertions++ }
@@ -87,7 +88,33 @@ const legacy = {...dashboard,trades:[{...dashboard.trades[0],legacy_position_id:
 check(render({dashboard:legacy,selected:'trade:40',research:{...research,outcomes:[{trade_id:40,cohort:'Legacy',realized_net_pct:null,realized_net_r:null}]}}).includes('חסרה היסטוריה מלאה'))
 const css = readFileSync('src/systemActivity.css','utf8')
 check(css.includes('prefers-reduced-motion:reduce'))
-check(!css.includes('infinite'))
+// Continuous motion belongs only to the explicitly decorative crawler, not event evidence.
+check(css.includes('.visual-motion-enabled .system-crawler') && css.includes('system-visual-tour'))
+check(css.includes('.visual-motion-enabled .system-crawler-leg { animation: none; }'))
+const graph = buildNetwork(items)
+equal(graph.flatMap(c => c.nodes).length, items.length)
+equal(graph.flatMap(c => c.nodes.map(n => n.item.id)).sort(), items.map(i => i.id).sort())
+equal(buildNetwork([...items].reverse()), graph)
+equal(crawlerRoute([...items].reverse()), crawlerRoute(items))
+const dense = Array.from({length: 100}, (_, n) => ({...stock('HOTL'), id:`synthetic:${n}`}))
+const denseCluster = buildNetwork(dense).find(c => c.station === 'position')
+equal(denseCluster.nodes.length, NETWORK_LIMIT)
+equal(denseCluster.omitted, 100-NETWORK_LIMIT)
+check(denseCluster.nodes.every(n => Number.isFinite(n.x) && Number.isFinite(n.y)))
+equal(buildNetwork([]).flatMap(c => c.nodes), [])
+equal(crawlerRoute([]),'M 610 340 L 610 340')
+const network = props => renderToStaticMarkup(createElement(SystemNetwork,{he:true,items,changed:new Set(),station:'all',setStation:()=>{},selected:null,select:()=>{},available:true,marketOpen:true,...props}))
+check(network({}).includes('visual-motion-enabled'))
+check(!network({available:false}).includes('visual-motion-enabled'))
+check(!network({items:[]}).includes('visual-motion-enabled'))
+check(network({}).includes('אנימציה חזותית בלבד — לא מצב Worker'))
+check(network({}).includes('נקודות הרקע דקורטיביות'))
+check(network({}).includes('מסלול מניה: HOTL'))
+check(network({changed:new Set(['trade:40'])}).includes('system-arrival'))
+check(!network({available:false,changed:new Set(['trade:40'])}).includes('system-arrival'))
+const networkSource = readFileSync('src/SystemNetwork.tsx','utf8')
+check(!networkSource.includes('fetch(') && !networkSource.includes('Math.random'))
+check(networkSource.includes("visibilityState !== 'hidden'"))
 const component = readFileSync('src/SystemActivity.tsx','utf8')
 check(!/method:\s*['"](?:POST|PUT|DELETE)/.test(component))
 check(component.includes('controller.abort()') && component.includes('inFlight') && component.includes("visibilityState === 'hidden'"))
