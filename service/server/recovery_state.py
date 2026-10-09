@@ -110,8 +110,12 @@ def export_postgres(url):
         conn.execute("SET LOCAL statement_timeout='30000'")
         # Schema 7 adds isolated SEC analytical tables; active-state recovery
         # remains portfolio-only, with no filing bodies/history or prompts.
-        if conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version'] not in (2,3,4,5,6,7):
+        schema = conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version']
+        if schema not in (2,3,4,5,6,7):
             raise ValueError('unsupported_source_schema')
+        if schema == 7:
+            from sec_schema7_compat import assert_sec_schema7
+            assert_sec_schema7(conn)
         def select(table,condition,args=()):
             rows=conn.execute(sql.SQL('SELECT * FROM {} WHERE ').format(sql.Identifier(table))+condition,args).fetchall()
             for row in rows:

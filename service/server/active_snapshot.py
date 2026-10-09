@@ -154,6 +154,9 @@ def import_data(data, url, *, allow_defaults=False, scanner_token=None):
         schema = conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version']
         if schema not in (2,3,4,5,6,7) or (data['version'] in (3,4) and schema < 6):
             raise ValueError('unsupported_destination_schema')
+        if schema == 7:
+            from sec_schema7_compat import assert_sec_schema7
+            assert_sec_schema7(conn)
         for key in ROLE_KEYS.values():
             if not conn.execute("SELECT pg_try_advisory_xact_lock(719322,%s) AS ok", (key,)).fetchone()["ok"]:
                 raise ValueError("workers_must_be_stopped")
