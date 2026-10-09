@@ -23,7 +23,15 @@ REQUIRED_COLUMNS = {
         'older_file_index', 'catchup_active', 'catchup_marker', 'retry_after', 'error_code'},
 }
 REQUIRED_INDEXES = {'idx_si_jobs_due', 'idx_si_jobs_issuer', 'idx_si_transactions_issuer',
-                    'idx_si_snapshot_lookup', 'idx_si_decisions_time'}
+                    'idx_si_snapshot_lookup', 'idx_si_decisions_time', 'idx_si_decisions_snapshot',
+                    'idx_si_snapshot_evidence_ids', 'idx_si_snapshot_facts'}
+# PostgreSQL-only dependency lookups for bounded archive-first maintenance.
+# The bridge never executes this DDL; it only verifies a completed schema.
+RETENTION_INDEX_SQL = (
+    'CREATE INDEX IF NOT EXISTS idx_si_decisions_snapshot ON si_decisions(sec_snapshot_id)',
+    'CREATE INDEX IF NOT EXISTS idx_si_snapshot_evidence_ids ON si_company_snapshots USING GIN ((evidence_ids_json::jsonb))',
+    'CREATE INDEX IF NOT EXISTS idx_si_snapshot_facts ON si_company_snapshots USING GIN ((evidence_json::jsonb))',
+)
 REQUIRED_CONSTRAINTS = {
     ('si_universe_snapshots', 'p', ('id',), ''),
     ('si_filing_jobs', 'p', ('accession',), ''),
