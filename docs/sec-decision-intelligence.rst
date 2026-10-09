@@ -24,6 +24,34 @@ are bounded, and XML DTD/entities are rejected. An operator User-Agent with a
 real contact email is mandatory. EdgarTools is not required; SEC XML/XBRL
 definitions and original filing references are authoritative.
 
+Document recovery (parser v2)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Ownership ``xsl.../FILE.xml`` primary paths are SEC presentation wrappers.
+The worker requests ``FILE.xml`` directly under the same verified issuer and
+accession, retaining the original primary metadata and the actual evidence
+URL/hash. It does not parse rendered HTML as ownership XML or relax DTD/entity,
+allowlist, redirect, time or two-request-per-second protections. Financial
+10-Q/10-K primary documents have a bounded 10 MB hash-only transport ceiling,
+matching their existing structured XBRL ceiling. Ownership/current-report
+limits and news extractors remain unchanged.
+
+The normal bounded worker may attempt once, under parser v2, prior generic
+``ValueError`` failures from the v1/null parser only for rendered ownership
+documents and financial reports. Successful rows are never reprocessed;
+unsupported failures record the attempted parser and a whitelisted reason,
+so repeated loops/restart cannot create an infinite recovery cycle. Transient
+failures retain the existing finite backoff policy. Accepted/published/first-
+seen timestamps and immutable decisions are not rewritten, and old filings
+remain ineligible for fresh evidence/publication. This is analytical recovery,
+not replay of trades or public news. Arbitrary exception text is never stored.
+
+A persisted processing cursor rotates issuers across worker cycles, rather
+than only inside each batch. It commits with each attempt, including a failed
+attempt, without increasing the batch size or SEC request rate. The cursor is
+an operational hint in existing settings, not source evidence; an isolated
+restore can safely start it empty because processed accessions remain final.
+
 Form 4/4/A transactions keep issuer versus reporting-owner CIK distinct.
 Only non-derivative common-equity P/acquired transactions with positive shares
 and price contribute to the initial purchase metric. P is *not* evidence of an

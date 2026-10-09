@@ -62,6 +62,157 @@ def test_form4_codes_acquisition_and_unknowns():
         si.parse_form4(b"<!DOCTYPE x [<!ENTITY y SYSTEM 'file:///etc/passwd'>]><x/>", "x", "0000320193")
 
 
+@pytest.mark.parametrize('form', ['4', '4/A'])
+def test_rendered_ownership_url_fetches_original_xml(isolated, monkeypatch, form):
+    now = datetime.now(timezone.utc)
+    uid, _ = si.save_universe({'AAPL': {'company': 'Apple Inc.', 'indexes': ['sp500']}},
+                              {'0000320193': ['AAPL']}, now)
+    row = filing('0000320193-26-000071', form, now-timedelta(hours=1))
+    row['primaryDocument'] = 'xslF345X05/ownership.xml'
+    si._queue_filing(row, '0000320193', ['AAPL'], uid, now, [10])
+    fetched = []
+    def fake_fetch(url, *_args, **_kwargs):
+        fetched.append(url)
+        if '/xslF345X05/' in url:
+            return b'<!DOCTYPE html><html><body>SEC rendered ownership report</body></html>', {}
+        return ownership_xml(form=form), {}
+    monkeypatch.setenv('NEWS_SEC_USER_AGENT', 'Test Operator test@example.com')
+    monkeypatch.setattr(si, 'fetch', fake_fetch)
+    assert si.process_jobs(now)['processed'] == 1
+    assert len(fetched) == 1 and '/xslF345X05/' not in fetched[0]
+    with isolated() as conn:
+        job = dict(conn.execute('SELECT * FROM si_filing_jobs').fetchone())
+        evidence = json.loads(job['evidence_json'])
+        assert evidence['source_url'] == fetched[0]
+        assert job['primary_document'] == row['primaryDocument']
+        assert evidence['document_sha256'] == si.hashlib.sha256(ownership_xml(form=form)).hexdigest()
+        assert conn.execute('SELECT count(*) n FROM si_transactions').fetchone()['n'] == 1
+    assert si.process_jobs(now)['processed'] == 0
+
+
+def test_old_generic_failure_recovers_once_without_backfill_publication(isolated, monkeypatch):
+    now = datetime.now(timezone.utc)
+    accepted = now-timedelta(days=100)
+    uid, _ = si.save_universe({'AAPL': {'company': 'Apple Inc.', 'indexes': ['sp500']}},
+                              {'0000320193': ['AAPL']}, now)
+    row = filing('0000320193-26-000072', '4', accepted)
+    row['primaryDocument'] = 'xslF345X05/ownership.xml'
+    si._queue_filing(row, '0000320193', ['AAPL'], uid, now, [10])
+    with isolated() as conn:
+        conn.execute("UPDATE si_filing_jobs SET status='unsupported',error_code='ValueError',attempts=1")
+        before = dict(conn.execute('SELECT * FROM si_filing_jobs').fetchone())
+        conn.commit()
+    monkeypatch.setenv('NEWS_SEC_USER_AGENT', 'Test Operator test@example.com')
+    monkeypatch.setenv('SEC_INTELLIGENCE_MODE', 'paper')
+    monkeypatch.setenv('STOCK_SCANNER_TELEGRAM_ENABLED', 'true')
+    monkeypatch.setenv('TELEGRAM_SEC_INTELLIGENCE_THREAD_ID', '345')
+    monkeypatch.setenv('SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE', si._z(now-timedelta(hours=1)))
+    monkeypatch.setattr(si, 'fetch', lambda *_a, **_k: (ownership_xml(), {}))
+    assert si.process_jobs(now)['processed'] == 1
+    assert si.process_jobs(now)['processed'] == 0
+    with isolated() as conn:
+        after = dict(conn.execute('SELECT * FROM si_filing_jobs').fetchone())
+        assert after['accepted_at'] == before['accepted_at']
+        assert after['published_at'] == before['published_at']
+        assert after['first_seen_at'] == before['first_seen_at']
+        assert after['attempts'] == 2 and after['parser_version'] == si.PARSER
+        assert conn.execute('SELECT count(*) n FROM si_transactions').fetchone()['n'] == 1
+        assert conn.execute('SELECT count(*) n FROM scanner_telegram_outbox').fetchone()['n'] == 0
+        assert conn.execute('SELECT count(*) n FROM scanner_fills').fetchone()['n'] == 0
+
+
+def test_recovery_still_rejects_unsafe_xml_and_never_repeats(isolated, monkeypatch):
+    now = datetime.now(timezone.utc)
+    uid, _ = si.save_universe({'AAPL': {'company': 'Apple Inc.', 'indexes': ['sp500']}},
+                              {'0000320193': ['AAPL']}, now)
+    row = filing('0000320193-26-000073', '4', now-timedelta(hours=1))
+    row['primaryDocument'] = 'xslF345X05/ownership.xml'
+    si._queue_filing(row, '0000320193', ['AAPL'], uid, now, [10])
+    with isolated() as conn:
+        conn.execute("UPDATE si_filing_jobs SET status='unsupported',error_code='ValueError',attempts=1")
+        conn.commit()
+    monkeypatch.setenv('NEWS_SEC_USER_AGENT', 'Test Operator test@example.com')
+    monkeypatch.setattr(si, 'fetch', lambda *_a, **_k: (
+        b'<!DOCTYPE ownershipDocument [<!ENTITY x SYSTEM "file:///private">]><ownershipDocument/>', {}))
+    assert si.process_jobs(now)['failed'] == 1
+    assert si.process_jobs(now)['failed'] == 0
+    with isolated() as conn:
+        job = dict(conn.execute('SELECT * FROM si_filing_jobs').fetchone())
+        assert job['status'] == 'unsupported' and job['error_code'] == 'unsafe_sec_xml'
+        assert job['parser_version'] == si.PARSER and job['attempts'] == 2
+        assert conn.execute('SELECT count(*) n FROM si_transactions').fetchone()['n'] == 0
+
+
+@pytest.mark.parametrize('legacy_failure', [False, True])
+def test_financial_document_has_its_own_bounded_size_limit(isolated, monkeypatch, legacy_failure):
+    now = datetime.now(timezone.utc)
+    uid, _ = si.save_universe({'AAPL': {'company': 'Apple Inc.', 'indexes': ['sp500']}},
+                              {'0000320193': ['AAPL']}, now)
+    row = filing('0000320193-26-000074', '10-K', now-timedelta(hours=1))
+    row['primaryDocument'] = 'annual.htm'
+    si._queue_filing(row, '0000320193', ['AAPL'], uid, now, [10])
+    if legacy_failure:
+        with isolated() as conn:
+            conn.execute("UPDATE si_filing_jobs SET status='unsupported',error_code='ValueError',attempts=1")
+            conn.commit()
+    raw = b'<html>' + b' ' * 2_000_001 + b'</html>'
+    def fake_fetch(url, *_args, **kwargs):
+        assert kwargs['max_bytes'] == 10_000_000
+        if 'companyfacts' in url:
+            return b'{"cik":320193,"facts":{}}', {}
+        return raw, {}
+    monkeypatch.setenv('NEWS_SEC_USER_AGENT', 'Test Operator test@example.com')
+    monkeypatch.setattr(si, 'fetch', fake_fetch)
+    assert si.process_jobs(now)['processed'] == 1
+    with isolated() as conn:
+        evidence = json.loads(conn.execute('SELECT evidence_json FROM si_filing_jobs').fetchone()['evidence_json'])
+        assert evidence['document_sha256'] == si.hashlib.sha256(raw).hexdigest()
+        assert evidence['comparisons'] == []
+
+
+@pytest.mark.parametrize('source', [
+    'https://example.com/ownership.xml',
+    'https://www.sec.gov/Archives/edgar/data/42/000032019326000075/xslF345X05/ownership.xml',
+    'https://www.sec.gov/Archives/edgar/data/320193/000032019326000076/xslF345X05/ownership.xml',
+])
+def test_original_xml_resolution_rejects_wrong_host_issuer_or_accession(source):
+    job = {'form': '4', 'issuer_cik': '0000320193', 'accession': '0000320193-26-000075',
+           'primary_document': 'xslF345X05/ownership.xml', 'source_url': source}
+    with pytest.raises(ValueError, match='sec_source_metadata_mismatch'):
+        si._document_url(job)
+
+
+def test_processing_error_code_does_not_persist_response_secrets():
+    assert si._processing_error_code(ValueError('sec_document_too_large')) == 'sec_document_too_large'
+    assert si._processing_error_code(ValueError('response contains private provider text')) == 'ValueError'
+    assert si._processing_error_code(RuntimeError('secret-token')) == 'RuntimeError'
+
+
+def test_processing_rotates_issuers_across_cycles_not_only_within_a_batch(isolated, monkeypatch):
+    now = datetime.now(timezone.utc)
+    mapping = {'0000002488': ['AMD'], '0000002969': ['APD'], '0000320193': ['AAPL']}
+    universe = {ticker: {'company': ticker, 'indexes': ['sp500']}
+                for tickers in mapping.values() for ticker in tickers}
+    uid, _ = si.save_universe(universe, mapping, now)
+    for cik, tickers in mapping.items():
+        for suffix in (1, 2, 3):
+            si._queue_filing(filing(f'{cik}-26-{suffix:06}', '4', now-timedelta(hours=1)),
+                             cik, tickers, uid, now, [10])
+    seen = []
+    def fake_fetch(url, *_a, **_k):
+        cik = url.split('/data/')[1].split('/')[0].zfill(10)
+        seen.append(cik)
+        return ownership_xml().replace(b'0000320193</issuerCik>', cik.encode()+b'</issuerCik>'), {}
+    monkeypatch.setenv('NEWS_SEC_USER_AGENT', 'Test Operator test@example.com')
+    monkeypatch.setattr(si, 'fetch', fake_fetch)
+    for _ in range(3):
+        assert si.process_jobs(now, limit=1)['processed'] == 1
+    assert len(set(seen)) == 3
+    for _ in range(3):
+        assert si.process_jobs(now, limit=1)['processed'] == 1
+    assert seen[:3] == seen[3:]
+
+
 def test_research_controls_are_configurable_but_safety_bounded(monkeypatch):
     monkeypatch.setenv("SEC_INTELLIGENCE_PURCHASE_WINDOWS_DAYS", "5,20,60")
     monkeypatch.setenv("SEC_INTELLIGENCE_PURCHASE_WEIGHT", "0.015")
