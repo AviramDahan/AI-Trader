@@ -267,6 +267,29 @@ def test_processing_round_robin_prevents_active_issuer_starvation(isolated, monk
     assert set(issuers) == {"0000320193", "0000789019"}
 
 
+def test_immaterial_financial_facts_do_not_replace_current_news(isolated):
+    now = datetime.now(timezone.utc)
+    uid, _ = si.save_universe({"AAPL": {"company": "Apple Inc.", "indexes": ["sp500"]}},
+                               {"0000320193": ["AAPL"]}, now)
+    accession = "0000320193-26-000091"
+    fact = {"metric": "revenue", "namespace": "us-gaap", "tag": "Revenues", "unit": "USD",
+            "start": "2026-07-01", "end": "2026-09-30", "value": 105,
+            "previous": {"value": 100}, "change_pct": 5, "reason": "comparable_prior"}
+    with isolated() as conn:
+        conn.execute("""INSERT INTO si_filing_jobs(accession,issuer_cik,tickers_json,form,
+            accepted_at,published_at,first_seen_at,source_url,primary_document,status,
+            processed_at,evidence_json,universe_snapshot_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (accession, "0000320193", '["AAPL"]', "10-Q", si._z(now-timedelta(hours=1)),
+             si._z(now-timedelta(hours=1)), si._z(now),
+             "https://www.sec.gov/Archives/edgar/data/320193/000032019326000091/report.htm",
+             "report.htm", "processed", si._z(now), json.dumps({"kind": "financial", "comparisons": [fact]}), uid))
+        si._update_snapshots("0000320193", ["AAPL"], uid, now, conn)
+        conn.commit()
+    with isolated() as conn:
+        raw = conn.execute("SELECT evidence_json FROM si_company_snapshots ORDER BY created_at DESC LIMIT 1").fetchone()
+    assert json.loads(raw["evidence_json"])["coverage"] == "unknown_no_fresh_structured_evidence"
+
+
 def test_xbrl_comparisons_reject_ytd_units_future_and_missing():
     accession = "0000320193-26-000001"
     current = {"accn": accession, "form": "10-Q", "filed": "2026-10-08", "start": "2026-07-01", "end": "2026-09-30", "val": 120}

@@ -42,6 +42,10 @@ tags yield unknown instead of a fabricated percentage. 8-K and one related
 99 exhibit may supply a specific, quoted guidance update for AI review; no
 numeric guidance change is inferred without a same-period prior value. The
 bounded parser never executes document text or passes it as system instructions.
+Only validated material comparisons (at least 10% relative change or 2
+percentage points of operating margin) become current signal evidence;
+smaller or non-comparable filing facts remain stored context, not a fresh-news
+substitute. These initial cutoffs are uncalibrated research controls.
 
 Decision path and modes
 -----------------------

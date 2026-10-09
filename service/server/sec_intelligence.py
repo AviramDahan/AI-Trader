@@ -613,7 +613,8 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
                                                  for bucket in ("execution_character_unknown", "scheduled_or_private")}})
             elif evidence.get("kind") == "financial":
                 comparisons = [f for f in evidence.get("comparisons", [])
-                               if f.get("reason") == "comparable_prior" and f.get("change_pct") is not None]
+                               if f.get("reason") == "comparable_prior" and
+                               (f.get("change_pct") is not None or f.get("change_pp") is not None)]
                 # Opposing validated facts can cancel. Missing/custom tags
                 # contribute zero and retain an explicit coverage reason.
                 for fact in comparisons:
@@ -635,10 +636,13 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
                     filing_adjustment += delta
                     if delta:
                         evidence_ids.append(_hash(filing["accession"], fact["namespace"], fact["tag"], fact["end"]))
-                if comparisons:
+                material_comparisons = [fact for fact in comparisons
+                    if (fact.get("change_pct") is not None and abs(fact["change_pct"]) >= 10)
+                    or (fact.get("change_pp") is not None and abs(fact["change_pp"]) >= 2)]
+                if material_comparisons:
                     items.append({"kind": "comparable_financials", "accession": filing["accession"],
                                   "accepted_at": filing["accepted_at"], "source_url": filing["source_url"],
-                                  "comparisons": comparisons[:12]})
+                                  "comparisons": material_comparisons[:12]})
             elif evidence.get("kind") == "current_report" and evidence.get("specific_guidance_updates"):
                 # Text is evidence for AI review, not a fabricated numeric
                 # change or automatic positive score.
