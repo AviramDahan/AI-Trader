@@ -18,7 +18,7 @@ from database import get_db_connection
 from sec_transport import fetch
 
 POLICY = "sec-intelligence-v1"
-PARSER = "sec-structured-v1"
+PARSER = "sec-structured-v2"
 MAX_PENDING = 600
 FORMS = {"4", "4/A", "10-Q", "10-Q/A", "10-K", "10-K/A", "8-K", "8-K/A"}
 FINANCIAL_TAGS = {
@@ -302,6 +302,35 @@ def _source_url(cik: str, accession: str, document: str) -> str:
     if not re.fullmatch(r"(?:xsl[A-Za-z0-9]+/)?[A-Za-z0-9_.-]{1,180}", document):
         raise ValueError("invalid_sec_document_name")
     return f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/{document}"
+
+
+def _document_url(job: dict) -> str:
+    """Resolve only SEC's presentation prefix, never an arbitrary HTML link.
+
+    The xsl directory renders ownership XML as HTML. Fetch the original file
+    under the same verified issuer/accession before applying the strict XML
+    parser. Neither external entities nor document-size guards are relaxed.
+    """
+    document = job['primary_document']
+    expected = _source_url(job['issuer_cik'], job['accession'], document)
+    if job['source_url'] != expected:
+        raise ValueError('sec_source_metadata_mismatch')
+    if job['form'] in {'4', '4/A'} and re.fullmatch(
+            r'xsl[A-Za-z0-9]+/[A-Za-z0-9_.-]{1,180}\.xml', document):
+        return _source_url(job['issuer_cik'], job['accession'], document.split('/', 1)[1])
+    return expected
+
+
+def _processing_error_code(exc: Exception) -> str:
+    """Persist bounded identifiers, never arbitrary response text/URLs."""
+    allowed = {'unsafe_sec_xml', 'ownership_form_invalid', 'issuer_cik_mismatch',
+               'reporting_owner_missing', 'ownership_xml_missing', 'xbrl_issuer_mismatch',
+               'sec_exhibit_too_large', 'unsupported_form', 'invalid_accession',
+               'invalid_sec_document_name', 'sec_source_metadata_mismatch',
+               'sec_url_not_allowlisted', 'sec_query_not_allowlisted',
+               'sec_host_path_mismatch', 'sec_response_not_plain_200',
+               'sec_document_too_large'}
+    return str(exc) if isinstance(exc, ValueError) and str(exc) in allowed else type(exc).__name__
 
 
 def _rows(payload: dict, key: str):
@@ -831,23 +860,38 @@ def process_jobs(now: datetime | None = None, limit: int = 2) -> dict:
     research_controls()  # A config error must not mark a valid filing unsupported.
     now = now or datetime.now(timezone.utc)
     with get_db_connection() as conn:
+        cursor = conn.execute("SELECT value_json FROM scanner_settings WHERE key='si_processing_cursor'").fetchone()
+        last_issuer = json.loads(cursor['value_json']).get('last_issuer', '') if cursor else ''
         jobs = [dict(r) for r in conn.execute("""WITH due AS (
             SELECT *, ROW_NUMBER() OVER (PARTITION BY issuer_cik ORDER BY first_seen_at,accession) AS issuer_rank
-            FROM si_filing_jobs WHERE status IN ('queued','retry')
+            FROM si_filing_jobs WHERE (status IN ('queued','retry') OR
+                (status='unsupported' AND error_code='ValueError'
+                 AND (parser_version IS NULL OR parser_version='sec-structured-v1')
+                 AND (form IN ('10-Q','10-Q/A','10-K','10-K/A') OR
+                      (form IN ('4','4/A') AND primary_document LIKE 'xsl%/%.xml'))))
             AND (next_attempt_at IS NULL OR next_attempt_at<=?))
-            SELECT * FROM due ORDER BY issuer_rank,first_seen_at,accession LIMIT ?""",
-            (_z(now), min(max(limit, 1), 4)))]
+            SELECT * FROM due ORDER BY issuer_rank,
+                CASE WHEN issuer_cik>? THEN 0 ELSE 1 END,issuer_cik,first_seen_at,accession LIMIT ?""",
+            (_z(now), last_issuer, min(max(limit, 1), 4)))]
     processed, failures = 0, []
     for job in jobs:
         try:
-            raw, _ = fetch(job["source_url"], _user_agent(), max_bytes=2_000_000)
-            evidence, transactions = _filing_evidence(job, raw, now)
+            source_url = _document_url(job)
+            # Financial primary documents are hashed, not parsed as unbounded
+            # HTML. Use the same bounded ceiling as their structured XBRL;
+            # ownership XML and current reports retain their existing limits.
+            max_bytes = 10_000_000 if job['form'] in {'10-Q','10-Q/A','10-K','10-K/A'} else 2_000_000
+            raw, _ = fetch(source_url, _user_agent(), max_bytes=max_bytes)
+            evidence, transactions = _filing_evidence(dict(job, source_url=source_url), raw, now)
             processed_at = datetime.now(timezone.utc)
             with get_db_connection() as conn:
-                conn.execute("""UPDATE si_filing_jobs SET status='processed',attempts=attempts+1,
+                updated = conn.execute("""UPDATE si_filing_jobs SET status='processed',attempts=attempts+1,
                     document_sha256=?,parser_version=?,processed_at=?,error_code=NULL,evidence_json=?
-                    WHERE accession=? AND status IN ('queued','retry')""",
-                    (evidence["document_sha256"], PARSER, _z(processed_at), _json(evidence), job["accession"]))
+                    WHERE accession=? AND status=? AND attempts=?""",
+                    (evidence["document_sha256"], PARSER, _z(processed_at), _json(evidence),
+                     job['accession'], job['status'], job['attempts']))
+                if updated.rowcount != 1:
+                    continue
                 for tx in transactions:
                     conn.execute("""INSERT INTO si_transactions(event_id,accession,issuer_cik,transaction_key,
                         transaction_at,owners_json,category,body_json,effective_available_at)
@@ -881,6 +925,7 @@ def process_jobs(now: datetime | None = None, limit: int = 2) -> dict:
                 _update_snapshots(job["issuer_cik"], json.loads(job["tickers_json"]),
                                   job["universe_snapshot_id"], processed_at, conn)
                 _enqueue_material_public_alert(job, evidence, processed_at, conn)
+                _advance_processing_cursor(conn, job['issuer_cik'], now)
                 conn.commit()
             processed += 1
         except Exception as exc:
@@ -893,12 +938,23 @@ def process_jobs(now: datetime | None = None, limit: int = 2) -> dict:
                 delay = max(delay, exc.retry_after_seconds)
             with get_db_connection() as conn:
                 conn.execute("""UPDATE si_filing_jobs SET status=?,attempts=attempts+1,
-                    next_attempt_at=?,error_code=? WHERE accession=?""",
+                    next_attempt_at=?,error_code=?,parser_version=?
+                    WHERE accession=? AND status=? AND attempts=?""",
                     (status, _z(now + timedelta(seconds=delay)) if status == "retry" else None,
-                     type(exc).__name__, job["accession"]))
+                     _processing_error_code(exc), PARSER, job['accession'], job['status'], job['attempts']))
+                _advance_processing_cursor(conn, job['issuer_cik'], now)
                 conn.commit()
-            failures.append(type(exc).__name__)
+            failures.append(_processing_error_code(exc))
     return {"processed": processed, "failed": len(failures), "errors": failures[:4]}
+
+
+def _advance_processing_cursor(conn, issuer: str, at: datetime) -> None:
+    # Commit with the attempt, so restart neither starves other issuers nor
+    # changes facts/filing timestamps. No extra worker or schema is required.
+    conn.execute("""INSERT INTO scanner_settings(key,value_json,updated_at)
+        VALUES('si_processing_cursor',?,?) ON CONFLICT(key) DO UPDATE SET
+        value_json=excluded.value_json,updated_at=excluded.updated_at""",
+        (_json({'last_issuer': issuer}), _z(at)))
 
 
 def snapshots_for(candidates: list[dict], decided_at: datetime) -> dict[str, dict]:

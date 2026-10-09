@@ -6,6 +6,92 @@ import sec_intelligence as si
 import sec_transport
 
 
+def test_postgres_rendered_form4_failure_recovers_without_replay(pg, monkeypatch):
+    from migrations import migrate
+    migrate(target_version=7)
+    now = datetime.now(timezone.utc)
+    uid, _ = si.save_universe({'AAPL': {'company': 'Apple Inc.', 'indexes': ['sp500']}},
+                              {'0000320193': ['AAPL']}, now)
+    accession = '0000320193-26-000091'
+    row = {'accessionNumber': accession, 'form': '4',
+           'acceptanceDateTime': si._z(now-timedelta(days=100)),
+           'primaryDocument': 'xslF345X05/ownership.xml'}
+    assert si._queue_filing(row, '0000320193', ['AAPL'], uid, now, [10])
+    with database.get_db_connection() as conn:
+        conn.execute("UPDATE si_filing_jobs SET status='unsupported',error_code='ValueError',attempts=1")
+        original = dict(conn.execute('SELECT * FROM si_filing_jobs').fetchone())
+        conn.commit()
+    xml = b'''<ownershipDocument><documentType>4</documentType><periodOfReport>2026-07-01</periodOfReport>
+    <issuer><issuerCik>0000320193</issuerCik></issuer><reportingOwner><reportingOwnerId>
+    <rptOwnerCik>0000000042</rptOwnerCik></reportingOwnerId></reportingOwner>
+    <nonDerivativeTable><nonDerivativeTransaction><securityTitle><value>Common Stock</value></securityTitle>
+    <transactionDate><value>2026-07-01</value></transactionDate><transactionCoding><transactionCode>P</transactionCode></transactionCoding>
+    <transactionAmounts><transactionShares><value>10</value></transactionShares>
+    <transactionPricePerShare><value>12</value></transactionPricePerShare>
+    <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode></transactionAmounts>
+    </nonDerivativeTransaction></nonDerivativeTable></ownershipDocument>'''
+    fetched = []
+    def fake_fetch(url, *_a, **_k):
+        fetched.append(url)
+        assert '/xslF345X05/' not in url
+        return xml, {}
+    monkeypatch.setenv('NEWS_SEC_USER_AGENT', 'Isolated Test Operator test@example.com')
+    monkeypatch.setenv('SEC_INTELLIGENCE_MODE', 'paper')
+    monkeypatch.setenv('STOCK_SCANNER_TELEGRAM_ENABLED', 'true')
+    monkeypatch.setenv('TELEGRAM_SEC_INTELLIGENCE_THREAD_ID', '345')
+    monkeypatch.setenv('SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE', si._z(now-timedelta(hours=1)))
+    monkeypatch.setattr(si, 'fetch', fake_fetch)
+    assert si.process_jobs(now)['processed'] == 1
+    assert si.process_jobs(now)['processed'] == 0
+    with database.get_db_connection() as conn:
+        restored = dict(conn.execute('SELECT * FROM si_filing_jobs').fetchone())
+        for field in ('accession', 'accepted_at', 'published_at', 'first_seen_at'):
+            assert restored[field] == original[field]
+        assert restored['parser_version'] == si.PARSER and restored['attempts'] == 2
+        assert conn.execute('SELECT count(*) n FROM si_transactions').fetchone()['n'] == 1
+        assert conn.execute('SELECT count(*) n FROM scanner_telegram_outbox').fetchone()['n'] == 0
+        assert conn.execute('SELECT count(*) n FROM scanner_orders').fetchone()['n'] == 0
+        assert conn.execute('SELECT count(*) n FROM scanner_fills').fetchone()['n'] == 0
+    assert len(fetched) == 1
+
+
+def test_postgres_processing_cursor_rotates_after_failure_and_restart(pg, monkeypatch):
+    from migrations import migrate
+    migrate(target_version=7)
+    now = datetime.now(timezone.utc)
+    mapping = {'0000002488': ['AMD'], '0000002969': ['APD'], '0000320193': ['AAPL']}
+    uid, _ = si.save_universe({ticker: {'company': ticker, 'indexes': ['sp500']}
+                              for symbols in mapping.values() for ticker in symbols}, mapping, now)
+    for cik, symbols in mapping.items():
+        for suffix in (1, 2):
+            row = {'accessionNumber': f'{cik}-26-{suffix:06}', 'form': '4',
+                   'acceptanceDateTime': si._z(now-timedelta(days=100)), 'primaryDocument': 'ownership.xml'}
+            si._queue_filing(row, cik, symbols, uid, now, [10])
+    seen = []
+    def fake_fetch(url, *_a, **_k):
+        cik = url.split('/data/')[1].split('/')[0].zfill(10)
+        seen.append(cik)
+        if cik == '0000002488':
+            return b'<!DOCTYPE x [<!ENTITY y SYSTEM "file:///private">]><x/>', {}
+        return (f'<ownershipDocument><documentType>4</documentType><issuer><issuerCik>{cik}</issuerCik>'
+                '</issuer><reportingOwner><reportingOwnerId><rptOwnerCik>42</rptOwnerCik>'
+                '</reportingOwnerId></reportingOwner></ownershipDocument>').encode(), {}
+    monkeypatch.setenv('NEWS_SEC_USER_AGENT', 'Isolated Test Operator test@example.com')
+    monkeypatch.setattr(si, 'fetch', fake_fetch)
+    assert si.process_jobs(now, limit=1)['failed'] == 1
+    assert si.process_jobs(now, limit=1)['processed'] == 1
+    assert si.process_jobs(now, limit=1)['processed'] == 1
+    with database.get_db_connection() as conn:
+        cursor = conn.execute("SELECT value_json FROM scanner_settings WHERE key='si_processing_cursor'").fetchone()
+        assert '0000320193' in cursor['value_json']
+    # Every call opens a new DB connection; no in-process rotation memory.
+    assert si.process_jobs(now, limit=1)['failed'] == 1
+    assert si.process_jobs(now, limit=1)['processed'] == 1
+    assert si.process_jobs(now, limit=1)['processed'] == 1
+    assert seen[:3] == list(mapping) and seen[:3] == seen[3:]
+    assert si.process_jobs(now, limit=1)['processed'] == 0
+
+
 def test_schema7_snapshot_decisions_and_idempotent_migration(pg, monkeypatch):
     from migrations import migrate
     migrate(target_version=7)
