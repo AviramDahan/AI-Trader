@@ -14,8 +14,8 @@ ROLES = {
     "telegram": "stock_telegram_outbox,stock_telegram_status",
 }
 ROLE_KEYS = {"scanner": 11, "monitor": 12, "telegram": 13}
-# Activation release: migration 006 is required. The prerequisite bridge
-# supports actual schemas 5/6 and is the only safe binary rollback target.
+# SEC activation requires complete migration 007. The prerequisite bridge
+# accepts schemas 6/7 and is the only compatible binary rollback target.
 SCHEMA_VERSION = 7
 SUPPORTED_SCHEMAS = (7,)
 SINGLE_TARGET_ROLLBACK_CAPABILITY = 'v2-format3-holds-legacy-v1'
@@ -41,11 +41,8 @@ def assert_schema():
                     ('scanner_trades','tp2'),('scanner_trades','tp3'))):
                 raise RuntimeError('single_target_schema_incomplete')
         if row['version'] == 7:
-            tables = {r['table_name'] for r in conn.execute("""SELECT table_name FROM information_schema.tables
-                WHERE table_schema=current_schema() AND table_name LIKE 'si_%'""")}
-            if not {'si_universe_snapshots','si_filing_jobs','si_transactions',
-                    'si_company_snapshots','si_decisions','si_checkpoints'} <= tables:
-                raise RuntimeError('sec_intelligence_schema_incomplete')
+            from sec_schema7_compat import assert_sec_schema7
+            assert_sec_schema7(conn)
 
 
 class RoleLease:
