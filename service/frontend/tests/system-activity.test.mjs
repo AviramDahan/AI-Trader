@@ -163,6 +163,7 @@ const networkSource = readFileSync('src/SystemNetwork.tsx','utf8')
 check(!networkSource.includes('fetch(') && !networkSource.includes('Math.random'))
 check(networkSource.includes("visibilityState !== 'hidden'"))
 check(networkSource.includes('seenBatch.current = key') && networkSource.includes('active: false'))
+check(networkSource.includes('[compact,selected,threeD]')) // reframe both renderers above the mobile summary
 const component = readFileSync('src/SystemActivity.tsx','utf8')
 check(!/method:\s*['"](?:POST|PUT|DELETE)/.test(component))
 check(component.includes('controller.abort()') && component.includes('inFlight') && component.includes("visibilityState === 'hidden'"))

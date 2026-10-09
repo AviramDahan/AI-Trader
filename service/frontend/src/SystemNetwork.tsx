@@ -24,6 +24,11 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   const seenBatch = useRef('')
   const lastPoint = useRef(REST)
   const timer = useRef<number | undefined>()
+  const panel = useRef<HTMLDivElement>(null)
+  useEffect(()=> {
+    // Navigation only: keep the selected label above the mobile card in either renderer.
+    if(compact&&selected)panel.current?.scrollIntoView({behavior:'auto',block:'start'})
+  },[compact,selected,threeD])
   const [sweep, setSweep] = useState({ key: '', path: 'M 610 340 L 610 340', active: false, shown: [] as ActivityUpdate[], omitted: 0 })
   useEffect(() => {
     const update = () => setVisible(document.visibilityState !== 'hidden')
@@ -118,7 +123,7 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
         </g>
       </svg>
     </div>
-  return <div className="system-network-panel">
+  return <div ref={panel} className="system-network-panel">
     <div className="system-network-heading"><div><span className="system-eyebrow">THE INTELLIGENCE WEB</span><h3>{t('רשת המניות', 'Stock network')}</h3></div>
       <div className="system-network-controls">
       <button type="button" aria-pressed={threeD} onClick={()=>{setThreeD(v=>!v);setZoom(false)}}>{threeD?t('תצוגת 2D','2D view'):t('תצוגת 3D','3D view')}</button>

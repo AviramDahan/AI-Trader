@@ -93,7 +93,8 @@ directly to the view; manual orbit cancels camera travel. A compact summary
 shows the recorded state, reason, source timestamp and available levels beside
 the map on desktop and in a dismissible, nonmodal bottom card on mobile. Missing
 levels remain unavailable, not zero. Full evidence opens only on request;
-selecting a node no longer scrolls the page automatically. Search, service
+selecting a node never jumps to the full journey. On mobile it frames the map
+header so the selected label remains above the card, including in 2D. Search, service
 details and station lists are collapsible, without removing retained records.
 The mobile 3D map is 520px high, with larger ticker labels and state symbols
 alongside words (colour is not the only signal). Closed does not imply profit
