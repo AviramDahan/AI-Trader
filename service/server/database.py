@@ -238,7 +238,9 @@ class DatabaseCursor:
             if should_capture_id:
                 table = re.match(r"INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)", query.lstrip(), re.I).group(1)
                 # Several scanner state tables use a natural key, not an id.
-                self._cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=%s AND column_name='id'", (table,))
+                self._cursor.execute("""SELECT 1 FROM information_schema.columns
+                    WHERE table_schema=current_schema() AND table_name=%s AND column_name='id'
+                    AND data_type IN ('smallint','integer','bigint')""", (table,))
                 should_capture_id = self._cursor.fetchone() is not None
             if should_capture_id:
                 query = f"{query.strip().rstrip(';')} RETURNING id"
