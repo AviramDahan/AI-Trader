@@ -24,12 +24,23 @@ REQUIRED_COLUMNS = {
 }
 REQUIRED_INDEXES = {'idx_si_jobs_due', 'idx_si_jobs_issuer', 'idx_si_transactions_issuer',
                     'idx_si_snapshot_lookup', 'idx_si_decisions_time'}
+REQUIRED_CONSTRAINTS = {
+    ('si_universe_snapshots', 'p', ('id',), ''),
+    ('si_filing_jobs', 'p', ('accession',), ''),
+    ('si_filing_jobs', 'f', ('universe_snapshot_id',), 'si_universe_snapshots'),
+    ('si_transactions', 'p', ('event_id',), ''),
+    ('si_transactions', 'f', ('accession',), 'si_filing_jobs'),
+    ('si_company_snapshots', 'p', ('id',), ''),
+    ('si_company_snapshots', 'f', ('universe_snapshot_id',), 'si_universe_snapshots'),
+    ('si_decisions', 'p', ('scan_id', 'ticker', 'mode'), ''),
+    ('si_checkpoints', 'p', ('issuer_cik',), ''),
+}
 
 
 def assert_sec_schema7(conn):
     versions = [int(row['version']) for row in conn.execute(
         'SELECT version FROM schema_migrations ORDER BY version').fetchall()]
-    if not versions or versions[-1] != 7 or 6 not in versions or versions.count(7) != 1:
+    if versions != list(range(1, 8)):
         raise RuntimeError('sec_schema7_migration_history_incomplete')
     rows = conn.execute("""SELECT table_name,column_name FROM information_schema.columns
         WHERE table_schema=current_schema() AND table_name LIKE 'si_%'""").fetchall()
@@ -42,3 +53,18 @@ def assert_sec_schema7(conn):
         WHERE schemaname=current_schema() AND tablename LIKE 'si_%'""").fetchall()}
     if not REQUIRED_INDEXES <= indexes:
         raise RuntimeError('sec_schema7_indexes_incomplete')
+    constraints = conn.execute("""SELECT rel.relname AS table_name, c.contype AS constraint_type,
+            array_agg(att.attname ORDER BY key.ordinality) AS column_names,
+            COALESCE(refrel.relname, '') AS referenced_table
+        FROM pg_constraint c
+        JOIN pg_class rel ON rel.oid=c.conrelid
+        JOIN pg_namespace ns ON ns.oid=rel.relnamespace
+        LEFT JOIN pg_class refrel ON refrel.oid=c.confrelid
+        JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS key(attnum,ordinality) ON true
+        JOIN pg_attribute att ON att.attrelid=rel.oid AND att.attnum=key.attnum
+        WHERE ns.nspname=current_schema() AND rel.relname LIKE 'si_%' AND c.contype IN ('p','f')
+        GROUP BY rel.relname,c.contype,c.oid,refrel.relname""").fetchall()
+    actual = {(row['table_name'], row['constraint_type'], tuple(row['column_names']),
+               row['referenced_table']) for row in constraints}
+    if not REQUIRED_CONSTRAINTS <= actual:
+        raise RuntimeError('sec_schema7_constraints_incomplete')
