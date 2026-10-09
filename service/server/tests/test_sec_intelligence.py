@@ -62,6 +62,17 @@ def test_form4_codes_acquisition_and_unknowns():
         si.parse_form4(b"<!DOCTYPE x [<!ENTITY y SYSTEM 'file:///etc/passwd'>]><x/>", "x", "0000320193")
 
 
+def test_research_controls_are_configurable_but_safety_bounded(monkeypatch):
+    monkeypatch.setenv("SEC_INTELLIGENCE_PURCHASE_WINDOWS_DAYS", "5,20,60")
+    monkeypatch.setenv("SEC_INTELLIGENCE_PURCHASE_WEIGHT", "0.015")
+    controls = si.research_controls()
+    assert controls["purchase_windows_days"] == (5, 20, 60)
+    assert controls["purchase_weight"] == .015
+    monkeypatch.setenv("SEC_INTELLIGENCE_ADJUSTMENT_CAP", "0.11")
+    with pytest.raises(ValueError, match="invalid_sec_intelligence_adjustment_cap"):
+        si.research_controls()
+
+
 def test_mapping_is_exact_and_url_is_bounded(isolated):
     universe = {"AAPL": {"company": "Apple Inc.", "indexes": ["sp500"]},
                 "DUPE": {"company": "Ambiguous", "indexes": ["sp500"]}}

@@ -32,6 +32,10 @@ supported. Known scheduled/private purchases remain AI evidence but receive no
 ranking bonus; purchases whose execution character is unknown receive only a
 small bounded research adjustment, never the label "discretionary". Shared
 owners of the same economic purchase form one buyer group.
+The 7/30/90-day windows, purchase/filing weights and material-change cutoffs
+are bounded server settings in ``.env.example`` and are retained with each
+immutable snapshot. Changing them requires a new forward comparison; it does
+not rewrite earlier decisions.
 An amendment supersedes exactly one original only when report period, owner
 set, security set and transaction count all match; otherwise its new purchase
 rows do not contribute. Earlier immutable decision snapshots are not revised.

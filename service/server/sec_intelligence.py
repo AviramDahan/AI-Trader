@@ -30,6 +30,28 @@ FINANCIAL_TAGS = {
 DEI_TAGS = {"EntityCommonStockSharesOutstanding": "shares_outstanding"}
 
 
+def research_controls() -> dict:
+    """Bounded, uncalibrated SEC research weights; invalid config fails closed."""
+    def bounded(name: str, default: float, low: float, high: float) -> float:
+        value = float(os.getenv(name, str(default)))
+        if not low <= value <= high:
+            raise ValueError(f"invalid_{name.lower()}")
+        return value
+    raw_windows = os.getenv("SEC_INTELLIGENCE_PURCHASE_WINDOWS_DAYS", "7,30,90")
+    try:
+        windows = tuple(int(value.strip()) for value in raw_windows.split(","))
+    except ValueError as exc:
+        raise ValueError("invalid_sec_purchase_windows") from exc
+    if len(windows) != 3 or tuple(sorted(set(windows))) != windows or not 1 <= windows[0] <= windows[-1] <= 180:
+        raise ValueError("invalid_sec_purchase_windows")
+    return {"purchase_windows_days": windows,
+            "purchase_weight": bounded("SEC_INTELLIGENCE_PURCHASE_WEIGHT", .01, 0, .02),
+            "financial_weight": bounded("SEC_INTELLIGENCE_FINANCIAL_WEIGHT", .01, 0, .02),
+            "adjustment_cap": bounded("SEC_INTELLIGENCE_ADJUSTMENT_CAP", .10, 0, .10),
+            "material_change_pct": bounded("SEC_INTELLIGENCE_MATERIAL_CHANGE_PCT", 10, 5, 30),
+            "material_margin_pp": bounded("SEC_INTELLIGENCE_MATERIAL_MARGIN_PP", 2, 1, 10)}
+
+
 def mode() -> str:
     value = os.getenv("SEC_INTELLIGENCE_MODE", "off").lower()
     return value if value in {"off", "shadow", "paper"} else "off"
@@ -547,7 +569,9 @@ def _filing_evidence(job: dict, raw: bytes, at: datetime) -> tuple[dict, list[di
 def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
                       at: datetime, conn) -> None:
     """Insert immutable decision data. Historical rows are never revised."""
-    start = _z(at - timedelta(days=90))
+    controls = research_controls()
+    windows = controls["purchase_windows_days"]
+    start = _z(at - timedelta(days=windows[-1]))
     filings = [dict(r) for r in conn.execute("""SELECT accession,form,accepted_at,processed_at,
             source_url,evidence_json FROM si_filing_jobs WHERE issuer_cik=? AND status='processed'
             AND superseded_by IS NULL AND accepted_at>=? AND processed_at<=?
@@ -564,7 +588,7 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
             continue
         tx = json.loads(row["body_json"])
         try:
-            if tx["transaction_at"] < (at - timedelta(days=90)).date().isoformat():
+            if tx["transaction_at"] < (at - timedelta(days=windows[-1])).date().isoformat():
                 continue
         except (KeyError, TypeError):
             continue
@@ -601,7 +625,7 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
                 # P/acquired is verified, but absent execution detail is not
                 # proof of an open-market discretionary purchase. Known
                 # scheduled/private buys remain review evidence, not a bonus.
-                contribution = min(.06, sum(.01 for tx in purchases
+                contribution = min(.06, sum(controls["purchase_weight"] for tx in purchases
                     if tx["policy_bucket"] == "execution_character_unknown"))
                 insider_adjustment += contribution
                 evidence_ids.extend(tx["event_id"] for tx in purchases)
@@ -632,13 +656,14 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
                     # economic meaning; do not score it as improvement/decline.
                     if fact["previous"]["value"] <= 0:
                         continue
-                    delta = .01 if fact["change_pct"] >= 10 else -.01 if fact["change_pct"] <= -10 else 0
+                    delta = (controls["financial_weight"] if fact["change_pct"] >= controls["material_change_pct"]
+                             else -controls["financial_weight"] if fact["change_pct"] <= -controls["material_change_pct"] else 0)
                     filing_adjustment += delta
                     if delta:
                         evidence_ids.append(_hash(filing["accession"], fact["namespace"], fact["tag"], fact["end"]))
                 material_comparisons = [fact for fact in comparisons
-                    if (fact.get("change_pct") is not None and abs(fact["change_pct"]) >= 10)
-                    or (fact.get("change_pp") is not None and abs(fact["change_pp"]) >= 2)]
+                    if (fact.get("change_pct") is not None and abs(fact["change_pct"]) >= controls["material_change_pct"])
+                    or (fact.get("change_pp") is not None and abs(fact["change_pp"]) >= controls["material_margin_pp"])]
                 if material_comparisons:
                     items.append({"kind": "comparable_financials", "accession": filing["accession"],
                                   "accepted_at": filing["accepted_at"], "source_url": filing["source_url"],
@@ -659,7 +684,8 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
             and fact.get("change_pct") is not None and fact["change_pct"] <= -20
             for item in items if item["kind"] == "comparable_financials"
             for fact in item["comparisons"])
-        adjustment = round(max(-.10, min(.10, insider_adjustment + filing_adjustment)), 4)
+        adjustment = round(max(-controls["adjustment_cap"], min(controls["adjustment_cap"],
+                               insider_adjustment + filing_adjustment)), 4)
         if conflict:
             adjustment = min(adjustment, -.02)
         status = "verified" if items else "unknown_no_fresh_structured_evidence"
@@ -668,20 +694,21 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
         available = max((_time(f["processed_at"]) for f in fresh), default=at)
         expiry = min(_time(f["accepted_at"]) + timedelta(days=7 if f["form"].startswith("4") else 5)
                      for f in fresh) if fresh else at
-        snapshot_id = _hash(POLICY, ticker, cik, universe_snapshot_id, _z(at), items)
+        snapshot_id = _hash(POLICY, ticker, cik, universe_snapshot_id, _z(at), controls, items)
         payload = {"ticker": ticker, "issuer_cik": cik, "facts": items[:12],
                    "purchase_windows": {str(days): sum(tx["at"] >= (at-timedelta(days=days)).date().isoformat()
-                                                 for tx in unique_purchases) for days in (7, 30, 90)},
+                                                 for tx in unique_purchases) for days in windows},
                    "purchase_window_details": {str(days): {
                        "transaction_groups": len(group),
                        "verified_value_sum": round(sum(tx["value"] for tx in group if tx["value"] is not None), 2),
                        "independent_buyer_groups": len(group)}
-                       for days in (7, 30, 90)
+                       for days in windows
                        for group in [[tx for tx in unique_purchases if tx["at"] >=
                                       (at-timedelta(days=days)).date().isoformat()]]},
                    "coverage": status, "source": "SEC EDGAR structured filings",
                    "material_conflict": conflict,
                    "data_confidence": data_confidence, "policy_version": POLICY,
+                   "research_controls": controls,
                    "components": {"insider": round(insider_adjustment, 4),
                                   "filing": round(filing_adjustment, 4)}}
         conn.execute("""INSERT INTO si_company_snapshots(id,ticker,issuer_cik,universe_snapshot_id,
