@@ -513,6 +513,19 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertGreaterEqual(result["failed"], 1)
         self.assertTrue(self.fetchall("SELECT * FROM scanner_telegram_outbox WHERE status='retry'"))
 
+    def test_schema7_bridge_cancels_sec_alert_without_sending_to_general(self):
+        conn = database.get_db_connection()
+        scanner_engine.enqueue_telegram(conn.cursor(), 'sec:accession-1',
+                                        'sec_intelligence', 'Unsent filing alert')
+        conn.commit(); conn.close()
+        with patch.dict(os.environ, {'STOCK_SCANNER_TELEGRAM_ENABLED': 'true'}), \
+             patch('stock_scanner.send_telegram') as send:
+            scanner_engine.process_telegram_outbox()
+        send.assert_not_called()
+        row = self.fetchall("SELECT status,last_error FROM scanner_telegram_outbox WHERE dedupe_key='sec:accession-1'")[0]
+        self.assertEqual(row['status'], 'cancelled')
+        self.assertEqual(row['last_error'], 'sec_bridge_publication_fenced')
+
     def test_telegram_outbox_lease_blocks_parallel_duplicate_dispatch(self):
         stamp = "2099-09-24T12:00:00Z"
         conn = database.get_db_connection(); cur = conn.cursor()

@@ -1347,6 +1347,15 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
     sent = failed = 0
     portfolio_changed = False
     for row in rows:
+        # This bridge has no SEC publisher or forum-topic policy. A queued SEC
+        # alert from the newer binary must never fall through to General.
+        if row['event_type'] == 'sec_intelligence':
+            conn = get_db_connection()
+            conn.execute("""UPDATE scanner_telegram_outbox SET status='cancelled',
+                last_error='sec_bridge_publication_fenced'
+                WHERE id=? AND status='sending'""", (row['id'],))
+            conn.commit(); conn.close()
+            continue
         cfg = settings()
         enabled = bool(cfg.get("telegram_enabled"))
         if row["event_type"] in {"entry", "entry_chart"}:

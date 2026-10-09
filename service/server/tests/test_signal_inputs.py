@@ -40,6 +40,8 @@ def clock(monkeypatch):
     Clock.instant = NOW
     monkeypatch.setattr(scanner, 'datetime', Clock)
     monkeypatch.setattr(targets, 'datetime', Clock)
+    # The canonical reader uses its own clock; keep this fixture point-in-time.
+    monkeypatch.setattr(signal_news, 'datetime', Clock)
     monkeypatch.setattr(scanner.time, 'time', lambda: Clock.instant.timestamp())
     yield Clock
     Clock.instant = NOW
