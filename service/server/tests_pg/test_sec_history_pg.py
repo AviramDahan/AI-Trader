@@ -81,8 +81,9 @@ def confirmed(repo,proof):
     subprocess.run(['git','-c','user.name=Synthetic','-c','user.email=synthetic@example.com','commit','-m','Encrypted fixture'],
                    cwd=repo,check=True,capture_output=True)
     remote=repo.parent/'remote.git'
-    subprocess.run(['git','init','--bare',str(remote)],check=True,capture_output=True)
-    subprocess.run(['git','remote','add','origin',str(remote)],cwd=repo,check=True,capture_output=True)
+    if not (remote/'HEAD').exists():
+        subprocess.run(['git','init','--bare',str(remote)],check=True,capture_output=True)
+        subprocess.run(['git','remote','add','origin',str(remote)],cwd=repo,check=True,capture_output=True)
     subprocess.run(['git','push','origin','HEAD:main'],cwd=repo,check=True,capture_output=True)
     commit = subprocess.check_output(['git','rev-parse','HEAD'],cwd=repo).decode().strip()
     assert subprocess.check_output(['git','ls-remote','origin','refs/heads/main'],cwd=repo).decode().split()[0] == commit
@@ -119,6 +120,28 @@ def test_sec_companion_corruption_rolls_back_every_row(pg,tmp_path):
         with pytest.raises(ValueError,match='cipher_checksum'):
             history.restore_archive(repo,proof['manifest_path'],key,target,workers_stopped=True)
         assert all(not value for value in rows(target).values())
+
+def test_multichunk_companion_is_bounded_and_complete(pg,tmp_path):
+    seed(pg)
+    with psycopg.connect(pg) as conn:
+        conn.execute('''INSERT INTO si_decisions(scan_id,ticker,mode,baseline_rank_score,sec_adjustment,
+            enhanced_rank_score,evidence_ids_json,shortlist_limit,decided_at)
+            SELECT 'bulk-'||n,'AAPL','shadow',.5,0,.5,'[]',25,'2026-01-01T00:00:00Z'
+            FROM generate_series(1,6000) n''')
+    import tracemalloc
+    tracemalloc.start()
+    try:
+        repo,key,_recipient,proof=archive(pg,tmp_path)
+        peak=tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert len([p for p in proof['manifest']['chunks'] if p['table']=='si_decisions'])>=2
+    assert peak < 40 * 1024 * 1024
+    with target_schema(pg) as target:
+        complete_seven(target)
+        restored=history.restore_archive(repo,proof['manifest_path'],key,target,workers_stopped=True)
+        assert restored['counts']['si_decisions']==6002
+    print('SEC_STREAMING_ARCHIVE_PASS peak_python_bytes='+str(peak))
 
 
 def test_sec_companion_refuses_running_role(pg,tmp_path):

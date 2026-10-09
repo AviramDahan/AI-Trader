@@ -215,10 +215,14 @@ def restore_archive(repo, manifest_path, identity, url, *, workers_stopped=False
     if not workers_stopped:
         raise ValueError('sec_restore_requires_stopped_workers')
     repo = Path(repo)
-    manifest = json.loads(decrypt(location(repo, manifest_path), identity, MAX_MANIFEST_BYTES))
+    raw_manifest = decrypt(location(repo, manifest_path), identity, MAX_MANIFEST_BYTES)
+    if digest(raw_manifest) != Path(manifest_path).stem:
+        raise ValueError('sec_archive_manifest_checksum')
+    manifest = json.loads(raw_manifest)
     if manifest.get('sec_archive_format') != FORMAT or manifest.get('schema') != 7:
         raise ValueError('unsupported_sec_archive_format')
-    if set(manifest.get('counts', {})) != set(TABLES) or len(manifest.get('chunks', [])) > MAX_CHUNKS:
+    if (set(manifest.get('counts', {})) != set(TABLES) or len(manifest.get('chunks', [])) > MAX_CHUNKS
+            or any(type(count) is not int or count < 0 for count in manifest['counts'].values())):
         raise ValueError('sec_archive_manifest_invalid')
     seen, counts = set(), {table: 0 for table in TABLES}
     with psycopg.connect(url, row_factory=dict_row) as conn:
