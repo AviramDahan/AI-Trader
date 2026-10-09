@@ -58,15 +58,41 @@ def backup(predeploy=False):
         data=recovery_state.export_postgres(url)
         encrypted,sizes=recovery_state.encrypted_bytes(data,recipient)
         now=datetime.now(timezone.utc)
+        from sec_history import export_archive
+        sec_archive = export_archive(url, repo, recipient, predeploy=predeploy, now=now)
         for relative in retention_paths(now,predeploy):
             path=repo/relative
             path.parent.mkdir(exist_ok=True)
             path.write_bytes(encrypted)
         prune(repo)
         command('git','add','hourly','daily','weekly',*(['predeploy'] if (repo/'predeploy').exists() else []),cwd=repo)
+        if sec_archive:
+            command('git','add','-A','sec',cwd=repo)
         command('git','-c','user.name=AI-Trader Recovery','-c','user.email=recovery@localhost',
                 'commit','-m','Encrypted active recovery '+now.isoformat(),cwd=repo)
         command('git','push','origin','HEAD:main',cwd=repo)
+        commit = command('git','rev-parse','HEAD',cwd=repo).decode().strip()
+        if command('git','ls-remote','origin','refs/heads/main',cwd=repo).decode().split()[0] != commit:
+            raise ValueError('backup_remote_commit_not_verified')
+        retention = None
+        if sec_archive:
+            sec_archive['remote_commit'] = commit
+            # The rollback bridge archives SEC but never deletes analytical data.
+            import cloud_runtime
+            if not hasattr(cloud_runtime, 'SEC_SCHEMA7_ROLLBACK_CAPABILITY'):
+                from sec_retention import prune_archived
+                import psycopg
+                try:
+                    retention = prune_archived(url, repo, sec_archive)
+                except (psycopg.errors.LockNotAvailable, psycopg.errors.QueryCanceled) as exc:
+                    # Archive delivery succeeded; optional cleanup rolls back
+                    # atomically and defers without hiding the maintenance gap.
+                    retention = {'deferred': type(exc).__name__, 'deleted': {}}
+                from scanner_engine import set_service_status
+                set_service_status('sec_history_retention', 'degraded' if 'deferred' in retention else 'ok',
+                                   'SEC archive verified; cleanup deferred' if 'deferred' in retention
+                                   else 'SEC archive verified; protected history retention checked',
+                                   success='deferred' not in retention)
         history_bytes=sum(p.stat().st_size for p in (repo/'.git').rglob('*') if p.is_file())
         status={'success_at':now.isoformat(),**sizes,'retained_files':len(list(repo.glob('*/*.age'))),
                 'recovery_format':data['recovery_format'],
@@ -74,6 +100,10 @@ def backup(predeploy=False):
                 'git_bytes':history_bytes,'warning':history_bytes>=int(os.getenv('RECOVERY_GIT_WARN_BYTES','104857600')),
                 'retention':'24 hourly / 7 daily / 4 weekly / latest predeploy',
                 'snapshot_id':data['snapshot_id']}
+        if sec_archive:
+            status['sec_history'] = {'format': 1, 'captured_at': sec_archive['manifest']['captured_at'],
+                'manifest': sec_archive['manifest_path'], 'counts': sec_archive['manifest']['counts'],
+                'remote_commit': commit, 'retention': retention}
         (repo.parent/'status.json').write_text(json.dumps(status))
         Path('/tmp/backup-ok').touch()
         from scanner_engine import set_service_status

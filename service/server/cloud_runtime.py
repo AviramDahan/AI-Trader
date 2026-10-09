@@ -17,7 +17,8 @@ ROLE_KEYS = {"scanner": 11, "monitor": 12, "telegram": 13}
 # Activation release: migration 006 is required. The prerequisite bridge
 # supports actual schemas 5/6 and is the only safe binary rollback target.
 SCHEMA_VERSION = 6
-SUPPORTED_SCHEMAS = (6,)
+SUPPORTED_SCHEMAS = (6, 7)
+SEC_SCHEMA7_ROLLBACK_CAPABILITY = 'sec-schema7-readers-no-producers'
 SINGLE_TARGET_ROLLBACK_CAPABILITY = 'v2-format3-holds-legacy-v1'
 ACTIVE_LEASE = None
 
@@ -30,7 +31,7 @@ def assert_schema():
         row = conn.cursor().execute("SELECT MAX(version) AS version FROM schema_migrations").fetchone()
         if row["version"] not in SUPPORTED_SCHEMAS:
             raise RuntimeError("run_numbered_migrations_before_start")
-        if row['version'] == 6:
+        if row['version'] in (6, 7):
             # A version label alone is insufficient readiness evidence.
             columns = conn.execute("""SELECT table_name,column_name,is_nullable FROM information_schema.columns
                 WHERE table_schema=current_schema() AND table_name IN ('scanner_orders','scanner_signals','scanner_trades')""").fetchall()
@@ -40,6 +41,9 @@ def assert_schema():
                     ('scanner_signals','tp2'),('scanner_signals','tp3'),('scanner_signals','rr2'),('scanner_signals','rr3'),
                     ('scanner_trades','tp2'),('scanner_trades','tp3'))):
                 raise RuntimeError('single_target_schema_incomplete')
+        if row['version'] == 7:
+            from sec_schema7_compat import assert_sec_schema7
+            assert_sec_schema7(conn)
 
 
 class RoleLease:
