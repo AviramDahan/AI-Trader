@@ -254,10 +254,16 @@ def main(phase):
         recovery.restore(data, os.environ["DATABASE_URL"], "synthetic-scanner-token-longer-than-32")
         engine.initialize_runtime()
         unchanged("portfolio")
-        assert record("V2HOLD")["status"] == "DUPLICATE_BLOCKED"
+        # Check restore/restart before explicitly attempting a new admission.
+        # record_signal legitimately queues a new (blocked) signal notice;
+        # that notice is not an imported or replayed message.
         with database.get_db_connection() as conn:
             assert conn.execute("SELECT COUNT(*) n FROM scanner_telegram_outbox").fetchone()["n"] == 0
             assert conn.execute("SELECT COUNT(*) n FROM si_decisions").fetchone()["n"] == 0
+        assert record("V2HOLD")["status"] == "DUPLICATE_BLOCKED"
+        with database.get_db_connection() as conn:
+            notices = conn.execute("SELECT event_type FROM scanner_telegram_outbox").fetchall()
+            assert len(notices) == 1 and notices[0]["event_type"] == "new_signal"
         try:
             recovery.restore(data, os.environ["DATABASE_URL"], "synthetic-scanner-token-longer-than-32")
         except ValueError as exc:
