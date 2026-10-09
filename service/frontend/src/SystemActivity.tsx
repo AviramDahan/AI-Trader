@@ -108,9 +108,9 @@ export function SystemActivityView({ he, research, dashboard, error = '', items 
     <div className="system-overview">
       <SystemNetwork he={he} items={filtered} changed={changed} updates={updates} station={station} setStation={setStation}
         selected={selected} select={setSelected} available={!!research && !!dashboard && timestamp(generated)>0 && timestamp(generated)<=Date.now() && !error && !old} marketOpen={open} />
-      <aside className="system-context"><h3>{t('מה רואים כאן?', 'What is shown?')}</h3>
+      <aside className="system-context"><details><summary>{t('מה רואים כאן?', 'What is shown?')}</summary>
         <p>{t('כל צומת מניה מבוסס על רשומה שנשמרה. העכביש מצביע רק על שינוי מתועד חדש שנקלט בתצוגה, ועומד כשאין שינוי. זו אינה הוכחה שה־Worker מטפל כרגע במניה או שכל השלבים עברו.', 'Every stock node represents a retained record. The crawler points only to new retained evidence received by the view and rests when unchanged. This does not prove a worker is currently processing that stock or all stages passed.')}</p>
-        <dl><div><dt>{t('מניות במדגם התחנות', 'Stocks in station sample')}</dt><dd>{new Set(filtered.map(i => i.ticker)).size}</dd></div>
+        </details><dl><div><dt>{t('מניות במדגם התחנות', 'Stocks in station sample')}</dt><dd>{new Set(filtered.map(i => i.ticker)).size}</dd></div>
           <div><dt>{t('פוזיציות דמה פתוחות', 'Open paper positions')}</dt><dd>{dashboard ? items.filter(i => i.state === 'open').length : '—'}</dd></div>
           <div><dt>{t('מחזור סריקה אחרון', 'Last scan')}</dt><dd><bdi>{stamp(dashboard?.activity?.last_scan_at ? new Date(dashboard.activity.last_scan_at*1000).toISOString() : null, he)}</bdi></dd></div></dl>
         <p className="system-footnote">{t('מחקר מתרענן כל דקה; מצב הסורק כל 30 שניות. זה אינו זרם עסקאות בזמן אמת.', 'Research refreshes every minute; scanner status every 30 seconds. This is not a real-time trade feed.')}</p>

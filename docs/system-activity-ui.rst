@@ -62,8 +62,15 @@ Evidence contract
   trading policy. Tickers/names are escaped React text with bidi isolation.
 * The interactive SVG is a group with keyboard-operable station buttons,
   not a single image that hides its controls from assistive technology.
-  Mobile station cards stack, and only the network region scrolls horizontally
-  to keep its labels readable.
+  Mobile station cards stack. Below 640px the graph uses a dedicated vertical,
+  two-column station layout rather than a horizontally scrolling desktop map.
+  Resizing resets cursor geometry without replaying consumed updates. Zoom is
+  presentation-only and targets the selected station or map centre; Full map
+  restores the complete view. The decorative field is deterministic, capped at
+  1024 vertices on desktop / 512 on mobile with at most four connections per
+  vertex. These vertices are aria-hidden, non-interactive and never stock nodes.
+  No timer animates them. The shaded spider, lighting and silk are SVG/CSS;
+  rendering introduces no external assets, analytics or provider requests.
 
 Verification and release
 ------------------------

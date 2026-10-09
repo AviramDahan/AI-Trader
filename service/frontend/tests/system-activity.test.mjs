@@ -20,7 +20,7 @@ const load = name => {
 }
 const { buildActivity, activityRevision, detectActivityUpdates, finite } = load('systemActivityModel')
 const { SystemActivityView } = load('SystemActivity')
-const { buildNetwork, buildEvidenceSweep, NETWORK_LIMIT, SystemNetwork } = load('SystemNetwork')
+const { buildNetwork, buildConstellation, COMPACT_CLUSTERS, buildEvidenceSweep, NETWORK_LIMIT, SystemNetwork } = load('SystemNetwork')
 let assertions = 0
 const check = v => { assert.ok(v); assertions++ }
 const equal = (a,b) => { assert.deepEqual(a,b); assertions++ }
@@ -102,6 +102,21 @@ equal(denseCluster.nodes.length, NETWORK_LIMIT)
 equal(denseCluster.omitted, 100-NETWORK_LIMIT)
 check(denseCluster.nodes.every(n => Number.isFinite(n.x) && Number.isFinite(n.y)))
 equal(buildNetwork([]).flatMap(c => c.nodes), [])
+const compactGraph = buildNetwork(items,true)
+equal(compactGraph.flatMap(c=>c.nodes.map(n=>n.item.id)).sort(),items.map(i=>i.id).sort())
+equal(buildNetwork([...items].reverse(),true),compactGraph)
+check(compactGraph.flatMap(c=>c.nodes).every(n=>n.x>=0 && n.x<=380 && n.y>=0 && n.y<=672))
+equal(COMPACT_CLUSTERS.technical.x,94); equal(COMPACT_CLUSTERS.targets.x,286)
+equal(COMPACT_CLUSTERS.exit.y,550)
+for (const compact of [false,true]) {
+  const field = buildConstellation(compact)
+  equal(field,buildConstellation(compact))
+  equal(field.flatMap(c=>c.points).length,compact?512:1024)
+  check(field.every(c=>c.edges.length<=c.points.length*4))
+  check(field.flatMap(c=>c.points).every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)))
+  check(field.flatMap(c=>c.points).every(p=>p.x>=0 && p.x<=(compact?380:1200) && p.y>=0 && p.y<=(compact?672:720)))
+  check(field.every(c=>c.edges.every(e=>c.points.includes(e.a)&&c.points.includes(e.b))))
+}
 equal(buildEvidenceSweep(items,[]).path,'M 610 340')
 const now = Date.parse('2026-10-09T15:10:00Z'), baseline = now-60000
 const freshAlfa = {...stock('ALFA'),at:'2026-10-09T15:09:40Z',station:'targets',reason:'pre_no_forward_zone'}
@@ -120,6 +135,9 @@ equal(detectActivityUpdates(items,[{...freshAlfa,id:'new-event'}],baseline,now).
 const evidenceSweep = buildEvidenceSweep(updatedItems,observed)
 equal(evidenceSweep.shown.length,1)
 equal(evidenceSweep.end.x,buildNetwork(updatedItems).find(c=>c.station==='targets').nodes.find(n=>n.item.id===freshAlfa.id).x)
+const compactSweep = buildEvidenceSweep(updatedItems,observed,{x:190,y:336},true)
+equal(compactSweep.end.x,buildNetwork(updatedItems,true).find(c=>c.station==='targets').nodes.find(n=>n.item.id===freshAlfa.id).x)
+check(compactSweep.path.startsWith('M 190 336'))
 check(!evidenceSweep.path.includes('1040 370')) // no invented visit to AI
 equal(buildEvidenceSweep(items,observed).shown,[]) // no old-stage update rendered in a different current station
 equal(buildEvidenceSweep([],observed).shown,[])
@@ -134,6 +152,10 @@ check(!network({items:[]}).includes('evidence-motion-enabled'))
 check(network({}).includes('מצביע לעדכון מתועד שנקלט — לא מצב Worker בזמן אמת'))
 check(network({}).includes('אין תנועה על טעינה או רענון ללא שינוי'))
 check(network({}).includes('נקודות הרקע דקורטיביות'))
+check(network({}).includes('התקרבות') && network({}).includes('איך לקרוא את הרשת'))
+check(network({items:[]}).includes('00 רשומות במדגם'))
+equal((network({}).match(/class="system-graph-stock /g)||[]).length,items.length)
+equal((network({items:[]}).match(/class="system-graph-stock /g)||[]).length,0)
 check(network({}).includes('מסלול מניה: HOTL'))
 check(network({changed:new Set(['trade:40'])}).includes('system-arrival'))
 check(!network({available:false,changed:new Set(['trade:40'])}).includes('system-arrival'))
