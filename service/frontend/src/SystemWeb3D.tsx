@@ -187,7 +187,8 @@ export default function SystemWeb3D(props:Props) {
       renderer.setPixelRatio(ratio);renderer.setSize(width,height,false)
       camera.aspect=width/height;camera.updateProjectionMatrix();element.dataset.pixelRatio=ratio.toFixed(2)
       const point=focusDestination(latest.current.items,latest.current.selected,compact)
-      if(point)focus(point,false);else if(!previousZoom)home();else requestRender()
+      // Opening the desktop summary resizes the canvas; do not skip its focus transition.
+      if(point&&flight)requestRender();else if(point)focus(point,false);else if(!previousZoom)home();else requestRender()
     }
     const lose=(event:Event)=>{event.preventDefault();finish();finishCamera();setFailed(true)}
     const visibility=()=>{if(document.visibilityState==='hidden'){finish();finishCamera();window.cancelAnimationFrame(raf);raf=0}else requestRender()}

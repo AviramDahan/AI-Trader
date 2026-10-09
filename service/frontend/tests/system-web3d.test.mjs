@@ -91,4 +91,5 @@ check(source.includes('p.selected!==previousSelected') && source.includes('focus
 check(source.includes('element.dataset.cameraMotion') && source.includes('element.dataset.motion'))
 check(source.includes('controls.removeEventListener(\'start\',manual)'))
 check(source.includes('props.changed]')) // finite highlight cleared without a new provider snapshot
+check(source.includes('if(point&&flight)requestRender()')) // sidebar resize preserves finite focus travel
 console.log(`3D geometry, evidence destinations, bounds and GPU-resource disposal: ${assertions} assertions passed`)
