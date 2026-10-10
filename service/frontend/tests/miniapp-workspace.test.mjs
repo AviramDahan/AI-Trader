@@ -76,6 +76,10 @@ ok(!empty.includes('תנועת המחשה'));ok(!full.includes('עכביש'))
 ok(css.includes('justify-self:center'));ok(css.includes('pointer-events:none'))
 ok(css.includes('grid-template-columns:minmax(0,1fr)'));ok(css.includes('width:75%'))
 ok(!css.includes('scaleX(-1)'));ok(!css.includes('mini-reactor-link path'))
+ok(css.match(/mini-reactor-open[^}]*text-align:center/))
+ok(css.match(/mini-reactor-number[^}]*position:absolute[^}]*right:14px/))
+ok(css.match(/mini-reactor-stocks[^}]*justify-content:center/))
+ok(!css.includes('padding-inline:8px')) // Keep symmetric clearance around the right-hand badge.
 ok(css.includes('overflow-y:auto'));ok(css.includes('overflow-x:hidden'))
 ok(css.includes('min-height:82px'));ok(!css.includes('grid-template-rows:repeat(4'))
 // Always-visible, bounded, unique ticker preview; no extra tiny touch targets.

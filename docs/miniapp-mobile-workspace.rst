@@ -34,7 +34,9 @@ Interaction
 * Prominent step badges 1–8 and seven plain vertical connector lines show a
   centered top-to-bottom column, one station per row in both Hebrew and English.
   Card colors, proportions, badges and stock previews are preserved; there are
-  no arrowheads or sideways offsets. The map scrolls vertically rather than
+  no arrowheads or sideways offsets. Card text and ticker previews are centered;
+  the step badge stays on the physical right in both languages, with symmetric
+  text clearance to avoid overlap on narrow screens. The map scrolls vertically rather than
   shrinking eight cards into one screen; navigation remains accessible. No
   horizontal dragging, zoom or decorative motion. DOM/tab order remains
   chronological. Counts are separately
