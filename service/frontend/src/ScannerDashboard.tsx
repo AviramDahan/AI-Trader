@@ -5,6 +5,7 @@ import { API_ORIGIN, useLanguage } from './appShared'
 import { positionMove, unifiedSignals, activeTargetIndexes } from './signalPresentation'
 import { SignalResearch } from './SignalResearch'
 import { HistoryCacheStatus } from './HistoryCacheStatus'
+import { SystemActivity } from './SystemActivity'
 
 type Dashboard = {
   market: { is_open: boolean }
@@ -47,7 +48,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const location = useLocation()
   const navigate = useNavigate()
   const requestedTab = new URLSearchParams(location.search).get('tab') || 'signals'
-  const tab = requestedTab === 'trades' ? 'signals' : ['signals', 'results', 'research', 'news', 'status'].includes(requestedTab) ? requestedTab : 'signals'
+  const tab = requestedTab === 'trades' ? 'signals' : ['signals', 'results', 'research', 'news', 'status', 'live'].includes(requestedTab) ? requestedTab : 'signals'
   const [data, setData] = useState<Dashboard | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -228,6 +229,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     ['signals', text('סיגנלים', 'Signals')],
     ['results', text('תוצאות', 'Results')], ['news', text('חדשות', 'News')],
     ['research', text('מחקר סיגנלים', 'Signal research')],
+    ['live', text('המערכת בפעולה', 'System in motion')],
     ['status', text('מצב הסורק', 'Scanner status')],
   ]
 
@@ -308,6 +310,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     </nav>
 
     {tab === 'research' && <SignalResearch he={he} />}
+    {tab === 'live' && <SystemActivity he={he} dashboard={data} dashboardError={error} />}
     {tab === 'status' && <SignalResearch he={he} mode="summary" />}
     {tab === 'results' && <SignalResearch he={he} mode="results" />}
 

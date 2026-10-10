@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "test:research": "node tests/signal-research.test.mjs",
+    "test:activity": "node tests/system-activity.test.mjs && node tests/system-web3d.test.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview"
@@ -12,11 +13,13 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.21.0",
-    "recharts": "^3.8.0"
+    "recharts": "^3.8.0",
+    "three": "0.186.1"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
+    "@types/three": "0.186.0",
     "@vitejs/plugin-react": "^4.2.1",
     "typescript": "^5.2.2",
     "vite": "^5.0.8"
