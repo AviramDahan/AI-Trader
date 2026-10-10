@@ -6,6 +6,7 @@ import { positionMove, unifiedSignals, activeTargetIndexes } from './signalPrese
 import { SignalResearch } from './SignalResearch'
 import { HistoryCacheStatus } from './HistoryCacheStatus'
 import { SystemActivity } from './SystemActivity'
+import { preserveMiniApp } from './telegramMiniApp'
 
 type Dashboard = {
   market: { is_open: boolean }
@@ -306,7 +307,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
 
     </details>
     <nav className="scanner-tabs" aria-label={text('ניווט בדשבורד', 'Dashboard navigation')}>
-      {tabs.map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => navigate(`/market?tab=${key}`)}>{label}</button>)}
+      {tabs.map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => navigate(preserveMiniApp(`/market?tab=${key}`, location.search, location.hash))}>{label}</button>)}
     </nav>
 
     {tab === 'research' && <SignalResearch he={he} />}
