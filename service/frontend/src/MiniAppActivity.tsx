@@ -75,7 +75,7 @@ export function MiniAppActivity(p: Props) {
       <div className="mini-map-view" hidden={view !== 'map'}>
         <div className="mini-map-heading"><h1>{t('הכורים', 'Reactors')}</h1><button type="button" onClick={() => open({ kind: 'filters' })}>{p.ticker || p.onlyFollowed ? t('סינון פעיל', 'Filtered') : t('סינון', 'Filter')} <span aria-hidden="true">⌕</span></button></div>
         <MobileReactors he={he} items={items} changed={changed} known={known} openStation={s => open({ kind: 'station', station: s })} openStock={id => open({ kind: 'stock', id })} />
-        <div className="mini-map-footnote"><span>{t('לחצו על כור או מניה לפרטים', 'Tap a reactor or stock for details')}</span><span>{dashboard?.market?.is_open === false ? t('השוק סגור', 'Market closed') : dashboard?.market?.is_open === true ? t('השוק פתוח', 'Market open') : t('מצב שוק לא זמין', 'Market status unavailable')}</span></div>
+        <div className="mini-map-footnote"><span>{t('לחצו על קובייה לכל המניות והפרטים', 'Tap a card for all stocks and details')}</span><span>{dashboard?.market?.is_open === false ? t('השוק סגור', 'Market closed') : dashboard?.market?.is_open === true ? t('השוק פתוח', 'Market open') : t('מצב שוק לא זמין', 'Market status unavailable')}</span></div>
       </div>
       {view === 'stocks' && <div className="mini-page"><h1>{t('מניות במדגם', 'Sampled stocks')}</h1><label className="mini-search">{t('חיפוש', 'Search')}<input type="search" placeholder={t('סימול או חברה', 'Ticker or company')} value={p.ticker} onChange={e => p.setTicker(e.target.value)} /></label>{list(items)}</div>}
       {view === 'more' && <div className="mini-page"><h1>{t('עוד במערכת', 'More')}</h1><div className="mini-more-links">
@@ -113,7 +113,7 @@ export function MiniAppActivity(p: Props) {
   </section>
 }
 
-export function MobileReactors({he, items, changed, known, openStation, openStock}: {
+export function MobileReactors({he, items, changed, known, openStation}: {
   he:boolean; items:ActivityItem[]; changed:Set<string>; known:boolean
   openStation:(s:Station)=>void; openStock:(id:string)=>void
 }) {
@@ -121,13 +121,18 @@ export function MobileReactors({he, items, changed, known, openStation, openStoc
   return <div className={`mini-reactors ${known?'':'is-loading'}`} aria-label={t('מפת הכורים', 'Reactor map')}>
     {STATIONS.map((s,n) => {
       const group = items.filter(i=>i.station===s)
+      // Unique symbols are a preview; counts and the sheet retain every record.
+      const symbols = [...new Set(group.map(i=>i.ticker).filter(Boolean))]
+      const shown = symbols.slice(0,3)
       return <article data-reactor={s} key={s} className={`mini-reactor reactor-${s} ${group.some(i=>changed.has(i.id))?'has-update':''}`} style={{gridRow:Math.floor(n/2)+1,gridColumn:n%4===0||n%4===3?1:2}} data-flow={n===STATIONS.length-1?undefined:n%2===1?'down':n%4===0?'forward':'back'} data-arrow={n%2===1?'↓':(n%4===0)===he?'←':'→'}>
         <button type="button" className="mini-reactor-open" onClick={()=>openStation(s)} aria-label={`${t('שלב','Step')} ${n+1}: ${names(LABELS[s],he)} · ${known?`${group.length} ${t('רשומות','records')}`:t('טוען','Loading')}`}>
           <span className="mini-reactor-number" aria-hidden="true">{n+1}</span><span className="mini-reactor-name">{names(LABELS[s],he)}</span><span className="mini-reactor-count"><bdi>{known?group.length:'—'}</bdi> {t('רשומות','records')}</span>
+          <span className="mini-reactor-stocks" aria-label={t('מניות בתחנה','Stocks in station')}>
+            {shown.map(symbol=><bdi key={symbol} title={symbol}>{symbol}</bdi>)}
+            {symbols.length>shown.length && <bdi className="mini-reactor-more" aria-label={t(`עוד ${symbols.length-shown.length} מניות`,`${symbols.length-shown.length} more stocks`)}>+{symbols.length-shown.length}</bdi>}
+            {!shown.length && <span>{known?t('אין רשומות במדגם','No sampled records'):t('ממתין לנתונים','Waiting for data')}</span>}
+          </span>
         </button>
-        <div className="mini-reactor-preview">{group.slice(0,1).map(item=><button type="button" key={item.id} onClick={()=>openStock(item.id)} aria-label={`${t('פרטי מניה','Stock details')}: ${item.ticker}`}><bdi>{item.ticker}</bdi><span>{item.state==='recorded'?t('תיעוד בלבד','Recorded only'):names(STATE_LABELS[item.state],he)}</span></button>)}
-          {!group.length && <span>{known?t('אין רשומות במדגם','No sampled records'):t('ממתין לנתונים','Waiting for data')}</span>}
-        </div>
       </article>
     })}
   </div>

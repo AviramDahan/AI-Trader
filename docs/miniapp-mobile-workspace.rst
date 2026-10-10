@@ -22,8 +22,10 @@ Interaction
 * Details open in a viewport-bounded sheet, not somewhere further down the page.
 * Back pops one sheet; dismiss restores focus. Escape, keyboard focus trapping,
   background inertness and Telegram's optional BackButton are supported.
-* Small-height containers omit preview chips, not stations or records. Lists keep
-  all filtered records accessible. Touch targets are at least 44 CSS pixels.
+* Each card previews up to three distinct stock symbols plus a ``+N`` remainder,
+  including in short-height containers. Symbols are display-only within the
+  station button; its sheet keeps all filtered records accessible. Counts still
+  measure records, not unique stocks. Touch targets are at least 44 CSS pixels.
 * The fixed 2D map cannot be dragged or rotated. The decorative spider and its
   motion controls have been removed from both renderers.
 * Prominent step badges 1–8 and seven directional arrows show a continuous
