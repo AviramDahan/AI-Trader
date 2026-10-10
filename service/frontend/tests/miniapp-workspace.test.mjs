@@ -15,7 +15,7 @@ const bundle = await build({entryPoints:['src/SystemActivity.tsx','src/systemAct
     b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path==='chrome'?'export const TopbarControls=()=>null':"export const API_ORIGIN='http://isolated.invalid'"}))
   }}]})
 const load=name=>{const m={exports:{}};new Function('require','module','exports',bundle.outputFiles.find(f=>f.path.endsWith(name+'.js')).text)(createRequire(import.meta.url),m,m.exports);return m.exports}
-const {SystemActivityView}=load('SystemActivity'),{MobileReactors}=load('MiniAppActivity'),{buildActivity,STATIONS}=load('systemActivityModel')
+const {SystemActivityView}=load('SystemActivity'),{MobileReactors}=load('MiniAppActivity'),{buildActivity,activePositionItems,STATIONS}=load('systemActivityModel')
 const {installMiniAppBackButton}=load('telegramMiniApp')
 let assertions=0
 const ok=v=>{assert.ok(v);assertions++},equal=(a,b)=>{assert.deepEqual(a,b);assertions++}
@@ -37,6 +37,25 @@ equal(render({research:r,dashboard:fixtureDashboard,onlyFollowed:true,followed:[
 ok(!full.includes('mini-follow'));ok(!full.includes('type="checkbox"'))
 ok(full.includes('מחובר'));ok(full.includes('השוק'));ok(full.indexOf('mini-reactors')<full.indexOf('mini-bottom-nav'))
 const items=buildActivity(r,fixtureDashboard),original=JSON.stringify(items)
+const nav=full.match(/<nav class="mini-bottom-nav".*?<\/nav>/s)[0]
+ok(nav.includes('aria-label="פוזיציות פעילות"'))
+ok(nav.includes('class="mini-nav-label"><span>פוזיציות</span><span>פעילות</span>'))
+ok(!nav.includes('מניות'))
+const englishNav=render({research:r,dashboard:fixtureDashboard,he:false}).match(/<nav class="mini-bottom-nav".*?<\/nav>/s)[0]
+ok(englishNav.includes('aria-label="Active positions"'))
+ok(englishNav.includes('class="mini-nav-label"><span>Active</span><span>positions</span>'))
+equal(activePositionItems(items).map(i=>i.ticker),['HOTL'])
+equal(activePositionItems([]),[])
+const active=activePositionItems(items)[0]
+equal(activePositionItems([
+  ...items,
+  {...active,id:'shadow',trade:{...active.trade,is_shadow:1}},
+  {...active,id:'closed',trade:{...active.trade,status:'closed'}},
+  {...active,id:'no-trade',trade:undefined},
+  {...active,id:'pending',kind:'signal',state:'waiting'},
+  {...active,id:'legacy',ticker:'LEGA',trade:{...active.trade,legacy_imported:true}},
+]).map(i=>i.ticker),['HOTL','LEGA'])
+equal(activePositionItems(items.filter(i=>i.ticker==='FOXT')),[])
 for(const he of [true,false]) {
   const map=renderToStaticMarkup(createElement(MobileReactors,{he,items,changed:new Set(),updates:[],known:true,available:true,openStation:()=>{},openStock:()=>{}}))
   for(const s of STATIONS)ok(map.includes(`data-reactor="${s}"`))
@@ -55,6 +74,9 @@ const cleanup=installMiniAppBackButton(()=>calls.push('back'),win);equal(calls,[
 win.Telegram=undefined;const late=installMiniAppBackButton(()=>calls.push('late'),win);win.Telegram={WebApp:{BackButton:button}};events.get('ai-trader:miniapp-ready')();button.click();late();equal(calls.slice(-3),['show','late','hide'])
 win.location.search='';const plain=installMiniAppBackButton(()=>{},win);equal(button.click,null);plain()
 const css=readFileSync('src/miniAppActivity.css','utf8'),source=readFileSync('src/MiniAppActivity.tsx','utf8')
+ok(source.includes('list(activePositionItems(items)'))
+ok(css.includes('.mini-bottom-nav .mini-nav-label'))
+ok(css.includes('min-height:2.4em'))
 ok(css.includes('min-height:44px'));ok(css.includes('min-height:48px'));ok(css.includes('grid-template-rows:repeat(8'));ok(css.includes('@media(max-height:680px)'))
 ok(source.includes('aria-modal="true"'));ok(source.includes("setAttribute('inert'"));ok(source.includes("e.key !== 'Tab'"));ok(!source.includes('EvidenceSpider'))
 for(const forbidden of ['fetch(',"method: 'POST'",'sendMessage','initData','scrollIntoView'])ok(!source.includes(forbidden))

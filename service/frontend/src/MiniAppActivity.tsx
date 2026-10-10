@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { TopbarControls } from './appChrome'
 import { installMiniAppBackButton, preserveMiniApp } from './telegramMiniApp'
-import { LABELS, STATE_LABELS, STATIONS, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
+import { activePositionItems, LABELS, STATE_LABELS, STATIONS, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
 import './miniAppActivity.css'
 
 type Sheet = { kind: 'station'; station: Station } | { kind: 'stock' | 'journey'; id: string } | { kind: 'info' | 'filters' }
@@ -21,7 +21,7 @@ export function MiniAppActivity(p: Props) {
   const { he, items, allItems, research, dashboard, available, changed } = p
   const t = (a: string, b: string) => he ? a : b
   const location = useLocation(), navigate = useNavigate()
-  const [view, setView] = useState<'map' | 'stocks' | 'more'>('map')
+  const [view, setView] = useState<'map' | 'positions' | 'more'>('map')
   const [stack, setStack] = useState<Sheet[]>([])
   const sheet = stack.at(-1)
   const base = useRef<HTMLDivElement>(null), panel = useRef<HTMLDivElement>(null)
@@ -60,11 +60,11 @@ export function MiniAppActivity(p: Props) {
   const selected = sheet && 'id' in sheet ? allItems.find(i => i.id === sheet.id) : undefined
   const title = sheet?.kind === 'station' ? names(LABELS[sheet.station], he) : selected ? sheet?.kind === 'journey' ? t(`הסבר וראיות · ${selected.ticker}`,`Explanation & evidence · ${selected.ticker}`) : selected.ticker : sheet?.kind === 'filters' ? t('חיפוש וסינון', 'Search and filters') : t('מה רואים כאן?', 'About this view')
   const state = p.error ? t('העדכון מתעכב', 'Refresh delayed') : !known ? t('טוען נתונים…', 'Loading data…') : !available ? t('מידע שמור', 'Retained data') : t('מחובר', 'Connected')
-  const list = (rows: ActivityItem[]) => rows.length ? <ul className="mini-stock-list">{rows.map(item => <li key={item.id}>
+  const list = (rows: ActivityItem[], emptyMessage?: string) => rows.length ? <ul className="mini-stock-list">{rows.map(item => <li key={item.id}>
     <button className="mini-stock-row" type="button" onClick={() => open({ kind: 'stock', id: item.id })} aria-label={`${t('פרטי מניה', 'Stock details')}: ${item.ticker}`}>
       <span><strong><bdi>{item.ticker}</bdi></strong><small><bdi>{item.company || t('שם חברה לא נשמר', 'Company not retained')}</bdi></small></span>
       <span className="mini-stock-state"><span>{names(STATE_LABELS[item.state], he)}</span><small>{names(LABELS[item.station], he)}</small></span>
-    </button></li>)}</ul> : <p className="mini-empty">{known ? t('אין מניות תואמות במדגם הזה.', 'No matching stocks in this sample.') : t('הנתונים עדיין נטענים. אין להסיק שאין פעילות.', 'Data is loading; this does not indicate inactivity.')}</p>
+    </button></li>)}</ul> : <p className="mini-empty">{known ? emptyMessage || t('אין מניות תואמות במדגם הזה.', 'No matching stocks in this sample.') : t('הנתונים עדיין נטענים. אין להסיק שאין פעילות.', 'Data is loading; this does not indicate inactivity.')}</p>
 
   return <section className="mini-workspace" dir={he ? 'rtl' : 'ltr'} aria-label={t('המערכת בפעולה', 'System in motion')}>
     <div ref={base} className="mini-base">
@@ -76,13 +76,13 @@ export function MiniAppActivity(p: Props) {
         <MobileReactors he={he} items={items} changed={changed} known={known} openStation={s => open({ kind: 'station', station: s })} openStock={id => open({ kind: 'stock', id })} />
         <div className="mini-map-footnote"><span>{t('לחצו על קובייה לכל המניות והפרטים', 'Tap a card for all stocks and details')}</span><span>{dashboard?.market?.is_open === false ? t('השוק סגור', 'Market closed') : dashboard?.market?.is_open === true ? t('השוק פתוח', 'Market open') : t('מצב שוק לא זמין', 'Market status unavailable')}</span></div>
       </div>
-      {view === 'stocks' && <div className="mini-page"><h1>{t('מניות במדגם', 'Sampled stocks')}</h1><label className="mini-search">{t('חיפוש', 'Search')}<input type="search" placeholder={t('סימול או חברה', 'Ticker or company')} value={p.ticker} onChange={e => p.setTicker(e.target.value)} /></label>{list(items)}</div>}
+      {view === 'positions' && <div className="mini-page"><h1>{t('פוזיציות פעילות', 'Active positions')}</h1><p className="mini-small-note">{t('פוזיציות דמה פתוחות לאחר כניסה. סיגנלים ופקודות ממתינות אינם פוזיציות פעילות.', 'Open paper positions after entry. Signals and pending orders are not active positions.')}</p><label className="mini-search">{t('חיפוש', 'Search')}<input type="search" placeholder={t('סימול או חברה', 'Ticker or company')} value={p.ticker} onChange={e => p.setTicker(e.target.value)} /></label>{list(activePositionItems(items), p.ticker ? t('אין פוזיציות פעילות שתואמות לחיפוש במידע שנשמר.', 'No active positions match the search in retained data.') : t('אין פוזיציות פעילות במידע שנשמר.', 'No active positions in retained data.'))}</div>}
       {view === 'more' && <div className="mini-page"><h1>{t('עוד במערכת', 'More')}</h1><div className="mini-more-links">
         {([['signals','סיגנלים ופוזיציות','Signals and positions'],['research','מחקר סיגנלים','Signal research'],['results','תוצאות','Results'],['news','חדשות','News'],['status','מצב הסורק','Scanner status']] as const).map(([tab, a, b]) => <button key={tab} type="button" onClick={() => navigate(preserveMiniApp(`/market?tab=${tab}`, location.search, location.hash))}>{t(a,b)}<span aria-hidden="true">‹</span></button>)}
         <button type="button" onClick={() => open({ kind: 'info' })}>{t('איך לקרוא את התצוגה?', 'How to read this view')}<span aria-hidden="true">ⓘ</span></button>
       </div><TopbarControls /><p className="mini-small-note">{t('צפייה בלבד. אין שינוי בסורק או במסחר.', 'Read-only. No scanner or trading changes.')}</p></div>}
       <nav className="mini-bottom-nav" aria-label={t('ניווט ראשי', 'Main navigation')}>
-        {(['map','stocks','more'] as const).map((key,n) => <button type="button" key={key} aria-current={view === key ? 'page' : undefined} onClick={() => setView(key)}><span aria-hidden="true">{['◉','▥','•••'][n]}</span>{names(([['כורים','Reactors'],['מניות','Stocks'],['עוד','More']] as [string,string][])[n], he)}</button>)}
+        {(['map','positions','more'] as const).map((key,n) => <button type="button" key={key} aria-label={names(([['כורים','Reactors'],['פוזיציות פעילות','Active positions'],['עוד','More']] as [string,string][])[n], he)} aria-current={view === key ? 'page' : undefined} onClick={() => setView(key)}><span className="mini-nav-icon" aria-hidden="true">{['◉','▥','•••'][n]}</span><span className="mini-nav-label">{key === 'positions' ? <><span>{t('פוזיציות','Active')}</span><span>{t('פעילות','positions')}</span></> : t(key === 'map' ? 'כורים' : 'עוד',key === 'map' ? 'Reactors' : 'More')}</span></button>)}
       </nav>
     </div>
     {sheet && <div className="mini-sheet-layer">

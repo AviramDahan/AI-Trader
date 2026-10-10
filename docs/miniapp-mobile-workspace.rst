@@ -18,7 +18,12 @@ stage transitions. The explanatory sheet retains freshness/sample limitations.
 Interaction
 -----------
 
-* Three primary destinations: reactors, sampled stocks, more.
+* Three primary destinations: reactors, active positions, more. The middle
+  navigation label is two centered lines (Hebrew: ``פוזיציות`` then ``פעילות``).
+  It lists only retained open main paper trades, including open Legacy trades;
+  candidates, unfilled signals/orders, closed trades and Shadow are excluded.
+  Search filters the displayed positions without changing any trading state.
+  Stock candidates remain accessible through the reactor cards.
 * Public visitors can search and inspect details, but cannot mark stocks for
   tracking. Favorites controls/filter and browser preference reads/writes are
   removed from both shells. The engine watchlist and trading remain unchanged.
