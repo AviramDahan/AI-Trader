@@ -100,7 +100,7 @@ export function MiniAppActivity(p: Props) {
             <button type="button" onClick={() => p.setTicker('')}>{t('ניקוי סינון', 'Clear filters')}</button><button className="mini-primary" type="button" onClick={close}>{t('הצגת התוצאות', 'Show results')}</button></div>}
           {sheet.kind === 'info' && <div className="mini-info"><p className="mini-info-status">{p.connection}</p><p>{t('מיקום המניה נקבע לפי התיעוד האחרון. הוא אינו מציג Worker שמטפל בה כרגע או אישור מעבר בתחנות קודמות.', 'Stocks are located by their latest retained evidence, not a worker processing them or proof of earlier approvals.')}</p>
             <p>{t('תצוגה ציבורית לצפייה בלבד. פתיחת פרטים וחיפוש אינם משנים את רשימת המעקב או את המסחר.', 'Public read-only view. Opening details and searching do not change the watchlist or trading.')}</p>
-            <p>{t('המספרים 1–8 והחצים מציגים את סדר התחנות. מספר המניות השונות בכל תחנה מוצג בנפרד; החצים אינם הוכחה שמניה עברה את הבדיקות.', 'Steps 1–8 and arrows show station order. Distinct stock counts are separate; arrows do not prove a stock passed earlier gates.')}</p>
+            <p>{t('המספרים 1–8 והקו המחבר מציגים את סדר התחנות מלמעלה למטה. מספר המניות השונות בכל תחנה מוצג בנפרד; הקו אינו הוכחה שמניה עברה את הבדיקות.', 'Steps 1–8 and the connecting line show station order from top to bottom. Distinct stock counts are separate; the line does not prove a stock passed earlier gates.')}</p>
             <p>{t('המחקר מתעדכן כל דקה ומצב הסורק כל 30 שניות. המדגם אינו כל ה־Universe.', 'Research refreshes each minute and scanner status every 30 seconds. This sample is not the full universe.')}</p>
             <dl><div><dt>{t('תמונת מחקר', 'Research snapshot')}</dt><dd><bdi>{time(research?.generated_at,he)}</bdi></dd></div><div><dt>{t('מניות במדגם', 'Sampled stocks')}</dt><dd>{known ? new Set(allItems.map(i => i.ticker)).size : '—'}</dd></div></dl>
             {p.error && <details><summary>{t('פרטי שגיאת העדכון', 'Refresh error details')}</summary><p><bdi>{p.error}</bdi></p></details>}
@@ -123,10 +123,8 @@ export function MobileReactors({he, items, changed, known, openStation}: {
       // Count distinct stocks; the sheet still retains every evidence record.
       const symbols = [...new Set(group.map(i=>i.ticker).filter(Boolean))]
       const shown = symbols.slice(0,3)
-      // One station per row: visual, DOM and keyboard order all move downward.
-      // Logical grid columns mirror the path in RTL without rearranging evidence.
-      const flow = (n%2===0) === he ? 'left' : 'right'
-      return <article data-reactor={s} key={s} className={`mini-reactor reactor-${s} ${group.some(i=>changed.has(i.id))?'has-update':''}`} style={{gridRow:n+1,gridColumn:`${n%2===0?1:4} / span 9`}} data-flow={n===STATIONS.length-1?undefined:flow}>
+      // One centered station per row: visual, DOM and keyboard order agree.
+      return <article data-reactor={s} key={s} className={`mini-reactor reactor-${s} ${group.some(i=>changed.has(i.id))?'has-update':''}`} style={{gridRow:n+1}} data-flow={n===STATIONS.length-1?undefined:'down'}>
         <button type="button" className="mini-reactor-open" onClick={()=>openStation(s)} aria-label={`${t('שלב','Step')} ${n+1}: ${names(LABELS[s],he)} · ${known?`${symbols.length} ${t('מניות','stocks')}`:t('טוען','Loading')}`}>
           <span className="mini-reactor-number" aria-hidden="true">{n+1}</span><span className="mini-reactor-name">{names(LABELS[s],he)}</span><span className="mini-reactor-count"><bdi>{known?symbols.length:'—'}</bdi> {t('מניות','stocks')}</span>
           <span className="mini-reactor-stocks" aria-label={t('מניות בתחנה','Stocks in station')}>
@@ -135,9 +133,7 @@ export function MobileReactors({he, items, changed, known, openStation}: {
             {!shown.length && <span>{known?t('אין מניות במדגם','No sampled stocks'):t('ממתין לנתונים','Waiting for data')}</span>}
           </span>
         </button>
-        {n < STATIONS.length-1 && <svg className="mini-reactor-link" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-          <path d="M 0 0 C 0 16 100 8 100 29 M 92 22 L 100 29 L 108 22" />
-        </svg>}
+        {n < STATIONS.length-1 && <span className="mini-reactor-link" aria-hidden="true" />}
       </article>
     })}
   </div>
