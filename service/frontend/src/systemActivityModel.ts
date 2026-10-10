@@ -10,6 +10,9 @@ export type ActivityItem = {
 }
 /** Display count only; retained evidence rows remain individually accessible. */
 export const stockCount = (items: ActivityItem[]) => new Set(items.map(i => i.ticker).filter(Boolean)).size
+/** Only retained, open main trades are active positions; signals/orders are not fills. */
+export const activePositionItems = (items: ActivityItem[]) => items.filter(item =>
+  item.kind === 'position' && item.state === 'open' && item.trade?.status === 'open' && !item.trade.is_shadow)
 // Presentation symbols, never approval/profit indicators; closed includes expiry.
 export const STATE_SYMBOLS: Record<ActivityItem['state'],string> = {recorded:'·',blocked:'×',waiting:'…',uncertain:'?',open:'●',closed:'■'}
 

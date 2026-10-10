@@ -32,8 +32,9 @@
 .mini-reactor-stocks>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mini-map-footnote { display:flex; justify-content:space-between; gap:8px; padding:10px 0; font-size:11px; color:var(--mini-muted); flex-shrink:0; }
 .mini-bottom-nav { display:grid; grid-template-columns:repeat(3,1fr); border-top:1px solid var(--mini-line); background:var(--mini-bg); flex-shrink:0; padding:3px 12px 6px; }
-.mini-bottom-nav button { min-height:54px; border:0; background:none; color:var(--mini-muted); border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-size:12px; }
-.mini-bottom-nav button>span { font-size:20px; }
+.mini-bottom-nav button { min-height:64px; border:0; background:none; color:var(--mini-muted); border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-size:12px; }
+.mini-bottom-nav .mini-nav-icon { font-size:20px; }
+.mini-bottom-nav .mini-nav-label { min-height:2.4em; display:flex; flex-direction:column; justify-content:center; text-align:center; font-size:12px; line-height:1.2; }
 .mini-bottom-nav button[aria-current] { color:var(--mini-accent); background:#65ded30c; }
 .mini-page { overflow:auto; flex:1; min-height:0; padding:8px 16px 20px; overscroll-behavior:contain; }
 .mini-stock-list { list-style:none; margin:8px 0; padding:0; }
