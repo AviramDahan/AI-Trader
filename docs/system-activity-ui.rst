@@ -26,8 +26,13 @@ It moves for 3.2 seconds only to newly observed evidence destinations, at most
 four per batch. This is an illustration of received evidence, NOT live worker
 tracking or successful-stage proof. Initial load, unchanged/stale/future data,
 reconnection, paused/hidden states and reduced motion do not initiate/replay
-movement. Hidden/paused batches are consumed. No idle loop, random tour or
-requestAnimationFrame renderer. Reduced motion disables the path and gait.
+travel. Hidden/paused batches are consumed. A separate decorative idle pose
+adds subtle body breathing/sway and staggered leg settling, without changing
+map coordinates, evidence timestamps, counters, status or stage membership.
+It is labelled decorative, not worker activity. No random tour or
+requestAnimationFrame renderer. Pause, hidden/unavailable state and reduced
+motion disable both idle and travel animation; unchanged polls never replay
+travel. Idle uses CSS transforms only, no extra polling or timers.
 The active view imports no 3D module or Three.js; the frontend build emits no
 3D activity chunk. Older unmounted sources and tests remain in the repository.
 

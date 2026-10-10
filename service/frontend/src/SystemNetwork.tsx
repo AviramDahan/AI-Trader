@@ -15,23 +15,25 @@ const SPIDER_LEGS = [
 ]
 
 /** Photoreal decorative crawler; its finite path represents observed updates only. */
-export function EvidenceSpider({moving,path,point,compact,batch}:{moving:boolean;path:string;point:{x:number;y:number};compact:boolean;batch:string}) {
+export function EvidenceSpider({moving,idle=false,path,point,compact,batch}:{moving:boolean;idle?:boolean;path:string;point:{x:number;y:number};compact:boolean;batch:string}) {
   const id=useId().replace(/:/g,'')
-  return <g className={`system-evidence-spider ${moving?'is-walking':''}`} aria-hidden="true" pointerEvents="none">
+  return <g className={`system-evidence-spider ${moving?'is-walking':idle?'is-idle':''}`} aria-hidden="true" pointerEvents="none">
     <defs>
       {[-1,1].flatMap(side=>SPIDER_LEGS.map((leg,n)=><clipPath key={`${side}:${n}`} id={`spider-leg-${id}-${side}-${n}`}><polygon points={side===-1?leg.polygon:leg.polygon.split(' ').map(pair=>{const [x,y]=pair.split(',').map(Number);return `${x},${1280-y}`}).join(' ')}/></clipPath>))}
       <clipPath id={`spider-body-${id}`}><path d="M 150 480 Q 300 405 475 445 L 610 515 Q 720 470 820 525 L 955 560 L 965 700 L 825 750 Q 720 815 610 750 L 480 810 Q 285 845 150 710 Z"/></clipPath>
     </defs>
     <g key={moving?batch:'rest'} transform={moving?undefined:`translate(${point.x} ${point.y})`}>
       {moving && <animateMotion path={path} dur="3.2s" rotate="auto" fill="freeze" calcMode="paced"/>}
+      <g className="system-spider-pose">
       <g transform={`scale(${compact?.062:.073})`}>
         <g transform="translate(-640 -640)">
           <ellipse cx="615" cy="665" rx="315" ry="180" fill="#000" opacity=".38"/>
-          {[-1,1].flatMap(side=>SPIDER_LEGS.map((leg,n)=><g key={`${side}:${n}`} className={`system-spider-leg gait-${(n+(side===1?1:0))%2}`} style={{transformOrigin:`${leg.hip[0]}px ${side===-1?leg.hip[1]:1280-leg.hip[1]}px`}}>
+          {[-1,1].flatMap(side=>SPIDER_LEGS.map((leg,n)=><g key={`${side}:${n}`} className={`system-spider-leg gait-${(n+(side===1?1:0))%2}`} style={{transformOrigin:`${leg.hip[0]}px ${side===-1?leg.hip[1]:1280-leg.hip[1]}px`,'--idle-period':`${9+n*1.7+(side===1?2.3:0)}s`,'--idle-delay':`${-n*2.1-(side===1?4.7:0)}s`} as React.CSSProperties}>
             <image href={spiderTexture} width="1280" height="1280" clipPath={`url(#spider-leg-${id}-${side}-${n})`}/>
           </g>))}
           <image className="system-spider-body" href={spiderTexture} width="1280" height="1280" clipPath={`url(#spider-body-${id})`}/>
         </g>
+      </g>
       </g>
     </g>
   </g>
@@ -96,6 +98,7 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   }, [motion, reduced, visible, available])
   useEffect(() => () => window.clearTimeout(timer.current), [])
   const moving = sweep.active && motion && !reduced && visible && available
+  const idle = !moving && motion && !reduced && visible && available
   const viewBox = compact ? '0 0 380 672' : '0 0 1200 720'
   const updatedStations=new Set(available?items.filter(i=>changed.has(i.id)).map(i=>i.station):[])
   const t = (a: string, b: string) => he ? a : b
@@ -135,7 +138,7 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
           </foreignObject>
           {!!c.omitted && <text className="system-omitted" x={c.x} y={c.y + 100} textAnchor="middle">+{c.omitted} {t('ברשימת התחנה', 'in station list')}</text>}
         </g>)}
-        <EvidenceSpider moving={moving} path={sweep.path} point={lastPoint.current} compact={compact} batch={sweep.key}/>
+        <EvidenceSpider moving={moving} idle={idle} path={sweep.path} point={lastPoint.current} compact={compact} batch={sweep.key}/>
       </svg>
     </div>
   return <div ref={panel} className="system-network-panel">
@@ -147,8 +150,8 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
     {flat}
     <div className="system-state-key" aria-label={t('מקרא מצב המניות','Stock state legend')}>{(['blocked','waiting','uncertain','open'] as const).map(s=><span className={`system-state-badge state-${s}`} key={s}><bdi aria-hidden="true">{STATE_SYMBOLS[s]}</bdi>{STATE_LABELS[s][he?0:1]}</span>)}</div>
     <div className="system-network-legend"><span><i className="system-legend-event"/>{t('סימון מניה: שינוי מתועד שנקלט — לא מצב Worker בזמן אמת', 'Stock marker: a received retained-data change — not real-time worker activity')}</span></div>
-    <p className="system-spider-caption">{t('העכביש נע רק בעקבות עדכון מתועד. זו המחשה, לא מעקב חי אחר Worker.', 'The spider moves only on received evidence updates. This is a visualisation, not live worker tracking.')}</p>
-    <p className={`system-network-update ${moving&&available?'system-update-received':''}`} role="status">{sweep.shown.length ? <><strong>{t(moving ? 'נקלט עדכון' : 'העדכון האחרון שהוצג', moving ? 'Update received' : 'Last displayed update')}</strong>: <bdi>{sweep.shown.at(-1)!.item.ticker}</bdi> · {LABELS[sweep.shown.at(-1)!.item.station][he ? 0 : 1]} · <time dateTime={sweep.shown.at(-1)!.item.at!} title={sweep.shown.at(-1)!.item.at!}><bdi>{new Date(sweep.shown.at(-1)!.item.at!).toLocaleTimeString(he?'he-IL':'en-GB')}</bdi></time>{sweep.omitted>0 && <> · {t(`ועוד ${sweep.omitted} עדכונים ברשימות`, `${sweep.omitted} more updates in the lists`)}</>}</> : t('ממתין לשינוי מתועד חדש — אין תנועה על טעינה או רענון ללא שינוי.', 'Waiting for new retained evidence — no motion on initial load or unchanged refresh.')}</p>
+    <p className="system-spider-caption">{t('תנועת המנוחה דקורטיבית בלבד. מעבר בין תחנות מתרחש רק בעקבות עדכון מתועד — לא מעקב חי אחר Worker.', 'Idle movement is decorative only. Travel between stations happens only on received evidence updates — not live worker tracking.')}</p>
+    <p className={`system-network-update ${moving&&available?'system-update-received':''}`} role="status">{sweep.shown.length ? <><strong>{t(moving ? 'נקלט עדכון' : 'העדכון האחרון שהוצג', moving ? 'Update received' : 'Last displayed update')}</strong>: <bdi>{sweep.shown.at(-1)!.item.ticker}</bdi> · {LABELS[sweep.shown.at(-1)!.item.station][he ? 0 : 1]} · <time dateTime={sweep.shown.at(-1)!.item.at!} title={sweep.shown.at(-1)!.item.at!}><bdi>{new Date(sweep.shown.at(-1)!.item.at!).toLocaleTimeString(he?'he-IL':'en-GB')}</bdi></time>{sweep.omitted>0 && <> · {t(`ועוד ${sweep.omitted} עדכונים ברשימות`, `${sweep.omitted} more updates in the lists`)}</>}</> : t('ממתין לשינוי מתועד חדש — אין מעבר בין תחנות על טעינה או רענון ללא שינוי.', 'Waiting for new retained evidence — no travel on initial load or unchanged refresh.')}</p>
     <details className="system-network-note"><summary>{t('איך לקרוא את הרשת','How to read the network')}</summary><p className="system-footnote">{t('לחצו על סימול לפתיחת המסלול, או על שם תחנה לסינון. קורים הם שיוך לתחנה, לא הוכחה למעבר בין שלבים. נקודות הרקע דקורטיביות. עד 4 רשומות בכור בטלפון, 8 במחשב; כל יתר המדגם ברשימות למטה.', 'Select a ticker for its journey, or a station name to filter. Wires mean station membership, not proof of passed stages. Background points are decorative. Up to 4 records per cluster on phones, 8 on desktop; remaining sampled records are listed below.')}</p></details>
   </div>
 }
