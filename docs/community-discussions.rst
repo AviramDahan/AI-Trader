@@ -6,9 +6,13 @@ Telegram role. No Codex availability or scheduled thread wakes are required.
 Default off. No schema migration, trading controls or news-source changes.
 
 Enable TELEGRAM_COMMUNITY_DISCUSSIONS_ENABLED=true in protected runtime.env
-only after deployment/readiness. Optionally enable
-TELEGRAM_COMMUNITY_AI_REPLIES_ENABLED=true for the existing news Luna model.
-Both flags default false. Disable the first flag to stop polling/new posts and
+only after deployment/readiness. The approved mode opens discussions only.
+Keep TELEGRAM_COMMUNITY_REPLIES_ENABLED=false and
+TELEGRAM_COMMUNITY_AI_REPLIES_ENABLED=false. It does not consume human updates,
+answer people, or make any conversation AI call. The independent replies flag
+defaults false and also fences already queued replies at dispatch. Enabling the
+AI wording flag alone does not enable replies. All flags default false.
+Disable the first flag to stop polling/new posts and
 fence queued community deliveries; existing trading/news outboxes keep running.
 
 Require no webhook or other getUpdates consumer for this bot, and an official
@@ -18,11 +22,20 @@ bot, ignores other chats/topics, and is owned by the Telegram role lease.
 
 An optional SEED_MESSAGE_ID/SEED_AT must refer to a previously actually verified
 General discussion in the same community within seven days. Bootstrap does not
-resend that discussion, and reserves its local day against a second opener.
+resend that discussion. The old once/day reservation is mapped to its existing
+morning/noon/evening slot using the recorded opening time. If its time is unknown,
+the entire recorded day is reserved rather than risking another post.
 
-Bounds: at most one opener/local day, fresh cached research within six hours,
-no automatic follow-ups without new human replies, 10:00-21:00 Israel only.
-Same candidate set is not reopened during retained history. Replies only to
+Schedule: 09:00, 13:00 and 19:00 Asia/Jerusalem, first natural loop in each
+window (09:00-12:00, 13:00-17:00, 19:00-21:00). At most three openers/local day.
+No catch-up after a window ends, no overnight posts, no unsolicited follow-ups.
+Each slot is reserved durably before dispatch and survives restart and uncertain
+delivery. Morning/evening questions concern product use and signal explanations.
+Noon can use fresh cached research within six hours; missing/stale or already
+discussed stocks use a product question instead, never fabricated market facts.
+Product questions do not depend on opening the UI, quotes, news or a new scan.
+Same candidate set is not reopened during retained history. The former opt-in
+reply path remains gated independently; if explicitly enabled, replies only to
 tracked bot messages, never private chats, other topics, anonymous senders,
 other bots or trading commands. At most eight attempts/day, four/root,
 two/user/day, five-minute global cooldown. Multiple human responders in the
@@ -30,7 +43,7 @@ same polling batch are left to discuss without another bot intervention.
 These are spam bounds, not a quota. A missed/ambiguous reply is not replayed.
 
 State is a bounded 64KiB JSON record in scanner_settings.community_discussions_v1;
-root metadata seven days, dispatch claims one day, user hashes per local day,
+up to 21 opening slots/root metadata seven days, dispatch claims one day, user hashes per local day,
 no user names or stored chat transcripts. Offset and attempts are persisted
 before AI. Short dedicated advisory transactions never span network IO or
 lock trading admission. Outgoing intent uses the existing deduplicated outbox,

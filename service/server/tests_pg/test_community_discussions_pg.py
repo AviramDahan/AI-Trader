@@ -32,3 +32,32 @@ def test_durable_general_outbox_and_no_trading_mutation(pg,monkeypatch):
         assert state['delivered']==1
         for t in ('scanner_signals','scanner_orders','scanner_trades','scanner_fills'):
             assert db.execute('SELECT count(*) n FROM '+t).fetchone()['n']==0
+
+
+def test_openers_only_three_durable_slots_and_reply_fence(pg,monkeypatch):
+    monkeypatch.setenv('TELEGRAM_CHAT_ID','-100123')
+    monkeypatch.setenv('TELEGRAM_COMMUNITY_DISCUSSIONS_ENABLED','true')
+    monkeypatch.setenv('TELEGRAM_COMMUNITY_REPLIES_ENABLED','false')
+    monkeypatch.setenv('TELEGRAM_COMMUNITY_AI_REPLIES_ENABLED','true')
+    monkeypatch.delenv('TELEGRAM_COMMUNITY_SEED_MESSAGE_ID',raising=False)
+    monkeypatch.delenv('TELEGRAM_COMMUNITY_SEED_AT',raising=False)
+    with patch.object(c,'bot_call') as network,patch.object(c,'reply_text') as ai,patch.object(c,'cached_facts',return_value=[]):
+        for h in (6,10,16):
+            at=datetime(2026,10,10,h,tzinfo=timezone.utc)
+            assert c.cycle(at)['opened']
+            assert not c.cycle(at)['opened']
+        network.assert_not_called();ai.assert_not_called()
+    with get_db_connection() as db:
+        rows=[dict(r) for r in db.execute("SELECT * FROM scanner_telegram_outbox WHERE event_type=?",(c.EVENT,))]
+        assert len(rows)==3 and len({r['dedupe_key'] for r in rows})==3
+        assert all(json.loads(r['message'])['kind']=='opening' for r in rows)
+        for t in ('scanner_signals','scanner_orders','scanner_trades','scanner_fills'):
+            assert db.execute('SELECT count(*) n FROM '+t).fetchone()['n']==0
+    at=datetime(2026,10,10,16,tzinfo=timezone.utc)
+    with c.transaction(at) as (db,_):
+        c.queue(db,'community:reply:old',dict(kind='reply',text='תשובה',facts=[],root='2324',reply=3001,at=c.stamp(at),chat=c.binding()))
+    with get_db_connection() as db:
+        row=dict(db.execute("SELECT * FROM scanner_telegram_outbox WHERE dedupe_key='community:reply:old'").fetchone())
+    with patch.object(c,'now',return_value=at),patch.object(c,'bot_call') as network:
+        assert json.loads(c.dispatch(row))['reason']=='community_replies_disabled'
+        network.assert_not_called()

@@ -23,6 +23,7 @@ def local_db(tmp_path, monkeypatch):
     monkeypatch.setenv('TELEGRAM_CHAT_ID','-100123')
     monkeypatch.setenv('TELEGRAM_BOT_TOKEN','fake')
     monkeypatch.setenv('TELEGRAM_COMMUNITY_DISCUSSIONS_ENABLED','true')
+    monkeypatch.setenv('TELEGRAM_COMMUNITY_REPLIES_ENABLED','true')
     monkeypatch.setenv('TELEGRAM_COMMUNITY_AI_REPLIES_ENABLED','false')
     monkeypatch.delenv('TELEGRAM_COMMUNITY_SEED_MESSAGE_ID',raising=False)
     monkeypatch.delenv('TELEGRAM_COMMUNITY_SEED_AT',raising=False)
@@ -93,14 +94,16 @@ def test_limits_cooldown_and_let_humans_discuss(local_db):
     assert c.reserve_updates([update(7,user=30)],AT+timedelta(minutes=18),99) is None
 
 
-def test_open_once_fresh_cached_only_no_same_set(local_db):
+def test_noon_fresh_cached_only_no_repeated_stock_set(local_db):
     facts=[dict(ticker='TSLA',company='Tesla',status='candidate',at=c.stamp(AT))]
+    at=AT+timedelta(days=1,hours=-6)
     with patch.object(c,'cached_facts',return_value=facts):
-        assert c.maybe_open(AT)
-        assert not c.maybe_open(AT)
-        assert not c.maybe_open(AT+timedelta(days=1))
-    assert len(rows())==1
+        assert c.maybe_open(at)
+        assert not c.maybe_open(at)
+        assert c.maybe_open(at+timedelta(days=1))
+    assert len(rows())==2
     assert 'לא סיגנלים מאושרים' in rows()[0]['message']
+    assert 'TSLA' not in rows()[1]['message']
 
 
 def test_seed_does_not_post_again_today(local_db,monkeypatch):
@@ -226,3 +229,84 @@ def test_candidate_freshness_future_and_no_new_requests(local_db):
             db.execute('INSERT INTO scanner_candidates(scan_id,ticker,company,stage,status,metrics_json,created_at) VALUES(?,?,?,?,?,?,?)',
                        ('same',ticker,'Company','technical','candidate','{}',c.stamp(at)))
     assert [f['ticker'] for f in c.cached_facts(AT)]==['NOW']
+
+
+def test_openers_only_default_never_consumes_updates_or_calls_ai(local_db,monkeypatch):
+    monkeypatch.delenv('TELEGRAM_COMMUNITY_REPLIES_ENABLED',raising=False)
+    monkeypatch.setenv('TELEGRAM_COMMUNITY_AI_REPLIES_ENABLED','true')
+    with c.transaction(AT) as (_,s):s['offset']=77
+    with patch.object(c,'bot_call') as api,patch.object(c,'reply_text') as ai,patch.object(c,'prerequisites') as pre:
+        result=c.cycle(AT)
+    assert result['mode']=='openers_only' and not result['reply_reserved']
+    api.assert_not_called();ai.assert_not_called();pre.assert_not_called()
+    assert state()['offset']==77 and state()['attempted']==0
+    assert all(json.loads(r['message'])['kind']=='opening' for r in rows())
+    with patch.object(c.requests,'Session') as request:
+        assert c.reply_text(dict(text='למה אתה מתכוון')) is None
+        request.assert_not_called()
+
+
+def test_queued_reply_fenced_even_if_ai_flag_on(local_db,monkeypatch):
+    with c.transaction(AT) as (db,_):
+        c.queue(db,'community:reply:one',dict(kind='reply',text='תשובה',facts=[],root='2324',reply=3001,at=c.stamp(AT),chat=c.binding()))
+    monkeypatch.setenv('TELEGRAM_COMMUNITY_REPLIES_ENABLED','false')
+    monkeypatch.setenv('TELEGRAM_COMMUNITY_AI_REPLIES_ENABLED','true')
+    with patch.object(c,'now',return_value=AT),patch.object(c,'bot_call') as api:
+        assert json.loads(c.dispatch(rows()[0]))['reason']=='community_replies_disabled'
+        api.assert_not_called()
+
+
+def test_three_windows_per_day_restart_no_duplicates(local_db):
+    day=AT+timedelta(days=1)
+    instants=[day.replace(hour=h,minute=0) for h in (6,10,16)]
+    with patch.object(c,'cached_facts',return_value=[]):
+        for at in instants:
+            assert c.maybe_open(at)
+            assert not c.maybe_open(at+timedelta(seconds=30))
+        assert not c.maybe_open(instants[-1]+timedelta(minutes=90))
+    assert len(rows())==3
+    assert len({r['dedupe_key'] for r in rows()})==3
+    assert {json.loads(r['message'])['slot'] for r in rows()}=={'morning','noon','evening'}
+    assert all(not json.loads(r['message'])['facts'] for r in rows())
+    assert all(not any(x in json.loads(r['message'])['text'] for x in ('---','—','–')) for r in rows())
+
+
+@pytest.mark.parametrize('hour,minute,slot',[(5,59,None),(6,0,'morning'),(8,59,'morning'),(9,0,None),
+    (10,0,'noon'),(13,59,'noon'),(14,0,None),(16,0,'evening'),(17,59,'evening'),(18,0,None)])
+def test_schedule_boundaries_no_catchup(hour,minute,slot):
+    assert c.discussion_slot(AT.replace(hour=hour,minute=minute))==slot
+
+
+def test_schedule_uses_israel_dst():
+    winter=datetime(2026,11,1,7,tzinfo=timezone.utc)
+    assert c.discussion_slot(winter)=='morning'
+    assert c.discussion_slot(winter-timedelta(minutes=1)) is None
+
+
+def test_old_daily_seed_reserves_existing_evening(local_db):
+    with database.get_db_connection() as db:
+        previous=state()
+        previous.pop('opening_slots',None)
+        previous['last_open_day']='2026-10-10'
+        db.execute('UPDATE scanner_settings SET value_json=? WHERE key=?',(json.dumps(previous),c.KEY))
+    with patch.object(c,'cached_facts',return_value=[]):
+        assert not c.maybe_open(AT)
+    assert '2026-10-10:evening' in state()['opening_slots']
+    assert not rows()
+
+
+def test_legacy_unknown_open_time_reserves_day_fail_closed(local_db):
+    with database.get_db_connection() as db:
+        previous=state();previous.pop('opening_slots',None)
+        previous.update(roots={},last_open_day='2026-10-10')
+        db.execute('UPDATE scanner_settings SET value_json=? WHERE key=?',(json.dumps(previous),c.KEY))
+    assert not c.maybe_open(AT)
+    assert len(state()['opening_slots'])==3
+
+
+def test_opening_never_moves_into_next_window(local_db):
+    morning=AT.replace(hour=8,minute=59)
+    with patch.object(c,'cached_facts',return_value=[]):assert c.maybe_open(morning)
+    with patch.object(c,'now',return_value=morning+timedelta(minutes=2)),patch.object(c,'bot_call') as api:
+        assert json.loads(c.dispatch(rows()[0]))['reason']=='community_opening_window_finished'
+        api.assert_not_called()

@@ -30,6 +30,21 @@ def enabled():
     return os.getenv('TELEGRAM_COMMUNITY_DISCUSSIONS_ENABLED', 'false').lower() == 'true'
 
 
+def replies_enabled():
+    # Independent kill switch: opening a discussion never authorizes answering
+    # people, consuming their updates, or making conversation AI requests.
+    return os.getenv('TELEGRAM_COMMUNITY_REPLIES_ENABLED', 'false').lower() == 'true'
+
+
+def discussion_slot(at):
+    """Three local windows, never catch up missed openings or post overnight."""
+    hour = at.astimezone(IL).hour
+    for name, start, end in (('morning',9,12), ('noon',13,17), ('evening',19,21)):
+        if start <= hour < end:
+            return name
+    return None
+
+
 def now():
     return datetime.now(UTC)
 
@@ -74,9 +89,25 @@ def blank(at):
 
 
 def prune(state, at):
+    if 'opening_slots' not in state:
+        # Upgrade the previous once/day reservation without re-posting tonight's
+        # existing opener. If its time is unknown, reserve that whole day rather
+        # than guessing whether an opener was delivered.
+        state['opening_slots'] = {}
+        last_day = state.get('last_open_day')
+        if last_day:
+            dates = [parse(root['at']) for root in state['roots'].values()
+                     if parse(root['at']).astimezone(IL).date().isoformat() == last_day]
+            latest = max(dates) if dates else None
+            slot = discussion_slot(latest) if latest else None
+            slots = [slot] if slot else ['morning','noon','evening']
+            for name in slots:
+                state['opening_slots'][last_day+':'+name] = stamp(latest or at)
+    state['opening_slots'] = {k:v for k,v in state['opening_slots'].items()
+                              if 0 <= (at-parse(v)).total_seconds() < 7*86400}
     state['roots'] = {k:v for k,v in state['roots'].items()
                       if 0 <= (at-parse(v['at'])).total_seconds() < 7*86400}
-    state['open_claims'] = state['open_claims'][-7:]
+    state['open_claims'] = state['open_claims'][-21:]
     state['dispatch_claims'] = {k:v for k,v in state.get('dispatch_claims',{}).items()
                               if (at-parse(v)).total_seconds() < 86400}
     day = at.astimezone(IL).date().isoformat()
@@ -162,6 +193,29 @@ def cached_facts(at):
 
 
 def opening(facts, at):
+    if not facts:
+        questions = {
+            'morning': (
+                'בוקר טוב, מה הכי חשוב לכם לראות בכרטיס מניה כדי להבין למה היא עלתה לבדיקה? ומה עדיין חסר בתצוגה?',
+                'בוקר טוב, כשאתם פותחים את תצוגת המערכת, מה אתם בודקים קודם: המניות במחקר, הסיגנלים או הפוזיציות? ולמה?',
+                'בוקר טוב, איזה הסבר על סיבת בחירה או פסילה של מניה יעזור לכם להבין טוב יותר את העבודה של המערכת?',
+            ),
+            'noon': (
+                'שאלה על השימוש במערכת: מה ברור לכם בתצוגה מהטלפון, ואיפה קשה להבין מה קורה? נשמח לדוגמאות מהשימוש שלכם.',
+                'כשמניה עדיין בשלב המחקר ולא סיגנל מאושר, איזה מידע הייתם רוצים לבדוק עליה לפני שממשיכים?',
+                'מה עוזר לכם להבחין בתצוגה בין מועמדת לבדיקה, סיגנל מאושר ופוזיציית דמה שנכנסה בפועל?',
+            ),
+            'evening': (
+                'שאלה לסוף היום: כשאתם בוחנים סיגנל, מה הכי עוזר לכם להבין את התרחיש ומה יבטל אותו? הכניסה, הסטופ, היעד או ההסבר?',
+                'איזה מידע על התקדמות פוזיציית דמה הייתם רוצים שיהיה ברור יותר, ואיזה מידע פחות שימושי לכם?',
+                'אם הייתם בוחרים שיפור אחד בדרך שבה המערכת מסבירה את הבדיקות שלה, מה הייתם משנים ולמה?',
+            ),
+        }
+        slot = discussion_slot(at)
+        if slot not in questions:
+            raise ValueError('community_outside_opening_window')
+        text = questions[slot][at.astimezone(IL).date().toordinal()%3]
+        return text+'\n\nהבוט הרשמי פותח דיון לימודי; המסחר במערכת מדומה בלבד.'
     names = ', '.join(f"{f['company']} ({f['ticker']})" for f in facts)
     questions = (
         'איזו מהן שווה בדיקה מעמיקה לדעתכם, ומה הייתם צריכים לראות כדי לוותר עליה?',
@@ -183,26 +237,33 @@ def queue(conn, key, payload):
 
 
 def maybe_open(at):
-    if not 10 <= at.astimezone(IL).hour < 21:
+    slot = discussion_slot(at)
+    if slot is None:
         return False
-    facts = cached_facts(at)
-    if not facts:
-        return False
+    # Noon can discuss actual fresh cached research. Morning/evening discuss
+    # product use. Missing fresh facts never fabricate stocks, prices or news.
+    facts = cached_facts(at) if slot == 'noon' else []
     # Rotate the bounded real candidate set, not always the same three leaders.
-    start = (at.astimezone(IL).date().toordinal()*3) % len(facts)
-    facts = (facts[start:]+facts[:start])[:3]
+    if facts:
+        start = (at.astimezone(IL).date().toordinal()*3) % len(facts)
+        facts = (facts[start:]+facts[:start])[:3]
     signature = hashlib.sha256(json.dumps([(f['ticker'],f['status']) for f in facts]).encode()).hexdigest()
     day = at.astimezone(IL).date().isoformat()
+    slot_key = day+':'+slot
     with transaction(at) as (conn, state):
-        if state['last_open_day'] == day or signature in state['open_claims'] or len(state['roots']) >= 7:
+        if slot_key in state['opening_slots'] or len(state['roots']) >= 21:
             return False
+        if facts and signature in state['open_claims']:
+            facts = []  # Product discussion, never repeat the same stock set.
         payload = dict(kind='opening', text=opening(facts, at), facts=facts,
-                       root=None, reply=None, at=stamp(at), chat=binding())
-        if not queue(conn, 'community:open:'+day, payload):
+                       root=None, reply=None, at=stamp(at), chat=binding(), slot=slot)
+        if not queue(conn, 'community:open:'+slot_key, payload):
             return False
         # Reservation survives restart and even uncertain network delivery.
         state['last_open_day'] = day
-        state['open_claims'].append(signature)
+        state['opening_slots'][slot_key] = stamp(at)
+        if facts:
+            state['open_claims'].append(signature)
         return True
 
 
@@ -277,6 +338,8 @@ def fallback(item):
 
 def reply_text(item):
     """Optional one-shot Luna wording. No tools, new analysis or invented facts."""
+    if not replies_enabled():
+        return None
     if any(word in item['text'] for word in ('תקנה','תמכור','תשנה','בצע פקודה','התעלם מהוראות')):
         return fallback(dict(item, text='תשנה פקודה'))
     if os.getenv('TELEGRAM_COMMUNITY_AI_REPLIES_ENABLED','false').lower() != 'true':
@@ -355,6 +418,11 @@ def cycle(at=None):
     if not enabled():
         return dict(status='disabled')
     at = at or now()
+    if not replies_enabled():
+        opened = maybe_open(at)
+        # No getUpdates acknowledgement, human-message processing or model calls.
+        # Deliberately leave the old reply offset/history unchanged.
+        return dict(status='ok', mode='openers_only', opened=opened, reply_reserved=False)
     bot_id = prerequisites(at)
     with transaction(at) as (_, state):
         offset = state['offset']
@@ -363,7 +431,7 @@ def cycle(at=None):
     if item and 10 <= at.astimezone(IL).hour < 21:
         text = reply_text(item)
         # Check the switch AGAIN after model/network IO, before committing intent.
-        if enabled():
+        if enabled() and replies_enabled():
             with transaction(at) as (conn, state):
                 if item['root'] in state['roots']:
                     queue(conn, 'community:reply:'+str(item['reply']), dict(kind='reply',
@@ -388,10 +456,14 @@ def dispatch(row):
     at = now()
     if not enabled() or payload.get('chat') != binding():
         return terminal('community_disabled_or_destination_changed')
-    if not 0 <= (at-parse(payload['at'])).total_seconds() <= 600 or not 10 <= at.astimezone(IL).hour < 21:
+    if not 0 <= (at-parse(payload['at'])).total_seconds() <= 600 or not 9 <= at.astimezone(IL).hour < 21:
         return terminal('community_expired_or_quiet_hours')
     if payload.get('kind') not in ('opening','reply') or not payload.get('text'):
         return terminal('community_invalid_payload')
+    if payload['kind'] == 'reply' and not replies_enabled():
+        return terminal('community_replies_disabled')
+    if payload['kind'] == 'opening' and payload.get('slot') and payload['slot'] != discussion_slot(at):
+        return terminal('community_opening_window_finished')
     # Mark before send: a process death or stale dispatch lease must never retry.
     with transaction(at) as (_, state):
         if row['dedupe_key'] in state['dispatch_claims']:
