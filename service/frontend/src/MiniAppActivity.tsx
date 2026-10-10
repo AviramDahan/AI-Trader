@@ -123,7 +123,10 @@ export function MobileReactors({he, items, changed, known, openStation}: {
       // Count distinct stocks; the sheet still retains every evidence record.
       const symbols = [...new Set(group.map(i=>i.ticker).filter(Boolean))]
       const shown = symbols.slice(0,3)
-      return <article data-reactor={s} key={s} className={`mini-reactor reactor-${s} ${group.some(i=>changed.has(i.id))?'has-update':''}`} style={{gridRow:Math.floor(n/2)+1,gridColumn:n%4===0||n%4===3?1:2}} data-flow={n===STATIONS.length-1?undefined:n%2===1?'down':n%4===0?'forward':'back'} data-arrow={n%2===1?'↓':(n%4===0)===he?'←':'→'}>
+      // One station per row: visual, DOM and keyboard order all move downward.
+      // Logical grid columns mirror the path in RTL without rearranging evidence.
+      const flow = (n%2===0) === he ? 'left' : 'right'
+      return <article data-reactor={s} key={s} className={`mini-reactor reactor-${s} ${group.some(i=>changed.has(i.id))?'has-update':''}`} style={{gridRow:n+1,gridColumn:`${n%2===0?1:4} / span 9`}} data-flow={n===STATIONS.length-1?undefined:flow}>
         <button type="button" className="mini-reactor-open" onClick={()=>openStation(s)} aria-label={`${t('שלב','Step')} ${n+1}: ${names(LABELS[s],he)} · ${known?`${symbols.length} ${t('מניות','stocks')}`:t('טוען','Loading')}`}>
           <span className="mini-reactor-number" aria-hidden="true">{n+1}</span><span className="mini-reactor-name">{names(LABELS[s],he)}</span><span className="mini-reactor-count"><bdi>{known?symbols.length:'—'}</bdi> {t('מניות','stocks')}</span>
           <span className="mini-reactor-stocks" aria-label={t('מניות בתחנה','Stocks in station')}>
@@ -132,6 +135,9 @@ export function MobileReactors({he, items, changed, known, openStation}: {
             {!shown.length && <span>{known?t('אין מניות במדגם','No sampled stocks'):t('ממתין לנתונים','Waiting for data')}</span>}
           </span>
         </button>
+        {n < STATIONS.length-1 && <svg className="mini-reactor-link" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+          <path d="M 0 0 C 0 16 100 8 100 29 M 92 22 L 100 29 L 108 22" />
+        </svg>}
       </article>
     })}
   </div>
