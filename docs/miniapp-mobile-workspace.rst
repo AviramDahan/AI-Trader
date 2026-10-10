@@ -10,7 +10,8 @@ Telegram delivery policy changes. The ordinary website retains its navigation.
 No new message or topic is required: the existing Mini App URL remains valid.
 
 The shell renders the eight reactors immediately, including while data loads.
-Unknown counts are ``—``; only a received empty sample may display zero.
+Unknown counts are omitted next to the stock label, with an explicit waiting
+message and loading accessibility label; only a received empty sample may display zero.
 Reactor counts represent distinct sampled stocks, not the entire universe or successful
 stage transitions. The explanatory sheet retains freshness/sample limitations.
 

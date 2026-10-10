@@ -23,7 +23,14 @@ const render=props=>renderToStaticMarkup(createElement(MemoryRouter,{initialEntr
 const empty=render({research:null,dashboard:null})
 ok(empty.includes('מפת הכורים'));equal((empty.match(/data-reactor=/g)||[]).length,8)
 ok(empty.includes('טוען נתונים'));ok(!empty.includes('scanner-hero'));ok(!empty.includes('system-title'));ok(!empty.includes('scanner-tabs'))
-equal((empty.match(/mini-reactor-count"><bdi>—/g)||[]).length,8)
+equal((empty.match(/mini-reactor-count">מניות<\/span>/g)||[]).length,8)
+ok(!empty.includes('mini-reactor-count"><bdi>0'))
+for(const he of [true,false]) {
+  const loading=renderToStaticMarkup(createElement(MobileReactors,{he,items:[],changed:new Set(),known:false,openStation:()=>{},openStock:()=>{}}))
+  const counts=[...loading.matchAll(/class="mini-reactor-count">(.*?)<\/span>/g)].map(m=>m[1])
+  equal(counts,Array(8).fill(he?'מניות':'stocks'))
+  ok(loading.includes(he?'ממתין לנתונים':'Waiting for data'))
+}
 const r={...fixtureResearch,generated_at:new Date().toISOString()}
 const full=render({research:r,dashboard:fixtureDashboard})
 equal(render({research:r,dashboard:fixtureDashboard,onlyFollowed:true,followed:['FOXT']}),full)
