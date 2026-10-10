@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
 import { BackendStatusBanner, Sidebar } from './appChrome'
 import { LanguageContext, ThemeContext, type ThemeMode } from './appShared'
@@ -7,6 +7,15 @@ import { ScannerDashboard } from './ScannerDashboard'
 import { type Language, getT } from './i18n'
 import { isMiniAppEntry, mountTelegramMiniApp } from './telegramMiniApp'
 import './telegramMiniApp.css'
+
+function DisplayShell({ children }: { children: React.ReactNode }) {
+  const location = useLocation()
+  const mini = isMiniAppEntry(location.search)
+  return <div className={`app-container ${mini ? 'miniapp-shell' : ''}`}><Sidebar />
+    <main className="main-content" style={{ display: 'flex', gap: '24px' }}><div className="app-main-column">
+      {!mini && <BackendStatusBanner />}{children}
+    </div></main></div>
+}
 
 function App() {
   const [language, setLanguage] = useState<Language>(() => {
@@ -40,13 +49,7 @@ function App() {
     <ThemeContext.Provider value={{ theme, setTheme }}>
       <LanguageContext.Provider value={{ language, setLanguage, t }}>
         <BrowserRouter basename={import.meta.env.BASE_URL}>
-          <div className="app-container">
-            <Sidebar />
-
-            <main className="main-content" style={{ display: 'flex', gap: '24px' }}>
-              <div className="app-main-column">
-                <BackendStatusBanner />
-
+          <DisplayShell>
                 <Routes>
                   <Route path="/" element={<Navigate to="/market?tab=signals" replace />} />
                   <Route path="/market" element={<ScannerDashboard token={operatorToken} />} />
@@ -54,9 +57,7 @@ function App() {
                   <Route path="/register" element={<Navigate to="/market?tab=signals" replace />} />
                   <Route path="*" element={<Navigate to="/market?tab=signals" replace />} />
                 </Routes>
-              </div>
-            </main>
-          </div>
+          </DisplayShell>
         </BrowserRouter>
       </LanguageContext.Provider>
     </ThemeContext.Provider>

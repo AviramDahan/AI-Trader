@@ -10,6 +10,7 @@ type WebApp = {
   contentSafeAreaInset?: Insets
   onEvent?: (name: string, callback: () => void) => void
   offEvent?: (name: string, callback: () => void) => void
+  BackButton?: { show: () => void; hide: () => void; onClick: (cb: () => void) => void; offClick: (cb: () => void) => void }
 }
 type TelegramWindow = Window & { Telegram?: { WebApp?: WebApp } }
 
@@ -46,6 +47,7 @@ export function mountTelegramMiniApp(win: TelegramWindow = window, doc: Document
     // Older clients may lack inset events; ordinary responsive rendering still works.
     try { for (const event of events) app.onEvent?.(event, sync) } catch { /* Optional display API only. */ }
     try { app.ready(); app.expand() } catch { /* SDK failure must not block the website. */ }
+    win.dispatchEvent?.(new Event('ai-trader:miniapp-ready'))
   }
   let script: HTMLScriptElement | undefined
   if (win.Telegram?.WebApp) connect()
@@ -62,5 +64,21 @@ export function mountTelegramMiniApp(win: TelegramWindow = window, doc: Document
     try { for (const event of events) app?.offEvent?.(event, sync) } catch { /* Optional display API only. */ }
     root.classList.remove('telegram-miniapp')
     for (const key of ['height', 'safe-top', 'safe-bottom', 'safe-left', 'safe-right']) root.style.removeProperty(`--miniapp-${key}`)
+  }
+}
+
+/** Navigation only, including SDK loaded after React mounted. No launch identity is used. */
+export function installMiniAppBackButton(back: () => void, win: TelegramWindow = window): () => void {
+  let button: WebApp['BackButton']
+  const attach = () => {
+    if (button || !isMiniAppEntry(win.location.search)) return
+    button = win.Telegram?.WebApp?.BackButton
+    try { button?.onClick(back); button?.show() } catch { /* On-screen back remains available. */ }
+  }
+  attach()
+  win.addEventListener?.('ai-trader:miniapp-ready', attach)
+  return () => {
+    win.removeEventListener?.('ai-trader:miniapp-ready', attach)
+    try { button?.offClick(back); button?.hide() } catch { /* Optional display API. */ }
   }
 }

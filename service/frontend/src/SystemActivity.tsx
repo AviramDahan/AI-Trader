@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { API_ORIGIN } from './appShared'
 import { activeTargetIndexes } from './signalPresentation'
 import { SystemNetwork } from './SystemNetwork'
+import { MiniAppActivity } from './MiniAppActivity'
 import { buildActivity, detectActivityUpdates, finite, LABELS, REASONS, recordTime, STATE_LABELS, STATIONS, timestamp, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
 import './systemActivity.css'
 
@@ -13,7 +14,7 @@ const readFollowed = (): string[] => {
   try { const data = JSON.parse(localStorage.getItem('ai_trader_visual_follow') || '[]'); return Array.isArray(data) ? data.filter(v => typeof v === 'string').slice(0, 100) : [] } catch { return [] }
 }
 
-export function SystemActivity({ he, dashboard, dashboardError = '' }: { he: boolean, dashboard: Row | null, dashboardError?: string }) {
+export function SystemActivity({ he, dashboard, dashboardError = '', miniApp = false }: { he: boolean, dashboard: Row | null, dashboardError?: string, miniApp?: boolean }) {
   const [research, setResearch] = useState<Row | null>(null)
   const [error, setError] = useState('')
   const [hours, setHours] = useState(24)
@@ -66,13 +67,14 @@ export function SystemActivity({ he, dashboard, dashboardError = '' }: { he: boo
     try { localStorage.setItem('ai_trader_visual_follow', JSON.stringify(next)) } catch { /* Viewing remains available without storage. */ }
     return next
   })
-  return <SystemActivityView he={he} research={research} dashboard={dashboard} error={error || dashboardError}
+  return <SystemActivityView miniApp={miniApp} he={he} research={research} dashboard={dashboard} error={error || dashboardError}
     items={items} changed={changed} updates={updates} hours={hours} setHours={setHours} ticker={ticker} setTicker={setTicker}
     station={station} setStation={setStation} selected={selected} setSelected={setSelected}
     followed={followed} follow={follow} onlyFollowed={onlyFollowed} setOnlyFollowed={setOnlyFollowed} />
 }
 
 type ViewProps = {
+  miniApp?: boolean
   he: boolean; research: Row | null; dashboard: Row | null; error?: string; items?: ActivityItem[]; changed?: Set<string>
   updates?: ActivityUpdate[]
   hours?: number; setHours?: (v: number) => void; ticker?: string; setTicker?: (v: string) => void
@@ -81,7 +83,7 @@ type ViewProps = {
   onlyFollowed?: boolean; setOnlyFollowed?: (v: boolean) => void
 }
 
-export function SystemActivityView({ he, research, dashboard, error = '', items = buildActivity(research, dashboard), changed = new Set(),
+export function SystemActivityView({ miniApp = false, he, research, dashboard, error = '', items = buildActivity(research, dashboard), changed = new Set(),
   updates = [],
   hours = 24, setHours = () => {}, ticker = '', setTicker = () => {}, station = 'all', setStation = () => {},
   selected = null, setSelected = () => {}, followed = [], follow = () => {}, onlyFollowed = false, setOnlyFollowed = () => {} }: ViewProps) {
@@ -109,6 +111,12 @@ export function SystemActivityView({ he, research, dashboard, error = '', items 
   const invalidTime = !!research && (!timestamp(generated) || timestamp(generated)>Date.now())
   const available = !!research && !!dashboard && !invalidTime && !error && !old
   const connection = error ? t('החיבור נכשל — מוצג מידע אחרון', 'Connection failed — last retained data') : !research || !dashboard ? t('ממתין לנתונים', 'Waiting for data') : invalidTime ? t('זמן התמונה לא תקין — מוצג מידע שמור','Invalid snapshot time — retained data') : old ? t('המידע לא עודכן — לא פעילות חיה', 'Data not updated — not live activity') : t('מחובר · עדכון מחזורי', 'Connected · periodic updates')
+  if (miniApp) return <MiniAppActivity he={he} items={filtered} allItems={items} changed={changed} updates={updates}
+    research={research} dashboard={dashboard} error={error} available={available} connection={connection}
+    hours={hours} setHours={setHours} ticker={ticker} setTicker={setTicker} followed={followed} follow={follow}
+    onlyFollowed={onlyFollowed} setOnlyFollowed={setOnlyFollowed}
+    renderFocus={(item, close, details) => <StockFocus item={item} he={he} stale={!available} onClose={close} onDetails={details} />}
+    renderJourney={(item, close) => <StockJourney item={item} he={he} records={research?.records || []} onClose={close} />} />
   const fullJourney = chosen && <details className="system-full-journey" ref={journey} tabIndex={-1} open={detailsOpen} onToggle={e=>setDetailsOpen(e.currentTarget.open)}>
     <summary>{t('מסלול הראיות המלא', 'Full evidence journey')} · <bdi>{chosen.ticker}</bdi></summary>
     <StockJourney item={chosen} he={he} records={research?.records || []} onClose={() => setDetailsOpen(false)} /></details>
