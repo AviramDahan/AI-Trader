@@ -43,5 +43,6 @@ const unsupportedClean=mountTelegramMiniApp(unsupported.win,unsupported.doc);equ
 const source=readFileSync('src/telegramMiniApp.ts','utf8');
 for(const forbidden of ['initDataUnsafe','sendData','requestWriteAccess','requestContact','fetch(','localStorage','sessionStorage'])equal(source.includes(forbidden),false)
 const appSource=readFileSync('src/App.tsx','utf8');equal(appSource.includes("isMiniAppEntry(window.location.search) ? null : localStorage.getItem('claw_token')"),true)
+const dashboardSource=readFileSync('src/ScannerDashboard.tsx','utf8');equal(dashboardSource.includes("(isMiniAppEntry(location.search) ? 'live' : 'signals')"),true)
 const css=readFileSync('src/telegramMiniApp.css','utf8');equal(css.includes('overflow: hidden'),false)
 console.log(`Telegram display-only Mini App: ${assertions} assertions passed (SDK mocked; no Telegram calls)`)

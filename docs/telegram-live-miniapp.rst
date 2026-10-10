@@ -3,7 +3,10 @@ Telegram: the existing live activity view
 
 The community launches the SAME published dashboard at::
 
-    https://aviramdahan.github.io/AI-Trader/market/?tab=live&miniapp=1
+    https://aviramdahan.github.io/AI-Trader/market/?miniapp=1
+
+The single launch parameter selects the live tab by default and avoids URL
+ampersand escaping in BotFather. Normal website entry still defaults to signals.
 
 No extra website, worker, scanner, schema, feed or polling loop is added.
 The existing bounded public GETs remain unchanged. Telegram launch data is
