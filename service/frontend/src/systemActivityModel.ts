@@ -8,6 +8,8 @@ export type ActivityItem = {
   at: string | null; reason: string | null; kind: 'candidate' | 'signal' | 'position'
   record?: Row; signal?: Row; trade?: Row; outcome?: Row
 }
+/** Display count only; retained evidence rows remain individually accessible. */
+export const stockCount = (items: ActivityItem[]) => new Set(items.map(i => i.ticker).filter(Boolean)).size
 // Presentation symbols, never approval/profit indicators; closed includes expiry.
 export const STATE_SYMBOLS: Record<ActivityItem['state'],string> = {recorded:'·',blocked:'×',waiting:'…',uncertain:'?',open:'●',closed:'■'}
 

@@ -41,7 +41,7 @@ ok(failed.includes('העדכון מתעכב'));ok(!failed.includes('signal timed
 const stale=render({research:fixtureResearch,dashboard:fixtureDashboard});ok(stale.includes('מידע שמור'))
 const noRecords=render({research:{generated_at:new Date().toISOString(),records:[]},dashboard:{signals:[],trades:[],market:{is_open:false}}})
 equal((noRecords.match(/mini-reactor-count"><bdi>0/g)||[]).length,8)
-ok(noRecords.includes('אין רשומות במדגם'))
+ok(noRecords.includes('אין מניות במדגם'))
 const calls=[],events=new Map(),button={show:()=>calls.push('show'),hide:()=>calls.push('hide'),onClick:cb=>button.click=cb,offClick:cb=>{if(button.click===cb)button.click=null}}
 const win={location:{search:'?miniapp=1'},Telegram:{WebApp:{BackButton:button}},addEventListener:(name,cb)=>events.set(name,cb),removeEventListener:(name,cb)=>{if(events.get(name)===cb)events.delete(name)}}
 const cleanup=installMiniAppBackButton(()=>calls.push('back'),win);equal(calls,['show']);button.click();equal(calls,['show','back']);cleanup();equal(calls,['show','back','hide']);equal(button.click,null);equal(events.size,0)
@@ -69,7 +69,7 @@ for(const he of [true,false]) {
   ok(map.includes(`data-arrow="${he?'→':'←'}"`))
   for(let n=1;n<=8;n++)ok(map.includes(`class="mini-reactor-number" aria-hidden="true">${n}</span>`))
   ok(map.includes(he?'שלב 1:':'Step 1:'))
-  ok(map.includes(he?'רשומות':'records'))
+  ok(map.includes(he?'מניות':'stocks'))
 }
 ok(!empty.includes('תנועת המחשה'));ok(!full.includes('עכביש'))
 ok(css.includes('[data-flow=down]'));ok(css.includes('pointer-events:none'))
@@ -82,7 +82,7 @@ for(const he of [true,false]) {
   ok(preview.includes('ALFA'));ok(preview.includes('BRK.B'));ok(preview.includes('CHAR'))
   equal((preview.match(/title="ALFA"/g)||[]).length,1)
   ok(preview.includes('>+3</bdi>'));ok(!preview.includes('DELTA'))
-  ok(map.includes('<bdi>7</bdi>'));equal((map.match(/<button /g)||[]).length,8)
+  ok(map.includes('<bdi>6</bdi>'));ok(!map.includes('<bdi>7</bdi>'));equal((map.match(/<button /g)||[]).length,8)
   equal((map.match(/class="mini-reactor-stocks"/g)||[]).length,8)
   ok(!preview.includes('<button'));ok(preview.includes('<bdi'))
 }

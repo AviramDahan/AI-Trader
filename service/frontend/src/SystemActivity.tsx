@@ -4,7 +4,7 @@ import { activeTargetIndexes } from './signalPresentation'
 import { SystemNetwork } from './SystemNetwork'
 import { MiniAppActivity } from './MiniAppActivity'
 import { StockEvidence } from './StockEvidence'
-import { buildActivity, detectActivityUpdates, finite, LABELS, REASONS, STATE_LABELS, STATIONS, timestamp, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
+import { buildActivity, detectActivityUpdates, finite, LABELS, REASONS, STATE_LABELS, STATIONS, stockCount, timestamp, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
 import './systemActivity.css'
 
 const label = (names: [string, string], he: boolean) => names[he ? 0 : 1]
@@ -146,7 +146,7 @@ export function SystemActivityView({ miniApp = false, he, research, dashboard, e
     </div></details>
     {!!research?.records_clipped || !!research?.clipped?.length ? <details className="system-sample-warning scanner-warning"><summary>{t('מדגם מוגבל — לא כל ההיסטוריה מוצגת', 'Capped sample — not all history is shown')}</summary><p>{t('המדגם מוגבל: חלק מפרטי ההיסטוריה לא נכללו. אין להסיק שאין פעילות במניה שלא מופיעה.', 'Sample is capped: some history is omitted. An absent ticker does not prove inactivity.')}</p></details> : null}
     {!research && !error && <p role="status">{t('טוען את תיעוד התחנות…', 'Loading station evidence…')}</p>}
-    <details className="system-support-details"><summary>{t('פרטי המניות במדגם', 'Sampled stock details')} <bdi>{filtered.length}</bdi></summary>
+    <details className="system-support-details"><summary>{t('פרטי המניות במדגם', 'Sampled stock details')} <bdi>{stockCount(filtered)}</bdi></summary>
       <StationFlow he={he} items={filtered} station={station} selected={selected} select={setSelected}
         changed={new Set()} stale={!available} onDetails={()=>setDetailsOpen(true)} /></details>
     {fullJourney}
@@ -191,7 +191,7 @@ export function StationFlow({he,items,station,selected,select,changed,stale,onDe
           onClick={()=>{setExpanded(v=>({...v,[s]:!isOpen}));if(chosen)select(null)}}>
           <span className="system-flow-step" aria-hidden="true">{String(STATIONS.indexOf(s)+1).padStart(2,'0')}</span>
           <span className="system-flow-name"><strong>{label(LABELS[s],he)}</strong><small>{label(STATION_HELP[s],he)}</small></span>
-          <span className="system-flow-count"><bdi>{group.length}</bdi><small>{t('רשומות','records')}</small></span>
+          <span className="system-flow-count"><bdi>{stockCount(group)}</bdi><small>{t('מניות','stocks')}</small></span>
           <span className="system-flow-chevron" aria-hidden="true">{isOpen?'−':'+'}</span>
         </button>
         {!isOpen && <div className="system-flow-preview">
@@ -199,7 +199,7 @@ export function StationFlow({he,items,station,selected,select,changed,stale,onDe
             onClick={()=>select(i.id)} aria-label={`${t('פרטי מניה','Stock details')}: ${i.ticker} · ${label(STATE_LABELS[i.state],he)}`}>
             <bdi>{i.ticker}</bdi><span>{i.reason==='allocation_blocked'?t('הקצאת דמה חסומה','Paper allocation blocked'):i.state==='recorded'?t('תיעוד בלבד','Recorded only'):label(STATE_LABELS[i.state],he)}</span></button>)}
           {group.length>3 && <button className="system-flow-more" type="button" onClick={()=>setExpanded(v=>({...v,[s]:true}))}>{t(`עוד ${group.length-3}`,`${group.length-3} more`)}</button>}
-          {!group.length && <span className="system-flow-empty">{t('אין רשומות במדגם','No records in sample')}</span>}
+          {!group.length && <span className="system-flow-empty">{t('אין מניות במדגם','No stocks in sample')}</span>}
         </div>}
         <div id={`station-records-${s}`} hidden={!isOpen} className="system-flow-records">
           {visible.map(i=><div key={i.id} className="system-flow-record">
@@ -214,8 +214,8 @@ export function StationFlow({he,items,station,selected,select,changed,stale,onDe
             </article>
             {selected===i.id && <div className="system-flow-focus"><StockFocus item={i} he={he} stale={stale} onClose={()=>select(null)} onDetails={onDetails}/>{fullJourney}</div>}
           </div>)}
-          {!group.length && <p className="system-empty">{t('אין רשומות במדגם ובסינון הזה','No records in this filtered sample')}</p>}
-          {group.length>8 && <button className="system-more" type="button" onClick={()=>setShowAll(v=>({...v,[s]:!v[s]}))}>{showAll[s]?t('פחות','Less'):t(`הצג את כל ${group.length} הרשומות`,`Show all ${group.length} records`)}</button>}
+          {!group.length && <p className="system-empty">{t('אין מניות במדגם ובסינון הזה','No stocks in this filtered sample')}</p>}
+          {group.length>8 && <button className="system-more" type="button" onClick={()=>setShowAll(v=>({...v,[s]:!v[s]}))}>{showAll[s]?t('פחות','Less'):t('הצג את כל המניות','Show all stocks')}</button>}
         </div>
       </section>
     })}
