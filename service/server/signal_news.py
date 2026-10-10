@@ -14,6 +14,8 @@ from news_events.factual_evidence import sufficient
 from news_events.yahoo_identity import corroborate
 
 LOG = logging.getLogger(__name__)
+# Per company, not across the public market-news stream. The returned stories
+# remain capped at five and every selected observation still passes all gates.
 MAX_EVENTS = 1000
 
 
@@ -24,7 +26,8 @@ def _time(value):
 def eligible_observations(record, candidate, max_age_hours, now):
     event = json.loads(record['body_json'])
     ticker = candidate['ticker']
-    if (ticker not in event.get('tickers', []) or event.get('conflicts') or
+    tickers = event.get('tickers')
+    if (not isinstance(tickers, list) or ticker not in tickers or event.get('conflicts') or
             event.get('event_type') in (None, 'unknown', 'market') or
             record.get('reason') in {'source_conflict', 'source_retracted', 'license_required',
                 'backlog_blocked', 'identity_unverified', 'unsupported_or_noise'}):
@@ -63,28 +66,46 @@ def eligible_observations(record, candidate, max_age_hours, now):
 
 
 def existing_news(candidates, max_age_hours, now=None):
-    """Bounded read-only snapshot, with no init/migration/provider/AI side effect."""
+    """Bounded company-scoped snapshot; no ingestion, provider or AI side effect.
+
+    Filter exact structured ticker membership before applying the cap. A busy
+    market feed or another company must not crowd out fresh company evidence.
+    JSON shape is checked before casting/iteration, so a corrupt event cannot
+    abort the snapshot. SQL selection is only a prefilter, not verification.
+    """
     from database import get_db_connection, using_postgres
     now = now or datetime.now(timezone.utc)
     result = {c['ticker']: [] for c in candidates}
+    if not candidates:
+        return result
+    postgres = using_postgres()
     conn = get_db_connection()
     try:
-        if using_postgres():
+        if postgres:
             conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
             conn.execute("SET LOCAL statement_timeout='8s'")
+            # PostgreSQL 17 is the supported production/CI backend. Guard the
+            # cast explicitly, including syntactically invalid JSON in old rows.
+            body = "CASE WHEN pg_input_is_valid(body_json,'jsonb') THEN body_json::jsonb ELSE '{}'::jsonb END"
+            membership = f"jsonb_typeof(({body})->'tickers')='array' AND ({body})->'tickers' @> CAST(? AS jsonb)"
         else:
             conn.execute('PRAGMA query_only=ON')
-        rows = conn.execute('''SELECT event_id,body_json,status,reason,evidence_version,created_at,updated_at
+            body = "CASE WHEN json_valid(body_json) THEN body_json ELSE '{}' END"
+            membership = f"json_type({body},'$.tickers')='array' AND EXISTS (SELECT 1 FROM json_each({body},'$.tickers') WHERE value=?)"
+        query = f'''SELECT event_id,body_json,status,reason,evidence_version,created_at,updated_at
             FROM ne_events WHERE updated_at>=? AND updated_at<=? AND created_at<=? AND
             (status IN ('pending','analyzing','analyzed') OR (status='blocked' AND reason='stale_or_future'))
-            ORDER BY updated_at DESC LIMIT ?''',
-            ((now-timedelta(hours=max_age_hours)).isoformat(), now.isoformat(), now.isoformat(), MAX_EVENTS+1)).fetchall()
-        if len(rows) > MAX_EVENTS:
-            LOG.warning('signal_news_snapshot_clipped:%s', MAX_EVENTS)
-        for row in rows[:MAX_EVENTS]:
-            for candidate in candidates:
+            AND {membership} ORDER BY updated_at DESC,event_id DESC LIMIT ?'''
+        for candidate in candidates:
+            ticker = candidate['ticker']
+            selector = json.dumps([ticker]) if postgres else ticker
+            rows = conn.execute(query, ((now-timedelta(hours=max_age_hours)).isoformat(),
+                now.isoformat(), now.isoformat(), selector, MAX_EVENTS+1)).fetchall()
+            if len(rows) > MAX_EVENTS:
+                LOG.warning('signal_news_snapshot_clipped:%s:%s', ticker, MAX_EVENTS)
+            for row in rows[:MAX_EVENTS]:
                 try:
-                    result[candidate['ticker']].extend(eligible_observations(dict(row), candidate, max_age_hours, now))
+                    result[ticker].extend(eligible_observations(dict(row), candidate, max_age_hours, now))
                 except (ValueError, TypeError, KeyError, AttributeError):
                     # Malformed one event must not disable Yahoo or other events.
                     continue
