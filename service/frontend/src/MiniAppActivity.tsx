@@ -126,7 +126,7 @@ export function MobileReactors({he, items, changed, known, openStation}: {
       // One centered station per row: visual, DOM and keyboard order agree.
       return <article data-reactor={s} key={s} className={`mini-reactor reactor-${s} ${group.some(i=>changed.has(i.id))?'has-update':''}`} style={{gridRow:n+1}} data-flow={n===STATIONS.length-1?undefined:'down'}>
         <button type="button" className="mini-reactor-open" onClick={()=>openStation(s)} aria-label={`${t('שלב','Step')} ${n+1}: ${names(LABELS[s],he)} · ${known?`${symbols.length} ${t('מניות','stocks')}`:t('טוען','Loading')}`}>
-          <span className="mini-reactor-number" aria-hidden="true">{n+1}</span><span className="mini-reactor-name">{names(LABELS[s],he)}</span><span className="mini-reactor-count"><bdi>{known?symbols.length:'—'}</bdi> {t('מניות','stocks')}</span>
+          <span className="mini-reactor-number" aria-hidden="true">{n+1}</span><span className="mini-reactor-name">{names(LABELS[s],he)}</span><span className="mini-reactor-count">{known?<><bdi>{symbols.length}</bdi> </>:null}{t('מניות','stocks')}</span>
           <span className="mini-reactor-stocks" aria-label={t('מניות בתחנה','Stocks in station')}>
             {shown.map(symbol=><bdi key={symbol} title={symbol}>{symbol}</bdi>)}
             {symbols.length>shown.length && <bdi className="mini-reactor-more" aria-label={t(`עוד ${symbols.length-shown.length} מניות`,`${symbols.length-shown.length} more stocks`)}>+{symbols.length-shown.length}</bdi>}
