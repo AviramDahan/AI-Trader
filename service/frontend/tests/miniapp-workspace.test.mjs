@@ -61,19 +61,21 @@ for(const he of [true,false]) {
   for(let n=0;n<8;n++) {
     ok(rows[n].includes(`data-reactor="${STATIONS[n]}"`))
     ok(rows[n].includes(`grid-row:${n+1}`))
-    ok(rows[n].includes(`grid-column:${n%2===0?1:4} / span 9`))
+    ok(!rows[n].includes('grid-column'))
   }
   equal((map.match(/data-flow=/g)||[]).length,7)
-  equal((map.match(/data-flow="left"/g)||[]).length,he?4:3)
-  equal((map.match(/data-flow="right"/g)||[]).length,he?3:4)
+  equal((map.match(/data-flow="down"/g)||[]).length,7)
+  ok(!map.includes('<svg'));ok(!map.includes('data-arrow'))
   equal((map.match(/class="mini-reactor-link"/g)||[]).length,7)
-  ok(map.includes('aria-hidden="true" focusable="false"'))
+  ok(map.includes('class="mini-reactor-link" aria-hidden="true"'))
   for(let n=1;n<=8;n++)ok(map.includes(`class="mini-reactor-number" aria-hidden="true">${n}</span>`))
   ok(map.includes(he?'שלב 1:':'Step 1:'))
   ok(map.includes(he?'מניות':'stocks'))
 }
 ok(!empty.includes('תנועת המחשה'));ok(!full.includes('עכביש'))
-ok(css.includes('[data-flow=left]'));ok(css.includes('pointer-events:none'))
+ok(css.includes('justify-self:center'));ok(css.includes('pointer-events:none'))
+ok(css.includes('grid-template-columns:minmax(0,1fr)'));ok(css.includes('width:75%'))
+ok(!css.includes('scaleX(-1)'));ok(!css.includes('mini-reactor-link path'))
 ok(css.includes('overflow-y:auto'));ok(css.includes('overflow-x:hidden'))
 ok(css.includes('min-height:82px'));ok(!css.includes('grid-template-rows:repeat(4'))
 // Always-visible, bounded, unique ticker preview; no extra tiny touch targets.

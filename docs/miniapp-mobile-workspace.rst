@@ -31,14 +31,14 @@ Interaction
   distinct ticker symbols per station. Touch targets are at least 44 CSS pixels.
 * The fixed 2D map cannot be dragged or rotated. The decorative spider and its
   motion controls have been removed from both renderers.
-* Prominent step badges 1–8 and seven directional arrows show a continuous
-  staggered zigzag sequence, with one station on each successive row and curved
-  downward arrows. In Hebrew the first step starts top-right; in English it
-  starts top-left. The map scrolls vertically inside the workspace rather than
+* Prominent step badges 1–8 and seven plain vertical connector lines show a
+  centered top-to-bottom column, one station per row in both Hebrew and English.
+  Card colors, proportions, badges and stock previews are preserved; there are
+  no arrowheads or sideways offsets. The map scrolls vertically rather than
   shrinking eight cards into one screen; navigation remains accessible. No
   horizontal dragging, zoom or decorative motion. DOM/tab order remains
   chronological. Counts are separately
-  labeled stocks, never used as step numbers. Arrows describe pipeline order,
+  labeled stocks, never used as step numbers. Lines describe pipeline order,
   not proof a sampled stock passed earlier stages.
 
 Verification
