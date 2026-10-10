@@ -40,6 +40,20 @@ Interaction
 Verification
 ------------
 
+The stock sheet opens ``Explanation & evidence`` rather than claiming a complete
+chain. A short status summary precedes retained entry/stop/target/gross RR and
+weighted position outcomes (realized net versus open gross, percent/R only).
+Only documented stages get expandable cards; unavailable stages and technical
+IDs/codes are separate, initially closed disclosures. All evidence times use
+Asia/Jerusalem. Entry-order validity is explicitly not position expiry. A
+validated AI response means schema validation, not entry approval. Allocation
+blocks do not become signal-quality failures; missing evidence is neither a
+failed nor passed gate. Other same-ticker scans remain separate chains.
+
+The evidence renderer is shared with the ordinary website, performs no network
+requests and cannot refresh a scan or mutate public state. Existing API gaps
+(selection explanation or per-signal order links) are labeled, never inferred.
+
 ``npm run build``, ``npm run test:activity``, ``npm run test:research`` and
 ``node test-signal-presentation.cjs`` cover the existing projections plus the
 mobile shell and display-only SDK navigation. Fixtures contain synthetic data.

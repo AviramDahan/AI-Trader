@@ -68,6 +68,14 @@
 .mini-sheet .system-focus-card header p, .mini-sheet .system-focus-levels dd { color:var(--mini-text); }
 .mini-sheet .system-journey { background:none; border:0; padding:4px 0; }
 .mini-sheet .system-journey p { font-size:14px; }
+.mini-sheet .stock-evidence { margin:0; }
+.mini-sheet .stock-evidence > header { display:none; }
+.mini-sheet .stock-evidence .evidence-note { font-size:13px; }
+.mini-sheet .stock-evidence .evidence-warning { font-size:13px; }
+.mini-sheet .stock-evidence .evidence-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.mini-sheet .stock-evidence .evidence-grid dd { font-size:16px; }
+.mini-sheet .stock-evidence .evidence-status { margin-top:8px; }
+.mini-sheet-header:has(+ .mini-sheet-content .stock-evidence) h2 { font-size:17px; }
 .mini-sheet .system-focus-levels { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .mini-sheet .system-focus-details { min-height:48px; width:100%; }
 .mini-filters>button { border:1px solid var(--mini-line); border-radius:12px; background:var(--mini-bg); padding:12px; margin-top:8px; }

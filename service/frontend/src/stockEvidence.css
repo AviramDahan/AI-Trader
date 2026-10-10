@@ -1,0 +1,48 @@
+/* Progressive disclosure, shared by website and Mini App; no decision logic. */
+.stock-evidence { --ev-panel:var(--mini-panel,var(--bg-secondary)); --ev-line:var(--mini-line,var(--border-color)); --ev-muted:var(--mini-muted,var(--text-secondary)); --ev-accent:var(--mini-accent,var(--system-accent)); color:var(--mini-text,var(--text-primary)); font-size:15px; line-height:1.65; min-width:0; }
+.stock-evidence > header { margin-bottom:16px; }
+.stock-evidence > header h3 { font-size:25px; margin:4px 0; }
+.stock-evidence > header p { color:var(--ev-muted); margin:0; }
+.stock-evidence h4 { font-size:17px; margin:0 0 12px; }
+.stock-evidence p { margin:8px 0; line-height:1.7; }
+.stock-evidence .evidence-note { color:var(--ev-muted); font-size:13px; line-height:1.65; }
+.evidence-status { padding:16px; border:1px solid var(--ev-line); border-inline-start:3px solid var(--ev-accent); border-radius:14px; background:#65ded308; }
+.evidence-status > strong { display:block; font-size:18px; }
+.evidence-status > small { display:block; color:var(--ev-muted); font-size:12px; }
+.evidence-status.state-blocked { border-inline-start-color:#f59f99; }
+.evidence-status.state-waiting,.evidence-status.state-uncertain { border-inline-start-color:#e3b56d; }
+.evidence-main-reason { font-weight:650; }
+.evidence-block { padding-block:20px; border-bottom:1px solid var(--ev-line); }
+.evidence-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin:10px 0; }
+.evidence-grid > div { min-width:0; }
+.evidence-grid dt { color:var(--ev-muted); font-size:12px; line-height:1.5; }
+.evidence-grid dd { margin:5px 0 0; font-size:16px; font-weight:650; overflow-wrap:anywhere; }
+.evidence-grid dd small { display:block; font-size:13px; margin-top:2px; font-weight:400; }
+.evidence-stages { display:grid; gap:10px; }
+.evidence-stage,.evidence-missing,.evidence-other,.evidence-technical { border:1px solid var(--ev-line); border-radius:12px; background:var(--ev-panel); min-width:0; }
+.stock-evidence summary { min-height:48px; box-sizing:border-box; cursor:pointer; font-size:14px; padding:13px; overflow-wrap:anywhere; }
+.stock-evidence summary:focus-visible { outline:3px solid var(--ev-accent); outline-offset:2px; }
+.evidence-stage > summary { display:flex; align-items:center; gap:10px; list-style:none; }
+.evidence-stage > summary::-webkit-details-marker { display:none; }
+.evidence-stage > summary > span:nth-child(2) { flex:1; min-width:0; }
+.evidence-stage > summary strong { display:block; font-size:15px; }
+.evidence-stage > summary small { display:block; color:var(--ev-muted); font-size:12px; font-weight:400; line-height:1.6; margin-top:3px; }
+.evidence-step { display:grid; place-items:center; width:25px; height:25px; border-radius:7px; background:#65ded314; color:var(--ev-accent); flex-shrink:0; font-size:12px; }
+.evidence-disclosure { flex-shrink:0; color:var(--ev-muted); font-size:20px; }
+.evidence-stage[open] .evidence-disclosure { transform:rotate(45deg); }
+.evidence-stage-body { padding:2px 14px 14px; border-top:1px solid var(--ev-line); }
+.evidence-check { padding:12px 0; }
+.evidence-check + .evidence-check { border-top:1px solid var(--ev-line); }
+.evidence-check > strong { font-size:14px; }
+.stock-evidence .evidence-warning { border-inline-start:3px solid #e3b56d; background:#e3b56d0a; padding:10px 12px; font-size:13px; }
+.evidence-missing { margin-top:14px; color:var(--ev-muted); }
+.evidence-missing > p,.evidence-missing > ul,.evidence-other > p,.evidence-other > article,.evidence-technical > p,.evidence-technical > dl,.evidence-technical > ul { margin-inline:14px; }
+.evidence-missing li { margin-block:6px; }
+.evidence-other,.evidence-technical { margin-top:18px; }
+.evidence-technical code { font-size:12px; overflow-wrap:anywhere; white-space:normal; }
+.evidence-technical li { padding-block:3px; }
+.stock-evidence .evidence-footer { margin-top:20px; }
+.evidence-thesis > p { white-space:pre-line; }
+.evidence-thesis > small { color:var(--ev-muted); font-size:12px; }
+@media(min-width:760px) { .stock-evidence > .evidence-block > .evidence-grid { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media(max-width:370px) { .evidence-status { padding:13px; } .evidence-grid { gap:12px 10px; } .evidence-stage > summary { padding:12px 10px; } }

@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
 import { candidate, fixtureResearch as research, fixtureDashboard as dashboard } from './system-activity-fixtures.mjs'
 
-const result = await build({ entryPoints: ['src/SystemActivity.tsx','src/systemActivityModel.ts','src/SystemNetwork.tsx'], bundle: true, write: false,
+const result = await build({ entryPoints: ['src/SystemActivity.tsx','src/systemActivityModel.ts','src/SystemNetwork.tsx','src/StockEvidence.tsx'], bundle: true, write: false,
   outdir: 'unused', loader: {'.png':'file'}, platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react','react/jsx-runtime'],
   plugins: [{ name: 'isolated-render', setup(b) {
     b.onResolve({ filter: /^\.\/appShared$/ }, () => ({ path: 'stub', namespace: 'stub' }))
@@ -19,7 +19,8 @@ const load = name => {
   return m.exports
 }
 const { buildActivity, activityRevision, detectActivityUpdates, finite, STATE_SYMBOLS, STATIONS } = load('systemActivityModel')
-const { SystemActivityView, StockFocus, StationFlow, activityLevels } = load('SystemActivity')
+const { SystemActivityView, StockFocus, StationFlow, StockJourney, activityLevels } = load('SystemActivity')
+const {evidenceTime,evidenceReason}=load('StockEvidence')
 const { buildNetwork, buildConstellation, COMPACT_CLUSTERS, buildEvidenceSweep, networkControls, networkMotionAllowed, NETWORK_LIMIT, SystemNetwork } = load('SystemNetwork')
 let assertions = 0
 const check = v => { assert.ok(v); assertions++ }
@@ -62,14 +63,14 @@ check(html.includes('aria-expanded="true"') && html.includes('station-records-po
 check(html.includes('dir="rtl"') && html.includes('<bdi>HOTL</bdi>'))
 check(html.includes('יתרה מהפוזיציה') && html.includes('100.00%'))
 check(html.includes('ממומש נטו') && html.includes('חלק פתוח ברוטו'))
-check(html.includes('אינן תשואת תיק') && html.includes('Shadow אינו תיק עצמאי'))
+check(html.includes('לא תשואת תיק') && html.includes('Shadow אינו תיק עצמאי'))
 check(!html.includes('$') && !html.includes('NaN') && !html.includes('Infinity'))
 check(!html.includes('system-evidence-spider') && !render({he:false}).includes('Idle movement'))
 check(html.includes('106.00') && !html.includes('TP2: 106.00'))
 check(html.includes('המדגם מוגבל'))
 check(render({selected:'signal:1'}).includes('סיגנל כשיר; הקצאת הדמה חסומה'))
 check(render({selected:'signal:3'}).includes('אי־ודאות בהתאוששות'))
-check(render({selected:'scan:synthetic-ALFA:ALFA'}).includes('אין סיגנל מקושר במדגם'))
+check(render({selected:'scan:synthetic-ALFA:ALFA'}).includes('מידע שאינו זמין במדגם'))
 const singleV1 = {...dashboard,signals:[{id:8,ticker:'VONE',planned_entry:100,current_stop:97,rr1:1,rr2:2,rr3:3,tp1:103,tp2:106,tp3:109,operational_tp1_pct:0,operational_tp2_pct:1,operational_tp3_pct:0,status:'ACTIVE'}],trades:[]}
 const v1 = render({dashboard:singleV1,research:{records:[]},selected:'signal:8'})
 check(v1.includes('2.00R') && !v1.includes('1.00R'))
@@ -215,7 +216,69 @@ check(!/method:\s*['"](?:POST|PUT|DELETE)/.test(component))
 check(component.includes('controller.abort()') && component.includes('inFlight') && component.includes("visibilityState === 'hidden'"))
 const focus=(item,props={})=>renderToStaticMarkup(createElement(StockFocus,{item,he:true,stale:false,onClose:()=>{},onDetails:()=>{},...props}))
 const focusHtml=focus(stock('HOTL'))
-check(focusHtml.includes('תקציר המניה במיקוד')&&focusHtml.includes('פתח ראיות מלאות')&&focusHtml.includes('בטל מיקוד'))
+// Evidence is progressive disclosure over the exact linked record, never a
+// reconstruction from newer scans or a successful trade assumed from an order.
+const journey=(item,props={})=>renderToStaticMarkup(createElement(StockJourney,{item,he:true,records:research.records,onClose:()=>{},...props}))
+const documented=journey(stock('HOTL'))
+check(documented.includes('פוזיציית דמה פתוחה')&&documented.includes('תוצאה עד עכשיו'))
+check(documented.includes('ממומש נטו')&&documented.includes('חלק פתוח ברוטו'))
+check(documented.includes('0.20R')&&documented.includes('-0.05%'))
+check(documented.includes('תוקף הכניסה אינו תוקף הפוזיציה'))
+check(documented.includes('RR ברוטו: היחס שנשמר בתוכנית'))
+check(!documented.match(/<details[^>]*\sopen[\s>]/))
+const readable=documented.split('<details class="evidence-technical"')[0]
+for(const raw of ['ENTERED','BUY','Native','single_target_v2','filled','entry'])check(!readable.includes(`>${raw}<`))
+check(documented.includes('<code dir="ltr">ENTERED</code>'))
+check(!documented.includes('system-journey-timeline'))
+check(!readable.includes('אין החלטת AI מקושרת'))
+check(documented.includes('מידע חסר אינו כישלון'))
+check(journey(stock('ALFA')).includes('מועמדת שנשמרה — המשך לא ידוע'))
+check(!journey(stock('ALFA')).includes('0.00R'))
+check(journey(stock('ECHO')).includes('חסימת הקצאה אינה פסילת איכות הסיגנל'))
+check(!journey(stock('FOXT')).includes('פוזיציית דמה פתוחה'))
+check(journey(stock('FOXT')).includes('ממתין לביצוע כניסה'))
+check(journey(stock('GOLF')).includes('אין כניסה מאומתת'))
+check(journey(stock('BETA')).includes('לפני סקירת AI · הבדיקה עברה'))
+check(journey(stock('DELT')).includes('הפלט נבדק מבחינת המבנה — לא אישור כניסה'))
+check(journey(stock('DELT')).includes('הציון אינו הסתברות לרווח'))
+check(journey(stock('GAMA')).includes('נשמרה חסימה בשלב הראיות'))
+check(journey(stock('INDI')).includes('מימוש ביעד'))
+check(journey(stock('HOTL'),{stale:true}).includes('העדכון מתעכב או אינו טרי'))
+equal(evidenceTime('not a date',true),'לא נשמר')
+check(evidenceTime('2026-10-09T15:00:00Z',true).includes('18:00'))
+equal(evidenceReason('nearest_resistance_below_2r',true),'התנגדות קרובה לפני 2R')
+equal(evidenceReason('UNKNOWN_PROVIDER_STATUS',true),'סיבה נוספת שלא תורגמה — ראו מידע טכני')
+const unusual=journey({...stock('ALFA'),reason:'UNKNOWN_PROVIDER_STATUS'})
+check(!unusual.split('<details class="evidence-technical"')[0].includes('UNKNOWN_PROVIDER_STATUS'))
+check(unusual.includes('<code dir="ltr">UNKNOWN_PROVIDER_STATUS</code>'))
+const originalItem=JSON.stringify(stock('HOTL')),originalRecords=JSON.stringify(research.records)
+journey(stock('HOTL'))
+equal(JSON.stringify(stock('HOTL')),originalItem);equal(JSON.stringify(research.records),originalRecords)
+const imported=journey({...stock('HOTL'),trade:{...stock('HOTL').trade,legacy_position_id:7},outcome:{cohort:'Legacy',realized_net_pct:null,remaining_pct:null}})
+check(imported.includes('פוזיציה מיובאת')&&imported.includes('חסרה היסטוריה מלאה'))
+check(!imported.includes('0.00%'))
+const historical=candidate('HOTL',{scan_id:'unrelated-newer-scan',ai_decision:{action:'BUY',confidence:.99}})
+const absent=journey({...stock('HOTL'),record:undefined},{records:[historical]})
+check(!absent.includes('data-evidence-stage="ai"')) // same ticker is not a linked chain
+check(absent.includes('שרשראות נפרדות'))
+const conflicting=journey({...stock('HOTL'),record:{...stock('HOTL').record,signals:[{id:4},{id:444}]}})
+check(conflicting.includes('לא אומת כאן שכל פקודה שייכת לאותו סיגנל'))
+const checked=candidate('TEST',{target_checks:[{phase:'pre_ai',outcome:'REJECT',rejection_reason:'no_fresh_quote',quote:{price:99,eligible_for_entry:false,fresh:false,as_of:'invalid'},evidence_gap:'missing_pivots',geometry:{rr_rounded:1.5},rejection_detail:['non_positive_stop']}],rejection:'pre_no_fresh_quote'})
+const rejected=journey(buildActivity({records:[checked]},null)[0])
+check(rejected.includes('הבדיקה לא עברה')&&rejected.includes('המחיר האחרון אינו טרי'))
+check(rejected.includes('חסרות ראיות מבנה')&&rejected.includes('מחיר הסטופ אינו חיובי'))
+const malicious=journey({...stock('HOTL'),company:'<script>bad</script>',signal:{...stock('HOTL').signal,reason_he:'<img src=x onerror=alert(1)>'}})
+check(malicious.includes('&lt;script&gt;')&&malicious.includes('&lt;img'))
+check(!malicious.includes('<script>bad')&&!malicious.includes('<img src=x'))
+const evidenceSource=readFileSync('src/StockEvidence.tsx','utf8')
+for(const forbidden of ['fetch(','localStorage','sendMessage','innerHTML','dangerouslySetInnerHTML'])check(!evidenceSource.includes(forbidden))
+for(const he of [true,false]) {
+  const markup=journey(stock('HOTL'),{he})
+  check(markup.includes(he?'dir="rtl"':'dir="ltr"'))
+  check(!markup.includes('$')&&!markup.includes('NaN')&&!markup.includes('Infinity'))
+  check(markup.includes(he?'מידע שאינו זמין במדגם':'Information unavailable in sample'))
+}
+check(focusHtml.includes('תקציר המניה במיקוד')&&focusHtml.includes('הסבר וראיות')&&focusHtml.includes('בטל מיקוד'))
 check(focusHtml.includes('100.00')&&focusHtml.includes('97.00')&&focusHtml.includes('106.00')&&focusHtml.includes('2.00R'))
 check(!focusHtml.includes('TP1')&&!focusHtml.includes('TP3')&&!focusHtml.includes('$'))
 check(focus(stock('ECHO')).includes('סיגנל כשיר; הקצאת הדמה חסומה'))
