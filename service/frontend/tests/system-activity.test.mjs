@@ -20,7 +20,7 @@ const load = name => {
 }
 const { buildActivity, activityRevision, detectActivityUpdates, finite, STATE_SYMBOLS, STATIONS } = load('systemActivityModel')
 const { SystemActivityView, StockFocus, StationFlow, activityLevels } = load('SystemActivity')
-const { buildNetwork, buildConstellation, COMPACT_CLUSTERS, buildEvidenceSweep, networkControls, NETWORK_LIMIT, SystemNetwork, EvidenceSpider } = load('SystemNetwork')
+const { buildNetwork, buildConstellation, COMPACT_CLUSTERS, buildEvidenceSweep, networkControls, networkMotionAllowed, NETWORK_LIMIT, SystemNetwork, EvidenceSpider } = load('SystemNetwork')
 let assertions = 0
 const check = v => { assert.ok(v); assertions++ }
 const equal = (a,b) => { assert.deepEqual(a,b); assertions++ }
@@ -202,13 +202,23 @@ check(networkSource.includes("visibilityState !== 'hidden'"))
 check(networkSource.includes('seenBatch.current = key') && networkSource.includes('active: false'))
 check(networkSource.includes('[compact,selected]')) // scroll only; never pan or zoom the fixed map
 check(!networkSource.includes('Web3D')&&!networkSource.includes('setZoom')&&!networkSource.includes('onPointerMove'))
-check(networkSource.includes('reduced || !visible || !available'))
+check(networkSource.includes('!motionAllowed || !visible || !available'))
+for (const requested of [false,true]) for (const reduced of [false,true]) for (const explicitlyEnabled of [false,true]) {
+  equal(networkMotionAllowed(requested,reduced,explicitlyEnabled),requested&&(!reduced||explicitlyEnabled))
+}
+check(networkSource.includes('useState(()=>!reduced)'))
+check(networkSource.includes('setMotionOverride(false)')) // changing device preference revokes opt-in
+check(networkSource.includes('aria-pressed={motionAllowed}')) // label/state reflect actual animation permission
 const spider=props=>renderToStaticMarkup(createElement('svg',null,createElement(EvidenceSpider,{moving:false,path:'M 190 336 L 94 112',point:{x:190,y:336},compact:true,batch:'event:1',...props})))
 check(!spider({}).includes('animateMotion'))
 check(spider({moving:true}).includes('path="M 190 336 L 94 112"'))
 equal((spider({moving:true}).match(/class="system-spider-leg /g)||[]).length,8)
 check(spider({moving:true}).includes('dur="3.2s"')&&!spider({moving:true}).includes('repeatCount'))
 check(spider({}).includes('aria-hidden="true"')&&spider({}).includes('pointer-events="none"'))
+check(spider({}).includes('scale(0.044)'))
+check(spider({compact:false}).includes('scale(0.052)'))
+check(!spider({}).includes('data-motion-override'))
+check(spider({allowReducedMotion:true}).includes('data-motion-override="true"'))
 equal((spider({}).match(/<image /g)||[]).length,9)
 check(spider({}).includes('evidence-spider-titanium-v1') && !spider({}).includes('spider-metal'))
 const texture=readFileSync(new URL('../src/assets/evidence-spider-titanium-v1.png',import.meta.url))
@@ -219,8 +229,8 @@ check(spider({idle:true}).includes('is-idle') && !spider({idle:true}).includes('
 check(!spider({}).includes('is-idle'))
 check(spider({moving:true,idle:true}).includes('is-walking') && !spider({moving:true,idle:true}).includes('is-idle'))
 equal((spider({idle:true}).match(/--idle-delay:/g)||[]).length,8)
-check(networkSource.includes('!moving && motion && !reduced && visible && available'))
-check(css.includes('.system-evidence-spider .system-spider-body, .system-evidence-spider .system-spider-pose { animation: none; }'))
+check(networkSource.includes('!moving && motionAllowed && visible && available'))
+for (const part of ['leg','body','pose']) check(css.includes(`.system-evidence-spider:not([data-motion-override=true]) .system-spider-${part}`))
 equal(network({selected:'trade:40'}).match(/viewBox="([^"]+)"/)[1],network({}).match(/viewBox="([^"]+)"/)[1])
 const component = readFileSync('src/SystemActivity.tsx','utf8')
 check(!/method:\s*['"](?:POST|PUT|DELETE)/.test(component))

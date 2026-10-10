@@ -1,8 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { LABELS, STATE_LABELS, STATE_SYMBOLS, STATIONS, type ActivityItem, type ActivityUpdate, type Station } from './systemActivityModel'
-import { buildNetwork, buildConstellation, buildEvidenceSweep, networkControls, networkCentre as centre } from './systemNetworkGeometry'
+import { buildNetwork, buildConstellation, buildEvidenceSweep, networkControls, networkMotionAllowed, networkCentre as centre } from './systemNetworkGeometry'
 import spiderTexture from './assets/evidence-spider-titanium-v1.png'
-export { CLUSTERS, COMPACT_CLUSTERS, NETWORK_LIMIT, buildNetwork, buildConstellation, buildEvidenceSweep, networkControls } from './systemNetworkGeometry'
+export { CLUSTERS, COMPACT_CLUSTERS, NETWORK_LIMIT, buildNetwork, buildConstellation, buildEvidenceSweep, networkControls, networkMotionAllowed } from './systemNetworkGeometry'
 const REST = { x: 610, y: 340 }
 
 // Clipped parts of one alpha sprite: every limb shares the same material/light.
@@ -15,9 +15,9 @@ const SPIDER_LEGS = [
 ]
 
 /** Photoreal decorative crawler; its finite path represents observed updates only. */
-export function EvidenceSpider({moving,idle=false,path,point,compact,batch}:{moving:boolean;idle?:boolean;path:string;point:{x:number;y:number};compact:boolean;batch:string}) {
+export function EvidenceSpider({moving,idle=false,allowReducedMotion=false,path,point,compact,batch}:{moving:boolean;idle?:boolean;allowReducedMotion?:boolean;path:string;point:{x:number;y:number};compact:boolean;batch:string}) {
   const id=useId().replace(/:/g,'')
-  return <g className={`system-evidence-spider ${moving?'is-walking':idle?'is-idle':''}`} aria-hidden="true" pointerEvents="none">
+  return <g className={`system-evidence-spider ${moving?'is-walking':idle?'is-idle':''}`} data-motion-override={allowReducedMotion?'true':undefined} aria-hidden="true" pointerEvents="none">
     <defs>
       {[-1,1].flatMap(side=>SPIDER_LEGS.map((leg,n)=><clipPath key={`${side}:${n}`} id={`spider-leg-${id}-${side}-${n}`}><polygon points={side===-1?leg.polygon:leg.polygon.split(' ').map(pair=>{const [x,y]=pair.split(',').map(Number);return `${x},${1280-y}`}).join(' ')}/></clipPath>))}
       <clipPath id={`spider-body-${id}`}><path d="M 150 480 Q 300 405 475 445 L 610 515 Q 720 470 820 525 L 955 560 L 965 700 L 825 750 Q 720 815 610 750 L 480 810 Q 285 845 150 710 Z"/></clipPath>
@@ -25,7 +25,7 @@ export function EvidenceSpider({moving,idle=false,path,point,compact,batch}:{mov
     <g key={moving?batch:'rest'} transform={moving?undefined:`translate(${point.x} ${point.y})`}>
       {moving && <animateMotion path={path} dur="3.2s" rotate="auto" fill="freeze" calcMode="paced"/>}
       <g className="system-spider-pose">
-      <g transform={`scale(${compact?.062:.073})`}>
+      <g transform={`scale(${compact?.044:.052})`}>
         <g transform="translate(-640 -640)">
           <ellipse cx="615" cy="665" rx="315" ry="180" fill="#000" opacity=".38"/>
           {[-1,1].flatMap(side=>SPIDER_LEGS.map((leg,n)=><g key={`${side}:${n}`} className={`system-spider-leg gait-${(n+(side===1?1:0))%2}`} style={{transformOrigin:`${leg.hip[0]}px ${side===-1?leg.hip[1]:1280-leg.hip[1]}px`,'--idle-period':`${9+n*1.7+(side===1?2.3:0)}s`,'--idle-delay':`${-n*2.1-(side===1?4.7:0)}s`} as React.CSSProperties}>
@@ -44,9 +44,11 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   updates?: ActivityUpdate[]
   selected: string | null; select: (v: string|null) => void; available: boolean; marketOpen: boolean | undefined
 }) {
-  const [motion, setMotion] = useState(true)
   const [compact, setCompact] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width:1000px)').matches)
   const [reduced, setReduced] = useState(()=>typeof window!=='undefined'&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const [motion, setMotion] = useState(()=>!reduced)
+  const [motionOverride, setMotionOverride] = useState(false)
+  const motionAllowed = networkMotionAllowed(motion,reduced,motionOverride)
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
   const seenBatch = useRef('')
   const lastPoint = useRef(REST)
@@ -69,7 +71,9 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   },[compact,selected])
   const [sweep, setSweep] = useState({ key: '', path: 'M 610 340 L 610 340', active: false, shown: [] as ActivityUpdate[], omitted: 0 })
   useEffect(() => {
-    const query=window.matchMedia('(prefers-reduced-motion: reduce)'), update=()=>setReduced(query.matches)
+    const query=window.matchMedia('(prefers-reduced-motion: reduce)'), update=()=> {
+      setReduced(query.matches);setMotion(!query.matches);setMotionOverride(false)
+    }
     query.addEventListener('change',update)
     return ()=>query.removeEventListener('change',update)
   },[])
@@ -96,20 +100,20 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
     if (!key || key === seenBatch.current) return
     seenBatch.current = key // discarded/paused/hidden batches aren't replayed when viewing resumes
     const next = buildEvidenceSweep(items, updates, lastPoint.current,compact)
-    if (!motion || reduced || !visible || !available || !next.shown.length) return
+    if (!motionAllowed || !visible || !available || !next.shown.length) return
     window.clearTimeout(timer.current)
     lastPoint.current = { x: next.end.x, y: next.end.y }
     setSweep({ key, path: next.path, shown: next.shown, omitted: next.omitted, active: true })
     timer.current = window.setTimeout(() => setSweep(v => ({ ...v, active: false })), 3200)
-  }, [updates, items, motion, reduced, visible, available, compact])
+  }, [updates, items, motionAllowed, visible, available, compact])
   useEffect(() => {
-    if (!motion || reduced || !visible || !available) {
+    if (!motionAllowed || !visible || !available) {
       window.clearTimeout(timer.current); setSweep(v => v.active ? { ...v, active: false } : v)
     }
-  }, [motion, reduced, visible, available])
+  }, [motionAllowed, visible, available])
   useEffect(() => () => window.clearTimeout(timer.current), [])
-  const moving = sweep.active && motion && !reduced && visible && available
-  const idle = !moving && motion && !reduced && visible && available
+  const moving = sweep.active && motionAllowed && visible && available
+  const idle = !moving && motionAllowed && visible && available
   const viewBox = compact ? '0 0 380 776' : '0 0 1200 800'
   const controls = networkControls(compact,mapWidth)
   const updatedStations=new Set(available?items.filter(i=>changed.has(i.id)).map(i=>i.station):[])
@@ -152,13 +156,14 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
           </foreignObject>
           {!!c.omitted && <text className="system-omitted" x={c.x} y={c.y + 100} textAnchor="middle">+{c.omitted} {t('ברשימת התחנה', 'in station list')}</text>}
         </g>)}
-        <EvidenceSpider moving={moving} idle={idle} path={sweep.path} point={lastPoint.current} compact={compact} batch={sweep.key}/>
+        <EvidenceSpider moving={moving} idle={idle} allowReducedMotion={motionOverride} path={sweep.path} point={lastPoint.current} compact={compact} batch={sweep.key}/>
       </svg>
     </div>
   return <div ref={panel} className="system-network-panel">
     <div className="system-network-heading"><div><span className="system-eyebrow">THE INTELLIGENCE WEB</span><h3>{t('רשת המניות', 'Stock network')}</h3></div>
       <div className="system-network-controls">
-      <button type="button" className="system-motion-toggle" aria-pressed={motion} onClick={() => setMotion(v => !v)}>{motion ? t('השהה תנועה', 'Pause motion') : t('הפעל תנועה', 'Enable motion')}</button></div>
+      <button type="button" className="system-motion-toggle" aria-pressed={motionAllowed} onClick={() => {setMotion(!motionAllowed);setMotionOverride(reduced&&!motionAllowed)}}>{motionAllowed ? t('השהה תנועה', 'Pause motion') : t('הפעל תנועה', 'Enable motion')}</button>
+      {reduced&&!motionAllowed&&<span className="system-motion-preference">{t('הפחתת תנועה פעילה במכשיר. אפשר להפעיל כאן במפורש.', 'Reduced motion is enabled on this device. You can explicitly enable animation here.')}</span>}</div>
     </div>
     <div className="system-network-readout"><span><i className={available?'connected':''}/>{available?t('עדכון מחזורי מחובר','PERIODIC FEED CONNECTED'):t('ממתין לנתונים תקינים','AWAITING VALID DATA')}</span><bdi>{String(items.length).padStart(2,'0')} {t('רשומות במדגם','SAMPLED RECORDS')}</bdi><span>{marketOpen === true ? t('מסחר פתוח','MARKET OPEN') : marketOpen === false ? t('מחוץ למסחר','OUTSIDE SESSION') : t('מצב שוק לא ידוע','SESSION UNKNOWN')}</span></div>
     {flat}

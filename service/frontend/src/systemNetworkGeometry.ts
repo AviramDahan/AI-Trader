@@ -11,6 +11,7 @@ export const COMPACT_CLUSTERS: typeof CLUSTERS = Object.fromEntries(STATIONS.map
   ...CLUSTERS[s], x: n % 2 ? 286 : 94, y: 112 + Math.floor(n/2)*176,
 }])) as typeof CLUSTERS
 export const networkCentre = (compact: boolean) => compact ? { x: 190, y: 388 } : { x: 610, y: 340 }
+export const networkMotionAllowed = (requested: boolean, reduced: boolean, explicitlyEnabled: boolean) => requested && (!reduced || explicitlyEnabled)
 /** Screen-space controls: resizing a sidebar must not shrink text or touch targets. */
 export function networkControls(compact: boolean, renderedWidth: number) {
   const width = Number.isFinite(renderedWidth) && renderedWidth > 0 ? renderedWidth : compact ? 380 : 1200

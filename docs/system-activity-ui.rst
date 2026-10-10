@@ -31,8 +31,13 @@ adds subtle body breathing/sway and staggered leg settling, without changing
 map coordinates, evidence timestamps, counters, status or stage membership.
 It is labelled decorative, not worker activity. No random tour or
 requestAnimationFrame renderer. Pause, hidden/unavailable state and reduced
-motion disable both idle and travel animation; unchanged polls never replay
-travel. Idle uses CSS transforms only, no extra polling or timers.
+motion disable both idle and travel animation by default; unchanged polls never
+replay travel. The motion button reflects the effective state. A user can
+explicitly opt in within this view when the device requests reduced motion;
+this does not change the device preference and is not persisted. A preference
+change resets that opt-in. Pause, hidden/unavailable data still stop movement.
+The sprite is approximately 29% smaller than the previous revision on both
+layouts. Idle uses CSS transforms only, no extra polling or timers.
 The active view imports no 3D module or Three.js; the frontend build emits no
 3D activity chunk. Older unmounted sources and tests remain in the repository.
 Station controls retain a 48-screen-pixel height and 14-pixel font; ticker
@@ -80,7 +85,8 @@ non-GET requests; it does not connect to Production/AI/Telegram.
 ``?event-test=synthetic`` emits one ALFA update on the second fixture poll;
 unchanged later polls must not replay it. ``&motion-test=synthetic`` explicitly
 labels a visual QA fixture overriding reduced motion ONLY in the synthetic
-preview. The actual app always respects the user's preference. This is not
+preview. The actual app defaults to the user's preference, with an explicit
+per-view motion opt-in as described above. This is not
 live E2E evidence. Former GPU fixture URLs remain test-only, with no GPU scene.
 ``?density-test=synthetic`` renders 64 labelled synthetic records for crowded
 map QA, using the same view and controls; it does not load live data.
