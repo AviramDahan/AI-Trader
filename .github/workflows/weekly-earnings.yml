@@ -3,6 +3,9 @@ on:
   schedule:
     # UTC windows cover both Israel standard and daylight-saving time.
     - cron: '7 15-20 * * 5'
+    # Bounded catch-up if GitHub delayed/dropped every Friday opportunity.
+    # The existing durable weekly claim prevents a second publication.
+    - cron: '17 16 * * 6,0'
   workflow_dispatch:
     inputs:
       preview:
@@ -40,9 +43,10 @@ jobs:
           import os, subprocess, sys
           from datetime import datetime
           from zoneinfo import ZoneInfo
+          from scripts.weekly_earnings import delivery_window
           now = datetime.now(ZoneInfo('Asia/Jerusalem'))
-          if os.environ['SCHEDULED'] == 'true' and (now.weekday() != 4 or not 18 <= now.hour <= 22):
-              print('Outside Israel Friday delivery window; skipped')
+          if os.environ['SCHEDULED'] == 'true' and not delivery_window(now):
+              print('Outside bounded weekly delivery window; skipped without publication')
               sys.exit(0)
           command = [sys.executable, 'scripts/weekly_earnings.py']
           if os.environ['PREVIEW'] != 'true':

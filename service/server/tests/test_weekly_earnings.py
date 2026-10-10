@@ -1,7 +1,8 @@
 """Isolated weekly delivery tests: no real Telegram calls."""
 import importlib.util
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from unittest.mock import Mock
 import pytest
 
@@ -137,3 +138,111 @@ def test_cloud_read_error_fails_closed(monkeypatch):
     session=Mock(); session.get.return_value.status_code=503
     with pytest.raises(ValueError,match='Cloud state read failed'):
         w.GitHubDelivery('2026-09-28',session).read()
+
+
+@pytest.mark.parametrize('stamp,allowed',[
+    ('2026-10-09T17:59:59',False),
+    ('2026-10-09T18:00:00',True),
+    ('2026-10-09T22:59:59',True),
+    ('2026-10-09T23:04:06',True),  # actual delayed scheduled run
+    ('2026-10-10T02:58:25',True),  # actual delayed scheduled run
+    ('2026-10-10T19:17:00',True),
+    ('2026-10-11T23:59:59',True),
+    ('2026-10-12T00:00:00',False),
+    ('2026-10-08T20:00:00',False),
+    ('2026-12-31T20:00:00',False),
+    ('2027-01-01T23:00:00',True),
+    ('2027-01-03T23:59:59',True),
+    ('2027-01-04T00:00:00',False),
+])
+def test_bounded_weekend_catchup_window(stamp,allowed):
+    now=datetime.fromisoformat(stamp).replace(tzinfo=ZoneInfo('Asia/Jerusalem'))
+    assert w.delivery_window(now)==allowed
+
+
+def test_window_uses_israel_timezone():
+    assert w.delivery_window(datetime.fromisoformat('2026-10-09T15:00:00+00:00'))
+    assert not w.delivery_window(datetime.fromisoformat('2026-10-11T21:00:00+00:00'))
+    with pytest.raises(ValueError,match='timezone'):
+        w.delivery_window(datetime(2026,10,9,20))
+
+
+def test_delayed_main_send_then_catchup_is_already_sent(monkeypatch,tmp_path,capsys):
+    # Full CLI path, durable claim and real local guard; only provider/Telegram
+    # transports are mocked. No live topic, AI, repository or portfolio writes.
+    clock=[datetime(2026,10,9,23,4,tzinfo=ZoneInfo('Asia/Jerusalem'))]
+    class Frozen(datetime):
+        @classmethod
+        def now(cls,tz=None): return clock[0].astimezone(tz)
+    monkeypatch.setattr(w,'datetime',Frozen)
+    monkeypatch.setattr(w.sys,'argv',['weekly_earnings.py','--send','--github'])
+    item=w.find_calendar(feed(day='October 12, 2026'),date(2026,10,12))
+    fetch=Mock(return_value=item); monkeypatch.setattr(w,'fetch_calendar',fetch)
+    monkeypatch.setattr(w,'photo_bytes',Mock(return_value=b'fixture'))
+    session=Mock()
+    session.__enter__=Mock(return_value=session); session.__exit__=Mock(return_value=False)
+    session.post.return_value.json.return_value={'ok':True,'result':{'message_id':12}}
+    monkeypatch.setattr(w.requests,'Session',Mock(return_value=session))
+    cloud=Mock(); cloud.read.return_value=None
+    def persist(status): cloud.read.return_value=status
+    cloud.write.side_effect=persist
+    monkeypatch.setattr(w,'GitHubDelivery',Mock(return_value=cloud))
+    original=w.send_once
+    monkeypatch.setattr(w,'send_once',lambda *args,**kw:original(*args,state=tmp_path/'state.sqlite',**kw))
+    for key,value in inputs()[1].items(): monkeypatch.setenv(key,value)
+    w.main()
+    assert '"status": "sent"' in capsys.readouterr().out
+    clock[0]=datetime(2026,10,10,2,58,tzinfo=ZoneInfo('Asia/Jerusalem'))
+    w.main()
+    assert '"status": "already_sent"' in capsys.readouterr().out
+    assert session.post.call_count==1 and fetch.call_count==1
+    assert fetch.call_args.args[0]==date(2026,10,12)
+    assert [call.args[0] for call in cloud.write.call_args_list]==['sending','sent']
+    cloud.read.return_value='sending'
+    with pytest.raises(ValueError,match='Cloud delivery uncertain'):
+        w.main()
+    assert session.post.call_count==1 and fetch.call_count==1
+
+
+def test_main_monday_blocks_before_network(monkeypatch):
+    class Monday(datetime):
+        @classmethod
+        def now(cls,tz=None): return cls(2026,10,12,0,tzinfo=tz)
+    monkeypatch.setattr(w,'datetime',Monday)
+    monkeypatch.setattr(w.sys,'argv',['weekly_earnings.py','--send','--github'])
+    session=Mock(); monkeypatch.setattr(w.requests,'Session',session)
+    with pytest.raises(ValueError,match='delivery window'):
+        w.main()
+    session.assert_not_called()
+
+
+@pytest.mark.parametrize('stamp,allowed',[
+    ('2026-10-09T23:04:06',True),
+    ('2026-10-10T02:58:25',True),
+    ('2026-10-12T00:00:00',False),
+])
+def test_actual_workflow_python_guard(monkeypatch,stamp,allowed):
+    import datetime as datetime_module
+    import subprocess
+    import re
+    import textwrap
+    now=datetime.fromisoformat(stamp).replace(tzinfo=ZoneInfo('Asia/Jerusalem'))
+    class Frozen(datetime):
+        @classmethod
+        def now(cls,tz=None): return now.astimezone(tz)
+    monkeypatch.setattr(datetime_module,'datetime',Frozen)
+    monkeypatch.syspath_prepend(str(w.ROOT))
+    monkeypatch.setenv('SCHEDULED','true'); monkeypatch.setenv('PREVIEW','false')
+    run=Mock(); monkeypatch.setattr(subprocess,'run',run)
+    workflow=(w.ROOT/'.github/workflows/weekly-earnings.yml').read_text(encoding='utf-8')
+    code=textwrap.dedent(re.search(r"python - <<'PY'\n(.*?)\n\s+PY",workflow,re.S)[1])
+    if allowed:
+        exec(compile(code,'weekly-workflow','exec'),{})
+        run.assert_called_once()
+        assert run.call_args.args[0][-2:]==['--send','--github']
+        assert run.call_args.kwargs['check'] is True
+    else:
+        with pytest.raises(SystemExit) as exit:
+            exec(compile(code,'weekly-workflow','exec'),{})
+        assert exit.value.code==0
+        run.assert_not_called()
