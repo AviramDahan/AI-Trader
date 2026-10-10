@@ -24,12 +24,13 @@ Interaction
   background inertness and Telegram's optional BackButton are supported.
 * Small-height containers omit preview chips, not stations or records. Lists keep
   all filtered records accessible. Touch targets are at least 44 CSS pixels.
-* The fixed 2D map cannot be dragged or rotated. The same spider artwork is
-  smaller. Station movement is limited to newly observed changes, not arbitrary
-  trips. Hidden/paused/unavailable updates are discarded, including navigation
-  away and back; idle motion is explicitly described as decorative.
-* Reduced-motion preferences are respected by default. A viewer may explicitly
-  enable illustrative motion or disable it without affecting the application.
+* The fixed 2D map cannot be dragged or rotated. The decorative spider and its
+  motion controls have been removed from both renderers.
+* Prominent step badges 1–8 and seven directional arrows show a continuous
+  serpentine sequence. In Hebrew the first step starts top-right; in English it
+  starts top-left. DOM/tab order remains chronological. Counts are separately
+  labeled records, never used as step numbers. Arrows describe pipeline order,
+  not proof a sampled stock passed earlier stages.
 
 Verification
 ------------
@@ -39,11 +40,11 @@ Verification
 mobile shell and display-only SDK navigation. Fixtures contain synthetic data.
 The development-only ``tests/miniapp-harness.html`` is not an entry in the
 production build. It supports loading/empty/error/stale states, 360/390/430
-widths, short-height layouts and controlled observed-update animation.
+widths, short-height layouts and synthetic observed updates.
 
 Browser interaction checks must supplement static rendering: station/stock/
 journey/back, focus restoration, search, small viewport bounds, error distinction,
-motion completion and navigation without replay. Actual Telegram Web launch is
+step order in RTL/LTR and absence of the decorative spider. Telegram Web launch is
 checked after publication. Responsive rendering and Telegram Web do not prove
 native Android/iOS keyboard or client behavior; those remain a bounded limitation.
 

@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { TopbarControls } from './appChrome'
-import { EvidenceSpider } from './SystemNetwork'
 import { installMiniAppBackButton, preserveMiniApp } from './telegramMiniApp'
 import { LABELS, STATE_LABELS, STATIONS, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
 import './miniAppActivity.css'
@@ -17,7 +16,6 @@ type Props = {
 }
 const names = (pair: [string, string], he: boolean) => pair[he ? 0 : 1]
 const time = (value: unknown, he: boolean) => value ? new Date(String(value)).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
-const ICONS: Record<Station, string> = { technical: '⌁', targets: '◎', evidence: '▤', ai: '✧', signal: '↗', order: '◷', position: '◉', exit: '✓' }
 
 /** A display-only shell over the same retained evidence as the full website. */
 export function MiniAppActivity(p: Props) {
@@ -25,8 +23,6 @@ export function MiniAppActivity(p: Props) {
   const t = (a: string, b: string) => he ? a : b
   const location = useLocation(), navigate = useNavigate()
   const [view, setView] = useState<'map' | 'stocks' | 'more'>('map')
-  const [motionEnabled,setMotionEnabled] = useState(() => typeof window === 'undefined' || !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  const [motionOverride,setMotionOverride] = useState(false)
   const [stack, setStack] = useState<Sheet[]>([])
   const sheet = stack.at(-1)
   const base = useRef<HTMLDivElement>(null), panel = useRef<HTMLDivElement>(null)
@@ -78,14 +74,14 @@ export function MiniAppActivity(p: Props) {
       </header>
       <div className="mini-map-view" hidden={view !== 'map'}>
         <div className="mini-map-heading"><h1>{t('הכורים', 'Reactors')}</h1><button type="button" onClick={() => open({ kind: 'filters' })}>{p.ticker || p.onlyFollowed ? t('סינון פעיל', 'Filtered') : t('סינון', 'Filter')} <span aria-hidden="true">⌕</span></button></div>
-        <MobileReactors he={he} items={items} changed={changed} updates={p.updates} known={known} available={available} motionEnabled={motionEnabled} motionOverride={motionOverride} active={view === 'map' && !sheet} openStation={s => open({ kind: 'station', station: s })} openStock={id => open({ kind: 'stock', id })} />
+        <MobileReactors he={he} items={items} changed={changed} known={known} openStation={s => open({ kind: 'station', station: s })} openStock={id => open({ kind: 'stock', id })} />
         <div className="mini-map-footnote"><span>{t('לחצו על כור או מניה לפרטים', 'Tap a reactor or stock for details')}</span><span>{dashboard?.market?.is_open === false ? t('השוק סגור', 'Market closed') : dashboard?.market?.is_open === true ? t('השוק פתוח', 'Market open') : t('מצב שוק לא זמין', 'Market status unavailable')}</span></div>
       </div>
       {view === 'stocks' && <div className="mini-page"><h1>{t('מניות במדגם', 'Sampled stocks')}</h1><label className="mini-search">{t('חיפוש', 'Search')}<input type="search" placeholder={t('סימול או חברה', 'Ticker or company')} value={p.ticker} onChange={e => p.setTicker(e.target.value)} /></label>{list(items)}</div>}
       {view === 'more' && <div className="mini-page"><h1>{t('עוד במערכת', 'More')}</h1><div className="mini-more-links">
         {([['signals','סיגנלים ופוזיציות','Signals and positions'],['research','מחקר סיגנלים','Signal research'],['results','תוצאות','Results'],['news','חדשות','News'],['status','מצב הסורק','Scanner status']] as const).map(([tab, a, b]) => <button key={tab} type="button" onClick={() => navigate(preserveMiniApp(`/market?tab=${tab}`, location.search, location.hash))}>{t(a,b)}<span aria-hidden="true">‹</span></button>)}
         <button type="button" onClick={() => open({ kind: 'info' })}>{t('איך לקרוא את התצוגה?', 'How to read this view')}<span aria-hidden="true">ⓘ</span></button>
-      </div><TopbarControls /><label className="mini-motion-option"><input type="checkbox" checked={motionEnabled} onChange={e=>{setMotionEnabled(e.target.checked);setMotionOverride(e.target.checked)}} />{t('תנועת המחשה', 'Illustrative motion')}</label><p className="mini-small-note">{t('צפייה בלבד. אין שינוי בסורק או במסחר.', 'Read-only. No scanner or trading changes.')}</p></div>}
+      </div><TopbarControls /><p className="mini-small-note">{t('צפייה בלבד. אין שינוי בסורק או במסחר.', 'Read-only. No scanner or trading changes.')}</p></div>}
       <nav className="mini-bottom-nav" aria-label={t('ניווט ראשי', 'Main navigation')}>
         {(['map','stocks','more'] as const).map((key,n) => <button type="button" key={key} aria-current={view === key ? 'page' : undefined} onClick={() => setView(key)}><span aria-hidden="true">{['◉','▥','•••'][n]}</span>{names(([['כורים','Reactors'],['מניות','Stocks'],['עוד','More']] as [string,string][])[n], he)}</button>)}
       </nav>
@@ -105,7 +101,7 @@ export function MiniAppActivity(p: Props) {
             <label className="mini-check"><input type="checkbox" checked={p.onlyFollowed} onChange={e => p.setOnlyFollowed(e.target.checked)} />{t('רק מניות במעקב בתצוגה', 'Visually followed only')}</label>
             <button type="button" onClick={() => { p.setTicker(''); p.setOnlyFollowed(false) }}>{t('ניקוי סינון', 'Clear filters')}</button><button className="mini-primary" type="button" onClick={close}>{t('הצגת התוצאות', 'Show results')}</button></div>}
           {sheet.kind === 'info' && <div className="mini-info"><p className="mini-info-status">{p.connection}</p><p>{t('מיקום המניה נקבע לפי התיעוד האחרון. הוא אינו מציג Worker שמטפל בה כרגע או אישור מעבר בתחנות קודמות.', 'Stocks are located by their latest retained evidence, not a worker processing them or proof of earlier approvals.')}</p>
-            <p>{t('העכביש הוא המחשה: תנועה בין כורים מופיעה רק כשנקלט שינוי מתועד. תנועה קלה במקום היא אנימציה בלבד.', 'The spider illustrates observed updates between reactors. Gentle motion in place is decorative only.')}</p>
+            <p>{t('המספרים 1–8 והחצים מציגים את סדר התחנות. מספר הרשומות בכל תחנה מוצג בנפרד; החצים אינם הוכחה שמניה עברה את הבדיקות.', 'Steps 1–8 and arrows show station order. Record counts are separate; arrows do not prove a stock passed earlier gates.')}</p>
             <p>{t('המחקר מתעדכן כל דקה ומצב הסורק כל 30 שניות. המדגם אינו כל ה־Universe.', 'Research refreshes each minute and scanner status every 30 seconds. This sample is not the full universe.')}</p>
             <dl><div><dt>{t('תמונת מחקר', 'Research snapshot')}</dt><dd><bdi>{time(research?.generated_at,he)}</bdi></dd></div><div><dt>{t('מניות במדגם', 'Sampled stocks')}</dt><dd>{known ? new Set(allItems.map(i => i.ticker)).size : '—'}</dd></div></dl>
             {p.error && <details><summary>{t('פרטי שגיאת העדכון', 'Refresh error details')}</summary><p><bdi>{p.error}</bdi></p></details>}
@@ -117,58 +113,17 @@ export function MiniAppActivity(p: Props) {
   </section>
 }
 
-export function MobileReactors({he, items, changed, updates, known, available, motionEnabled=true, motionOverride=false, active=true, openStation, openStock}: {
-  he:boolean; items:ActivityItem[]; changed:Set<string>; updates:ActivityUpdate[]; known:boolean; available:boolean
-  openStation:(s:Station)=>void; openStock:(id:string)=>void; motionEnabled?:boolean; motionOverride?:boolean; active?:boolean
+export function MobileReactors({he, items, changed, known, openStation, openStock}: {
+  he:boolean; items:ActivityItem[]; changed:Set<string>; known:boolean
+  openStation:(s:Station)=>void; openStock:(id:string)=>void
 }) {
-  const map = useRef<HTMLDivElement>(null), seen = useRef('')
-  const sweepTimer = useRef<number | undefined>()
-  const [visible,setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
-  const [motion, setMotion] = useState(() => typeof window === 'undefined' || !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  const motionAllowed=motionEnabled && (motion || motionOverride)
-  const [size, setSize] = useState({w:380,h:510})
-  const [sweep, setSweep] = useState({active:false,key:'',path:''})
-  useEffect(() => {
-    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const change = () => setMotion(!query.matches)
-    query.addEventListener('change',change)
-    const resize = new ResizeObserver(() => { const r = map.current?.getBoundingClientRect(); if(r?.width && r.height) setSize({w:r.width,h:r.height}) })
-    if(map.current) resize.observe(map.current)
-    return () => { query.removeEventListener('change',change); resize.disconnect() }
-  },[])
-  useEffect(() => {
-    const key = updates.map(u=>u.key).join('|')
-    if(!key || key === seen.current) return
-    seen.current = key // Hidden, unavailable and paused batches are discarded, never replayed.
-    if(!available || !motionAllowed || !active || document.visibilityState === 'hidden') return
-    const rect = map.current?.getBoundingClientRect()
-    if(!rect) return
-    const points = [...new Set(updates.filter(u => items.some(i=>i.id===u.item.id)).map(u=>u.item.station))].slice(0,4).map(s => {
-      const r = map.current?.querySelector(`[data-reactor="${s}"]`)?.getBoundingClientRect()
-      return r ? `${r.x-rect.x+r.width/2} ${r.y-rect.y+r.height/2}` : ''
-    }).filter(Boolean)
-    if(!points.length) return
-    window.clearTimeout(sweepTimer.current)
-    setSweep({active:true,key,path:`M ${rect.width/2} ${rect.height/2} L ${points.join(' L ')} L ${rect.width/2} ${rect.height/2}`})
-    sweepTimer.current = window.setTimeout(()=>setSweep(v=>({...v,active:false})),3200)
-  },[updates,items,available,motionAllowed,active])
-  useEffect(()=>()=>window.clearTimeout(sweepTimer.current),[])
-  useEffect(() => {
-    const stop = () => { const shown=document.visibilityState !== 'hidden'; setVisible(shown); if(!shown) { window.clearTimeout(sweepTimer.current); setSweep(v=>({...v,active:false})) } }
-    if(!available || !motionAllowed || !active) { window.clearTimeout(sweepTimer.current); setSweep(v=>({...v,active:false})) }
-    document.addEventListener('visibilitychange',stop)
-    return ()=>document.removeEventListener('visibilitychange',stop)
-  },[available,motionAllowed,active])
   const t=(a:string,b:string)=>he?a:b
-  return <div ref={map} className={`mini-reactors ${known?'':'is-loading'}`} aria-label={t('מפת הכורים', 'Reactor map')}>
-    <svg className="mini-spider-overlay" viewBox={`0 0 ${size.w} ${size.h}`} aria-hidden="true"><path d={`M ${size.w/2} 18 L ${size.w/2} ${size.h-18}`} className="mini-spine" />
-      <EvidenceSpider moving={sweep.active && available && motionAllowed && visible && active} idle={motionAllowed && visible && active} allowReducedMotion={motionOverride} path={sweep.path} point={{x:size.w/2,y:size.h/2}} compact batch={sweep.key} scale={.034} />
-    </svg>
+  return <div className={`mini-reactors ${known?'':'is-loading'}`} aria-label={t('מפת הכורים', 'Reactor map')}>
     {STATIONS.map((s,n) => {
       const group = items.filter(i=>i.station===s)
-      return <article data-reactor={s} key={s} className={`mini-reactor reactor-${s} ${group.some(i=>changed.has(i.id))?'has-update':''}`}>
-        <button type="button" className="mini-reactor-open" onClick={()=>openStation(s)} aria-label={`${names(LABELS[s],he)} · ${known?group.length:t('טוען','Loading')}`}>
-          <span className="mini-reactor-icon" aria-hidden="true">{ICONS[s]}</span><span className="mini-reactor-name">{names(LABELS[s],he)}</span><span className="mini-reactor-count"><bdi>{known?group.length:'—'}</bdi></span><span className="mini-reactor-number" aria-hidden="true">{String(n+1).padStart(2,'0')}</span>
+      return <article data-reactor={s} key={s} className={`mini-reactor reactor-${s} ${group.some(i=>changed.has(i.id))?'has-update':''}`} style={{gridRow:Math.floor(n/2)+1,gridColumn:n%4===0||n%4===3?1:2}} data-flow={n===STATIONS.length-1?undefined:n%2===1?'down':n%4===0?'forward':'back'} data-arrow={n%2===1?'↓':(n%4===0)===he?'←':'→'}>
+        <button type="button" className="mini-reactor-open" onClick={()=>openStation(s)} aria-label={`${t('שלב','Step')} ${n+1}: ${names(LABELS[s],he)} · ${known?`${group.length} ${t('רשומות','records')}`:t('טוען','Loading')}`}>
+          <span className="mini-reactor-number" aria-hidden="true">{n+1}</span><span className="mini-reactor-name">{names(LABELS[s],he)}</span><span className="mini-reactor-count"><bdi>{known?group.length:'—'}</bdi> {t('רשומות','records')}</span>
         </button>
         <div className="mini-reactor-preview">{group.slice(0,1).map(item=><button type="button" key={item.id} onClick={()=>openStock(item.id)} aria-label={`${t('פרטי מניה','Stock details')}: ${item.ticker}`}><bdi>{item.ticker}</bdi><span>{item.state==='recorded'?t('תיעוד בלבד','Recorded only'):names(STATE_LABELS[item.state],he)}</span></button>)}
           {!group.length && <span>{known?t('אין רשומות במדגם','No sampled records'):t('ממתין לנתונים','Waiting for data')}</span>}

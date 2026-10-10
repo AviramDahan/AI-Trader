@@ -31,7 +31,7 @@ const items=buildActivity(r,fixtureDashboard),original=JSON.stringify(items)
 for(const he of [true,false]) {
   const map=renderToStaticMarkup(createElement(MobileReactors,{he,items,changed:new Set(),updates:[],known:true,available:true,openStation:()=>{},openStock:()=>{}}))
   for(const s of STATIONS)ok(map.includes(`data-reactor="${s}"`))
-  ok(map.includes('FOXT'));ok(map.includes('data-motion-override')===false)
+  ok(map.includes('FOXT'));ok(!map.includes('spider'));ok(!map.includes('animateMotion'))
 }
 equal(JSON.stringify(items),original)
 const failed=render({research:r,dashboard:fixtureDashboard,error:'signal timed out'})
@@ -47,6 +47,26 @@ win.Telegram=undefined;const late=installMiniAppBackButton(()=>calls.push('late'
 win.location.search='';const plain=installMiniAppBackButton(()=>{},win);equal(button.click,null);plain()
 const css=readFileSync('src/miniAppActivity.css','utf8'),source=readFileSync('src/MiniAppActivity.tsx','utf8')
 ok(css.includes('min-height:44px'));ok(css.includes('min-height:48px'));ok(css.includes('grid-template-rows:repeat(4'));ok(css.includes('@media(max-height:680px)'))
-ok(source.includes('aria-modal="true"'));ok(source.includes("setAttribute('inert'"));ok(source.includes("e.key !== 'Tab'"));ok(source.includes('prefers-reduced-motion'))
+ok(source.includes('aria-modal="true"'));ok(source.includes("setAttribute('inert'"));ok(source.includes("e.key !== 'Tab'"));ok(!source.includes('EvidenceSpider'))
 for(const forbidden of ['fetch(',"method: 'POST'",'sendMessage','initData','scrollIntoView'])ok(!source.includes(forbidden))
+// Numbers are station sequence, not counts; DOM/tab order stays chronological.
+for(const he of [true,false]) {
+  const map=renderToStaticMarkup(createElement(MobileReactors,{he,items,changed:new Set(),known:true,openStation:()=>{},openStock:()=>{}}))
+  const rows=[...map.matchAll(/<article([^>]+)>/g)].map(m=>m[1])
+  equal(rows.length,8)
+  for(let n=0;n<8;n++) {
+    ok(rows[n].includes(`data-reactor="${STATIONS[n]}"`))
+    ok(rows[n].includes(`grid-row:${Math.floor(n/2)+1}`))
+    ok(rows[n].includes(`grid-column:${n%4===0||n%4===3?1:2}`))
+  }
+  equal((map.match(/data-flow=/g)||[]).length,7)
+  equal((map.match(/data-flow="down"/g)||[]).length,3)
+  ok(map.includes(`data-arrow="${he?'←':'→'}"`))
+  ok(map.includes(`data-arrow="${he?'→':'←'}"`))
+  for(let n=1;n<=8;n++)ok(map.includes(`class="mini-reactor-number" aria-hidden="true">${n}</span>`))
+  ok(map.includes(he?'שלב 1:':'Step 1:'))
+  ok(map.includes(he?'רשומות':'records'))
+}
+ok(!empty.includes('תנועת המחשה'));ok(!full.includes('עכביש'))
+ok(css.includes('[data-flow=down]'));ok(css.includes('pointer-events:none'))
 console.log(`Mobile workspace: ${assertions} assertions passed (synthetic evidence; no network or Telegram delivery)`)
