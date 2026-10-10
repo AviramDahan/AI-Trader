@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "test:research": "node tests/signal-research.test.mjs",
-    "test:activity": "node tests/system-activity.test.mjs && node tests/system-web3d.test.mjs",
+    "test:activity": "node tests/system-activity.test.mjs && node tests/system-web3d.test.mjs && node tests/telegram-miniapp.test.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview"

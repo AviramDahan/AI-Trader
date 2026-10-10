@@ -5,6 +5,7 @@ import { Link, useLocation } from 'react-router-dom'
 import brandMark from './assets/ai-trader-logo.png'
 
 import { API_ORIGIN, useLanguage, useTheme } from './appShared'
+import { isMiniAppEntry, preserveMiniApp } from './telegramMiniApp'
 
 function LanguageSwitcher() {
   const { language, setLanguage } = useLanguage()
@@ -161,7 +162,7 @@ export function Sidebar() {
   return (
     <div className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
       <div className="sidebar-header">
-        <Link className="logo brand-home" to="/" dir="ltr"
+        <Link className="logo brand-home" to={isMiniAppEntry(location.search) ? preserveMiniApp('/market?tab=live', location.search, location.hash) : '/'} dir="ltr"
           aria-label={language === 'he' ? 'AI-Trader — לדף הבית' : 'AI-Trader — Home'}
           onClick={() => setMobileMenuOpen(false)}>
           <img className="brand-mark" src={brandMark} alt="" width={44} height={44} />
@@ -183,8 +184,8 @@ export function Sidebar() {
         {navItems.map((item) => (
           <Link
             key={item.path}
-            to={item.path}
-            className={`nav-link ${(location.pathname + location.search) === item.path || (item.path.endsWith('signals') && location.pathname === '/market' && !location.search) ? 'active' : ''}`}
+            to={preserveMiniApp(item.path, location.search, location.hash)}
+            className={`nav-link ${(location.pathname + '?tab=' + (new URLSearchParams(location.search).get('tab') || 'signals')) === item.path ? 'active' : ''}`}
           >
             <span className="nav-icon">{item.icon}</span>
             <span>{item.label}</span>
