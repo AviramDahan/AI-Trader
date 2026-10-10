@@ -11,7 +11,7 @@ from pathlib import Path
 ROLES = {
     "scanner": "telegram_news_stream,stock_scanner,stock_sec_intelligence,stock_position_news,stock_news_feed,stock_news_ai,stock_news_translation",
     "monitor": "stock_signal_monitor,stock_quote_refresh",
-    "telegram": "stock_telegram_outbox,stock_telegram_status",
+    "telegram": "stock_telegram_outbox,stock_telegram_status,community_discussions",
 }
 ROLE_KEYS = {"scanner": 11, "monitor": 12, "telegram": 13}
 # SEC activation requires complete migration 007. The prerequisite bridge

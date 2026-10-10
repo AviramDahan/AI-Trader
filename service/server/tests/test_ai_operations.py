@@ -13,6 +13,14 @@ def test_cost_split_does_not_assign_provider_discrepancy():
     assert result['projected'] is None and result['days_until_cap'] is None
     assert 'אין מספיק נתונים' in ops.notification(result)
 
+
+def test_community_cost_is_separate_but_in_monthly_total():
+    result=ops.calculate([{'task':'news_analysis','actual_cost':2},
+                          {'task':'community_discussion','actual_cost':.01}],{'usage_monthly':3})
+    assert result['community']==.01 and result['news']==2
+    assert result['local_total']==2.01 and result['discrepancy']==.99
+    assert 'Community discussion' in ops.notification(result)
+
 def test_forecast_uses_measured_delta_not_historical_unassigned_spend():
     from datetime import timedelta
     start=datetime(2026,9,11,tzinfo=timezone.utc)

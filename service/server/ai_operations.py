@@ -84,7 +84,7 @@ def credit_alerts(data):
 
 def calculate(rows, provider, now=None, samples=None, credit_data=None):
     now=now or datetime.now(timezone.utc)
-    totals={k:0.0 for k in ('news_analysis','news_translation','final_stock_review','retry_repair')}
+    totals={k:0.0 for k in ('news_analysis','news_translation','final_stock_review','retry_repair','community_discussion')}
     missing=0
     for row in rows:
         cost=number(row['actual_cost'])
@@ -115,7 +115,7 @@ def calculate(rows, provider, now=None, samples=None, credit_data=None):
     if days is not None and days>calendar.monthrange(now.year,now.month)[1]-elapsed:
         days=None  # Monthly reset occurs first; do not forecast a cap years away.
     return dict(local_total=local,total=usage,news=totals['news_analysis']+totals['news_translation'],
-                final=totals['final_stock_review'],retry=totals['retry_repair'],missing_cost_calls=missing,
+                final=totals['final_stock_review'],retry=totals['retry_repair'],community=totals['community_discussion'],missing_cost_calls=missing,
                 remaining=remaining,used_percent=usage/cap*100 if usage is not None else None,
                 average_daily_burn=burn,projected=usage+burn*(calendar.monthrange(now.year,now.month)[1]-elapsed) if burn is not None else None,
                 days_until_cap=days,
@@ -138,6 +138,7 @@ def notification(s):
     def f(k): return 'לא זמין' if s[k] is None else f'{s[k]:.2f}'
     return ('AI-Trader Admin\nAI budget: $'+f('total')+' / $25\nNews: $'+f('news')+
             '\nFinal stock: $'+f('final')+'\nRetries/repairs: $'+f('retry')+
+            '\nCommunity discussion: $'+f('community')+
             '\nMonthly budget remaining: $'+f('remaining')+
             '\nAccount credit balance: $'+f('credit_balance')+
             '\nProjected month-end: '+('$'+f('projected') if s['projected'] is not None else 'אין מספיק נתונים')+
