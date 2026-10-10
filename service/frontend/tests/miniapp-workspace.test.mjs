@@ -26,6 +26,8 @@ ok(empty.includes('טוען נתונים'));ok(!empty.includes('scanner-hero'));
 equal((empty.match(/mini-reactor-count"><bdi>—/g)||[]).length,8)
 const r={...fixtureResearch,generated_at:new Date().toISOString()}
 const full=render({research:r,dashboard:fixtureDashboard})
+equal(render({research:r,dashboard:fixtureDashboard,onlyFollowed:true,followed:['FOXT']}),full)
+ok(!full.includes('mini-follow'));ok(!full.includes('type="checkbox"'))
 ok(full.includes('מחובר'));ok(full.includes('השוק'));ok(full.indexOf('mini-reactors')<full.indexOf('mini-bottom-nav'))
 const items=buildActivity(r,fixtureDashboard),original=JSON.stringify(items)
 for(const he of [true,false]) {
@@ -49,6 +51,8 @@ const css=readFileSync('src/miniAppActivity.css','utf8'),source=readFileSync('sr
 ok(css.includes('min-height:44px'));ok(css.includes('min-height:48px'));ok(css.includes('grid-template-rows:repeat(4'));ok(css.includes('@media(max-height:680px)'))
 ok(source.includes('aria-modal="true"'));ok(source.includes("setAttribute('inert'"));ok(source.includes("e.key !== 'Tab'"));ok(!source.includes('EvidenceSpider'))
 for(const forbidden of ['fetch(',"method: 'POST'",'sendMessage','initData','scrollIntoView'])ok(!source.includes(forbidden))
+for(const forbidden of ['localStorage','onlyFollowed','p.follow','mini-follow','mini-check'])ok(!source.includes(forbidden))
+ok(source.includes('תצוגה ציבורית לצפייה בלבד'))
 // Numbers are station sequence, not counts; DOM/tab order stays chronological.
 for(const he of [true,false]) {
   const map=renderToStaticMarkup(createElement(MobileReactors,{he,items,changed:new Set(),known:true,openStation:()=>{},openStock:()=>{}}))

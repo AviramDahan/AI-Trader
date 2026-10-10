@@ -10,7 +10,6 @@ type Props = {
   he: boolean; items: ActivityItem[]; allItems: ActivityItem[]; changed: Set<string>; updates: ActivityUpdate[]
   research: Row | null; dashboard: Row | null; available: boolean; connection: string; error: string
   hours: number; setHours: (hours: number) => void; ticker: string; setTicker: (ticker: string) => void
-  followed: string[]; follow: (ticker: string) => void; onlyFollowed: boolean; setOnlyFollowed: (value: boolean) => void
   renderFocus: (item: ActivityItem, close: () => void, details: () => void) => ReactNode
   renderJourney: (item: ActivityItem, close: () => void) => ReactNode
 }
@@ -73,7 +72,7 @@ export function MiniAppActivity(p: Props) {
         <button type="button" className={`mini-connection ${available ? 'is-connected' : ''}`} onClick={() => open({ kind: 'info' })} aria-label={t('מצב החיבור והסבר', 'Connection status and explanation')}><span />{state}<span aria-hidden="true">ⓘ</span></button>
       </header>
       <div className="mini-map-view" hidden={view !== 'map'}>
-        <div className="mini-map-heading"><h1>{t('הכורים', 'Reactors')}</h1><button type="button" onClick={() => open({ kind: 'filters' })}>{p.ticker || p.onlyFollowed ? t('סינון פעיל', 'Filtered') : t('סינון', 'Filter')} <span aria-hidden="true">⌕</span></button></div>
+        <div className="mini-map-heading"><h1>{t('הכורים', 'Reactors')}</h1><button type="button" onClick={() => open({ kind: 'filters' })}>{p.ticker ? t('סינון פעיל', 'Filtered') : t('סינון', 'Filter')} <span aria-hidden="true">⌕</span></button></div>
         <MobileReactors he={he} items={items} changed={changed} known={known} openStation={s => open({ kind: 'station', station: s })} openStock={id => open({ kind: 'stock', id })} />
         <div className="mini-map-footnote"><span>{t('לחצו על קובייה לכל המניות והפרטים', 'Tap a card for all stocks and details')}</span><span>{dashboard?.market?.is_open === false ? t('השוק סגור', 'Market closed') : dashboard?.market?.is_open === true ? t('השוק פתוח', 'Market open') : t('מצב שוק לא זמין', 'Market status unavailable')}</span></div>
       </div>
@@ -93,14 +92,14 @@ export function MiniAppActivity(p: Props) {
         <div className="mini-sheet-content">
           {!available && sheet.kind !== 'info' && <p className="mini-retained-note">{known ? t('מידע אחרון שנשמר — לא פעילות חדשה.', 'Last retained data, not new activity.') : t('ממתין לנתונים.', 'Waiting for data.')}</p>}
           {sheet.kind === 'station' && <><p className="mini-small-note">{t('רשומות לפי התחנה האחרונה שתועדה; לא הוכחה שכל השלבים עברו.', 'Records by latest retained station; not proof that all earlier stages passed.')}</p>{list(items.filter(i => i.station === sheet.station))}</>}
-          {sheet.kind === 'stock' && selected && <>{p.renderFocus(selected, back, () => open({ kind: 'journey', id: selected.id }))}<button className="mini-follow" type="button" aria-pressed={p.followed.includes(selected.ticker)} onClick={() => p.follow(selected.ticker)}>{p.followed.includes(selected.ticker) ? '★' : '☆'} {t('מעקב בתצוגה בלבד', 'Visual follow only')}</button></>}
+          {sheet.kind === 'stock' && selected && p.renderFocus(selected, back, () => open({ kind: 'journey', id: selected.id }))}
           {sheet.kind === 'journey' && selected && p.renderJourney(selected, back)}
           {(sheet.kind === 'stock' || sheet.kind === 'journey') && !selected && <p>{t('הרשומה כבר אינה במדגם. אין בכך הוכחה שהפוזיציה נסגרה.', 'Record left the sample; this does not prove closure.')}</p>}
           {sheet.kind === 'filters' && <div className="mini-filters"><label>{t('חיפוש מניה', 'Find a stock')}<input type="search" value={p.ticker} placeholder={t('סימול או חברה', 'Ticker or company')} onChange={e => p.setTicker(e.target.value)} /></label>
             <label>{t('חלון מחקר', 'Research window')}<select value={p.hours} onChange={e => p.setHours(Number(e.target.value))}>{[24,48,168].map(v => <option key={v} value={v}>{v}h</option>)}</select></label>
-            <label className="mini-check"><input type="checkbox" checked={p.onlyFollowed} onChange={e => p.setOnlyFollowed(e.target.checked)} />{t('רק מניות במעקב בתצוגה', 'Visually followed only')}</label>
-            <button type="button" onClick={() => { p.setTicker(''); p.setOnlyFollowed(false) }}>{t('ניקוי סינון', 'Clear filters')}</button><button className="mini-primary" type="button" onClick={close}>{t('הצגת התוצאות', 'Show results')}</button></div>}
+            <button type="button" onClick={() => p.setTicker('')}>{t('ניקוי סינון', 'Clear filters')}</button><button className="mini-primary" type="button" onClick={close}>{t('הצגת התוצאות', 'Show results')}</button></div>}
           {sheet.kind === 'info' && <div className="mini-info"><p className="mini-info-status">{p.connection}</p><p>{t('מיקום המניה נקבע לפי התיעוד האחרון. הוא אינו מציג Worker שמטפל בה כרגע או אישור מעבר בתחנות קודמות.', 'Stocks are located by their latest retained evidence, not a worker processing them or proof of earlier approvals.')}</p>
+            <p>{t('תצוגה ציבורית לצפייה בלבד. פתיחת פרטים וחיפוש אינם משנים את רשימת המעקב או את המסחר.', 'Public read-only view. Opening details and searching do not change the watchlist or trading.')}</p>
             <p>{t('המספרים 1–8 והחצים מציגים את סדר התחנות. מספר הרשומות בכל תחנה מוצג בנפרד; החצים אינם הוכחה שמניה עברה את הבדיקות.', 'Steps 1–8 and arrows show station order. Record counts are separate; arrows do not prove a stock passed earlier gates.')}</p>
             <p>{t('המחקר מתעדכן כל דקה ומצב הסורק כל 30 שניות. המדגם אינו כל ה־Universe.', 'Research refreshes each minute and scanner status every 30 seconds. This sample is not the full universe.')}</p>
             <dl><div><dt>{t('תמונת מחקר', 'Research snapshot')}</dt><dd><bdi>{time(research?.generated_at,he)}</bdi></dd></div><div><dt>{t('מניות במדגם', 'Sampled stocks')}</dt><dd>{known ? new Set(allItems.map(i => i.ticker)).size : '—'}</dd></div></dl>

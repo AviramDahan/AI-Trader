@@ -64,7 +64,9 @@ Evidence contract
   main map, not independent capital. Legacy missing results are unavailable.
 * Existing weighted percentage/R results retain realized-net/open-gross and
   stale-mark distinctions. No cash, dollar P&L or invented return is shown.
-* Stars are browser-only, capped at 100. No backend watchlist/trading mutation.
+* Public views have no favorite/star controls or favorites filter. Search and
+  stock details are read-only and cannot change the engine watchlist or trading.
+  Earlier browser-only preferences are ignored, without rewriting browser data.
   Escaped React text, bidi isolation and keyboard controls are preserved.
 * Graph caps at four records per cluster on phones, eight on desktop; omitted counts and full lists
   preserve access to all retained sample records. Source timestamps are shown.
