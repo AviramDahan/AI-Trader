@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { API_ORIGIN } from './appShared'
+import { createReadPoller } from './readPoller'
 import { activeTargetIndexes } from './signalPresentation'
 import { SystemNetwork } from './SystemNetwork'
 import { MiniAppActivity } from './MiniAppActivity'
@@ -25,25 +26,13 @@ export function SystemActivity({ he, dashboard, dashboardError = '', miniApp = f
   const baselineAt = useRef(0)
   const items = useMemo(() => buildActivity(research, dashboard), [research, dashboard])
   useEffect(() => {
-    const controller = new AbortController()
-    let active = true, inFlight = false
     setResearch(null); setError(''); previous.current = null; baselineAt.current = 0; setUpdates([]); setChanged(new Set())
-    const refresh = async () => {
-      if (inFlight || document.visibilityState === 'hidden') return
-      inFlight = true
-      try {
-        const response = await fetch(`${API_ORIGIN}/api/scanner/research?hours=${hours}`, { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]) })
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        const data = await response.json()
-        if (active) { setResearch(data); setError('') }
-      } catch (e) { if (active) setError(e instanceof Error ? e.message : 'Unavailable') }
-      finally { inFlight = false }
-    }
-    void refresh()
-    const interval = window.setInterval(() => void refresh(), 60000)
-    const visible = () => { if (document.visibilityState === 'visible') void refresh() }
-    document.addEventListener('visibilitychange', visible)
-    return () => { active = false; controller.abort(); window.clearInterval(interval); document.removeEventListener('visibilitychange', visible) }
+    const poller = createReadPoller<Row>({
+      url: `${API_ORIGIN}/api/scanner/research?hours=${hours}`, intervalMs: 60000,
+      onData: payload => { setResearch(payload); setError('') }, onError: setError,
+    })
+    poller.start()
+    return () => poller.stop()
   }, [hours])
   useEffect(() => {
     const now = Date.now(), generated = timestamp(research?.generated_at)
