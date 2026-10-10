@@ -74,6 +74,15 @@ Evidence contract
 Verification and preview
 ------------------------
 
+Stock evidence uses the shared ``StockEvidence`` renderer: a clear state summary,
+retained price levels and percent/R outcomes, then collapsed documented-stage
+cards. Missing stages and technical codes/IDs have separate closed disclosures.
+Unknown is not failure, and retained records are not proof all gates passed.
+Entry-order validity does not expire an existing position. Model scores are
+uncalibrated; a validated AI response is not trading approval. Timestamps in
+this view are explicitly Israel time. No evidence is borrowed from another scan.
+This is presentation only: decision logic, payloads and polling stay unchanged.
+
 Run from ``service/frontend``::
 
     npm run test:activity

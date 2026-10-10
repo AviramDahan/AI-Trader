@@ -58,7 +58,7 @@ export function MiniAppActivity(p: Props) {
   }, [sheet])
   const known = !!research && !!dashboard
   const selected = sheet && 'id' in sheet ? allItems.find(i => i.id === sheet.id) : undefined
-  const title = sheet?.kind === 'station' ? names(LABELS[sheet.station], he) : selected ? selected.ticker : sheet?.kind === 'filters' ? t('חיפוש וסינון', 'Search and filters') : t('מה רואים כאן?', 'About this view')
+  const title = sheet?.kind === 'station' ? names(LABELS[sheet.station], he) : selected ? sheet?.kind === 'journey' ? t(`הסבר וראיות · ${selected.ticker}`,`Explanation & evidence · ${selected.ticker}`) : selected.ticker : sheet?.kind === 'filters' ? t('חיפוש וסינון', 'Search and filters') : t('מה רואים כאן?', 'About this view')
   const state = p.error ? t('העדכון מתעכב', 'Refresh delayed') : !known ? t('טוען נתונים…', 'Loading data…') : !available ? t('מידע שמור', 'Retained data') : t('מחובר', 'Connected')
   const list = (rows: ActivityItem[]) => rows.length ? <ul className="mini-stock-list">{rows.map(item => <li key={item.id}>
     <button className="mini-stock-row" type="button" onClick={() => open({ kind: 'stock', id: item.id })} aria-label={`${t('פרטי מניה', 'Stock details')}: ${item.ticker}`}>

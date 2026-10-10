@@ -3,7 +3,8 @@ import { API_ORIGIN } from './appShared'
 import { activeTargetIndexes } from './signalPresentation'
 import { SystemNetwork } from './SystemNetwork'
 import { MiniAppActivity } from './MiniAppActivity'
-import { buildActivity, detectActivityUpdates, finite, LABELS, REASONS, recordTime, STATE_LABELS, STATIONS, timestamp, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
+import { StockEvidence } from './StockEvidence'
+import { buildActivity, detectActivityUpdates, finite, LABELS, REASONS, STATE_LABELS, STATIONS, timestamp, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
 import './systemActivity.css'
 
 const label = (names: [string, string], he: boolean) => names[he ? 0 : 1]
@@ -103,10 +104,10 @@ export function SystemActivityView({ miniApp = false, he, research, dashboard, e
     research={research} dashboard={dashboard} error={error} available={available} connection={connection}
     hours={hours} setHours={setHours} ticker={ticker} setTicker={setTicker}
     renderFocus={(item, close, details) => <StockFocus item={item} he={he} stale={!available} onClose={close} onDetails={details} />}
-    renderJourney={(item, close) => <StockJourney item={item} he={he} records={research?.records || []} onClose={close} />} />
+    renderJourney={(item, close) => <StockJourney item={item} he={he} records={research?.records || []} onClose={close} stale={!available} />} />
   const fullJourney = chosen && <details className="system-full-journey" ref={journey} tabIndex={-1} open={detailsOpen} onToggle={e=>setDetailsOpen(e.currentTarget.open)}>
-    <summary>{t('מסלול הראיות המלא', 'Full evidence journey')} · <bdi>{chosen.ticker}</bdi></summary>
-    <StockJourney item={chosen} he={he} records={research?.records || []} onClose={() => setDetailsOpen(false)} /></details>
+    <summary>{t('הסבר וראיות', 'Explanation & evidence')} · <bdi>{chosen.ticker}</bdi></summary>
+    <StockJourney item={chosen} he={he} records={research?.records || []} onClose={() => setDetailsOpen(false)} stale={!available} /></details>
   return <section className="system-activity" dir={he ? 'rtl' : 'ltr'} aria-label={t('המערכת בפעולה', 'System in motion')}>
     <header className="system-title"><div><span className="system-eyebrow">AI TRADER / ACTIVITY</span><h2>{t('מה קורה במערכת?', 'What is happening?')}</h2><p>{t('איפה כל מניה נמצאת — ומה עוצר או מקדם אותה.', 'Where each stock stands — and what blocks or advances it.')}</p></div>
       <div className={`system-connection ${!available ? 'warning' : ''}`}><span />{connection}<small>{t('תמונת המחקר', 'Research snapshot')}: <bdi>{stamp(generated, he)}</bdi></small></div>
@@ -247,34 +248,10 @@ export function StockFocus({item:i,he,stale,onClose,onDetails}:{item:ActivityIte
     <time dateTime={i.at || undefined}>{t('זמן הראיה','Evidence time')}: <bdi>{stamp(i.at,he)}</bdi></time>
     {stale && <p className="scanner-warning">{t('מידע שמור — העדכון אינו זמין או אינו טרי.','Retained data — refresh unavailable or stale.')}</p>}
     <dl className="system-focus-levels">{[[t(i.trade?'כניסה בפועל':'כניסה / ייחוס',i.trade?'Filled entry':'Entry / reference'),entry,''],[t('סטופ','Stop'),stop,''],[t('יעד פעיל','Active target'),activeTarget,''],[t('RR ברוטו','Gross RR'),rr,'R']].map(([name,v,suffix])=><div key={String(name)}><dt>{String(name)}</dt><dd><bdi>{number(v,String(suffix))}</bdi></dd></div>)}</dl>
-    <button className="system-focus-details" type="button" onClick={onDetails}>{t('פתח ראיות מלאות','Open full evidence')} <span aria-hidden="true">↗</span></button>
+    <button className="system-focus-details" type="button" onClick={onDetails}>{t('הסבר וראיות','Explanation & evidence')} <span aria-hidden="true">↗</span></button>
   </aside>
 }
 
-function StockJourney({ item: i, he, records, onClose }: { item: ActivityItem, he: boolean, records: Row[], onClose: () => void }) {
-  const t = (a: string, b: string) => he ? a : b
-  const r = i.record, s = i.signal, trade = i.trade, o = i.outcome
-  const checks: Row[] = r?.target_checks || []
-  const {plan,entry,stop,activeTarget,rr}=activityLevels(i)
-  const sameTicker = records.filter(v => v.ticker === i.ticker && (!r || v.scan_id !== r.scan_id)).sort((a,b) => timestamp(recordTime(b))-timestamp(recordTime(a))).slice(0, 5)
-  return <section className="system-journey" aria-label={t('מסלול המניה', 'Stock journey')}>
-    <header><div><span className="system-eyebrow">{t('המסלול המתועד', 'RETAINED JOURNEY')}</span><h3><bdi>{i.ticker}</bdi> · <bdi>{i.company || '—'}</bdi></h3><p>{label(LABELS[i.station], he)} · {label(STATE_LABELS[i.state], he)}</p></div><button type="button" onClick={onClose}>{t('סגירה', 'Close')}</button></header>
-    <p className="system-footnote">{t('שלבים שלא תועדו אינם מסומנים כעברו. הסריקות האחרות למטה אינן אותה שרשרת ביצוע.', 'Unrecorded stages are not marked passed. Other scans below are not the same execution chain.')}</p>
-    <dl className="system-levels">{[[t(trade ? 'כניסה בפועל' : 'מחיר כניסה / ייחוס', trade ? 'Filled entry' : 'Entry / reference'), entry, ''], [t('סטופ', 'Stop'), stop, ''], [t('יעד פעיל', 'Active target'), activeTarget, ''], ['RR '+t('מתוכנן ברוטו', 'planned gross'), rr, 'R']].map(([name,v,suffix]) => <div key={String(name)}><dt>{String(name)}</dt><dd><bdi>{number(v, String(suffix))}</bdi></dd></div>)}</dl>
-    {activeTarget == null && (trade || s) && <p>{t('תוכנית קודמת: היעדים נשמרים לפי חוזה האסטרטגיה, ללא המצאת יעד יחיד.', 'Earlier plan: targets follow its saved strategy contract; no invented single target.')} {activeTargetIndexes(trade || s || {}).map(n => <bdi key={n}> TP{n}: {number((trade || s || {})[`tp${n}`])} </bdi>)}</p>}
-    <p>{t('תוקף', 'Valid until')}: <bdi>{stamp(s?.valid_until || (r?.signals || [])[0]?.valid_until, he)}</bdi> · {t('מדיניות', 'Policy')}: <bdi>{plan?.policy_version || s?.policy_version || o?.policy_version || t('גרסה לא נשמרה', 'Version not retained')}</bdi></p>
-    <ol className="system-journey-timeline">
-      <li><strong>{label(LABELS.technical, he)}</strong><p>{r?.technical_recorded ? t('מועמד מתועד; אין כאן אישור שכל הבקרות עברו.', 'Candidate retained; not proof all gates passed.') : t('חסרה ראיית סריקה מקושרת במדגם', 'Linked scan evidence missing in sample')}</p>{r && <time>{stamp(r.at, he)}</time>}</li>
-      <li><strong>{label(LABELS.targets, he)}</strong>{checks.length ? checks.map((c, index) => <p key={index}><bdi>{c.phase} · {c.outcome}</bdi> · {stamp(c.decided_at || c.observed_at, he)}{c.rejection_reason && <> · <bdi>{reason(`pre_${c.rejection_reason.replace(/^pre_/, '')}`, he)}</bdi></>}{c.quote?.eligible_for_entry === false && <> · {t('מחיר למחקר בלבד — אינו מאשר כניסה', 'Research-only quote — does not authorize entry')}</>}</p>) : <p>{t('אין בדיקת יעדים מקושרת', 'No linked target check')}</p>}</li>
-      <li><strong>{label(LABELS.evidence, he)}</strong>{r?.sec_decision ? <p>SEC · <bdi>{r.sec_decision.mode}</bdi> · {t('שינוי דירוג', 'Rank adjustment')}: <bdi>{number(r.sec_decision.sec_adjustment)}</bdi> · {stamp(r.sec_decision.decided_at, he)}<br/>{t('רשומת SEC אינה לבדה הוכחה שעבר סף הראיות.', 'A SEC record alone does not prove the evidence gate passed.')}</p> : <p>{t('פירוט מעבר סף הראיות אינו זמין במסלול הזה', 'Evidence-gate detail is not available in this view')}</p>}</li>
-      <li><strong>{label(LABELS.ai, he)}</strong>{r?.ai_decision ? <p><bdi>{r.ai_decision.action}</bdi> · {t('ציון מודל לא מכויל', 'Uncalibrated model score')}: <bdi>{number(r.ai_decision.confidence)}</bdi></p> : <p>{t('אין החלטת AI מקושרת במדגם', 'No linked AI decision in sample')}</p>}{(r?.reviews || []).map((v: Row,n: number) => <p key={n}><bdi>{v.result}</bdi> · {stamp(v.at, he)} · {t('ניסיונות מתועדים', 'Recorded attempts')}: {v.attempts}</p>)}</li>
-      <li><strong>{label(LABELS.signal, he)}</strong><p>{s ? t('סיגנל נשמר; פעולה ומצב ביצוע מוצגים בנפרד. מצב ההקצאה אינו מדד איכות הסיגנל.', 'Signal retained; action and execution status are separate. Allocation status is not signal quality.') : t('אין סיגנל מקושר במדגם', 'No linked signal in sample')}{s && <> <bdi>#{s.id} · {s.action || '—'} · {s.status}</bdi></>}</p></li>
-      <li><strong>{label(LABELS.order, he)}</strong>{r?.orders?.length ? r.orders.map((v: Row) => <p key={v.id}><bdi>#{v.id} · {v.purpose} · {v.status}</bdi></p>) : <p>{t('פרטי הפקודה אינם זמינים במדגם; אין להסיק שבוצעה כניסה.', 'Order detail unavailable in sample; do not infer a fill.')}</p>}</li>
-      <li><strong>{label(LABELS.position, he)}</strong><p>{trade ? <><bdi>#{trade.id} · {trade.status} · {trade.legacy_position_id ? 'Legacy' : 'Native'}</bdi> · {stamp(trade.opened_at, he)}<br/>{t('יתרה מהפוזיציה', 'Position remaining')}: <bdi>{number(o?.remaining_pct, '%')}</bdi></> : t('לא נמצאה פוזיציה מקושרת; סיגנל או פקודה אינם עסקה שבוצעה.', 'No linked position found; a signal or order is not a filled trade.')}</p></li>
-      <li><strong>{label(LABELS.exit, he)}</strong>{o ? <><p>{t('ממומש נטו', 'Realized net')}: <bdi>{number(o.realized_net_pct,'%')} / {number(o.realized_net_r,'R')}</bdi><br/>{t('חלק פתוח ברוטו', 'Open portion gross')}: <bdi>{number(o.open_gross_pct,'%')} / {number(o.open_gross_r,'R')}</bdi></p>{(o.exits || []).map((v: Row,n: number) => <p key={n}><bdi>{v.type}</bdi> · {number(v.position_pct,'%')} {t('מהפוזיציה', 'of position')} · {stamp(v.at, he)}</p>)}{o.mark_stale && <p className="scanner-warning">{t('הערכת החלק הפתוח מבוססת על נר ישן; אינה מחיר חי.', 'Open valuation uses an old bar, not a live quote.')}</p>}{o.cohort === 'Legacy' && <p>{t('Legacy: חסרה היסטוריה מלאה לאימות התוצאה.', 'Legacy: complete history unavailable for verified results.')}</p>}</> : <p>{t('אין תוצאה מאומתת במדגם — לא אפס רווח.', 'No verified outcome in sample — not zero return.')}</p>}</li>
-    </ol>
-    {i.reason && <p className="system-session-note">{t('סיבה שנשמרה', 'Retained reason')}: <bdi>{reason(i.reason, he)}</bdi> <code dir="ltr">{i.reason}</code></p>}
-    {!!sameTicker.length && <details><summary>{t('סריקות אחרות של אותה מניה — שרשראות נפרדות', 'Other scans of this stock — separate chains')}</summary>{sameTicker.map(v => <p key={v.scan_id}><bdi>{stamp(recordTime(v),he)}</bdi> · <bdi>{reason(v.rejection,he)}</bdi></p>)}</details>}
-    <p className="system-footnote">{t('תוצאות הסיגנל משוקללות לפי חלקי הפוזיציה, אינן תשואת תיק. Shadow אינו תיק עצמאי ואינו נכלל בתחנות הביצוע הראשיות.', 'Signal outcomes are weighted by position portions, not portfolio returns. Shadow is not independent capital and is excluded from main execution stations.')}</p>
-  </section>
+export function StockJourney({ item, he, records, onClose, stale = false }: { item: ActivityItem, he: boolean, records: Row[], onClose: () => void, stale?: boolean }) {
+  return <StockEvidence item={item} levels={activityLevels(item)} he={he} records={records} onClose={onClose} stale={stale} />
 }
