@@ -16,9 +16,9 @@ export function buildNetwork(items: ActivityItem[], compact = false) {
   return STATIONS.map(station => {
     const cluster = (compact ? COMPACT_CLUSTERS : CLUSTERS)[station]
     const group = items.filter(i => i.station === station).sort((a, b) => a.id.localeCompare(b.id))
-    const nodes = group.slice(0, NETWORK_LIMIT).map((item, index) => ({ item,
-      x: cluster.x + ((index % 3) - 1) * (compact ? 43 : 58) + (geometryHash(item.id) % 7 - 3),
-      y: cluster.y + 2 + Math.floor(index / 3) * 30 + (geometryHash(item.id + 'y') % 7 - 3),
+    const nodes = group.slice(0, compact?4:NETWORK_LIMIT).map((item, index) => ({ item,
+      x: cluster.x + (compact?((index%2)-.5)*66:((index%3)-1)*58) + (geometryHash(item.id) % 7 - 3),
+      y: cluster.y + 2 + (compact?Math.floor(index/2)*36:Math.floor(index/3)*30) + (geometryHash(item.id + 'y') % 7 - 3),
     }))
     return { station, ...cluster, total: group.length, omitted: Math.max(0, group.length - nodes.length), nodes }
   })

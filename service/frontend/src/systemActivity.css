@@ -94,6 +94,17 @@
 .system-network-readout i.connected { background: #7ee5cc; box-shadow: 0 0 8px #7ee5cc80; }
 .system-organic-web { padding: 0; background: radial-gradient(ellipse at 50% 52%,#0b1319 0,#05090d 68%); overflow: hidden; isolation: isolate; }
 .system-organic-web svg { max-height: none; min-width: 0; width: 100%; display: block; overflow: hidden; }
+.system-organic-web { touch-action: pan-y; overscroll-behavior-x: none; }
+.system-evidence-spider { pointer-events: none; }
+.system-reactor { pointer-events: none; }
+.system-reactor circle { fill: #071318cc; stroke: currentColor; stroke-width: .7; opacity: .45; }
+.system-reactor circle:nth-child(2) { fill: none; stroke-width: 2; stroke-dasharray: 3 7; opacity: .35; }
+.system-reactor circle:nth-child(3) { fill: #142b3144; stroke-width: .4; opacity: .7; }
+.system-evidence-spider.is-walking .system-spider-leg { animation: system-spider-step .32s ease-in-out 10; }
+.system-evidence-spider.is-walking .system-spider-leg.gait-1 { animation-direction: reverse; }
+@keyframes system-spider-step { 0%,100% { transform: rotate(-7deg); } 50% { transform: rotate(8deg); } }
+.system-spider-caption { margin: 8px 28px; font-size: 13px; color: #a3b8c8; line-height: 1.7; }
+@media(prefers-reduced-motion:reduce) { .system-evidence-spider.is-walking .system-spider-leg { animation: none; } }
 .system-organic-web text { fill: #d5e2ed; font-size: 12px; }
 .system-web-decoration { pointer-events: none; }
 .system-web-decoration path { fill: none; stroke: currentColor; stroke-width: .6; opacity: .27; }
@@ -356,6 +367,16 @@
 
 /* Phone-first reading: one stock per row; explanations unfold rather than shrink. */
 @media(max-width:640px) {
+  .system-organic-web, .system-organic-web svg { min-width: 0; max-width: 100%; overflow: hidden; }
+  .system-network-heading h3 { font-size: 17px; }
+  .system-network-heading .system-eyebrow { display: none; }
+  .system-cluster-button { font-size: 14px; font-weight: 600; background: #0b1621ed; border-color: #ffffff18; gap: 8px; text-shadow: none; }
+  .system-cluster-index { display: none; }
+  .system-network-controls button { min-height: 48px; font-size: 14px; }
+  .system-network-readout { font-size: 12px; gap: 12px; line-height: 1.7; }
+  .system-network-legend, .system-network-note { font-size: 13px; line-height: 1.7; }
+  .system-network-update { font-size: 14px; }
+  .system-spider-caption { margin-inline: 12px; font-size: 13px; }
   .system-activity { line-height: 1.65; }
   .system-title { gap: 14px; margin-top: 18px; }
   .system-title > div:first-child > .system-eyebrow { display: none; }

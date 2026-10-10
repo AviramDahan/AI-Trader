@@ -86,7 +86,6 @@ export function SystemActivityView({ he, research, dashboard, error = '', items 
   hours = 24, setHours = () => {}, ticker = '', setTicker = () => {}, station = 'all', setStation = () => {},
   selected = null, setSelected = () => {}, followed = [], follow = () => {}, onlyFollowed = false, setOnlyFollowed = () => {} }: ViewProps) {
   const t = (a: string, b: string) => he ? a : b
-  const [view, setView] = useState<'stations' | 'map'>('stations')
   const [detailsOpen, setDetailsOpen] = useState(false)
   const journey = useRef<HTMLDetailsElement>(null)
   const workspace = useRef<HTMLDivElement>(null), wasOpen = useRef(false)
@@ -96,7 +95,7 @@ export function SystemActivityView({ he, research, dashboard, error = '', items 
       journey.current.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
       journey.current.focus({ preventScroll: true })
     } else if(wasOpen.current && workspace.current) {
-      const anchor=workspace.current.querySelector<HTMLButtonElement>('.system-stock-select[aria-pressed=true], .system-3d-stock[aria-pressed=true]')
+      const anchor=workspace.current.querySelector<HTMLButtonElement>('.system-stock-select[aria-pressed=true], .system-graph-stock[aria-pressed=true]')
       ;(anchor || workspace.current).scrollIntoView({behavior:'auto',block:'nearest'})
       anchor?.focus({preventScroll:true})
     }
@@ -126,20 +125,12 @@ export function SystemActivityView({ he, research, dashboard, error = '', items 
         <label className="system-follow-filter"><input type="checkbox" checked={onlyFollowed} onChange={e => setOnlyFollowed(e.target.checked)} />{t('במעקב בתצוגה בלבד', 'Visually followed only')} ({followed.length})</label>
       </div>
     </details>
-    <div className="system-view-switch" role="group" aria-label={t('בחירת תצוגה','Choose view')}>
-      <button type="button" aria-pressed={view==='stations'} onClick={()=>setView('stations')}>{t('תחנות ומניות','Stations & stocks')}</button>
-      <button type="button" aria-pressed={view==='map'} onClick={()=>setView('map')}>{t('מפת תלת־ממד','3D map')}</button>
-    </div>
     <div className="system-overview">
-      <div ref={workspace} className={view==='stations'?'system-station-workspace':`system-map-workspace ${chosen?'has-selection':''} ${detailsOpen?'detail-open':''}`}>
-      {view==='stations' ? <StationFlow he={he} items={filtered} station={station} selected={selected} select={setSelected}
-        followed={followed} follow={follow} changed={available ? changed : new Set()} stale={!available}
-        onDetails={()=>setDetailsOpen(true)} fullJourney={fullJourney} /> : <>
+      <div ref={workspace} className={`system-map-workspace ${chosen?'has-selection':''} ${detailsOpen?'detail-open':''}`}>
       <SystemNetwork he={he} items={filtered} changed={changed} updates={updates} station={station} setStation={setStation}
         selected={selected} select={setSelected} available={available} marketOpen={open} />
       {chosen && <StockFocus item={chosen} he={he} stale={!available}
         onClose={()=>setSelected(null)} onDetails={()=>setDetailsOpen(true)} />}
-      </>}
       </div>
       <aside className="system-context"><details><summary>{t('מה רואים כאן?', 'What is shown?')}</summary>
         <p>{t('מניה מופיעה בתחנה לפי התיעוד האחרון שלה. זה אינו אומר שהיא עברה את כל התחנות הקודמות או שה־Worker מטפל בה כרגע. סימון עדכון מציין רק שינוי מתועד חדש שנקלט בתצוגה.', 'A stock is placed by its latest retained evidence, not proof that earlier stages passed or a worker is processing it now. An update marker indicates only new retained evidence received by the view.')}</p>
@@ -160,10 +151,10 @@ export function SystemActivityView({ he, research, dashboard, error = '', items 
     </div></details>
     {!!research?.records_clipped || !!research?.clipped?.length ? <details className="system-sample-warning scanner-warning"><summary>{t('מדגם מוגבל — לא כל ההיסטוריה מוצגת', 'Capped sample — not all history is shown')}</summary><p>{t('המדגם מוגבל: חלק מפרטי ההיסטוריה לא נכללו. אין להסיק שאין פעילות במניה שלא מופיעה.', 'Sample is capped: some history is omitted. An absent ticker does not prove inactivity.')}</p></details> : null}
     {!research && !error && <p role="status">{t('טוען את תיעוד התחנות…', 'Loading station evidence…')}</p>}
-    {view==='map' && <details className="system-support-details"><summary>{t('רשומות התחנות', 'Station records')} <bdi>{filtered.length}</bdi></summary>
+    <details className="system-support-details"><summary>{t('פרטי המניות במדגם', 'Sampled stock details')} <bdi>{filtered.length}</bdi></summary>
       <StationFlow he={he} items={filtered} station={station} selected={selected} select={setSelected} followed={followed} follow={follow}
-        changed={new Set()} stale={!available} onDetails={()=>setDetailsOpen(true)} /></details>}
-    {view==='map' && fullJourney}
+        changed={new Set()} stale={!available} onDetails={()=>setDetailsOpen(true)} /></details>
+    {fullJourney}
     {selected && !chosen && <p role="status">{t('הרשומה כבר אינה במדגם הנוכחי. אין בכך הוכחה שהפוזיציה נסגרה.', 'Record is no longer in the current sample. This does not prove the position closed.')}</p>}
   </section>
 }
@@ -193,7 +184,7 @@ export function StationFlow({he,items,station,selected,select,followed,follow,ch
     else if(previousStation.current) root.current?.querySelector<HTMLButtonElement>(`.station-${previousStation.current} .system-flow-heading`)?.focus({preventScroll:true})
     previousStation.current=current?.station || null
   },[selected])
-  return <div ref={root} className="system-station-flow" aria-label={t('תחנות ומניות','Stations & stocks')}>
+  return <div ref={root} className="system-station-flow" aria-label={t('פרטי המניות במדגם','Sampled stock details')}>
     <div className="system-flow-intro"><span>{t('לחצו על מניה לפרטים','Select a stock for details')}</span><details><summary>{t('מיקום מתועד, לא מעבר מאומת','Retained location, not verified progression')}</summary><p>{t('מיקום לפי התיעוד האחרון. תחנות קודמות אינן בהכרח אישור מעבר.','Location by latest evidence. Earlier stages do not necessarily imply approval.')}</p></details></div>
     {STATIONS.filter(s=>station==='all'||station===s).map(s=>{
       const group=items.filter(i=>i.station===s), chosen=group.find(i=>i.id===selected)

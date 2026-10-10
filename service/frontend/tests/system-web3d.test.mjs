@@ -27,7 +27,7 @@ for(const compact of [false,true]) {
   check(new Set(graph.map(c=>c.point.z)).size>1)
   check(graph.flatMap(c=>c.nodes).every(n=>Object.values(n.point).every(Number.isFinite)))
   const crowded=buildSpatialNetwork(Array.from({length:100},(_,n)=>({...items[0],id:`synthetic:${n}`})),compact)
-  equal(crowded[0].nodes.length,8);equal(crowded[0].omitted,92)
+  equal(crowded[0].nodes.length,compact?4:8);equal(crowded[0].omitted,compact?96:92)
   equal(buildSpatialNetwork([],compact).flatMap(c=>c.nodes),[])
   equal(focusDestination(items,null,compact),null)
   equal(focusDestination(items,'missing',compact),null)
