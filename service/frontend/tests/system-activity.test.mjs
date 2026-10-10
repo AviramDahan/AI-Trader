@@ -18,9 +18,9 @@ const load = name => {
   new Function('require','module','exports',result.outputFiles.find(f => f.path.endsWith(name+'.js')).text)(createRequire(import.meta.url), m, m.exports)
   return m.exports
 }
-const { buildActivity, activityRevision, detectActivityUpdates, finite, STATE_SYMBOLS } = load('systemActivityModel')
+const { buildActivity, activityRevision, detectActivityUpdates, finite, STATE_SYMBOLS, STATIONS } = load('systemActivityModel')
 const { SystemActivityView, StockFocus, StationFlow, activityLevels } = load('SystemActivity')
-const { buildNetwork, buildConstellation, COMPACT_CLUSTERS, buildEvidenceSweep, NETWORK_LIMIT, SystemNetwork, EvidenceSpider } = load('SystemNetwork')
+const { buildNetwork, buildConstellation, COMPACT_CLUSTERS, buildEvidenceSweep, networkControls, NETWORK_LIMIT, SystemNetwork, EvidenceSpider } = load('SystemNetwork')
 let assertions = 0
 const check = v => { assert.ok(v); assertions++ }
 const equal = (a,b) => { assert.deepEqual(a,b); assertions++ }
@@ -110,16 +110,16 @@ equal(buildNetwork([]).flatMap(c => c.nodes), [])
 const compactGraph = buildNetwork(items,true)
 equal(compactGraph.flatMap(c=>c.nodes.map(n=>n.item.id)).sort(),items.map(i=>i.id).sort())
 equal(buildNetwork([...items].reverse(),true),compactGraph)
-check(compactGraph.flatMap(c=>c.nodes).every(n=>n.x>=0 && n.x<=380 && n.y>=0 && n.y<=672))
+check(compactGraph.flatMap(c=>c.nodes).every(n=>n.x>=0 && n.x<=380 && n.y>=0 && n.y<=776))
 equal(COMPACT_CLUSTERS.technical.x,94); equal(COMPACT_CLUSTERS.targets.x,286)
-equal(COMPACT_CLUSTERS.exit.y,550)
+equal(COMPACT_CLUSTERS.exit.y,640)
 for (const compact of [false,true]) {
   const field = buildConstellation(compact)
   equal(field,buildConstellation(compact))
   equal(field.flatMap(c=>c.points).length,compact?320:640)
   check(field.every(c=>c.edges.length<=c.points.length*3))
   check(field.flatMap(c=>c.points).every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)))
-  check(field.flatMap(c=>c.points).every(p=>p.x>=0 && p.x<=(compact?380:1200) && p.y>=0 && p.y<=(compact?672:720)))
+  check(field.flatMap(c=>c.points).every(p=>p.x>=0 && p.x<=(compact?380:1200) && p.y>=0 && p.y<=(compact?776:800)))
   check(field.every(c=>c.edges.every(e=>c.points.includes(e.a)&&c.points.includes(e.b))))
 }
 equal(buildEvidenceSweep(items,[]).path,'M 610 340')
@@ -168,6 +168,35 @@ check(network({}).includes('מסלול מניה: HOTL'))
 check(network({changed:new Set(['trade:40'])}).includes('system-arrival'))
 check(!network({available:false,changed:new Set(['trade:40'])}).includes('system-arrival'))
 const networkSource = readFileSync('src/SystemNetwork.tsx','utf8')
+// Narrow phones and desktop sidebars must not scale the controls below their
+// screen-space type/touch sizes. The SVG viewBox never depends on selection.
+for (const [compact,width] of [[true,288],[true,358],[true,398],[true,800],[false,826],[false,882],[false,1042],[false,1342]]) {
+  const ui=networkControls(compact,width),scale=width/(compact?380:1200)
+  check(Math.abs(ui.buttonHeight*scale-48)<1e-8)
+  check(Math.abs(ui.fontSize*scale-14)<1e-8)
+  check(Math.abs(ui.labelFontSize*scale-13)<1e-8)
+  check(ui.buttonWidth*scale<width)
+  const graph=buildNetwork(Array.from({length:64},(_,n)=>({...items[0],id:`crowded:${n}`,station:STATIONS[Math.floor(n/8)]})),compact)
+  const headers=graph.map(c=>({left:c.x-ui.buttonWidth/2,right:c.x+ui.buttonWidth/2,top:c.y-ui.buttonOffset,bottom:c.y-ui.buttonOffset+ui.buttonHeight}))
+  const labels=graph.flatMap(c=>c.nodes.map(n=>({left:n.x-40,right:n.x+40,top:n.y+9,bottom:n.y+9+ui.labelHeight})))
+  const overlaps=(a,b)=>a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top
+  check(headers.every(h=>h.top>=0&&h.left>=0&&h.right<=(compact?380:1200)))
+  check(labels.every(l=>l.bottom<=(compact?776:800)))
+  check(!headers.some(h=>labels.some(l=>overlaps(h,l))))
+  check(!labels.some((l,n)=>labels.slice(n+1).some(other=>overlaps(l,other))))
+  if(compact) {
+    const rows=buildNetwork(Array.from({length:32},(_,n)=>({...items[0],id:`readable:${n}`,station:STATIONS[Math.floor(n/4)]})),true)
+    for(let row=0;row<3;row++) {
+      const previous=rows[row*2],next=rows[(row+1)*2]
+      const labelBottom=Math.max(...previous.nodes.map(n=>n.y+9))+ui.labelHeight
+      check(next.y-ui.buttonOffset-labelBottom>=6/scale)
+    }
+  }
+}
+for(const invalidWidth of [0,NaN,Infinity,-1]) check(Number.isFinite(networkControls(true,invalidWidth).fontSize))
+check(networkSource.includes('observer.disconnect()')&&networkSource.includes('new ResizeObserver(update)'))
+check(networkSource.includes('n.item.ticker}</div>')) // no silent ticker truncation in source
+check(css.includes('text-overflow: ellipsis')&&css.includes('height: 100%; gap: calc(8px * var(--map-control-unit,1))'))
 check(!networkSource.includes('fetch(') && !networkSource.includes('Math.random'))
 check(networkSource.includes("visibilityState !== 'hidden'"))
 check(networkSource.includes('seenBatch.current = key') && networkSource.includes('active: false'))

@@ -263,6 +263,12 @@
 .system-3d-stock[aria-pressed=true] { box-shadow: 0 0 24px #7ee5cc22; opacity: 1; }
 .system-3d-station { font-size: 13px; direction: inherit; }
 .system-graph-stock text { font-size: 12px; }
+/* Foreign-object text stays in screen pixels, independently of SVG/sidebar scale. */
+.system-map-stock-label { color: inherit; font-family: ui-monospace,monospace; font-weight: 600; line-height: 1.4; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 3px #05090d,0 -1px 3px #05090d; pointer-events: none; }
+.system-organic-web .system-cluster-button { height: 100%; gap: calc(8px * var(--map-control-unit,1)); padding: 0 calc(6px * var(--map-control-unit,1)); border-radius: calc(7px * var(--map-control-unit,1)); }
+.system-organic-web .system-cluster-index { font-size: calc(10px * var(--map-control-unit,1)); }
+.system-organic-web.compact .system-cluster-index { display: none; }
+.system-organic-web .system-cluster-button bdi { font-size: calc(11px * var(--map-control-unit,1)); width: calc(25px * var(--map-control-unit,1)); height: calc(25px * var(--map-control-unit,1)); flex-shrink: 0; }
 .system-state-key { display: flex; flex-wrap: wrap; gap: 12px 20px; padding: 12px 28px; color: #a4b9c5; font-size: 12px; }
 .system-state-key > span { display: flex; align-items: center; gap: 6px; }
 .system-state-key bdi { font-size: 17px; font-family: ui-monospace,monospace; }
@@ -273,7 +279,7 @@
 .system-network-update { font-size: 12px; }
 .system-update-received { color: #d0f8e8; background: #7ee5cc0d; border-inline-start-color: #7ee5cc; }
 .system-network-controls button { font-size: 12px; }
-@media(max-width:1000px) {
+@media(max-width:1200px) {
   .system-map-workspace.has-selection { grid-template-columns: minmax(0,1fr); }
   .system-focus-card { border-inline-start: 0; border-top: 1px solid #7ee5cc30; }
 }

@@ -2,23 +2,31 @@ import { STATIONS, type ActivityItem, type ActivityUpdate, type Station } from '
 
 export const CLUSTERS: Record<Station, { x: number; y: number; color: string }> = {
   technical: { x: 205, y: 150, color: '#67cfff' }, targets: { x: 545, y: 115, color: '#f7c96b' },
-  evidence: { x: 950, y: 155, color: '#c3a2ff' }, ai: { x: 1040, y: 370, color: '#ff8ca9' },
-  signal: { x: 845, y: 575, color: '#72e2ba' }, order: { x: 480, y: 550, color: '#f8b87a' },
-  position: { x: 185, y: 485, color: '#50dccd' }, exit: { x: 185, y: 315, color: '#a4b5d2' },
+  evidence: { x: 950, y: 155, color: '#c3a2ff' }, ai: { x: 1040, y: 395, color: '#ff8ca9' },
+  signal: { x: 845, y: 635, color: '#72e2ba' }, order: { x: 480, y: 550, color: '#f8b87a' },
+  position: { x: 185, y: 630, color: '#50dccd' }, exit: { x: 185, y: 390, color: '#a4b5d2' },
 }
 export const NETWORK_LIMIT = 8
 export const COMPACT_CLUSTERS: typeof CLUSTERS = Object.fromEntries(STATIONS.map((s,n) => [s, {
-  ...CLUSTERS[s], x: n % 2 ? 286 : 94, y: 112 + Math.floor(n/2)*146,
+  ...CLUSTERS[s], x: n % 2 ? 286 : 94, y: 112 + Math.floor(n/2)*176,
 }])) as typeof CLUSTERS
-export const networkCentre = (compact: boolean) => compact ? { x: 190, y: 336 } : { x: 610, y: 340 }
+export const networkCentre = (compact: boolean) => compact ? { x: 190, y: 388 } : { x: 610, y: 340 }
+/** Screen-space controls: resizing a sidebar must not shrink text or touch targets. */
+export function networkControls(compact: boolean, renderedWidth: number) {
+  const width = Number.isFinite(renderedWidth) && renderedWidth > 0 ? renderedWidth : compact ? 380 : 1200
+  const unitsPerPixel = (compact ? 380 : 1200) / width
+  return { unitsPerPixel, buttonWidth: (compact ? Math.min(164,width*.44) : 208)*unitsPerPixel,
+    buttonHeight: 48*unitsPerPixel, buttonOffset: (compact ? 64 : 78)*unitsPerPixel,
+    fontSize: 14*unitsPerPixel, labelFontSize: 13*unitsPerPixel, labelHeight: 20*unitsPerPixel }
+}
 export const geometryHash = (s: string) => Array.from(s).reduce((a, c) => ((a * 31 + c.charCodeAt(0)) >>> 0), 7)
 export function buildNetwork(items: ActivityItem[], compact = false) {
   return STATIONS.map(station => {
     const cluster = (compact ? COMPACT_CLUSTERS : CLUSTERS)[station]
     const group = items.filter(i => i.station === station).sort((a, b) => a.id.localeCompare(b.id))
     const nodes = group.slice(0, compact?4:NETWORK_LIMIT).map((item, index) => ({ item,
-      x: cluster.x + (compact?((index%2)-.5)*66:((index%3)-1)*58) + (geometryHash(item.id) % 7 - 3),
-      y: cluster.y + 2 + (compact?Math.floor(index/2)*36:Math.floor(index/3)*30) + (geometryHash(item.id + 'y') % 7 - 3),
+      x: cluster.x + (compact?((index%2)-.5)*88:((index%3)-1)*88) + (geometryHash(item.id) % 7 - 3),
+      y: cluster.y + 2 + (compact?Math.floor(index/2)*42:Math.floor(index/3)*36) + (geometryHash(item.id + 'y') % 7 - 3),
     }))
     return { station, ...cluster, total: group.length, omitted: Math.max(0, group.length - nodes.length), nodes }
   })

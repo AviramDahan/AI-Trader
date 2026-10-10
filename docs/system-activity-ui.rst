@@ -35,6 +35,14 @@ motion disable both idle and travel animation; unchanged polls never replay
 travel. Idle uses CSS transforms only, no extra polling or timers.
 The active view imports no 3D module or Three.js; the frontend build emits no
 3D activity chunk. Older unmounted sources and tests remain in the repository.
+Station controls retain a 48-screen-pixel height and 14-pixel font; ticker
+labels retain a 13-pixel font when the map/sidebar resizes. ResizeObserver
+changes control dimensions only, not the fixed viewBox or evidence path.
+Compact rows have additional spacing for these touch targets. Dense ticker
+labels ellipsize within their cell; full tickers remain in accessible names,
+hover titles and the selected-stock card. No record is discarded by resizing.
+Narrow layouts up to 1000px use two fixed columns; the detail card stacks below
+the map up to 1200px. Selection never changes the viewBox.
 
 Evidence contract
 -----------------
@@ -74,6 +82,8 @@ unchanged later polls must not replay it. ``&motion-test=synthetic`` explicitly
 labels a visual QA fixture overriding reduced motion ONLY in the synthetic
 preview. The actual app always respects the user's preference. This is not
 live E2E evidence. Former GPU fixture URLs remain test-only, with no GPU scene.
+``?density-test=synthetic`` renders 64 labelled synthetic records for crowded
+map QA, using the same view and controls; it does not load live data.
 
 CI/Cloud Readiness run the model/render tests. No migration/config change is
 needed. A UI revert does not alter decisions or positions. This task does not

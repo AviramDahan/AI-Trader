@@ -5,7 +5,8 @@ import { fixtureResearch, fixtureDashboard } from './system-activity-fixtures.mj
 
 const compilePreview = async (unavailable=false) => build({ stdin: { contents: `
   import React from 'react'; import {createRoot} from 'react-dom/client';
-  import {SystemActivity} from './src/SystemActivity'; import './src/index.css';
+  import {SystemActivity,SystemActivityView} from './src/SystemActivity'; import './src/index.css';
+  import {buildActivity,STATIONS} from './src/systemActivityModel';
   if(new URLSearchParams(location.search).get('motion-test')==='synthetic') {
     const media=window.matchMedia.bind(window);
     window.matchMedia=q=>q==='(prefers-reduced-motion: reduce)'?{matches:false,media:q,addEventListener(){},removeEventListener(){}}:media(q);
@@ -14,7 +15,15 @@ const compilePreview = async (unavailable=false) => build({ stdin: { contents: `
     const interval=window.setInterval.bind(window);window.setInterval=(fn,ms,...args)=>interval(fn,ms===60000?2000:ms,...args);
   }
   const dashboard=${JSON.stringify(fixtureDashboard)};
-  createRoot(document.getElementById('root')).render(<SystemActivity he={true} dashboard={dashboard}/>);
+  const density=new URLSearchParams(location.search).get('density-test')==='synthetic';
+  function DenseFixture() {
+    const [selected,setSelected]=React.useState(null),[station,setStation]=React.useState('all');
+    const research={...${JSON.stringify(fixtureResearch)},generated_at:new Date().toISOString()};
+    const base=buildActivity(research,dashboard);
+    const items=STATIONS.flatMap((s,i)=>Array.from({length:8},(_,n)=>({...base.find(v=>v.station===s),id:'dense:'+i+':'+n,ticker:'TEST'+n})));
+    return <><p className="scanner-warning">DENSE FIXTURE · 64 רשומות סינתטיות · לא פעילות אמיתית</p><SystemActivityView he={true} research={research} dashboard={dashboard} items={items} selected={selected} setSelected={setSelected} station={station} setStation={setStation}/></>;
+  }
+  createRoot(document.getElementById('root')).render(density?<DenseFixture/>:<SystemActivity he={true} dashboard={dashboard}/>);
 `, resolveDir: process.cwd(), loader: 'tsx' }, outdir: 'preview-unused', loader:{'.png':'file'}, bundle: true, write: false,
   plugins: [{ name: 'local-api-only', setup(b) {
     b.onResolve({filter: /\/appShared$/}, () => ({path:'stub',namespace:'stub'}))

@@ -1,8 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { LABELS, STATE_LABELS, STATE_SYMBOLS, STATIONS, type ActivityItem, type ActivityUpdate, type Station } from './systemActivityModel'
-import { buildNetwork, buildConstellation, buildEvidenceSweep, networkCentre as centre } from './systemNetworkGeometry'
+import { buildNetwork, buildConstellation, buildEvidenceSweep, networkControls, networkCentre as centre } from './systemNetworkGeometry'
 import spiderTexture from './assets/evidence-spider-titanium-v1.png'
-export { CLUSTERS, COMPACT_CLUSTERS, NETWORK_LIMIT, buildNetwork, buildConstellation, buildEvidenceSweep } from './systemNetworkGeometry'
+export { CLUSTERS, COMPACT_CLUSTERS, NETWORK_LIMIT, buildNetwork, buildConstellation, buildEvidenceSweep, networkControls } from './systemNetworkGeometry'
 const REST = { x: 610, y: 340 }
 
 // Clipped parts of one alpha sprite: every limb shares the same material/light.
@@ -45,13 +45,24 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   selected: string | null; select: (v: string|null) => void; available: boolean; marketOpen: boolean | undefined
 }) {
   const [motion, setMotion] = useState(true)
-  const [compact, setCompact] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width:640px)').matches)
+  const [compact, setCompact] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width:1000px)').matches)
   const [reduced, setReduced] = useState(()=>typeof window!=='undefined'&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
   const seenBatch = useRef('')
   const lastPoint = useRef(REST)
   const timer = useRef<number | undefined>()
   const panel = useRef<HTMLDivElement>(null)
+  const map = useRef<HTMLDivElement>(null)
+  const [mapWidth, setMapWidth] = useState(0)
+  useEffect(() => {
+    const element = map.current
+    if (!element) return
+    const update = () => setMapWidth(element.getBoundingClientRect().width)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
   useEffect(()=> {
     // Navigation only: keep the selected label above the mobile card in either renderer.
     if(compact&&selected)panel.current?.scrollIntoView({behavior:'auto',block:'start'})
@@ -68,7 +79,7 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
     return () => document.removeEventListener('visibilitychange', update)
   }, [])
   useEffect(() => {
-    const query = window.matchMedia('(max-width:640px)'), update = () => setCompact(query.matches)
+    const query = window.matchMedia('(max-width:1000px)'), update = () => setCompact(query.matches)
     query.addEventListener('change',update)
     return () => query.removeEventListener('change',update)
   }, [])
@@ -99,13 +110,14 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   useEffect(() => () => window.clearTimeout(timer.current), [])
   const moving = sweep.active && motion && !reduced && visible && available
   const idle = !moving && motion && !reduced && visible && available
-  const viewBox = compact ? '0 0 380 672' : '0 0 1200 720'
+  const viewBox = compact ? '0 0 380 776' : '0 0 1200 800'
+  const controls = networkControls(compact,mapWidth)
   const updatedStations=new Set(available?items.filter(i=>changed.has(i.id)).map(i=>i.station):[])
   const t = (a: string, b: string) => he ? a : b
   const activate = (e: React.KeyboardEvent<SVGGElement>, action: () => void) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); action() }
   }
-  const flat = <div className={`system-web system-organic-web ${compact?'compact':''}`}>
+  const flat = <div ref={map} className={`system-web system-organic-web ${compact?'compact':''}`} style={{'--map-control-unit':controls.unitsPerPixel} as React.CSSProperties}>
       <svg viewBox={viewBox} role="group" aria-label={t('מפת תחנות דו־ממדית קבועה — רשת מניות', 'Fixed 2D station map — stock network')}>
         <defs>
           <radialGradient id="web-halo"><stop stopColor="#0e493f" stopOpacity=".55"/><stop offset="1" stopColor="#071013" stopOpacity="0"/></radialGradient>
@@ -129,11 +141,13 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
               onClick={() => select(n.item.id)} onKeyDown={e => activate(e, () => select(n.item.id))}>
               <title>{`${n.item.ticker} · ${n.item.company} · ${STATE_LABELS[n.item.state][he ? 0 : 1]}`}</title>
               <circle className="system-stock-hit" cx={n.x} cy={n.y} r="23"/><circle className="system-stock-glow" cx={n.x} cy={n.y} r="6" filter="url(#web-node-glow)"/><circle className="system-stock-orbit" cx={n.x} cy={n.y} r="8"/><circle className="system-stock-dot" cx={n.x} cy={n.y} r="3.8"/>
-              <text x={n.x} y={n.y + 19} textAnchor="middle" direction="ltr">{STATE_SYMBOLS[n.item.state]} {n.item.ticker.slice(0, 10)}</text>
+              <foreignObject x={n.x - 40} y={n.y + 9} width="80" height={controls.labelHeight}>
+                <div className="system-map-stock-label" dir="ltr" style={{fontSize:controls.labelFontSize}}>{STATE_SYMBOLS[n.item.state]} {n.item.ticker}</div>
+              </foreignObject>
             </g>
           </g>)}
-          <foreignObject x={c.x - (compact?84:100)} y={c.y - (compact?54:78)} width={compact?168:200} height="44">
-            <button type="button" className={`system-cluster-button ${updatedStations.has(c.station)?'system-new-evidence':''}`} dir={he ? 'rtl' : 'ltr'} aria-pressed={station === c.station} aria-label={`${LABELS[c.station][he ? 0 : 1]}: ${c.total}`}
+          <foreignObject x={c.x - controls.buttonWidth/2} y={c.y - controls.buttonOffset} width={controls.buttonWidth} height={controls.buttonHeight}>
+            <button type="button" className={`system-cluster-button ${updatedStations.has(c.station)?'system-new-evidence':''}`} style={{fontSize:controls.fontSize}} dir={he ? 'rtl' : 'ltr'} aria-pressed={station === c.station} aria-label={`${LABELS[c.station][he ? 0 : 1]}: ${c.total}`}
               onClick={() => setStation(station === c.station ? 'all' : c.station)}><span className="system-cluster-index" aria-hidden="true">{String(STATIONS.indexOf(c.station)+1).padStart(2,'0')}</span><span>{LABELS[c.station][he ? 0 : 1]}</span><bdi>{c.total}</bdi></button>
           </foreignObject>
           {!!c.omitted && <text className="system-omitted" x={c.x} y={c.y + 100} textAnchor="middle">+{c.omitted} {t('ברשימת התחנה', 'in station list')}</text>}
