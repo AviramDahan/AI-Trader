@@ -18,6 +18,9 @@ Interaction
 -----------
 
 * Three primary destinations: reactors, sampled stocks, more.
+* Public visitors can search and inspect details, but cannot mark stocks for
+  tracking. Favorites controls/filter and browser preference reads/writes are
+  removed from both shells. The engine watchlist and trading remain unchanged.
 * Reactor -> stock list -> focused stock -> optional full retained journey.
 * Details open in a viewport-bounded sheet, not somewhere further down the page.
 * Back pops one sheet; dismiss restores focus. Escape, keyboard focus trapping,

@@ -10,9 +10,6 @@ const label = (names: [string, string], he: boolean) => names[he ? 0 : 1]
 const number = (v: unknown, suffix = '') => finite(v) == null ? '—' : `${finite(v)!.toFixed(2)}${suffix}`
 const stamp = (v: unknown, he: boolean) => timestamp(v) ? new Date(String(v)).toLocaleString(he ? 'he-IL' : 'en-GB') : he ? 'לא מתועד' : 'Not recorded'
 const reason = (code: string | null | undefined, he: boolean) => code ? REASONS[code] ? label(REASONS[code], he) : code : he ? 'לא מתועד' : 'Not recorded'
-const readFollowed = (): string[] => {
-  try { const data = JSON.parse(localStorage.getItem('ai_trader_visual_follow') || '[]'); return Array.isArray(data) ? data.filter(v => typeof v === 'string').slice(0, 100) : [] } catch { return [] }
-}
 
 export function SystemActivity({ he, dashboard, dashboardError = '', miniApp = false }: { he: boolean, dashboard: Row | null, dashboardError?: string, miniApp?: boolean }) {
   const [research, setResearch] = useState<Row | null>(null)
@@ -21,8 +18,6 @@ export function SystemActivity({ he, dashboard, dashboardError = '', miniApp = f
   const [ticker, setTicker] = useState('')
   const [station, setStation] = useState<Station | 'all'>('all')
   const [selected, setSelected] = useState<string | null>(null)
-  const [followed, setFollowed] = useState<string[]>(readFollowed)
-  const [onlyFollowed, setOnlyFollowed] = useState(false)
   const [changed, setChanged] = useState<Set<string>>(new Set())
   const [updates, setUpdates] = useState<ActivityUpdate[]>([])
   const previous = useRef<ActivityItem[] | null>(null)
@@ -62,15 +57,9 @@ export function SystemActivity({ he, dashboard, dashboardError = '', miniApp = f
     const timer = window.setTimeout(() => setChanged(new Set()), 4000)
     return () => window.clearTimeout(timer)
   }, [items, research, dashboard, error, dashboardError])
-  const follow = (symbol: string) => setFollowed(current => {
-    const next = current.includes(symbol) ? current.filter(v => v !== symbol) : [...current, symbol].slice(-100)
-    try { localStorage.setItem('ai_trader_visual_follow', JSON.stringify(next)) } catch { /* Viewing remains available without storage. */ }
-    return next
-  })
   return <SystemActivityView miniApp={miniApp} he={he} research={research} dashboard={dashboard} error={error || dashboardError}
     items={items} changed={changed} updates={updates} hours={hours} setHours={setHours} ticker={ticker} setTicker={setTicker}
-    station={station} setStation={setStation} selected={selected} setSelected={setSelected}
-    followed={followed} follow={follow} onlyFollowed={onlyFollowed} setOnlyFollowed={setOnlyFollowed} />
+    station={station} setStation={setStation} selected={selected} setSelected={setSelected} />
 }
 
 type ViewProps = {
@@ -79,14 +68,13 @@ type ViewProps = {
   updates?: ActivityUpdate[]
   hours?: number; setHours?: (v: number) => void; ticker?: string; setTicker?: (v: string) => void
   station?: Station | 'all'; setStation?: (v: Station | 'all') => void
-  selected?: string | null; setSelected?: (v: string | null) => void; followed?: string[]; follow?: (v: string) => void
-  onlyFollowed?: boolean; setOnlyFollowed?: (v: boolean) => void
+  selected?: string | null; setSelected?: (v: string | null) => void
 }
 
 export function SystemActivityView({ miniApp = false, he, research, dashboard, error = '', items = buildActivity(research, dashboard), changed = new Set(),
   updates = [],
   hours = 24, setHours = () => {}, ticker = '', setTicker = () => {}, station = 'all', setStation = () => {},
-  selected = null, setSelected = () => {}, followed = [], follow = () => {}, onlyFollowed = false, setOnlyFollowed = () => {} }: ViewProps) {
+  selected = null, setSelected = () => {} }: ViewProps) {
   const t = (a: string, b: string) => he ? a : b
   const [detailsOpen, setDetailsOpen] = useState(false)
   const journey = useRef<HTMLDetailsElement>(null)
@@ -103,7 +91,7 @@ export function SystemActivityView({ miniApp = false, he, research, dashboard, e
     }
     wasOpen.current=detailsOpen
   }, [detailsOpen])
-  const filtered = items.filter(i => (!ticker || `${i.ticker} ${i.company}`.toLowerCase().includes(ticker.trim().toLowerCase())) && (!onlyFollowed || followed.includes(i.ticker)))
+  const filtered = items.filter(i => !ticker || `${i.ticker} ${i.company}`.toLowerCase().includes(ticker.trim().toLowerCase()))
   const chosen = items.find(i => i.id === selected)
   const open = dashboard?.market?.is_open
   const generated = research?.generated_at
@@ -113,8 +101,7 @@ export function SystemActivityView({ miniApp = false, he, research, dashboard, e
   const connection = error ? t('החיבור נכשל — מוצג מידע אחרון', 'Connection failed — last retained data') : !research || !dashboard ? t('ממתין לנתונים', 'Waiting for data') : invalidTime ? t('זמן התמונה לא תקין — מוצג מידע שמור','Invalid snapshot time — retained data') : old ? t('המידע לא עודכן — לא פעילות חיה', 'Data not updated — not live activity') : t('מחובר · עדכון מחזורי', 'Connected · periodic updates')
   if (miniApp) return <MiniAppActivity he={he} items={filtered} allItems={items} changed={changed} updates={updates}
     research={research} dashboard={dashboard} error={error} available={available} connection={connection}
-    hours={hours} setHours={setHours} ticker={ticker} setTicker={setTicker} followed={followed} follow={follow}
-    onlyFollowed={onlyFollowed} setOnlyFollowed={setOnlyFollowed}
+    hours={hours} setHours={setHours} ticker={ticker} setTicker={setTicker}
     renderFocus={(item, close, details) => <StockFocus item={item} he={he} stale={!available} onClose={close} onDetails={details} />}
     renderJourney={(item, close) => <StockJourney item={item} he={he} records={research?.records || []} onClose={close} />} />
   const fullJourney = chosen && <details className="system-full-journey" ref={journey} tabIndex={-1} open={detailsOpen} onToggle={e=>setDetailsOpen(e.currentTarget.open)}>
@@ -130,7 +117,6 @@ export function SystemActivityView({ miniApp = false, he, research, dashboard, e
         <label>{t('חיפוש מניה', 'Find a stock')}<input placeholder={t('סימול או חברה', 'Ticker or company')} value={ticker} onChange={e => setTicker(e.target.value)} /></label>
         <label>{t('תחנה', 'Station')}<select value={station} onChange={e => setStation(e.target.value as Station | 'all')}><option value="all">{t('כל התחנות', 'All stations')}</option>{STATIONS.map(s => <option key={s} value={s}>{label(LABELS[s], he)}</option>)}</select></label>
         <label>{t('חלון מחקר', 'Research window')}<select value={hours} onChange={e => setHours(Number(e.target.value))}>{[24,48,168].map(v => <option key={v} value={v}>{v}h</option>)}</select></label>
-        <label className="system-follow-filter"><input type="checkbox" checked={onlyFollowed} onChange={e => setOnlyFollowed(e.target.checked)} />{t('במעקב בתצוגה בלבד', 'Visually followed only')} ({followed.length})</label>
       </div>
     </details>
     <div className="system-overview">
@@ -143,7 +129,7 @@ export function SystemActivityView({ miniApp = false, he, research, dashboard, e
       <aside className="system-context"><details><summary>{t('מה רואים כאן?', 'What is shown?')}</summary>
         <p>{t('מניה מופיעה בתחנה לפי התיעוד האחרון שלה. זה אינו אומר שהיא עברה את כל התחנות הקודמות או שה־Worker מטפל בה כרגע. סימון עדכון מציין רק שינוי מתועד חדש שנקלט בתצוגה.', 'A stock is placed by its latest retained evidence, not proof that earlier stages passed or a worker is processing it now. An update marker indicates only new retained evidence received by the view.')}</p>
         <p>{t('מחקר מתרענן כל דקה; מצב הסורק כל 30 שניות. זה אינו זרם עסקאות בזמן אמת.', 'Research refreshes every minute; scanner status every 30 seconds. This is not a real-time trade feed.')}</p>
-        <p>{t('מוצגת הסריקה האחרונה שנשמרה לכל מניה במדגם, לצד הסיגנלים והפוזיציות. זו אינה רשימת כל ה־Universe. סימון כוכב נשמר רק בדפדפן ואינו משנה watchlist או מסחר.', 'Latest retained scan per sampled stock, alongside signals and positions. Not the entire universe. Stars are browser-only and do not change the watchlist or trading.')}</p>
+        <p>{t('מוצגת הסריקה האחרונה שנשמרה לכל מניה במדגם, לצד הסיגנלים והפוזיציות. זו אינה רשימת כל ה־Universe. התצוגה הציבורית היא לצפייה בלבד; לחיצות וחיפוש אינם משנים מעקב או מסחר.', 'Latest retained scan per sampled stock, alongside signals and positions. Not the entire universe. This public view is read-only; selecting and searching do not change the watchlist or trading.')}</p>
         </details><dl><div><dt>{t('מניות במדגם התחנות', 'Stocks in station sample')}</dt><dd>{new Set(filtered.map(i => i.ticker)).size}</dd></div>
           <div><dt>{t('פוזיציות דמה פתוחות', 'Open paper positions')}</dt><dd>{dashboard ? items.filter(i => i.state === 'open').length : '—'}</dd></div>
           <div><dt>{t('מחזור סריקה אחרון', 'Last scan')}</dt><dd><bdi>{stamp(dashboard?.activity?.last_scan_at ? new Date(dashboard.activity.last_scan_at*1000).toISOString() : null, he)}</bdi></dd></div></dl>
@@ -160,7 +146,7 @@ export function SystemActivityView({ miniApp = false, he, research, dashboard, e
     {!!research?.records_clipped || !!research?.clipped?.length ? <details className="system-sample-warning scanner-warning"><summary>{t('מדגם מוגבל — לא כל ההיסטוריה מוצגת', 'Capped sample — not all history is shown')}</summary><p>{t('המדגם מוגבל: חלק מפרטי ההיסטוריה לא נכללו. אין להסיק שאין פעילות במניה שלא מופיעה.', 'Sample is capped: some history is omitted. An absent ticker does not prove inactivity.')}</p></details> : null}
     {!research && !error && <p role="status">{t('טוען את תיעוד התחנות…', 'Loading station evidence…')}</p>}
     <details className="system-support-details"><summary>{t('פרטי המניות במדגם', 'Sampled stock details')} <bdi>{filtered.length}</bdi></summary>
-      <StationFlow he={he} items={filtered} station={station} selected={selected} select={setSelected} followed={followed} follow={follow}
+      <StationFlow he={he} items={filtered} station={station} selected={selected} select={setSelected}
         changed={new Set()} stale={!available} onDetails={()=>setDetailsOpen(true)} /></details>
     {fullJourney}
     {selected && !chosen && <p role="status">{t('הרשומה כבר אינה במדגם הנוכחי. אין בכך הוכחה שהפוזיציה נסגרה.', 'Record is no longer in the current sample. This does not prove the position closed.')}</p>}
@@ -178,9 +164,9 @@ const STATION_HELP: Record<Station,[string,string]> = {
   exit:['תוצאה שנשמרה אחרי יציאה','Retained outcome after exit'],
 }
 
-export function StationFlow({he,items,station,selected,select,followed,follow,changed,stale,onDetails,fullJourney}: {
+export function StationFlow({he,items,station,selected,select,changed,stale,onDetails,fullJourney}: {
   he:boolean; items:ActivityItem[]; station:Station|'all'; selected:string|null; select:(id:string|null)=>void;
-  followed:string[]; follow:(ticker:string)=>void; changed:Set<string>; stale:boolean; onDetails:()=>void; fullJourney?:ReactNode;
+  changed:Set<string>; stale:boolean; onDetails:()=>void; fullJourney?:ReactNode;
 }) {
   const t=(a:string,b:string)=>he?a:b
   const [expanded,setExpanded]=useState<Partial<Record<Station,boolean>>>({})
@@ -224,7 +210,6 @@ export function StationFlow({he,items,station,selected,select,followed,follow,ch
                 {i.reason && <small className="system-stock-reason">{reason(i.reason,he)}</small>}
                 <time dateTime={i.at||undefined}>{stamp(i.at,he)}</time></>}
               </button>
-              <button className="system-follow" type="button" aria-pressed={followed.includes(i.ticker)} aria-label={`${t('מעקב בתצוגה','Visual follow')}: ${i.ticker}`} onClick={()=>follow(i.ticker)}>{followed.includes(i.ticker)?'★':'☆'}</button>
             </article>
             {selected===i.id && <div className="system-flow-focus"><StockFocus item={i} he={he} stale={stale} onClose={()=>select(null)} onDetails={onDetails}/>{fullJourney}</div>}
           </div>)}

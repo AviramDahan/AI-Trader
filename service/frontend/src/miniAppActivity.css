@@ -69,11 +69,9 @@
 .mini-sheet .system-journey { background:none; border:0; padding:4px 0; }
 .mini-sheet .system-journey p { font-size:14px; }
 .mini-sheet .system-focus-levels { grid-template-columns:repeat(2,minmax(0,1fr)); }
-.mini-sheet .system-focus-details, .mini-follow { min-height:48px; width:100%; }
-.mini-follow, .mini-filters>button { border:1px solid var(--mini-line); border-radius:12px; background:var(--mini-bg); padding:12px; margin-top:8px; }
+.mini-sheet .system-focus-details { min-height:48px; width:100%; }
+.mini-filters>button { border:1px solid var(--mini-line); border-radius:12px; background:var(--mini-bg); padding:12px; margin-top:8px; }
 .mini-filters { display:grid; gap:18px; padding:12px 0; }
-.mini-filters .mini-check { flex-direction:row; align-items:center; }
-.mini-check input { width:24px; min-height:24px; }
 .mini-workspace .control-pill, .mini-workspace .theme-toggle { min-width:44px; min-height:44px; }
 .mini-filters .mini-primary { background:var(--mini-accent); color:#081724; font-weight:700; }
 .mini-info p { line-height:1.8; }
