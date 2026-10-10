@@ -11,7 +11,7 @@ const result = await build({ entryPoints: ['src/SystemActivity.tsx','src/systemA
   plugins: [{ name: 'isolated-render', setup(b) {
     b.onResolve({ filter: /^\.\/appShared$/ }, () => ({ path: 'stub', namespace: 'stub' }))
     b.onResolve({ filter: /\.css$/ }, () => ({ path: 'css', namespace: 'stub' }))
-    b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const API_ORIGIN='http://isolated.invalid'" }))
+    b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const API_ORIGIN='http://isolated.invalid'; export const useLanguage=()=>({language:'he',setLanguage:()=>{}}); export const useTheme=()=>({theme:'dark',setTheme:()=>{}})" }))
   } }] })
 const load = name => {
   const m = { exports: {} }

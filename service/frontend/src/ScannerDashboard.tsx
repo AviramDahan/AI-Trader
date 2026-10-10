@@ -6,7 +6,7 @@ import { positionMove, unifiedSignals, activeTargetIndexes } from './signalPrese
 import { SignalResearch } from './SignalResearch'
 import { HistoryCacheStatus } from './HistoryCacheStatus'
 import { SystemActivity } from './SystemActivity'
-import { isMiniAppEntry, preserveMiniApp } from './telegramMiniApp'
+import { isMiniAppEntry, preserveMiniApp, installMiniAppBackButton } from './telegramMiniApp'
 
 type Dashboard = {
   market: { is_open: boolean }
@@ -48,8 +48,13 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const he = language === 'he'
   const location = useLocation()
   const navigate = useNavigate()
+  const miniApp = isMiniAppEntry(location.search)
   const requestedTab = new URLSearchParams(location.search).get('tab') || (isMiniAppEntry(location.search) ? 'live' : 'signals')
   const tab = requestedTab === 'trades' ? 'signals' : ['signals', 'results', 'research', 'news', 'status', 'live'].includes(requestedTab) ? requestedTab : 'signals'
+  useEffect(() => {
+    if (!miniApp || tab === 'live') return
+    return installMiniAppBackButton(() => navigate(preserveMiniApp('/market?tab=live', location.search, location.hash)))
+  }, [miniApp, tab, navigate, location.search, location.hash])
   const [data, setData] = useState<Dashboard | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -278,10 +283,13 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     }
   }
 
-  if (loading && !data) return <div className="scanner-empty">{text('טוען את דשבורד הסורק…', 'Loading scanner dashboard…')}</div>
+  const miniHeader = miniApp && <header className="mini-secondary-header"><button type="button" onClick={() => navigate(preserveMiniApp('/market?tab=live', location.search, location.hash))}>{text('חזרה לכורים', 'Back to reactors')}</button><h1>{tabs.find(([key]) => key === tab)?.[1]}</h1></header>
+  if (miniApp && tab === 'live') return <SystemActivity he={he} dashboard={data} dashboardError={error} miniApp />
+  if (loading && !data) return <section className={miniApp ? 'miniapp-secondary' : ''} dir={he ? 'rtl' : 'ltr'}>{miniHeader}<div className="scanner-empty">{text('טוען את דשבורד הסורק…', 'Loading scanner dashboard…')}</div></section>
 
-  return <section className="scanner-dashboard" dir={he ? 'rtl' : 'ltr'}>
-    <header className="scanner-hero">
+  return <section className={`scanner-dashboard ${miniApp ? 'miniapp-secondary' : ''}`} dir={he ? 'rtl' : 'ltr'}>
+    {miniHeader}
+    {!miniApp && <header className="scanner-hero">
       <div>
         <p className="scanner-kicker">{text('סורק מניות ארה״ב', 'US STOCK SCANNER')}</p>
         <h1>{tabs.find(([key]) => key === tab)?.[1] || primaryName}</h1>
@@ -289,11 +297,11 @@ export function ScannerDashboard({ token }: { token: string | null }) {
         <small className="signal-price-time">{data?.market ? text(data.market.is_open ? 'השוק פתוח' : 'השוק סגור', data.market.is_open ? 'Market open' : 'Market closed') : text('מצב שוק לא זמין', 'Market status unavailable')} · {text('סריקה אחרונה', 'Last scan')}: {activity.last_scan_at ? stamp(activity.last_scan_at * 1000) : '—'}</small>
       </div>
       <strong className="paper-only">{text('מסחר מדומה בלבד', 'PAPER TRADING ONLY')}</strong>
-    </header>
+    </header>}
 
     {error && <div className="scanner-inline-error">{text('נתוני הסורק אינם זמינים כרגע', 'Scanner data is temporarily unavailable')}: {error} <button onClick={() => void load()}>{text('בדיקה מחדש', 'Retry')}</button></div>}
 
-    <details className="signal-scan-details" open={tab === 'status'}><summary>{text('פרטי הסריקה האחרונה', 'Latest scan details')}</summary>
+    {!miniApp && <details className="signal-scan-details" open={tab === 'status'}><summary>{text('פרטי הסריקה האחרונה', 'Latest scan details')}</summary>
     <div className="scanner-stage-grid" aria-label={text('שלבי הסריקה האחרונה', 'Latest scan stages')}>
       {[
         [text('יקום', 'Universe'), activity.universe_count],
@@ -305,10 +313,10 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       ].map(([label, value]) => <div className="scanner-stat" key={String(label)}><span>{label}</span><strong>{Number(value || 0).toLocaleString()}</strong></div>)}
     </div>
 
-    </details>
-    <nav className="scanner-tabs" aria-label={text('ניווט בדשבורד', 'Dashboard navigation')}>
+    </details>}
+    {!miniApp && <nav className="scanner-tabs" aria-label={text('ניווט בדשבורד', 'Dashboard navigation')}>
       {tabs.map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => navigate(preserveMiniApp(`/market?tab=${key}`, location.search, location.hash))}>{label}</button>)}
-    </nav>
+    </nav>}
 
     {tab === 'research' && <SignalResearch he={he} />}
     {tab === 'live' && <SystemActivity he={he} dashboard={data} dashboardError={error} />}

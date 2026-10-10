@@ -159,6 +159,8 @@ export function Sidebar() {
     setMobileMenuOpen(false)
   }, [location.pathname, location.search])
 
+  if (isMiniAppEntry(location.search)) return null
+
   return (
     <div className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
       <div className="sidebar-header">

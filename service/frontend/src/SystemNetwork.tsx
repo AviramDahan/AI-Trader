@@ -15,7 +15,7 @@ const SPIDER_LEGS = [
 ]
 
 /** Photoreal decorative crawler; its finite path represents observed updates only. */
-export function EvidenceSpider({moving,idle=false,allowReducedMotion=false,path,point,compact,batch}:{moving:boolean;idle?:boolean;allowReducedMotion?:boolean;path:string;point:{x:number;y:number};compact:boolean;batch:string}) {
+export function EvidenceSpider({moving,idle=false,allowReducedMotion=false,path,point,compact,batch,scale}:{moving:boolean;idle?:boolean;allowReducedMotion?:boolean;path:string;point:{x:number;y:number};compact:boolean;batch:string;scale?:number}) {
   const id=useId().replace(/:/g,'')
   return <g className={`system-evidence-spider ${moving?'is-walking':idle?'is-idle':''}`} data-motion-override={allowReducedMotion?'true':undefined} aria-hidden="true" pointerEvents="none">
     <defs>
@@ -25,7 +25,7 @@ export function EvidenceSpider({moving,idle=false,allowReducedMotion=false,path,
     <g key={moving?batch:'rest'} transform={moving?undefined:`translate(${point.x} ${point.y})`}>
       {moving && <animateMotion path={path} dur="3.2s" rotate="auto" fill="freeze" calcMode="paced"/>}
       <g className="system-spider-pose">
-      <g transform={`scale(${compact?.044:.052})`}>
+      <g transform={`scale(${scale ?? (compact?.044:.052)})`}>
         <g transform="translate(-640 -640)">
           <ellipse cx="615" cy="665" rx="315" ry="180" fill="#000" opacity=".38"/>
           {[-1,1].flatMap(side=>SPIDER_LEGS.map((leg,n)=><g key={`${side}:${n}`} className={`system-spider-leg gait-${(n+(side===1?1:0))%2}`} style={{transformOrigin:`${leg.hip[0]}px ${side===-1?leg.hip[1]:1280-leg.hip[1]}px`,'--idle-period':`${9+n*1.7+(side===1?2.3:0)}s`,'--idle-delay':`${-n*2.1-(side===1?4.7:0)}s`} as React.CSSProperties}>
