@@ -15,7 +15,7 @@ const compilePreview = async (unavailable=false) => build({ stdin: { contents: `
   }
   const dashboard=${JSON.stringify(fixtureDashboard)};
   createRoot(document.getElementById('root')).render(<SystemActivity he={true} dashboard={dashboard}/>);
-`, resolveDir: process.cwd(), loader: 'tsx' }, outdir: 'preview-unused', bundle: true, write: false,
+`, resolveDir: process.cwd(), loader: 'tsx' }, outdir: 'preview-unused', loader:{'.png':'file'}, bundle: true, write: false,
   plugins: [{ name: 'local-api-only', setup(b) {
     b.onResolve({filter: /\/appShared$/}, () => ({path:'stub',namespace:'stub'}))
     b.onLoad({filter:/.*/,namespace:'stub'}, () => ({contents:"export const API_ORIGIN=new URLSearchParams(location.search).get('event-test')==='synthetic'?'/fixture-event':'';"}))
@@ -33,6 +33,8 @@ const server = createServer((request,response) => {
   if(request.method !== 'GET') {response.writeHead(405);response.end();return}
   const path = new URL(request.url,'http://127.0.0.1:4318').pathname
   response.setHeader('Cache-Control','no-store')
+  const image=result.outputFiles.find(f=>f.path.endsWith('.png') && path==='/'+f.path.split(/[\\/]/).at(-1))
+  if(image) {response.setHeader('Content-Type','image/png');response.end(image.contents);return}
   if(path === '/api/scanner/research' || path === '/fixture-event/api/scanner/research') {
     const data = {...fixtureResearch,generated_at:new Date().toISOString()}
     if(path.startsWith('/fixture-event/')) {

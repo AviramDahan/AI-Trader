@@ -18,7 +18,10 @@ phones and beside it on desktop. Full sample lists remain reachable through
 "Sampled stock details". Search, scope, service status and full evidence are
 disclosed on request; stale/invalid/capped-sample/session warnings stay visible.
 
-The decorative metallic spider has eight articulated legs and body highlights.
+The decorative spider uses an alpha, orthographic titanium CGI sprite rather
+than drawn outlines. Eight clipped raster limbs articulate around their hips;
+the body uses the same texture. The texture is bundled locally, not fetched
+from X or an external image service. It does not require WebGL or a 3D camera.
 It moves for 3.2 seconds only to newly observed evidence destinations, at most
 four per batch. This is an illustration of received evidence, NOT live worker
 tracking or successful-stage proof. Initial load, unchanged/stale/future data,
@@ -70,3 +73,16 @@ live E2E evidence. Former GPU fixture URLs remain test-only, with no GPU scene.
 CI/Cloud Readiness run the model/render tests. No migration/config change is
 needed. A UI revert does not alter decisions or positions. This task does not
 authorise merge or Production deployment.
+
+Sprite provenance
+-----------------
+
+``service/frontend/src/assets/evidence-spider-titanium-v1.png`` was generated
+with the built-in imagegen tool, transparent-background generation mode.
+Prompt: "Premium photoreal CGI cybernetic spider, orthographic top-down,
+facing right, exactly eight separated slender articulated legs, brushed
+black titanium/graphite, restrained emerald thorax status light, realistic
+metal highlights and ambient occlusion, transparent alpha, no background,
+text, web, panels, watermark, cartoon or vector outlines."
+The X video was viewed as inspiration; this is an original generated asset,
+not a copy or extraction from that video.

@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import { candidate, fixtureResearch as research, fixtureDashboard as dashboard } from './system-activity-fixtures.mjs'
 
 const result = await build({ entryPoints: ['src/SystemActivity.tsx','src/systemActivityModel.ts','src/SystemNetwork.tsx'], bundle: true, write: false,
-  outdir: 'unused', platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react','react/jsx-runtime'],
+  outdir: 'unused', loader: {'.png':'file'}, platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react','react/jsx-runtime'],
   plugins: [{ name: 'isolated-render', setup(b) {
     b.onResolve({ filter: /^\.\/appShared$/ }, () => ({ path: 'stub', namespace: 'stub' }))
     b.onResolve({ filter: /\.css$/ }, () => ({ path: 'css', namespace: 'stub' }))
@@ -176,6 +176,12 @@ check(spider({moving:true}).includes('path="M 190 336 L 94 112"'))
 equal((spider({moving:true}).match(/class="system-spider-leg /g)||[]).length,8)
 check(spider({moving:true}).includes('dur="3.2s"')&&!spider({moving:true}).includes('repeatCount'))
 check(spider({}).includes('aria-hidden="true"')&&spider({}).includes('pointer-events="none"'))
+equal((spider({}).match(/<image /g)||[]).length,9)
+check(spider({}).includes('evidence-spider-titanium-v1') && !spider({}).includes('spider-metal'))
+const texture=readFileSync(new URL('../src/assets/evidence-spider-titanium-v1.png',import.meta.url))
+equal(texture.readUInt32BE(16),1254);equal(texture.readUInt32BE(20),1254)
+equal(texture[25],6) // RGBA, not a baked black/checkerboard background.
+check(spider({}).includes('width="1280" height="1280" clip-path='))
 equal(network({selected:'trade:40'}).match(/viewBox="([^"]+)"/)[1],network({}).match(/viewBox="([^"]+)"/)[1])
 const component = readFileSync('src/SystemActivity.tsx','utf8')
 check(!/method:\s*['"](?:POST|PUT|DELETE)/.test(component))

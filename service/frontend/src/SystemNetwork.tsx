@@ -1,31 +1,37 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { LABELS, STATE_LABELS, STATE_SYMBOLS, STATIONS, type ActivityItem, type ActivityUpdate, type Station } from './systemActivityModel'
 import { buildNetwork, buildConstellation, buildEvidenceSweep, networkCentre as centre } from './systemNetworkGeometry'
+import spiderTexture from './assets/evidence-spider-titanium-v1.png'
 export { CLUSTERS, COMPACT_CLUSTERS, NETWORK_LIMIT, buildNetwork, buildConstellation, buildEvidenceSweep } from './systemNetworkGeometry'
 const REST = { x: 610, y: 340 }
 
-/** Decorative agent glyph; its finite path is driven only by observed updates. */
+// Clipped parts of one alpha sprite: every limb shares the same material/light.
+// Coordinates use a 1280-unit sprite space, not map positions.
+const SPIDER_LEGS = [
+  {hip:[630,530],polygon:'70,240 290,240 440,320 600,455 665,565 600,575 435,435 70,375'},
+  {hip:[685,500],polygon:'390,65 455,65 590,185 675,345 725,505 665,530 600,370 505,205'},
+  {hip:[765,500],polygon:'730,500 800,350 845,245 970,150 1090,155 1220,210 970,240 880,350 810,540'},
+  {hip:[825,550],polygon:'805,545 880,430 960,375 1100,350 1255,485 1230,520 1110,440 970,435 870,590'},
+]
+
+/** Photoreal decorative crawler; its finite path represents observed updates only. */
 export function EvidenceSpider({moving,path,point,compact,batch}:{moving:boolean;path:string;point:{x:number;y:number};compact:boolean;batch:string}) {
   const id=useId().replace(/:/g,'')
   return <g className={`system-evidence-spider ${moving?'is-walking':''}`} aria-hidden="true" pointerEvents="none">
     <defs>
-      <linearGradient id={`spider-metal-${id}`} x1="0" y1="0" x2="0.3" y2="1"><stop stopColor="#b3cbc8"/><stop offset=".35" stopColor="#426968"/><stop offset=".7" stopColor="#172d34"/><stop offset="1" stopColor="#071217"/></linearGradient>
-      <radialGradient id={`spider-shell-${id}`} cx=".35" cy=".25"><stop stopColor="#779d96"/><stop offset=".45" stopColor="#203f43"/><stop offset="1" stopColor="#07161c"/></radialGradient>
+      {[-1,1].flatMap(side=>SPIDER_LEGS.map((leg,n)=><clipPath key={`${side}:${n}`} id={`spider-leg-${id}-${side}-${n}`}><polygon points={side===-1?leg.polygon:leg.polygon.split(' ').map(pair=>{const [x,y]=pair.split(',').map(Number);return `${x},${1280-y}`}).join(' ')}/></clipPath>))}
+      <clipPath id={`spider-body-${id}`}><path d="M 150 480 Q 300 405 475 445 L 610 515 Q 720 470 820 525 L 955 560 L 965 700 L 825 750 Q 720 815 610 750 L 480 810 Q 285 845 150 710 Z"/></clipPath>
     </defs>
     <g key={moving?batch:'rest'} transform={moving?undefined:`translate(${point.x} ${point.y})`}>
       {moving && <animateMotion path={path} dur="3.2s" rotate="auto" fill="freeze" calcMode="paced"/>}
-      <g transform={`scale(${compact?.85:1.15})`}>
-        <ellipse cx="-3" cy="4" rx="25" ry="15" fill="#000" opacity=".45"/>
-        {[-1,1].flatMap(side=>[0,1,2,3].map(n=><g key={`${side}:${n}`} className={`system-spider-leg gait-${(n+(side===1?1:0))%2}`} style={{transformOrigin:`${5-n*4}px ${side*4}px`}}>
-          <path d={`M ${5-n*4} ${side*4} L ${15-n*10} ${side*(12+n%2*3)} L ${24-n*15} ${side*23} L ${28-n*17} ${side*25}`} fill="none" stroke={`url(#spider-metal-${id})`} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"/>
-          <circle cx={15-n*10} cy={side*(12+n%2*3)} r="1.5" fill="#70a59d"/>
-        </g>))}
-        <ellipse cx="-10" cy="0" rx="11" ry="8" fill={`url(#spider-shell-${id})`} stroke="#78b0a2" strokeWidth=".6"/>
-        <path d="M -16 -5 Q -7 -8 -2 0 M -16 5 Q -7 8 -2 0" fill="none" stroke="#9ac2b6" strokeWidth=".55" opacity=".6"/>
-        <ellipse cx="4" cy="0" rx="8" ry="6" fill={`url(#spider-metal-${id})`} stroke="#a3c1b7" strokeWidth=".6"/>
-        <path d="M 10 -3 L 15 -4 L 16 -2 M 10 3 L 15 4 L 16 2" fill="none" stroke="#799d96" strokeWidth="1.3" strokeLinecap="round"/>
-        <circle cx="9" cy="-2" r="1.3" fill="#a9ffe0"/><circle cx="9" cy="2" r="1.3" fill="#a9ffe0"/>
-        <path d="M -18 -3 Q -13 -7 -7 -5" fill="none" stroke="#d4e6dd" strokeWidth=".8" opacity=".75"/>
+      <g transform={`scale(${compact?.062:.073})`}>
+        <g transform="translate(-640 -640)">
+          <ellipse cx="615" cy="665" rx="315" ry="180" fill="#000" opacity=".38"/>
+          {[-1,1].flatMap(side=>SPIDER_LEGS.map((leg,n)=><g key={`${side}:${n}`} className={`system-spider-leg gait-${(n+(side===1?1:0))%2}`} style={{transformOrigin:`${leg.hip[0]}px ${side===-1?leg.hip[1]:1280-leg.hip[1]}px`}}>
+            <image href={spiderTexture} width="1280" height="1280" clipPath={`url(#spider-leg-${id}-${side}-${n})`}/>
+          </g>))}
+          <image className="system-spider-body" href={spiderTexture} width="1280" height="1280" clipPath={`url(#spider-body-${id})`}/>
+        </g>
       </g>
     </g>
   </g>
