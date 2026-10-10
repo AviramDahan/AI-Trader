@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { build } from 'esbuild'
+import { readFileSync } from 'node:fs'
 const bundled = await build({ entryPoints: ['src/readPoller.ts'], bundle: true, write: false, platform: 'node', format: 'cjs' })
 const mod = { exports: {} }
 new Function('module', 'exports', bundled.outputFiles[0].text)(mod, mod.exports)
@@ -71,6 +72,9 @@ try {
   poller.stop(); requests[8].resolve(response({ afterUnmount: true })); await flush()
   assert.equal(results.length, 4)
   assert.equal(listeners.size, 0); assert.equal(timers.size, 0)
+  const source = readFileSync('src/readPoller.ts', 'utf8')
+  assert.equal(source.includes('AbortSignal.timeout'), false)
+  assert.equal(source.includes('AbortSignal.any'), false)
   await tick(90000); assert.equal(requests.length, 9)
   console.log('read poller: slow read, timeout, HTTP/JSON failure, recovery, foreground race, overlap and cleanup PASS')
 } finally { Object.assign(globalThis, real) }

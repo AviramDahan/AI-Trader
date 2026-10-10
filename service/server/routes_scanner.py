@@ -8,7 +8,6 @@ from scanner_engine import dashboard_payload, quotes_payload, set_active_strateg
 from services import _get_agent_by_token
 from stock_scanner import public_status
 from utils import _extract_token
-from scanner_read_compression import ScannerReadCompression
 
 
 class ExitStrategyRequest(BaseModel):
@@ -40,7 +39,6 @@ def _require_scanner_manager(authorization: str):
 
 
 def register_scanner_routes(app: FastAPI) -> None:
-    app.add_middleware(ScannerReadCompression)
     @app.get("/api/scanner/sec-intelligence/status")
     def sec_intelligence_status(authorization: str = Header(None)):
         _require_scanner_manager(authorization)
