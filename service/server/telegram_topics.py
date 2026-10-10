@@ -57,6 +57,8 @@ def with_news_community_link(message: str, event_type: str | None) -> str:
 
 
 def thread_id_for_event(event_type: str | None) -> int | None:
+    if event_type == 'community_discussion':
+        return None  # General: omit message_thread_id, never trading fallback.
     if not event_type:
         return None
     if event_type in MARKET_NEWS_EVENT_TYPES:
