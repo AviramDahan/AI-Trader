@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { API_ORIGIN, useLanguage } from './appShared'
@@ -6,6 +6,7 @@ import { positionMove, unifiedSignals, activeTargetIndexes } from './signalPrese
 import { SignalResearch } from './SignalResearch'
 import { HistoryCacheStatus } from './HistoryCacheStatus'
 import { SystemActivity } from './SystemActivity'
+import { createReadPoller } from './readPoller'
 import { isMiniAppEntry, preserveMiniApp, installMiniAppBackButton } from './telegramMiniApp'
 
 type Dashboard = {
@@ -70,23 +71,17 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const [watchBusy, setWatchBusy] = useState(false)
   const [quoteInfo, setQuoteInfo] = useState<Record<string, any> | null>(null)
 
-  const load = async () => {
-    try {
-      const response = await fetch(`${API_ORIGIN}/api/scanner/dashboard`, { cache: 'no-store', signal: AbortSignal.timeout(12000) })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      setData(await response.json())
-      setError('')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unavailable')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const reads = useRef<ReturnType<typeof createReadPoller<Dashboard>> | null>(null)
+  const load = async () => { await reads.current?.refresh(true) }
 
   useEffect(() => {
-    void load()
-    const interval = window.setInterval(() => void load(), 30000)
-    return () => window.clearInterval(interval)
+    const poller = createReadPoller<Dashboard>({
+      url: `${API_ORIGIN}/api/scanner/dashboard`, intervalMs: 30000,
+      onData: payload => { setData(payload); setError('') },
+      onError: setError, onSettled: () => setLoading(false),
+    })
+    reads.current = poller; poller.start()
+    return () => { poller.stop(); reads.current = null }
   }, [])
 
   useEffect(() => {

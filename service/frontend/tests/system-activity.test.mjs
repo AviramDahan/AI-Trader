@@ -215,7 +215,9 @@ equal(network({selected:'trade:40'}).match(/viewBox="([^"]+)"/)[1],network({}).m
 const component = readFileSync('src/SystemActivity.tsx','utf8')
 check(!component.includes('localStorage')&&!component.includes('ai_trader_visual_follow'))
 check(!/method:\s*['"](?:POST|PUT|DELETE)/.test(component))
-check(component.includes('controller.abort()') && component.includes('inFlight') && component.includes("visibilityState === 'hidden'"))
+check(component.includes('createReadPoller<Row>') && component.includes('poller.stop()') && component.includes('intervalMs: 60000'))
+const dashboardSource = readFileSync('src/ScannerDashboard.tsx','utf8')
+check(dashboardSource.includes('createReadPoller<Dashboard>') && dashboardSource.includes('intervalMs: 30000'))
 const focus=(item,props={})=>renderToStaticMarkup(createElement(StockFocus,{item,he:true,stale:false,onClose:()=>{},onDetails:()=>{},...props}))
 const focusHtml=focus(stock('HOTL'))
 // Evidence is progressive disclosure over the exact linked record, never a
