@@ -1,6 +1,6 @@
 """Weekly official Earnings Whispers image; local secrets, durable send guard.
 
-Default is a read-only preview. --send is used by the Friday scheduled task.
+Default is a read-only preview. --send is used by the weekly scheduled task.
 Permission to redistribute the chart was confirmed by the owner on 2026-09-25.
 """
 from __future__ import annotations
@@ -34,6 +34,19 @@ NS = {'a': 'http://www.w3.org/2005/Atom'}
 
 def next_monday(today: date) -> date:
     return today + timedelta(days=7-today.weekday())
+
+
+def delivery_window(now: datetime) -> bool:
+    """Friday evening, with bounded weekend catch-up for delayed runners.
+
+    All eligible dates address the same next-Monday week. Monday is rejected
+    before network access, preventing an old delayed job from selecting a
+    different week. Durable weekly claims remain the authority for retries.
+    """
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError('Delivery time requires a timezone')
+    local=now.astimezone(ZoneInfo('Asia/Jerusalem'))
+    return (local.weekday()==4 and local.hour>=18) or local.weekday() in (5,6)
 
 
 def find_calendar(xml: bytes, week: date) -> dict:
@@ -191,8 +204,8 @@ def main():
     parser.add_argument('--github',action='store_true',help='Use durable GitHub delivery state')
     args=parser.parse_args()
     now=datetime.now(ZoneInfo('Asia/Jerusalem'))
-    if args.send and now.weekday()!=4:
-        raise ValueError('Automatic delivery is Friday-only in Asia/Jerusalem')
+    if args.send and not delivery_window(now):
+        raise ValueError('Outside weekly delivery window: Friday 18:00 through Sunday, Asia/Jerusalem')
     with requests.Session() as session:
         week=next_monday(now.date())
         cloud=GitHubDelivery(week.isoformat(),session) if args.github and args.send else None

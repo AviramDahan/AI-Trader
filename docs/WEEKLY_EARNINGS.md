@@ -22,20 +22,25 @@ Reporting dates may change. No LLM is used.
 
 GitHub Actions workflow **Weekly earnings calendar** runs on hosted Linux runners.
 Friday UTC slots 15:07–20:07 cover both Israel time offsets; a local-time guard
-permits only 18:00–22:59 Friday in Asia/Jerusalem. The first eligible attempt is
-approximately 18:07, with hourly retries until 22:07 if needed. GitHub can delay
+permits Friday from 18:00 through Sunday 23:59 in Asia/Jerusalem. The first
+eligible attempt is approximately 18:07, with hourly Friday opportunities.
+Saturday and Sunday at 16:17 UTC provide bounded catch-up opportunities; an
+already delivered week is skipped before fetching. GitHub can delay
 scheduled jobs; delivery at an exact minute is not guaranteed. Public-repository
 schedules may be disabled after 60 days of repository inactivity.
 
 Neither the Windows computer nor Codex nor the application backend is required.
 This does **not** migrate the scanner, Ollama, or other news feeds to the cloud.
 Manual workflow dispatch defaults to read-only preview. Setting preview=false
-uses the normal Friday-only send path and the same persistent deduplication.
+uses the same bounded delivery window and persistent deduplication.
+Monday through Thursday and Friday before 18:00 remain blocked for publication;
+preview is unrestricted. A delayed weekend job always selects the coming
+Monday, never forwards an old calendar or catches up into the trading week.
 
 ```powershell
 # Preview: fetch and validate, no Telegram message
 .\.venv\Scripts\python.exe scripts\weekly_earnings.py
-# Actual publication: Friday only, Asia/Jerusalem
+# Actual publication: Friday evening or bounded weekend catch-up, Asia/Jerusalem
 .\.venv\Scripts\python.exe scripts\weekly_earnings.py --send
 ```
 
@@ -65,8 +70,9 @@ resending is deliberately blocked; inspect the topic before reconciling the
 delivery record. Never delete state blindly. Explicit HTTP rejection permits a
 later scheduled retry. Missing/changed source formats and missing current-week
 images fail closed rather than forwarding old images. No guaranteed publication
-time or source uptime is implied. Friday-only scheduling does not recover a
-missed Friday on a later day.
+time or source uptime is implied. Catch-up never overrides a ``sending`` claim
+with an uncertain outcome. If the weekend window is also missed, no automatic
+publication occurs during the trading week. State is not deleted to force a send.
 
 ## Verification
 
@@ -74,4 +80,6 @@ missed Friday on a later day.
 uses mocked Telegram responses and temporary SQLite files. Covers source/date
 validation, ticker deduplication, year boundaries, caption size, image-host
 restriction, persistent single-send protection, uncertain delivery and rate-limit
-recovery. It never sends test messages to the live group.
+recovery, delayed Friday/Saturday runner execution, weekend catch-up, the Monday
+cutoff and unchanged single-send/uncertain-outcome protections. It never sends
+test messages to the live group.
