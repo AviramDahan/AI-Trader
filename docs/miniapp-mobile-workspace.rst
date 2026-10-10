@@ -51,6 +51,18 @@ The earlier dashboard timeout is not claimed to be repaired by this UI change.
 An unavailable refresh is now shown succinctly; retained data is never presented
 as a fresh successful update. Request cadence and source semantics are unchanged.
 
+Read concurrency follow-up
+--------------------------
+
+Live read-only probing showed a dashboard read taking 5.23 seconds also delayed
+a concurrent health read by 5.03 seconds. The synchronous dashboard and cached
+quote handlers now run in FastAPI's existing bounded thread pool, like the
+research handler. Payloads, DB queries, polling intervals, errors and all write
+routes are unchanged. This removes event-loop head-of-line blocking; it does not
+promise zero network delay or make retained data fresh. The isolated ASGI test
+holds each read open while health must respond, checks identical JSON, and
+ensures a failed read remains an error without invoking trading writes.
+
 Release
 -------
 

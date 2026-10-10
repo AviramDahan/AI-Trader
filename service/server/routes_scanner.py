@@ -53,13 +53,15 @@ def register_scanner_routes(app: FastAPI) -> None:
         return payload(hours)
 
     @app.get("/api/scanner/dashboard")
-    async def scanner_dashboard():
+    def scanner_dashboard():
+        # These synchronous DB projections belong in FastAPI's bounded worker
+        # pool, not the event loop used by health and concurrent mobile reads.
         payload = dashboard_payload()
         payload["activity"] = public_status()
         return payload
 
     @app.get("/api/scanner/quotes")
-    async def scanner_quotes():
+    def scanner_quotes():
         return quotes_payload()
 
     @app.get("/api/scanner/trades/{trade_id}/chart")
