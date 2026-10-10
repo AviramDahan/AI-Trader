@@ -11,7 +11,7 @@ No new message or topic is required: the existing Mini App URL remains valid.
 
 The shell renders the eight reactors immediately, including while data loads.
 Unknown counts are ``—``; only a received empty sample may display zero.
-Reactor counts represent retained records, not the entire universe or successful
+Reactor counts represent distinct sampled stocks, not the entire universe or successful
 stage transitions. The explanatory sheet retains freshness/sample limitations.
 
 Interaction
@@ -27,14 +27,14 @@ Interaction
   background inertness and Telegram's optional BackButton are supported.
 * Each card previews up to three distinct stock symbols plus a ``+N`` remainder,
   including in short-height containers. Symbols are display-only within the
-  station button; its sheet keeps all filtered records accessible. Counts still
-  measure records, not unique stocks. Touch targets are at least 44 CSS pixels.
+  station button; its sheet keeps all filtered records accessible. Counts measure
+  distinct ticker symbols per station. Touch targets are at least 44 CSS pixels.
 * The fixed 2D map cannot be dragged or rotated. The decorative spider and its
   motion controls have been removed from both renderers.
 * Prominent step badges 1–8 and seven directional arrows show a continuous
   serpentine sequence. In Hebrew the first step starts top-right; in English it
   starts top-left. DOM/tab order remains chronological. Counts are separately
-  labeled records, never used as step numbers. Arrows describe pipeline order,
+  labeled stocks, never used as step numbers. Arrows describe pipeline order,
   not proof a sampled stock passed earlier stages.
 
 Verification

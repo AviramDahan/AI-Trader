@@ -64,7 +64,7 @@ export function MiniAppActivity(p: Props) {
     <button className="mini-stock-row" type="button" onClick={() => open({ kind: 'stock', id: item.id })} aria-label={`${t('פרטי מניה', 'Stock details')}: ${item.ticker}`}>
       <span><strong><bdi>{item.ticker}</bdi></strong><small><bdi>{item.company || t('שם חברה לא נשמר', 'Company not retained')}</bdi></small></span>
       <span className="mini-stock-state"><span>{names(STATE_LABELS[item.state], he)}</span><small>{names(LABELS[item.station], he)}</small></span>
-    </button></li>)}</ul> : <p className="mini-empty">{known ? t('אין רשומות תואמות במדגם הזה.', 'No matching records in this sample.') : t('הנתונים עדיין נטענים. אין להסיק שאין פעילות.', 'Data is loading; this does not indicate inactivity.')}</p>
+    </button></li>)}</ul> : <p className="mini-empty">{known ? t('אין מניות תואמות במדגם הזה.', 'No matching stocks in this sample.') : t('הנתונים עדיין נטענים. אין להסיק שאין פעילות.', 'Data is loading; this does not indicate inactivity.')}</p>
 
   return <section className="mini-workspace" dir={he ? 'rtl' : 'ltr'} aria-label={t('המערכת בפעולה', 'System in motion')}>
     <div ref={base} className="mini-base">
@@ -91,7 +91,7 @@ export function MiniAppActivity(p: Props) {
         <header className="mini-sheet-header"><button type="button" onClick={back} aria-label={stack.length > 1 ? t('חזרה', 'Back') : t('סגירה', 'Close')}>{stack.length > 1 ? '↪' : '×'}</button><h2 id={titleId}><bdi>{title}</bdi></h2>{stack.length > 1 && <button type="button" onClick={close} aria-label={t('סגירת כל הפרטים', 'Close all details')}>×</button>}</header>
         <div className="mini-sheet-content">
           {!available && sheet.kind !== 'info' && <p className="mini-retained-note">{known ? t('מידע אחרון שנשמר — לא פעילות חדשה.', 'Last retained data, not new activity.') : t('ממתין לנתונים.', 'Waiting for data.')}</p>}
-          {sheet.kind === 'station' && <><p className="mini-small-note">{t('רשומות לפי התחנה האחרונה שתועדה; לא הוכחה שכל השלבים עברו.', 'Records by latest retained station; not proof that all earlier stages passed.')}</p>{list(items.filter(i => i.station === sheet.station))}</>}
+          {sheet.kind === 'station' && <><p className="mini-small-note">{t('מניות לפי התחנה האחרונה שתועדה; לא הוכחה שכל השלבים עברו.', 'Stocks by latest retained station; not proof that all earlier stages passed.')}</p>{list(items.filter(i => i.station === sheet.station))}</>}
           {sheet.kind === 'stock' && selected && p.renderFocus(selected, back, () => open({ kind: 'journey', id: selected.id }))}
           {sheet.kind === 'journey' && selected && p.renderJourney(selected, back)}
           {(sheet.kind === 'stock' || sheet.kind === 'journey') && !selected && <p>{t('הרשומה כבר אינה במדגם. אין בכך הוכחה שהפוזיציה נסגרה.', 'Record left the sample; this does not prove closure.')}</p>}
@@ -100,7 +100,7 @@ export function MiniAppActivity(p: Props) {
             <button type="button" onClick={() => p.setTicker('')}>{t('ניקוי סינון', 'Clear filters')}</button><button className="mini-primary" type="button" onClick={close}>{t('הצגת התוצאות', 'Show results')}</button></div>}
           {sheet.kind === 'info' && <div className="mini-info"><p className="mini-info-status">{p.connection}</p><p>{t('מיקום המניה נקבע לפי התיעוד האחרון. הוא אינו מציג Worker שמטפל בה כרגע או אישור מעבר בתחנות קודמות.', 'Stocks are located by their latest retained evidence, not a worker processing them or proof of earlier approvals.')}</p>
             <p>{t('תצוגה ציבורית לצפייה בלבד. פתיחת פרטים וחיפוש אינם משנים את רשימת המעקב או את המסחר.', 'Public read-only view. Opening details and searching do not change the watchlist or trading.')}</p>
-            <p>{t('המספרים 1–8 והחצים מציגים את סדר התחנות. מספר הרשומות בכל תחנה מוצג בנפרד; החצים אינם הוכחה שמניה עברה את הבדיקות.', 'Steps 1–8 and arrows show station order. Record counts are separate; arrows do not prove a stock passed earlier gates.')}</p>
+            <p>{t('המספרים 1–8 והחצים מציגים את סדר התחנות. מספר המניות השונות בכל תחנה מוצג בנפרד; החצים אינם הוכחה שמניה עברה את הבדיקות.', 'Steps 1–8 and arrows show station order. Distinct stock counts are separate; arrows do not prove a stock passed earlier gates.')}</p>
             <p>{t('המחקר מתעדכן כל דקה ומצב הסורק כל 30 שניות. המדגם אינו כל ה־Universe.', 'Research refreshes each minute and scanner status every 30 seconds. This sample is not the full universe.')}</p>
             <dl><div><dt>{t('תמונת מחקר', 'Research snapshot')}</dt><dd><bdi>{time(research?.generated_at,he)}</bdi></dd></div><div><dt>{t('מניות במדגם', 'Sampled stocks')}</dt><dd>{known ? new Set(allItems.map(i => i.ticker)).size : '—'}</dd></div></dl>
             {p.error && <details><summary>{t('פרטי שגיאת העדכון', 'Refresh error details')}</summary><p><bdi>{p.error}</bdi></p></details>}
@@ -120,16 +120,16 @@ export function MobileReactors({he, items, changed, known, openStation}: {
   return <div className={`mini-reactors ${known?'':'is-loading'}`} aria-label={t('מפת הכורים', 'Reactor map')}>
     {STATIONS.map((s,n) => {
       const group = items.filter(i=>i.station===s)
-      // Unique symbols are a preview; counts and the sheet retain every record.
+      // Count distinct stocks; the sheet still retains every evidence record.
       const symbols = [...new Set(group.map(i=>i.ticker).filter(Boolean))]
       const shown = symbols.slice(0,3)
       return <article data-reactor={s} key={s} className={`mini-reactor reactor-${s} ${group.some(i=>changed.has(i.id))?'has-update':''}`} style={{gridRow:Math.floor(n/2)+1,gridColumn:n%4===0||n%4===3?1:2}} data-flow={n===STATIONS.length-1?undefined:n%2===1?'down':n%4===0?'forward':'back'} data-arrow={n%2===1?'↓':(n%4===0)===he?'←':'→'}>
-        <button type="button" className="mini-reactor-open" onClick={()=>openStation(s)} aria-label={`${t('שלב','Step')} ${n+1}: ${names(LABELS[s],he)} · ${known?`${group.length} ${t('רשומות','records')}`:t('טוען','Loading')}`}>
-          <span className="mini-reactor-number" aria-hidden="true">{n+1}</span><span className="mini-reactor-name">{names(LABELS[s],he)}</span><span className="mini-reactor-count"><bdi>{known?group.length:'—'}</bdi> {t('רשומות','records')}</span>
+        <button type="button" className="mini-reactor-open" onClick={()=>openStation(s)} aria-label={`${t('שלב','Step')} ${n+1}: ${names(LABELS[s],he)} · ${known?`${symbols.length} ${t('מניות','stocks')}`:t('טוען','Loading')}`}>
+          <span className="mini-reactor-number" aria-hidden="true">{n+1}</span><span className="mini-reactor-name">{names(LABELS[s],he)}</span><span className="mini-reactor-count"><bdi>{known?symbols.length:'—'}</bdi> {t('מניות','stocks')}</span>
           <span className="mini-reactor-stocks" aria-label={t('מניות בתחנה','Stocks in station')}>
             {shown.map(symbol=><bdi key={symbol} title={symbol}>{symbol}</bdi>)}
             {symbols.length>shown.length && <bdi className="mini-reactor-more" aria-label={t(`עוד ${symbols.length-shown.length} מניות`,`${symbols.length-shown.length} more stocks`)}>+{symbols.length-shown.length}</bdi>}
-            {!shown.length && <span>{known?t('אין רשומות במדגם','No sampled records'):t('ממתין לנתונים','Waiting for data')}</span>}
+            {!shown.length && <span>{known?t('אין מניות במדגם','No sampled stocks'):t('ממתין לנתונים','Waiting for data')}</span>}
           </span>
         </button>
       </article>
