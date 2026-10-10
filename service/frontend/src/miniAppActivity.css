@@ -25,14 +25,14 @@
 .mini-reactor[data-flow=back]::after { width:28px; top:calc(50% - 11px); inset-inline-start:-30px; }
 .mini-reactor[data-flow=down]::after { height:20px; top:100%; left:calc(50% - 11px); }
 .mini-reactor.has-update { border-color:var(--mini-accent); box-shadow:0 0 14px #65ded324; }
-.mini-reactor-open { min-height:52px; width:100%; border:0; background:none; padding:8px 10px; display:grid; grid-template-columns:24px 1fr; align-items:center; gap:2px 5px; text-align:start; }
+.mini-reactor-open { flex-shrink:0; min-height:52px; width:100%; border:0; background:none; padding:8px 10px; display:grid; grid-template-columns:24px 1fr; align-items:center; gap:2px 5px; text-align:start; }
 .mini-reactor-name { font-size:14px; font-weight:650; line-height:1.35; }
 .mini-reactor-count { color:var(--mini-muted); font-size:12px; }
 .mini-reactor-number { grid-row:span 2; display:grid; place-items:center; width:24px; height:24px; border-radius:6px; color:var(--mini-bg); background:var(--mini-accent); font:700 13px/1 sans-serif; }
-.mini-reactor-preview { padding:0 6px 4px; min-width:0; }
-.mini-reactor-preview button { width:100%; min-height:44px; border:0; border-top:1px solid #ffffff0d; border-radius:0 0 12px 12px; background:#ffffff04; display:flex; align-items:center; justify-content:space-between; gap:4px; padding:6px; font-size:11px; }
-.mini-reactor-preview bdi { color:var(--mini-text); font-size:13px; font-weight:700; }
-.mini-reactor-preview>span { display:block; padding:4px; font-size:11px; color:var(--mini-muted); }
+.mini-reactor-stocks { grid-column:1/-1; display:flex; align-items:center; gap:4px; min-width:0; margin-top:3px; color:var(--mini-muted); font-size:11px; line-height:17px; }
+.mini-reactor-stocks bdi { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0 3px; border-radius:4px; background:#65ded30c; color:var(--mini-text); font-size:11px; font-weight:650; }
+.mini-reactor-stocks .mini-reactor-more { flex-shrink:0; background:none; color:var(--mini-muted); }
+.mini-reactor-stocks>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mini-map-footnote { display:flex; justify-content:space-between; gap:8px; padding:10px 0; font-size:11px; color:var(--mini-muted); flex-shrink:0; }
 .mini-bottom-nav { display:grid; grid-template-columns:repeat(3,1fr); border-top:1px solid var(--mini-line); background:var(--mini-bg); flex-shrink:0; padding:3px 12px 6px; }
 .mini-bottom-nav button { min-height:54px; border:0; background:none; color:var(--mini-muted); border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-size:12px; }
@@ -85,7 +85,8 @@
 .mini-secondary-header { display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:5; background:var(--bg-primary,#09111e); padding:8px 0; }
 .mini-secondary-header h1 { font-size:18px; margin:0; }
 .mini-secondary-header button { min-height:48px; border:1px solid var(--border-color,#2b4159); border-radius:12px; background:none; padding:8px 12px; }
-@media(max-height:680px) { .mini-reactors { gap:22px 30px; } .mini-reactor-preview { display:none; } .mini-reactor-open { min-height:64px; } .mini-map-footnote { padding:5px 0; } }
-@container miniworkspace (max-height:580px) { .mini-reactors { gap:22px 30px; } .mini-reactor-preview { display:none; } .mini-reactor-open { min-height:64px; } .mini-map-footnote { padding:5px 0; } }
+@media(max-height:680px) { .mini-reactors { gap:22px 30px; } .mini-reactor-open { padding-block:4px; } .mini-map-footnote { padding:5px 0; } }
+@container miniworkspace (max-height:580px) { .mini-reactors { gap:22px 30px; } .mini-reactor-open { padding-block:4px; } .mini-map-footnote { padding:5px 0; } }
+@container miniworkspace (max-height:580px) { .mini-reactor-open { row-gap:1px; } .mini-reactor-name { font-size:13px; line-height:1.2; } .mini-reactor-count { font-size:11px; line-height:13px; } .mini-reactor-stocks { margin-top:0; line-height:15px; } }
 @media(max-width:370px) { .mini-header { padding-inline:10px; } .mini-header small { font-size:10px; } .mini-map-view { padding-inline:10px; } .mini-reactor-name { font-size:13px; } .mini-reactor-open { padding-inline:8px; } }
 @media(prefers-reduced-motion:reduce) { .mini-workspace *, .mini-workspace *::before, .mini-workspace *::after { scroll-behavior:auto!important; } }

@@ -69,4 +69,20 @@ for(const he of [true,false]) {
 }
 ok(!empty.includes('תנועת המחשה'));ok(!full.includes('עכביש'))
 ok(css.includes('[data-flow=down]'));ok(css.includes('pointer-events:none'))
+// Always-visible, bounded, unique ticker preview; no extra tiny touch targets.
+const dense=Array.from({length:7},(_,n)=>({...items[0],id:`dense-${n}`,ticker:['ALFA','ALFA','BRK.B','CHAR','DELTA','ECHO','FOXT'][n],station:STATIONS[0]}))
+const denseOriginal=JSON.stringify(dense)
+for(const he of [true,false]) {
+  const map=renderToStaticMarkup(createElement(MobileReactors,{he,items:dense,changed:new Set(),known:true,openStation:()=>{},openStock:()=>{}}))
+  const preview=map.match(/class="mini-reactor-stocks"[^>]*>(.*?)<\/span>\s*<\/button>/s)[1]
+  ok(preview.includes('ALFA'));ok(preview.includes('BRK.B'));ok(preview.includes('CHAR'))
+  equal((preview.match(/title="ALFA"/g)||[]).length,1)
+  ok(preview.includes('>+3</bdi>'));ok(!preview.includes('DELTA'))
+  ok(map.includes('<bdi>7</bdi>'));equal((map.match(/<button /g)||[]).length,8)
+  equal((map.match(/class="mini-reactor-stocks"/g)||[]).length,8)
+  ok(!preview.includes('<button'));ok(preview.includes('<bdi'))
+}
+equal(JSON.stringify(dense),denseOriginal)
+ok(!css.includes('.mini-reactor-preview'));ok(!css.match(/mini-reactor-stocks[^}]*display:none/))
+ok(css.includes('text-overflow:ellipsis'));ok(css.includes('grid-column:1/-1'))
 console.log(`Mobile workspace: ${assertions} assertions passed (synthetic evidence; no network or Telegram delivery)`)
