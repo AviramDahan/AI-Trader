@@ -44,6 +44,99 @@ STATE_LOCK = threading.RLock()
 SCAN_LOCK = threading.Lock()
 LOG = logging.getLogger(__name__)
 
+# Extra deterministic work only. These bounds do not increase the AI quota.
+TARGET_REFILL_MAX_CHECKS = 64
+TARGET_REFILL_SECONDS = 120
+
+
+class _TargetRefill:
+    """Keep the original shortlist first; replace only pre-AI target failures.
+
+    A structurally valid replacement consumes a credit even if its news or AI
+    later fails. Failed targets keep that credit, but never create another one.
+    Cursor rotation prevents a bounded search repeatedly starving the same tail.
+    """
+    def __init__(self, initial, tail, cursor=None):
+        self.initial = tuple(initial)
+        seen = {row['ticker'] for row in initial}
+        self.tail = []
+        for row in tail:
+            if row['ticker'] not in seen:
+                self.tail.append(row)
+                seen.add(row['ticker'])
+        indexes = [i for i, row in enumerate(self.tail) if row['ticker'] == cursor]
+        if indexes:
+            offset = indexes[0]+1
+            self.tail = self.tail[offset:] + self.tail[:offset]
+        self.cursor = cursor
+        self.credits = 0
+        self.started = None
+        self.halted = False
+        self.stats = dict(scope='scan', policy='target_failure_refill_v1', start_after=cursor,
+            target_failures=0, credits_created=0, checked=0, target_passed=0,
+            news_lookups=0, ai_selected=0, max_checks=TARGET_REFILL_MAX_CHECKS,
+            budget_seconds=TARGET_REFILL_SECONDS, stop_reason=None)
+
+    def target_failed(self, refill):
+        self.stats['target_failures'] += 1
+        if not refill:
+            self.credits += 1
+            self.stats['credits_created'] += 1
+
+    def target_passed(self):
+        self.credits -= 1
+        self.stats['target_passed'] += 1
+
+    def within_time(self):
+        if self.started is not None and time.monotonic()-self.started >= TARGET_REFILL_SECONDS:
+            self.stats['stop_reason'] = 'time_budget'
+            return False
+        return True
+
+    def may_start_io(self):
+        if not self.within_time():
+            return False
+        if not regular_session_open():
+            self.stats['stop_reason'] = 'market_closed'
+            return False
+        return True
+
+    def __iter__(self):
+        for candidate in self.initial:
+            if self.halted:
+                return
+            yield candidate, False
+        for candidate in self.tail:
+            if self.halted or self.stats['stop_reason'] is not None:
+                return
+            if not self.credits:
+                self.stats['stop_reason'] = 'no_target_credits'
+                return
+            if not regular_session_open():
+                self.stats['stop_reason'] = 'market_closed'
+                return
+            if self.stats['checked'] >= TARGET_REFILL_MAX_CHECKS:
+                self.stats['stop_reason'] = 'check_limit'
+                return
+            if self.started is None:
+                self.started = time.monotonic()
+            if not self.within_time():
+                return
+            self.stats['checked'] += 1
+            self.cursor = candidate['ticker']
+            yield candidate, True
+        if self.stats['stop_reason'] is None:
+            self.stats['stop_reason'] = 'tail_exhausted' if self.credits else 'no_target_credits'
+
+    def summary(self, ai_limit_hit=False, signal_limit_hit=False):
+        if ai_limit_hit:
+            self.stats['stop_reason'] = 'ai_limit'
+        elif signal_limit_hit:
+            self.stats['stop_reason'] = 'signal_limit'
+        self.stats['credits_remaining'] = self.credits
+        self.stats['elapsed_seconds'] = round(time.monotonic()-self.started, 3) if self.started is not None else 0
+        return dict(self.stats)
+
 
 def _state_synchronized(function):
     def wrapper(*args, **kwargs):
@@ -1028,7 +1121,9 @@ def run_scan() -> dict[str, Any]:
     cooldowns = {key: value for key, value in cooldowns.items() if float(value) >= cutoff}
     published, reviews, rejected = [], [], list(news_rejected)
     reviewed_candidates, early_skips, selected_for_ai = 0, 0, 0
-    for rank, candidate in enumerate(candidates, 1):
+    selection = _TargetRefill(candidates, technical_candidates[cfg['shortlist_limit']:] if in_session else [],
+                              state.get('target_refill_cursor'))
+    for rank, (candidate, is_refill) in enumerate(selection, 1):
         if selected_for_ai >= cfg['ai_candidate_limit']:
             break
         ticker = candidate["ticker"]
@@ -1039,7 +1134,7 @@ def run_scan() -> dict[str, Any]:
         precheck_complete = False
         quote = None
         try:
-            news = candidate["news"]
+            news = candidate.get('news') or []
             if not in_session or not regular_session_open():
                 try:
                     reference = research_reference_quote(ticker)
@@ -1062,10 +1157,32 @@ def run_scan() -> dict[str, Any]:
                 plan = _candidate_target_plan(candidate, candidate["technical_direction"], quote[0], cfg, quote_at=quote[1])
             except ValueError as exc:
                 rejected.append({"ticker": ticker, "reason": "pre_" + str(exc)})
+                selection.target_failed(is_refill)
                 continue
+            if is_refill:
+                selection.target_passed()
+                shortlist.append(candidate)
+                # Invalid tail targets never trigger news lookups. News failures
+                # do not earn replacement credits, and all original gates apply.
+                if not selection.may_start_io():
+                    rejected.append({'ticker':ticker, 'reason':'pre_refill_deferred'})
+                    continue
+                selection.stats['news_lookups'] += 1
+                enriched, blocked = enrich_and_rank_candidates([candidate], context, cfg)
+                rejected.extend(blocked)
+                if not enriched:
+                    continue
+                candidate = enriched[0]
+                news = candidate['news']
+                ranked_candidates.append(candidate)
+                candidates.append(candidate)
+                if not selection.may_start_io():
+                    rejected.append({'ticker':ticker, 'reason':'pre_refill_deferred'})
+                    continue
             # Persist eligibility before calling a provider; the connection closes here.
             precheck_complete = True
             selected_for_ai += 1
+            selection.stats['ai_selected'] += int(is_refill)
             trace["result"] = "eligible"
             final_ai.persist(trace)
             try:
@@ -1158,6 +1275,8 @@ def run_scan() -> dict[str, Any]:
                 final_ai.persist(trace)
             finally:
                 final_ai.TRACE.reset(trace_token)
+                selection.halted = (selected_for_ai >= cfg['ai_candidate_limit'] or
+                                    len(published) >= cfg['max_signals'])
     if sec_run_mode in {'shadow', 'paper'} and sec_rows and not cfg['sec_intelligence_killed']:
         try:
             from sec_intelligence import persist_decisions
@@ -1180,13 +1299,18 @@ def run_scan() -> dict[str, Any]:
                               reasons, cfg['shortlist_limit'])
         except Exception as exc:
             LOG.warning('sec_decision_audit_unavailable:%s:%s', type(exc).__name__, exc)
-    record_candidates(scan_id, technical_candidates, rejected)
+    selection_summary = selection.summary(selected_for_ai >= cfg['ai_candidate_limit'],
+                                          len(published) >= cfg['max_signals'])
+    record_candidates(scan_id, technical_candidates, rejected, selection=selection_summary)
     record_scan_news(ranked_candidates, published)
     state.update(status="waiting", last_scan_at=time.time(), last_completed_at=time.time(),
                   universe_count=len(universe), data_count=max(0, len(histories) - 2),
                   technical_candidates_count=len(technical_candidates), shortlist_count=len(shortlist),
+                  initial_shortlist_count=min(len(technical_candidates), cfg['shortlist_limit']),
                   candidates_count=len(candidates), ai_selected_count=selected_for_ai,
                   ai_candidates_count=reviewed_candidates, early_skips=early_skips, history_cache=cache_info,
+                  target_refill=selection_summary,
+                  target_refill_cursor=selection.cursor,
                   ai_reviews=reviews[-12:], rejected=rejected[-20:], signals_published=len(published),
                  last_signal=published[-1] if published else state.get("last_signal"), cooldowns=cooldowns,
                  next_scan_at=time.time() + cfg["interval"])

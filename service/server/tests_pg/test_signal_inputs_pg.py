@@ -11,6 +11,9 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tests'))
 from test_signal_inputs import NOW,seed_canonical,canonical_fixture,clock
 from test_signal_news_selection import CANDIDATE, insert_event, seed_crowded_snapshot
 from test_signal_admission_chain import test_recovered_evidence_reaches_real_pending_entry_fill_exit_and_restart as exercise_admission_chain
+from test_target_refill import test_target_failure_refill_reaches_pending_then_real_entry_exit_restart as exercise_refill_chain
+from test_target_refill import test_initial_and_refill_share_six_ai_slots_no_extra_hold_replacements as exercise_refill_cap
+from test_target_refill import test_refill_preserves_allocation_block_as_signal_not_active_position as exercise_refill_allocation
 from test_signal_projection import seed_projection,accounting,isolated_client,assert_roundtrip
 
 
@@ -52,6 +55,24 @@ def test_pg_recovered_evidence_through_real_scanner_and_lifecycle(pg,clock,monke
     from news_events.store import Store
     Store(database.get_db_connection,sandbox=True).install()
     exercise_admission_chain(None,clock,monkeypatch)
+
+
+def test_pg_target_refill_through_real_scanner_and_lifecycle(pg,clock,monkeypatch):
+    from news_events.store import Store
+    Store(database.get_db_connection,sandbox=True).install()
+    exercise_refill_chain(None,clock,monkeypatch)
+
+
+def test_pg_target_refill_shares_ai_cap_and_records_diagnostic(pg,clock,monkeypatch):
+    from news_events.store import Store
+    Store(database.get_db_connection,sandbox=True).install()
+    exercise_refill_cap(None,clock,monkeypatch)
+
+
+def test_pg_target_refill_does_not_bypass_allocation(pg,clock,monkeypatch):
+    from news_events.store import Store
+    Store(database.get_db_connection,sandbox=True).install()
+    exercise_refill_allocation(None,clock,monkeypatch)
 
 
 def test_pg_duplicate_concurrent_projection_posts_one_display_no_trade(pg,monkeypatch):

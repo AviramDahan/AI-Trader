@@ -570,7 +570,8 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
     return {"id": signal_id, "status": status, "valid_until": valid_until}
 
 
-def record_candidates(scan_id: str, candidates: list[dict[str, Any]], rejected: list[dict[str, Any]]) -> None:
+def record_candidates(scan_id: str, candidates: list[dict[str, Any]], rejected: list[dict[str, Any]],
+                      *, selection: dict[str, Any] | None = None) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
     stamp = now_z()
@@ -580,6 +581,12 @@ def record_candidates(scan_id: str, candidates: list[dict[str, Any]], rejected: 
     for item in rejected:
         cur.execute("INSERT INTO scanner_candidates(scan_id,ticker,company,stage,status,reason,metrics_json,created_at) VALUES(?,?,?,?,?,?,?,?)",
                     (scan_id, item.get("ticker", ""), item.get("company"), "final", "rejected", item.get("reason"), _json(item), stamp))
+    if selection is not None and candidates:
+        # Anchor the scan-wide diagnostic to an already recorded ticker so
+        # existing scan/ticker inventory queries never count a phantom stock.
+        cur.execute("INSERT INTO scanner_candidates(scan_id,ticker,company,stage,status,reason,metrics_json,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                    (scan_id, candidates[0]['ticker'], candidates[0].get('company'), 'admission_selection',
+                     'observed', selection.get('stop_reason'), _json(selection), stamp))
     conn.commit()
     conn.close()
 
