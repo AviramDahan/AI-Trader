@@ -19,7 +19,7 @@ backup_wait_seconds=600
 start_healthy() {
   local timeout=$1
   shift
-  dc up -d --no-deps --no-build --wait --wait-timeout "$timeout" "$@"
+  dc up -d --no-deps --no-build --wait --wait-timeout "$timeout" "$@" || return $?
   # Some Compose releases return zero at the timeout while still "starting".
   # Never trust the command's exit alone, on deployment OR rollback.
   local role state
