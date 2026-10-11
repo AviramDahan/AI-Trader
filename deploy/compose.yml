@@ -187,7 +187,7 @@ services:
     healthcheck:
       test: [CMD, python, -c, "import pathlib,time; assert time.time()-pathlib.Path('/tmp/backup-ok').stat().st_mtime < 7500"]
       interval: 15s
-      start_period: 120s
+      start_period: 600s
       retries: 2
 
 networks:

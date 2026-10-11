@@ -180,7 +180,7 @@ class BackupReleaseReadinessTest(unittest.TestCase):
         import yaml
         compose = yaml.safe_load((ROOT / 'deploy/compose.yml').read_text())
         check = compose['services']['backup']['healthcheck']
-        self.assertEqual((check['interval'], check['start_period'], check['retries']), ('15s', '120s', 2))
+        self.assertEqual((check['interval'], check['start_period'], check['retries']), ('15s', '600s', 2))
         marker = self.root / 'backup-ok'
         expression = check['test'][-1].replace('/tmp/backup-ok', marker.as_posix())
         def health():

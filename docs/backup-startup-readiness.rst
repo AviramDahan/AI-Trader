@@ -11,8 +11,11 @@ health sampling interval can exhaust a 180-second release budget.
 
 The focused fix separates backup startup from the other workers: they retain
 their 180-second gates, while backup has a bounded 600-second gate. Backup's
-health poll is 15 seconds; its 120-second start period, two failures and 7500-
-second freshness requirement remain unchanged. The same gates apply on return.
+health poll is 15 seconds; its start period is the same bounded 600 seconds,
+so more frequent polling cannot prematurely mark a valid slow first archive
+unhealthy. The two failures and 7500-second freshness requirement remain
+unchanged. A successful check still becomes healthy immediately during the
+start period; Compose never accepts merely "starting". The same gates apply on return.
 No CPU/RAM, archive, trading, schema, budget or provider setting changes.
 
 The marker is still created ONLY after encryption, push and remote-commit
@@ -26,7 +29,10 @@ Tests execute the release Bash itself with isolated command doubles and a
 virtual slow backup. They reproduce the old timeout, then prove success,
 bounded failure/rollback, prebackup failure, ordinary worker failure and the
 unchanged lock/main/schema guards. They are not live GitHub or live backup
-proof. Existing PostgreSQL real-age backup tests verify remote confirmation
+proof. A separate real Docker Compose probe in Linux uses the actual image and
+health expression, scaled timing and no network/DB/credentials to reproduce
+the timeout, pass the corrected startup and reject missing completion.
+Existing PostgreSQL real-age backup tests verify remote confirmation
 and failure behavior. All exact-release CI/readiness gates remain required.
 
 Operator installation uses the existing protected SSH channel, verifies the
