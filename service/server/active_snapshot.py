@@ -88,7 +88,7 @@ def export_data(path):
 
 
 def validate(data):
-    if data.get("version") not in (1,2,3,4) or set(data["tables"]) != set(TABLES):
+    if data.get("version") not in (1,2,3,4,5) or set(data["tables"]) != set(TABLES):
         raise ValueError("unsupported_snapshot_schema")
     if "snapshot_id" in data and data["snapshot_id"] != digest({k:v for k,v in data.items() if k != "snapshot_id"}):
         raise ValueError("snapshot_checksum_mismatch")
@@ -113,8 +113,8 @@ def validate(data):
         if trade["remaining_quantity"] > trade["original_quantity"] + 1e-6:
             raise ValueError("quantity_exceeds_original")
         levels = [trade[f'tp{i}'] for i in (1,2,3)]
-        from single_target_policy import is_v2
-        if is_v2(single_target_recovery.plan(trade, 'settings_json')):
+        from single_target_policy import is_single
+        if is_single(single_target_recovery.plan(trade, 'settings_json')):
             levels = [trade['tp1']]
         percentages = [trade[f'tp{i}_pct'] for i in (1,2,3)]
         if not all(math.isfinite(v) and v > 0 for v in levels) or levels != sorted(levels, reverse=trade['side']=='short'):
@@ -145,14 +145,14 @@ def import_data(data, url, *, allow_defaults=False, scanner_token=None):
     from psycopg.rows import dict_row
     from cloud_runtime import ROLE_KEYS
     validate(data)
-    if data['version'] not in (2,3,4):
+    if data['version'] not in (2,3,4,5):
         raise ValueError('legacy_hold_coverage_unknown_restore_refused')
     with psycopg.connect(url, row_factory=dict_row) as conn:
         conn.execute("SET LOCAL lock_timeout='5s'")
         # Schema 7 SEC analytical tables remain outside active-state recovery;
         # portfolio validation and clean-destination guards remain unchanged.
         schema = conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version']
-        if schema not in (2,3,4,5,6,7) or (data['version'] in (3,4) and schema < 6):
+        if schema not in (2,3,4,5,6,7) or (data['version'] in (3,4,5) and schema < 6):
             raise ValueError('unsupported_destination_schema')
         if schema == 7:
             from sec_schema7_compat import assert_sec_schema7

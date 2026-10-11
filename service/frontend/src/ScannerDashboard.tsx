@@ -554,8 +554,8 @@ function LevelChart({ record, kind, he, initiallyOpen = false }: { record: Recor
     record.tp1, record.tp2, record.tp3, record.operational_strategy ?? record.strategy, record.updated_at ?? record.last_bar_at,
   ].join('|'))
   const src = `${API_ORIGIN}/api/scanner/${isSignal ? 'signals' : 'trades'}/${record.id}/chart?v=${version}`
-  const description = record.policy_version === 'single_target_v2'
-    ? `${record.ticker} · SINGLE V2 · Entry / Stop / one active target (100%)`
+  const description = ['single_target_v2','single_breakout_v1'].includes(record.policy_version)
+    ? `${record.ticker} · SINGLE · Entry / Stop / one active target (100%)`
     : he
     ? `גרף יומי של ${record.ticker} עם ${isSignal && record.actual_entry == null ? 'כניסה מתוכננת שטרם בוצעה' : 'כניסה בפועל'}, סטופ ויעדי TP1, TP2 ו־TP3`
     : `${record.ticker} daily chart with ${isSignal && record.actual_entry == null ? 'planned entry not yet filled' : 'actual entry'}, stop, TP1, TP2 and TP3 levels`
@@ -591,6 +591,7 @@ function LevelChart({ record, kind, he, initiallyOpen = false }: { record: Recor
 }
 
 function TargetPlanDetails({ plan, he }: { plan: Record<string, any> | undefined, he: boolean }) {
+  if (plan?.policy_version === 'single_breakout_v1') return <p><bdi>{plan.policy_version}</bdi> · SINGLE · {he ? 'יעד מוקרן יחיד של 2R לפחות; אינו התנגדות מאומתת' : 'Single projected objective of at least 2R; not confirmed resistance'} · {he ? 'שיא 20 סשנים שהושלמו' : 'Completed 20-session high'}: {fmtPrice(plan.completed_high)} · {he ? 'נתוני מקור' : 'Source data'}: <bdi>{plan.source_data_at}</bdi> · {he ? 'RR מתוכנן ברוטו' : 'Planned gross RR'}: <bdi>{Number(plan.rr[0]).toFixed(2)}R</bdi></p>
   if (plan?.policy_version === 'short_structure_v1') return <details><summary>{he ? 'תוכנית Short — שלושה אזורי תמיכה' : 'Short plan — three support zones'}</summary>
     <p>{plan.policy_version} · SINGLE · TP2 100% · {he ? 'RR מתוכנן ברוטו' : 'Planned gross RR'}: {Number(plan.rr[1]).toFixed(2)}R</p>
     <p>{he ? 'נתוני מקור' : 'Source data'}: {plan.source_data_at}</p>

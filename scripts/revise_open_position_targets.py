@@ -169,10 +169,10 @@ def _backup_sqlite() -> Path:
 
 
 def _reject_v2_revision(groups):
-    from single_target_policy import is_v2
+    from single_target_policy import is_single
     for trades in groups.values():
         for trade in trades:
-            if is_v2(json.loads(trade.get('settings_json') or '{}').get('target_plan')):
+            if is_single(json.loads(trade.get('settings_json') or '{}').get('target_plan')):
                 raise ValueError('V2 contract is immutable; legacy target revision is not supported')
 
 

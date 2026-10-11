@@ -1,0 +1,63 @@
+name: Single breakout application images (no deployment)
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  images:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'codex/single-breakout-entry'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Build exact compatible application and previous reader
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          git worktree add --detach /tmp/previous-reader 6429c42d3e77ae2879b7f8bc5fa0e8185a6d8aa0
+          docker build --build-arg BUILD_SHA="$sha" -t breakout-compatible:test .
+          docker build --build-arg BUILD_SHA=6429c42d3e77ae2879b7f8bc5fa0e8185a6d8aa0 -t breakout-previous:test /tmp/previous-reader
+          mkdir -p /tmp/proof /tmp/artifacts
+          chmod 777 /tmp/proof
+          docker image inspect breakout-compatible:test breakout-previous:test --format '{{.Id}} {{json .Config.Env}}' | python -c 'import sys,json; rows=[]
+          for line in sys.stdin:
+            image,env=line.strip().split(" ",1); rows.append({"image_id":image,"build_sha":next(v.split("=",1)[1] for v in json.loads(env) if v.startswith("BUILD_SHA="))})
+          print(json.dumps(rows,indent=2))' > /tmp/artifacts/images.json
+      - name: Full application prepare, activate, compatible return, restart, encrypted restore
+        run: |
+          set -euo pipefail
+          docker network create --internal breakout-test
+          docker run -d --name breakout-pg --network breakout-test -e POSTGRES_USER=isolated -e POSTGRES_PASSWORD=disposable -e POSTGRES_DB=isolated_breakout postgres:17-bookworm
+          for i in $(seq 1 30); do docker exec breakout-pg pg_isready -U isolated && break; sleep 2; done
+          docker exec breakout-pg createdb -U isolated restored_breakout
+          probe() {
+            docker run --rm --network breakout-test \
+              -e DATABASE_URL="postgresql://isolated:disposable@breakout-pg:5432/${4:-isolated_breakout}" \
+              -e STOCK_SCANNER_EXIT_STRATEGY=single -e STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED=true \
+              -e STOCK_SCANNER_SINGLE_BREAKOUT_ENABLED="$3" -e STOCK_SCANNER_FULL_BAR_ENTRY_ENABLED="$3" \
+              -v "$PWD/scripts/single_breakout_image_probe.py:/probe.py:ro" -v /tmp/proof:/proof \
+              --entrypoint python "$1" /probe.py "$2" | tee -a /tmp/artifacts/results.jsonl
+          }
+          probe breakout-compatible:test prepare false
+          probe breakout-compatible:test activate true
+          # A separate process fails; compatible return uses the CURRENT database.
+          if docker run --rm --network none --entrypoint python breakout-compatible:test -c 'raise SystemExit(7)'; then exit 1; fi
+          probe breakout-compatible:test rollback false
+          probe breakout-compatible:test restart false
+          probe breakout-previous:test old_refused false
+          probe breakout-compatible:test restore false restored_breakout
+          probe breakout-compatible:test exit false restored_breakout
+          probe breakout-compatible:test forward true restored_breakout
+          probe breakout-compatible:test exit false
+          probe breakout-compatible:test forward true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: single-breakout-sanitized-image-proof
+          path: /tmp/artifacts/
+          if-no-files-found: error
+          retention-days: 14
