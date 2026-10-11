@@ -30,7 +30,10 @@ def dispatch():
                 shutil.copyfile(os.environ['BACKUP_TEST_ARCHIVE'], args[args.index('-o') + 1])
         elif name == 'docker':
             if args[0] == 'inspect':
-                print(state['active'])
+                if '{{.State.Health.Status}}' in args:
+                    print('starting' if state.get('silent_starting') and state['active']==NEW and args[-1].endswith('-backup-1') else 'healthy')
+                else:
+                    print(state['active'])
             elif args[:2] == ['image', 'inspect']:
                 print(NEW)
             elif args[0] == 'exec':
@@ -145,6 +148,14 @@ class BackupReleaseReadinessTest(unittest.TestCase):
         self.assertEqual((self.server / 'deploy/compose.yml').read_text(), 'previous: true\n')
         self.assertFalse((self.server / 'deploy/last-release').exists())
         self.assertIn('database never rewound', result.stdout)
+
+    def test_zero_exit_from_compose_without_health_is_not_success(self):
+        self.state['silent_starting'] = True
+        result = self.run_release()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.state['active'], OLD)
+        self.assertFalse((self.server / 'deploy/last-release').exists())
+        self.assertIn('backup is not healthy', result.stdout)
 
     def test_prebackup_failure_never_stops_workers(self):
         self.state['fail_prebackup'] = True

@@ -15,7 +15,10 @@ health poll is 15 seconds; its start period is the same bounded 600 seconds,
 so more frequent polling cannot prematurely mark a valid slow first archive
 unhealthy. The two failures and 7500-second freshness requirement remain
 unchanged. A successful check still becomes healthy immediately during the
-start period; Compose never accepts merely "starting". The same gates apply on return.
+start period. The release independently inspects actual health for every
+service after Compose exits: Linux tests found a Compose version returning
+zero at its deadline while still "starting". That is a release failure, not
+success. The same gates apply on return.
 No CPU/RAM, archive, trading, schema, budget or provider setting changes.
 
 The marker is still created ONLY after encryption, push and remote-commit

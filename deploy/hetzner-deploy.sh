@@ -16,6 +16,18 @@ dc() { docker compose -f "$root/deploy/compose.yml" --profile backups "$@"; }
 # The SEC companion archive can take several minutes on the bounded backup CPU.
 # Still require a completed, remotely verified backup; never fake its health.
 backup_wait_seconds=600
+start_healthy() {
+  local timeout=$1
+  shift
+  dc up -d --no-deps --no-build --wait --wait-timeout "$timeout" "$@"
+  # Some Compose releases return zero at the timeout while still "starting".
+  # Never trust the command's exit alone, on deployment OR rollback.
+  local role state
+  for role in "$@"; do
+    state=$(docker inspect --format '{{.State.Health.Status}}' "ai-trader-cloud-$role-1")
+    [[ "$state" == healthy ]] || { echo "Readiness failed: $role is not healthy"; return 1; }
+  done
+}
 old=$(docker inspect --format '{{.Image}}' ai-trader-cloud-api-1)
 work=$(mktemp -d /opt/ai-trader-release.XXXXXXXX)
 curl --fail --silent --show-error --location "$repo/archive/$sha.tar.gz" -o "$work/source.tar.gz"
@@ -37,8 +49,8 @@ rollback() {
     dc stop scanner telegram monitor backup || true
     cp "$work/previous-compose.yml" deploy/compose.yml
     export APP_IMAGE="$old"
-    dc up -d --no-deps --no-build --wait --wait-timeout 180 api monitor scanner telegram || { echo 'ROLLBACK FAILED: manual intervention required'; exit 70; }
-    dc up -d --no-deps --no-build --wait --wait-timeout "$backup_wait_seconds" backup || { echo 'ROLLBACK FAILED: backup not healthy; manual intervention required'; exit 70; }
+    start_healthy 180 api monitor scanner telegram || { echo 'ROLLBACK FAILED: manual intervention required'; exit 70; }
+    start_healthy "$backup_wait_seconds" backup || { echo 'ROLLBACK FAILED: backup not healthy; manual intervention required'; exit 70; }
     docker tag "$old" ai-trader:staging
   fi
   echo 'DEPLOY FAILED; previous version restored where possible; database never rewound'
@@ -50,10 +62,10 @@ dc stop scanner telegram monitor backup
 cp "$work/source/deploy/compose.yml" deploy/compose.yml
 export APP_IMAGE="$new"
 dc run --rm -T --no-deps migrate
-dc up -d --no-deps --no-build --wait --wait-timeout 180 api
-dc up -d --no-deps --no-build --wait --wait-timeout 180 monitor
-dc up -d --no-deps --no-build --wait --wait-timeout 180 scanner telegram
-dc up -d --no-deps --no-build --wait --wait-timeout "$backup_wait_seconds" backup
+start_healthy 180 api
+start_healthy 180 monitor
+start_healthy 180 scanner telegram
+start_healthy "$backup_wait_seconds" backup
 curl --fail --silent --show-error "https://$PUBLIC_API_HOST/health" >/dev/null
 docker tag "$new" ai-trader:staging
 docker exec ai-trader-cloud-api-1 python -c 'from pathlib import Path; import sys; Path("/app/.runtime/deployed-release").write_text(sys.argv[1])' "$sha"

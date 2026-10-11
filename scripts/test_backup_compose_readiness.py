@@ -39,12 +39,17 @@ def main(image):
             try:
                 run = subprocess.run(command + ['up','-d','--no-build','--wait',
                     '--wait-timeout',str(timeout)], capture_output=True, text=True, timeout=timeout+20)
-                assert (run.returncode == 0) == expected, name + ': ' + run.stdout + run.stderr
                 rows = json.loads(subprocess.check_output(command + ['ps','--all','--format','json'], text=True))
                 if isinstance(rows, dict): rows = [rows]
                 assert len(rows) == 1
+                # Match the release script's mandatory independent inspection.
+                # Compose versions may return zero at a wait timeout while
+                # health is still starting. That MUST remain a release failure.
+                effective_success = run.returncode == 0 and rows[0]['Health'] == 'healthy'
+                assert effective_success == expected, name + ': ' + str(rows) + run.stdout + run.stderr
                 assert (rows[0]['Health'] == 'healthy') == expected, rows
                 print(json.dumps({'case':name,'status':'PASS','actual_healthy':expected,
+                                  'compose_exit':run.returncode,'effective_release_success':effective_success,
                                   'live_archive_verified':False}), flush=True)
             finally:
                 subprocess.run(command + ['down','--timeout','1'], capture_output=True, check=True, timeout=15)
