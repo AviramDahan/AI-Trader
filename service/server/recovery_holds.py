@@ -55,7 +55,7 @@ def validate(data):
         if s.get('external_signal_id') is not None and not any(r['id']==s['external_signal_id'] for r in tables['signals']):
             raise ValueError('missing_recovery_external_signal_parent')
         allowed = {('entry','buy'),('close_long','sell')}
-        if data.get('version') == 4:
+        if data.get('version') in (4,5):
             allowed.add(('entry','sell'))
         if (o['purpose'],o['side']) not in allowed or o['order_type']!='limit':
             raise ValueError('unsupported_recovery_hold_type')

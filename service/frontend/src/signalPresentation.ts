@@ -1,7 +1,7 @@
 type Row = Record<string, any>
 
 export function activeTargetIndexes(record: Row): number[] {
-  if (record.policy_version === 'single_target_v2') return record.tp1 == null ? [] : [1]
+  if (['single_target_v2','single_breakout_v1'].includes(record.policy_version)) return record.tp1 == null ? [] : [1]
   return [1,2,3].filter(i => record[`tp${i}`] != null && Number(record[`operational_tp${i}_pct`] ?? record[`tp${i}_pct`] ?? 0) > 0)
 }
 

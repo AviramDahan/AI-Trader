@@ -200,8 +200,8 @@ def validate_plan(plan, entry, stop, action):
     import short_policy
     if short_policy.is_short(plan) or action == 'SHORT':
         return short_policy.validate(plan, entry, stop, action)
-    from single_target_policy import is_v2, validate
-    if is_v2(plan):
+    from single_target_policy import is_single, validate_single as validate
+    if is_single(plan):
         return validate(plan, entry, stop, action)
     rebuilt = structure_plan(action, entry, float(plan["atr"]),
                              [*plan["zones"], plan["stop_zone"]], float(plan["minimum_rr"]))

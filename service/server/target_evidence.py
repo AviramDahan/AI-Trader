@@ -16,7 +16,8 @@ MAX_BYTES = 65536
 
 
 def _source(source):
-    return {'atr': source.get('atr'), 'data_as_of': source.get('data_as_of'),
+    return {**({k:source[k] for k in ('completed_high','completed_high_sessions') if k in source}),
+            'atr': source.get('atr'), 'data_as_of': source.get('data_as_of'),
             'zones': [{k: z[k] for k in ('low', 'high', 'touches') if k in z} |
                       {'pivots': [{k: p[k] for k in ('price', 'date', 'kind', 'confirmed_at') if k in p}
                                   for p in z.get('pivots', [])]} for z in source.get('zones', [])]}
@@ -71,7 +72,7 @@ def capture(candidate, action, price, quote_at, phase, policy, strategy, source,
                              'provenance_status':'RECORDED' if quote_at else 'NOT_AVAILABLE'},
                       source_inputs=inputs, source_inputs_sha256=hashlib.sha256(
                           json.dumps(inputs, sort_keys=True, allow_nan=False).encode()).hexdigest(),
-                      minimum_rr=2.0 if policy=='single_target_v2' else cfg.get('min_risk_reward'),
+                      minimum_rr=2.0 if policy in ('single_target_v2','single_breakout_v1') else cfg.get('min_risk_reward'),
                       signal_link={'scan_id':trace['scan_id'],'ticker':trace['ticker']})
         reference = candidate.get('_reference_context')
         if reference:
@@ -83,6 +84,9 @@ def capture(candidate, action, price, quote_at, phase, policy, strategy, source,
                 record['rejection_detail'] = record['geometry'].get('invalid_level_conditions', [])
         if plan:
             record['accepted_levels'] = {k:plan[k] for k in ('entry','stop','targets','active_target','rr') if k in plan}
+            if policy == 'single_breakout_v1':
+                record['geometry'] = dict(target_kind=plan['target_kind'], completed_high=plan['completed_high'],
+                                          completed_high_sessions=20, rr_rounded=plan['rr'][0])
         encoded = json.dumps(record, allow_nan=False)
         if len(encoded.encode()) > MAX_BYTES:
             record = {k:record[k] for k in ('evidence_version','observation_id','review_id','scan_id','ticker',

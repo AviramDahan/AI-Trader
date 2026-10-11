@@ -357,9 +357,9 @@ def _signal_sec_telegram_block(signal: dict[str, Any]) -> str:
 
 
 def _signal_telegram_message(signal: dict[str, Any]) -> str:
-    from single_target_policy import is_v2
+    from single_target_policy import is_single
     plan = signal.get('target_plan') or _loads(signal.get('technical_json'), {}).get('target_plan')
-    if is_v2(plan):
+    if is_single(plan):
         # Preserve editorial context without invented fallbacks. Bound each
         # optional section so safety/validity fields can never be truncated.
         def bounded(value, size):
@@ -381,6 +381,10 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
             f'ציון מודל לא־מכויל: {ltr(confidence_text)}',
             'סיבה:\n' + (bounded(signal.get('reason_he') or signal.get('reason'), 900) or 'לא זמין'),
             'חדשות רלוונטיות:\n' + ('\n'.join('• ' + t for t in titles if t) or 'לא זמין')]
+        if plan.get('target_kind') == 'projected_2r_not_confirmed_resistance':
+            lines.insert(9, 'היעד מוקרן; אינו אזור התנגדות מאומת. פריצה מעל שיא 20 סשנים שהושלמו.')
+        if signal.get('entry_eligible_from'):
+            lines.insert(10, f"תחילת חלון הכניסה: {ltr(bounded(signal['entry_eligible_from'], 48))}")
         sec_block = _signal_sec_telegram_block(signal)
         return ('\n\n'.join([*(_telegram_rtl(line) for line in lines), *([sec_block] if sec_block else [])]))[:4000]
     reason = str(signal.get("reason_he") or "הסיבה נבדקה על ידי הסורק.").strip()
@@ -469,11 +473,12 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
         from scanner_targets import validate_plan
         plan = validate_plan(plan, entry, stop, action)
         tp1, tp2, tp3 = (plan['targets'] + [None, None])[:3]
-    from single_target_policy import is_v2
-    v2 = is_v2(plan)
+    from single_target_policy import is_single
+    v2 = is_single(plan)
     if v2:
         from single_target_activation import enabled
-        if not enabled():
+        from single_breakout_policy import is_breakout, enabled as breakout_enabled
+        if not (breakout_enabled() if is_breakout(plan) else enabled()):
             raise ValueError('new_single_target_v2_disabled')
         if parse_time(plan['decided_at']) > parse_time(created):
             raise ValueError('future_plan_decision')
@@ -483,6 +488,8 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
     weighted_rr = sum(r*p for r, p in zip(rr_values, fractions))
     candidate = dict(candidate, target_plan=plan) if plan else candidate
     valid_until = (parse_time(created) + timedelta(hours=cfg["signal_validity_hours"])).isoformat().replace("+00:00", "Z")
+    import entry_window
+    window = entry_window.build(created, valid_until) if v2 and entry_window.enabled() else None
     confidence = float(signal["confidence"])
     if not 0 <= confidence <= 1:
         raise ValueError("Invalid model score")
@@ -543,7 +550,8 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
             values = (signal_id, key, "entry", "sell" if short else "buy", cfg["entry_order_type"], entry, quantity, "pending", valid_until, created, created)
             if v2 or short:
                 cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at,plan_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                            values + (_json({'target_plan': plan, 'execution_settings': cfg}),))
+                            values + (_json({'target_plan': plan, 'execution_settings': cfg,
+                                             **({'entry_execution': window} if window else {})}),))
             else:
                 # Bridge must continue normal V1 admissions before migration 006.
                 cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", values)
@@ -563,6 +571,8 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
     row = dict(signal, id=signal_id, planned_entry=entry, original_stop=stop, current_stop=stop,
                tp1=tp1, tp2=tp2, tp3=tp3, confidence=confidence, valid_until=valid_until,
                reason_he=signal.get("telegram_reason_he") or "", news_json=_json(structured_news), status=status)
+    if window:
+        row['entry_eligible_from'] = window['entry_eligible_from']
     enqueue_telegram(cur, f"signal:{signal_id}", "new_signal", _signal_telegram_message(row))
     conn.commit()
     conn.close()
@@ -786,9 +796,9 @@ def _process_trade_bar(cur, trade: dict[str, Any], bar: dict[str, Any]) -> None:
         return
     cur.execute("SELECT target_index FROM scanner_fills WHERE trade_id=? AND fill_type='tp'", (trade["id"],))
     completed = {int(row["target_index"]) for row in cur.fetchall() if row["target_index"] is not None}
-    from single_target_policy import is_v2
+    from single_target_policy import is_single
     plan = settings.get('target_plan')
-    targets = ([(1, float(plan['active_target']), 1.0)] if is_v2(plan) else
+    targets = ([(1, float(plan['active_target']), 1.0)] if is_single(plan) else
                [(2, float(trade["tp2"]), 1.0)] if trade["strategy"] == "single" else
                [(1, float(trade["tp1"]), float(trade["tp1_pct"])),
                 (2, float(trade["tp2"]), float(trade["tp2_pct"])),
@@ -825,10 +835,10 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
     cur.execute("SELECT * FROM scanner_signals WHERE id=?", (order["signal_id"],))
     signal = dict(cur.fetchone())
     cfg = lifecycle_settings()
-    from single_target_policy import is_v2, validate_fill, validate
+    from single_target_policy import is_single, validate_single_fill as validate_fill, validate_single as validate
     contract = _loads(order.get('plan_json'), {})
     target_plan = _loads(signal.get('technical_json'), {}).get('target_plan')
-    v2 = is_v2(target_plan) or is_v2(contract.get('target_plan'))
+    v2 = is_single(target_plan) or is_single(contract.get('target_plan'))
     short = signal['action'] == 'SHORT' or short_policy.is_short(contract.get('target_plan'))
     if order['side'] == 'sell' and not short:
         cur.execute("UPDATE scanner_orders SET status='invalid',updated_at=? WHERE id=?", (now_z(), order['id']))
@@ -859,8 +869,9 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
                 raise ValueError('order_levels_mismatch')
             validate_fill(target_plan, fill_price)
             cfg = contract['execution_settings']
-        except (ValueError, KeyError, TypeError):
-            cur.execute("UPDATE scanner_orders SET status='invalid',updated_at=? WHERE id=?", (now_z(), order['id']))
+        except (ValueError, KeyError, TypeError) as exc:
+            contract['entry_rejection_reason'] = str(exc)[:120]
+            cur.execute("UPDATE scanner_orders SET status='invalid',updated_at=?,plan_json=? WHERE id=?", (now_z(), _json(contract), order['id']))
             cur.execute("UPDATE scanner_signals SET status='ENTRY_POLICY_REJECTED',updated_at=? WHERE id=?", (now_z(), signal['id']))
             return
     qty = float(order["quantity"])
@@ -901,6 +912,8 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
     strategies = [('single', 0)] if v2 or short else [(active, 0), ("staged" if active == "single" else "single", 1)]
     for strategy, shadow in strategies:
         snapshot = dict(cfg, strategy=strategy, captured_at=bar_at, target_plan=target_plan)
+        if contract.get('entry_execution'):
+            snapshot['entry_execution'] = contract['entry_execution']
         cur.execute("""INSERT INTO scanner_trades(signal_id,order_id,agent_id,ticker,company,side,strategy,is_shadow,status,
             original_quantity,remaining_quantity,entry_price,original_stop,current_stop,original_r,tp1,tp2,tp3,tp1_pct,tp2_pct,tp3_pct,
             settings_json,fees,opened_at,last_price,last_bar_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -960,11 +973,11 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
     orders = [dict(row) for row in cur.fetchall()]
     # V2 cannot consume an incomplete candle, including after restart. Do not
     # advance the shared ticker cursor past data that must be reconsidered.
-    from single_target_policy import is_v2
+    from single_target_policy import is_single
     if bar_at + timedelta(minutes=5) > parse_time(now_z()):
-        has_v2 = any(is_v2(_loads(o.get('plan_json'), {}).get('target_plan')) or short_policy.is_short(_loads(o.get('plan_json'), {}).get('target_plan')) for o in orders)
+        has_v2 = any(is_single(_loads(o.get('plan_json'), {}).get('target_plan')) or short_policy.is_short(_loads(o.get('plan_json'), {}).get('target_plan')) for o in orders)
         cur.execute("SELECT settings_json FROM scanner_trades WHERE ticker=? AND status='open'", (ticker,))
-        has_v2 = has_v2 or any(is_v2(_loads(r['settings_json'], {}).get('target_plan')) or short_policy.is_short(_loads(r['settings_json'], {}).get('target_plan')) for r in cur.fetchall())
+        has_v2 = has_v2 or any(is_single(_loads(r['settings_json'], {}).get('target_plan')) or short_policy.is_short(_loads(r['settings_json'], {}).get('target_plan')) for r in cur.fetchall())
         if has_v2:
             conn.rollback(); conn.close()
             return
@@ -977,7 +990,14 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
         order_id = int(order["id"])
         # Yahoo labels candles by their opening time. The entire candle must
         # follow order creation; a low reached before creation cannot fill it.
-        if bar_at < parse_time(order["created_at"]):
+        try:
+            from entry_window import eligible_from
+            eligible = eligible_from(order)
+        except (ValueError, KeyError, TypeError):
+            cur.execute("UPDATE scanner_orders SET status='recovery_uncertain',updated_at=? WHERE id=?", (now_z(), order_id))
+            cur.execute("UPDATE scanner_signals SET status='RECOVERY_UNCERTAIN',updated_at=? WHERE id=?", (now_z(), order['signal_id']))
+            continue
+        if bar_at < eligible:
             continue
         if parse_time(order["valid_until"]) < parse_time(bar["at"]):
             cur.execute("UPDATE scanner_orders SET status='expired',updated_at=? WHERE id=?", (now_z(), order_id))
@@ -1050,7 +1070,14 @@ def _pending_recovery_check(ticker, bars, observed_at):
         cursor = cur.execute('SELECT last_bar_at FROM scanner_price_cursors WHERE ticker=?', (ticker,)).fetchone()
         last = parse_time(cursor['last_bar_at']) if cursor else datetime.fromtimestamp(0, UTC)
         for order in orders:
-            created, expires = parse_time(order['created_at']), parse_time(order['valid_until'])
+            try:
+                from entry_window import eligible_from
+                created = eligible_from(order)
+            except (ValueError, KeyError, TypeError):
+                cur.execute("UPDATE scanner_orders SET status='recovery_uncertain',updated_at=? WHERE id=?", (now_z(), order['id']))
+                cur.execute("UPDATE scanner_signals SET status='RECOVERY_UNCERTAIN',updated_at=? WHERE id=?", (now_z(), order['signal_id']))
+                continue
+            expires = parse_time(order['valid_until'])
             end = min(expires, observed_at)
             at = created.replace(second=0, microsecond=0)
             at -= timedelta(minutes=at.minute % 5)
@@ -1707,14 +1734,21 @@ def dashboard_payload() -> dict[str, Any]:
         cur.execute("SELECT strategy FROM scanner_trades WHERE signal_id=? AND is_shadow=0 ORDER BY id LIMIT 1", (row["id"],))
         primary_trade = cur.fetchone()
         operational_strategy = primary_trade["strategy"] if primary_trade else default_operational_strategy
-        from single_target_policy import is_v2
+        from single_target_policy import is_single
         plan = row['technical_json'].get('target_plan')
-        if is_v2(plan):
+        if is_single(plan):
             operational_strategy = 'single'
             row.update(policy_version=plan['policy_version'], active_target=plan['active_target'],
                        signal_eligibility='QUALIFIED', execution_status=row['status'],
                        position_activated=row.get('actual_entry') is not None,
                        shadow_comparison=plan['shadow_comparison'])
+            cur.execute("SELECT plan_json FROM scanner_orders WHERE signal_id=? AND purpose='entry' ORDER BY id LIMIT 1", (row['id'],))
+            saved_order = cur.fetchone()
+            contract = _loads(saved_order['plan_json'], {}) if saved_order else {}
+            window = contract.get('entry_execution') or {}
+            row.update(entry_eligible_from=window.get('entry_eligible_from'),
+                       entry_execution_version=window.get('version'),
+                       entry_rejection_reason=contract.get('entry_rejection_reason'))
         elif short_policy.is_short(plan):
             operational_strategy = 'single'
             row.update(policy_version=plan['policy_version'], active_target=plan['active_target'],
@@ -1722,7 +1756,7 @@ def dashboard_payload() -> dict[str, Any]:
                        position_activated=row.get('actual_entry') is not None,
                        shadow_comparison=plan['shadow_comparison'])
         row["operational_strategy"] = operational_strategy
-        if is_v2(plan):
+        if is_single(plan):
             row['operational_tp1_pct'], row['operational_tp2_pct'], row['operational_tp3_pct'] = 1., 0., 0.
         elif operational_strategy == "single":
             row["operational_tp1_pct"], row["operational_tp2_pct"], row["operational_tp3_pct"] = 0.0, 1.0, 0.0
@@ -1745,12 +1779,12 @@ def dashboard_payload() -> dict[str, Any]:
         trade["price_stale"] = not trade["price_as_of"] or (
             datetime.now(UTC) - parse_time(trade["price_as_of"])
         ).total_seconds() > 900
-        from single_target_policy import is_v2
+        from single_target_policy import is_single
         plan = trade['settings'].get('target_plan')
-        if is_v2(plan) or short_policy.is_short(plan):
+        if is_single(plan) or short_policy.is_short(plan):
             trade.update(policy_version=plan['policy_version'], active_target=plan['active_target'],
                          shadow_comparison=plan['shadow_comparison'])
-            trade['operational_tp1_pct'], trade['operational_tp2_pct'], trade['operational_tp3_pct'] = (1., 0., 0.) if is_v2(plan) else (0., 1., 0.)
+            trade['operational_tp1_pct'], trade['operational_tp2_pct'], trade['operational_tp3_pct'] = (1., 0., 0.) if is_single(plan) else (0., 1., 0.)
             basis = float(trade['entry_price']) * float(trade['original_quantity'])
             risk_basis = float(trade['original_r']) * float(trade['original_quantity'])
             realized_net = float(trade['realized_pnl']) - float(trade['fees'])

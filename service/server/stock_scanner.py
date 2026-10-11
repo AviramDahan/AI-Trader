@@ -814,9 +814,19 @@ def _candidate_target_plan(candidate, action, price, cfg, *, quote_at=None, phas
         atr=candidate['atr'], zones=candidate.get('price_zones', []), data_as_of=candidate.get('price_as_of', ''))
     at = datetime.now(timezone.utc).isoformat()
     plan, rejection = None, None
+    policy = 'single_target_v2' if v2 else 'confirmed_daily_swing_zones_v1'
     try:
         if v2:
-            plan = build(price, source['atr'], source['zones'], source['data_as_of'], at)
+            try:
+                plan = build(price, source['atr'], source['zones'], source['data_as_of'], at)
+            except ValueError as exc:
+                from single_breakout_policy import enabled as breakout_enabled, build as breakout_build, VERSION
+                if str(exc) != 'no_forward_zone' or not breakout_enabled():
+                    raise
+                policy = VERSION
+                source = dict(source, completed_high=candidate.get('recent_high_20d'), completed_high_sessions=20)
+                plan = breakout_build(price, source['atr'], source['zones'], source['data_as_of'],
+                                      at, candidate.get('recent_high_20d'))
         else:
             plan = structure_plan(action, price, candidate['atr'], candidate.get('price_zones', []), cfg['min_risk_reward'])
         return plan
@@ -826,7 +836,7 @@ def _candidate_target_plan(candidate, action, price, cfg, *, quote_at=None, phas
     finally:
         from target_evidence import capture
         capture(candidate, action, price, quote_at, phase,
-                'single_target_v2' if v2 else 'confirmed_daily_swing_zones_v1',
+                policy,
                 'single' if v2 else None, source, cfg, decided_at=at, plan=plan, rejection=rejection)
 
 
@@ -853,8 +863,8 @@ def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list
         except (ValueError, KeyError) as exc:
             candidate['target_rejection'] = str(exc)
             return None
-    from single_target_policy import is_v2
-    index = 0 if is_v2(plan) else 1
+    from single_target_policy import is_single
+    index = 0 if is_single(plan) else 1
     take_profit, stop_loss, risk_reward = plan["targets"][index], plan["stop"], plan["rr"][index]
     if risk_reward + .001 < cfg["min_risk_reward"]:
         return None

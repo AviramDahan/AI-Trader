@@ -10,6 +10,22 @@ def is_v2(plan):
     return isinstance(plan, dict) and plan.get('policy_version') == VERSION
 
 
+def is_single(plan):
+    from single_breakout_policy import is_breakout
+    return is_v2(plan) or is_breakout(plan)
+
+
+def validate_single(plan, entry=None, stop=None, action='BUY'):
+    from single_breakout_policy import is_breakout, validate as validate_breakout
+    return (validate_breakout(plan, entry, stop, action) if is_breakout(plan)
+            else validate(plan, entry, stop, action))
+
+
+def validate_single_fill(plan, price):
+    from single_breakout_policy import is_breakout, validate_fill as validate_breakout_fill
+    return validate_breakout_fill(plan, price) if is_breakout(plan) else validate_fill(plan, price)
+
+
 def instant(value):
     stamp = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
     if stamp.tzinfo is None:
