@@ -3,8 +3,7 @@ import json
 import os
 from collections import Counter
 from datetime import datetime,timezone,timedelta
-import psycopg
-from psycopg.rows import dict_row
+from database import get_db_connection, using_postgres
 from single_target_policy import build as baseline_build, instant
 from single_breakout_policy import build as breakout_build
 
@@ -32,7 +31,7 @@ def collect(conn,since):
     evidence=conn.execute("""SELECT c.metrics_json,t.metrics_json technical FROM scanner_candidates c
         LEFT JOIN LATERAL (SELECT metrics_json FROM scanner_candidates t
           WHERE t.scan_id=c.scan_id AND t.ticker=c.ticker AND t.stage='technical' ORDER BY t.id LIMIT 1) t ON true
-        WHERE c.stage='target_check' AND c.created_at>=%s ORDER BY c.id LIMIT 2001""",(since,)).fetchall()
+        WHERE c.stage='target_check' AND c.created_at>=? ORDER BY c.id LIMIT 2001""",(since,)).fetchall()
     cohort=Counter();sources=set();rejections=Counter()
     for row in evidence[:2000]:
         check=json.loads(row['metrics_json'])
@@ -47,7 +46,7 @@ def collect(conn,since):
         except (ValueError,KeyError,TypeError):
             cohort['NOT_VERIFIED_INVALID_OR_INCOMPLETE_EVIDENCE']+=1
     outcomes=[dict(r) for r in conn.execute("""SELECT s.status,count(*) count
-        FROM scanner_signals s WHERE s.created_at>=%s
+        FROM scanner_signals s WHERE s.created_at>=?
         AND s.technical_json::jsonb->'target_plan'->>'policy_version'='single_breakout_v1'
         GROUP BY s.status""",(since,))]
     chains=[dict(r) for r in conn.execute("""SELECT s.id signal_id,o.id order_id,t.id trade_id,
@@ -57,7 +56,7 @@ def collect(conn,since):
         FROM scanner_signals s JOIN scanner_orders o ON o.signal_id=s.id
         JOIN scanner_trades t ON t.order_id=o.id AND t.is_shadow=0 AND t.legacy_position_id IS NULL
         LEFT JOIN scanner_fills f ON f.trade_id=t.id
-        WHERE s.created_at>=%s AND s.technical_json::jsonb->'target_plan'->>'policy_version'='single_breakout_v1'
+        WHERE s.created_at>=? AND s.technical_json::jsonb->'target_plan'->>'policy_version'='single_breakout_v1'
         GROUP BY s.id,o.id,t.id ORDER BY s.id LIMIT 101""",(since,))]
     holds=conn.execute("""SELECT count(*) count FROM scanner_orders
         WHERE purpose='entry' AND status='recovery_uncertain'""").fetchone()['count']
@@ -82,7 +81,9 @@ def main():
     now=datetime.now(timezone.utc);since=instant(args.since)
     if not now-timedelta(days=14)<=since<=now:
         raise ValueError('read_only_audit_window_must_be_within_14_days')
-    with psycopg.connect(os.environ['DATABASE_URL'],row_factory=dict_row) as conn:
+    if not using_postgres():
+        raise ValueError('read_only_audit_requires_postgresql')
+    with get_db_connection() as conn:
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
         conn.execute("SET LOCAL statement_timeout='10000'")
         print(json.dumps(collect(conn,since.isoformat()),default=str,ensure_ascii=True))
