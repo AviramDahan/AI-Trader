@@ -186,8 +186,8 @@ services:
       migrate: {condition: service_completed_successfully}
     healthcheck:
       test: [CMD, python, -c, "import pathlib,time; assert time.time()-pathlib.Path('/tmp/backup-ok').stat().st_mtime < 7500"]
-      interval: 60s
-      start_period: 120s
+      interval: 15s
+      start_period: 600s
       retries: 2
 
 networks:
