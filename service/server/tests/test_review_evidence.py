@@ -124,7 +124,9 @@ def test_capture_time_cannot_cross_boundary_and_complete_a_forming_bar(monkeypat
     monkeypatch.setattr(scanner.yf,'Ticker',Mock(return_value=Mock(history=Mock(return_value=f))))
     quote=scanner.current_intraday_quote('TEST')
     assert quote.evidence['latest_completed_at']=='2026-10-12T14:00:00+00:00'
-    timer.now.assert_called_once()
+    assert quote.evidence['observed_at']==after.isoformat()
+    assert quote.evidence['completed_through']==before.isoformat()
+    assert timer.now.call_count==2
 
 @pytest.mark.parametrize('damage',['stale','future','zero','nan'])
 def test_context_does_not_relax_the_existing_quote_gate(monkeypatch,clock,damage):

@@ -39,7 +39,7 @@ class ObservedQuote(tuple):
         return quote
 
 
-def completed_observation(frame,observed_at):
+def completed_observation(frame,observed_at,completed_before=None):
     """At most six completed 5m bars, from the SAME existing 1m response.
 
     Five distinct, valid one-minute OHLCV rows are required per bar. No gaps,
@@ -48,6 +48,9 @@ def completed_observation(frame,observed_at):
     """
     try:
         now=instant(observed_at)
+        cutoff=instant(completed_before) if completed_before is not None else now
+        if cutoff>now:
+            return unknown('UNKNOWN_INCONSISTENT_OBSERVATION_TIME')
         from scanner_engine import market_session_state
         if not market_session_state(now)['is_trading_day']:
             return unknown('UNKNOWN_NON_TRADING_DAY')
@@ -57,7 +60,7 @@ def completed_observation(frame,observed_at):
             return unknown('UNKNOWN_MISSING_OHLCV')
         if frame.index.tz is None or frame.index.has_duplicates:
             return unknown('UNKNOWN_AMBIGUOUS_TIMESTAMPS')
-        boundary=now.replace(second=0,microsecond=0)
+        boundary=cutoff.replace(second=0,microsecond=0)
         boundary-=timedelta(minutes=boundary.minute%5)
         # The existing response may contain a whole session. Only the bounded
         # evidence window needs row parsing, including for rejected candidates.
@@ -85,7 +88,7 @@ def completed_observation(frame,observed_at):
                 open=values[0][0],high=max(v[1] for v in values),low=min(v[2] for v in values),
                 close=values[-1][3],volume=sum(v[4] for v in values)))
         out=unknown(('COMPLETED_BARS_WITH_GAPS' if gaps else 'COMPLETED_BARS') if bars else 'UNKNOWN_NO_COMPLETED_BARS')
-        out.update(observed_at=now.isoformat(),bars=bars,gap_buckets=gaps,
+        out.update(observed_at=now.isoformat(),completed_through=cutoff.isoformat(),bars=bars,gap_buckets=gaps,
                    expected_bars=expected_bars,complete_window=bool(bars) and gaps==0)
         if bars:
             out['fresh']=(now-instant(bars[-1]['end_at'])).total_seconds()<=720
@@ -117,9 +120,11 @@ def context(candidate,observed_at,expected_session):
         if not intraday['bars']:
             # Preserve the collector's precise unknown reason; never add facts.
             intraday=unknown(intraday.get('status','UNKNOWN_NO_OBSERVATION'))
-        elif instant(intraday['observed_at'])>now or len(intraday['bars'])>6:
+        elif (instant(intraday['observed_at'])>now or len(intraday['bars'])>6 or
+              instant(intraday['completed_through'])>instant(intraday['observed_at'])):
             raise ValueError('future_or_unbounded')
-        if any(instant(b['end_at'])>now or instant(b['start_at'])+timedelta(minutes=5)!=instant(b['end_at'])
+        if any(instant(b['end_at'])>instant(intraday['completed_through']) or instant(b['end_at'])>now
+               or instant(b['start_at'])+timedelta(minutes=5)!=instant(b['end_at'])
                or not all(finite(b[k],positive=True) for k in ('open','high','low','close'))
                or not finite(b['volume']) or not b['low']<=min(b['open'],b['close'])<=max(b['open'],b['close'])<=b['high']
                or instant(b['start_at']).astimezone(ET).date()!=now.astimezone(ET).date()

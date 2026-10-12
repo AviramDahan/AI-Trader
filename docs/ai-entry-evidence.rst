@@ -25,7 +25,10 @@ Its two-value tuple-compatible quote now carries bounded evidence derived from
 that response. At most six completed, regular-session five-minute bars are
 assembled from exactly five distinct valid minute rows each. Unfinished/future
 minutes, duplicates, gaps, prior sessions, missing volume and invalid OHLCV do
-not become completed bars. No provider request, price-cache refresh or AI call
+not become completed bars. Completion is bounded by request START, with response
+receipt recorded separately, so a request straddling a bar boundary cannot
+retroactively turn an earlier in-progress response candle into a completed bar.
+No provider request, price-cache refresh or AI call
 is added. This evidence is not an execution replay or a prediction of intrabar
 order. The order executor still requires its own subsequent eligible full bar.
 

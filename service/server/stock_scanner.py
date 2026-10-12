@@ -764,6 +764,7 @@ def ai_review(candidate: dict[str, Any], news: list[dict[str, Any]], market_cont
 
 
 def current_intraday_quote(ticker: str) -> tuple[float, str] | None:
+    requested_at = datetime.now(timezone.utc)
     frame = yf.Ticker(ticker).history(period="1d", interval="1m", prepost=False, auto_adjust=True, timeout=15)
     observed_at = datetime.now(timezone.utc)
     if frame is None or frame.empty:
@@ -780,7 +781,7 @@ def current_intraday_quote(ticker: str) -> tuple[float, str] | None:
         return None
     from review_evidence import ObservedQuote, completed_observation
     return ObservedQuote(price, timestamp.to_pydatetime().astimezone(timezone.utc).isoformat(),
-                         completed_observation(frame, observed_at))
+                         completed_observation(frame, observed_at, completed_before=requested_at))
 
 
 def regular_session_open():
