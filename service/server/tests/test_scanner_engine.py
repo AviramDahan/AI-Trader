@@ -376,6 +376,12 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertAlmostEqual(account["cash"], account["initial_cash"] + closed["realized_pnl"] - closed["fees"], places=5)
         self.assertAlmostEqual(account["realized_pnl"], closed["realized_pnl"], places=5)
         self.assertAlmostEqual(account["fees_paid"], closed["fees"], places=5)
+        # Existing LONG TP is execution-on-touch with slippage, not the separate
+        # close_long SELL LIMIT contract. Document it; do not reprice history.
+        import json
+        stored=json.loads(trade['settings_json'])
+        exit_fill=self.fetchall("SELECT * FROM scanner_fills WHERE trade_id=? AND fill_type='tp'",(trade['id'],))[0]
+        self.assertAlmostEqual(exit_fill['price'],trade['tp2']*(1-stored['slippage_bps']/10000))
 
     def test_stop_after_partial_exit_closes_remainder_and_outcome_uses_total_net(self):
         scanner_engine.set_active_strategy("staged")

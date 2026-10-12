@@ -10,6 +10,12 @@ const reasonNames: Record<string, string> = {
   pre_insufficient_confirmed_price_zones: 'אין מספיק אזורי מחיר מאושרים לתוכנית',
   pre_price_structure_fails_risk_reward: 'מבנה היעדים אינו עומד בדרישות הסיכון־סיכוי',
   pre_no_structural_stop_anchor: 'אין עוגן סטופ מבני', pre_structural_stop_too_distant: 'הסטופ המבני רחוק מדי',
+  pre_entry_not_above_completed_high: 'מחיר הכניסה אינו מעל השיא של 20 ימי המסחר שהושלמו',
+  pre_completed_high_unavailable: 'חסר שיא מאומת של 20 ימי המסחר שהושלמו',
+  pre_breakout_requires_no_forward_zone: 'מסלול פריצה אינו זמין כשקיימת התנגדות קדמית',
+  pre_unsupported_breakout_policy: 'חוזה מדיניות הפריצה אינו נתמך',
+  pre_breakout_policy_contract_mismatch: 'תוכנית הפריצה אינה תואמת לחוזה השמור',
+  pre_fill_no_longer_above_completed_high: 'מחיר הביצוע כבר אינו מעל השיא המאומת',
   insufficient_current_news: 'אין די חדשות עדכניות', news_provider_unavailable_fail_closed: 'נתוני החדשות אינם זמינים',
   ai_or_confidence_filter: 'החלטת AI / ציון / רלוונטיות לא עברו', news_sentiment_conflict: 'סתירה בכיוון החדשות',
   pre_duplicate_cooldown: 'המתנה אחרי סיגנל קודם', duplicate_cooldown: 'המתנה אחרי סיגנל קודם',
@@ -22,7 +28,7 @@ const reasonNames: Record<string, string> = {
   non_positive_stop: 'הסטופ אינו מחיר חיובי', stop_not_below_entry: 'הסטופ אינו מתחת לכניסה',
   rounded_target_not_before_resistance: 'היעד לאחר עיגול אינו לפני ההתנגדות',
 }
-const reasonText = (reason: string, he: boolean) => he ? reasonNames[reason] || reason : reason
+const reasonText = (reason: string, he: boolean) => he ? reasonNames[reason] || reasonNames[`pre_${reason}`] || reason : reason
 const candidateReason = (row: Row, he: boolean) => {
   // Use only a detail belonging to the same persisted rejection; no historical rewrite.
   const check = [...(row.target_checks || [])].reverse().find((c: Row) =>
@@ -59,12 +65,23 @@ function Levels({ check, he }: { check: Row, he: boolean }) {
 
 function Candidate({ row, he }: { row: Row, he: boolean }) {
   const stamp = (s: string) => s ? new Date(s).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
+  const sec = row.sec_decision
   return <details className="research-candidate">
     <summary><bdi>{row.ticker}</bdi> · <bdi>{row.company || '—'}</bdi> · <bdi>{row.direction || '—'}</bdi><br />
       <small>{stamp(row.at)} · {row.rejection ? candidateReason(row, he) : row.signals.length ? (he ? 'סיגנל נשמר' : 'Signal saved') : (he ? 'אין תוצאה סופית מתועדת' : 'No retained final result')}</small>
     </summary>
     <p>{he ? 'חלון מסחר בזמן הבדיקה' : 'Session at check'}: {row.session?.is_open ? (he ? 'פתוח' : 'Open') : row.session?.reason || '—'} · {he ? 'ניסיונות AI מתועדים' : 'Recorded AI attempts'}: {row.ai_attempts}</p>
-    {row.sec_decision && <p className="scanner-note">{he ? 'ראיית SEC בהחלטה' : 'SEC decision evidence'}: <bdi>{row.sec_decision.mode}</bdi> · {he ? 'דירוג בסיס' : 'Baseline rank'} <bdi>{value(row.sec_decision.baseline_rank_score)}</bdi> → {he ? 'דירוג משופר' : 'Enhanced rank'} <bdi>{value(row.sec_decision.enhanced_rank_score)}</bdi> · {he ? 'שינוי' : 'Adjustment'} <bdi>{value(row.sec_decision.sec_adjustment)}</bdi> · {he ? 'סיבה' : 'Reason'}: <bdi>{row.sec_decision.rejection_reason || (he ? 'המשיך לבדיקה' : 'Continued to review')}</bdi></p>}
+    {sec && <div className="scanner-note">
+      <p>{he ? 'מצב הפעלת SEC' : 'SEC operating mode'}: <bdi>{sec.mode}</bdi></p>
+      <p>{sec.evidence_status === 'RETAINED_EVIDENCE'
+        ? (he ? 'נשמרו תמונת מידע והפניות SEC בהחלטה.' : 'SEC snapshot and references retained at decision.')
+        : (he ? 'אין ראיית SEC שמורה מספקת; מצב ההפעלה אינו הוכחה לראיה.' : 'No sufficient retained SEC evidence; operating mode is not evidence.')}
+        {sec.evidence_status === 'RETAINED_EVIDENCE' && (sec.ranking_changed_in_paper
+          ? (he ? ' הדירוג השתנה במסלול PAPER.' : ' Ranking changed in PAPER.')
+          : (he ? ' אין שינוי דירוג מתועד במסלול PAPER.' : ' No recorded ranking change in PAPER.'))}</p>
+      <p>{he ? 'דירוג בסיס' : 'Baseline rank'} <bdi>{value(sec.baseline_rank_score)}</bdi> → {he ? 'דירוג משופר' : 'Enhanced rank'} <bdi>{value(sec.enhanced_rank_score)}</bdi> · {he ? 'שינוי' : 'Adjustment'} <bdi>{value(sec.sec_adjustment)}</bdi></p>
+      <p>{he ? 'תוצאת המשך הבדיקה' : 'Subsequent review result'}: <bdi>{sec.rejection_reason ? reasonText(sec.rejection_reason, he) : (he ? 'לא נשמר חסם נוסף ברשומת SEC' : 'No additional blocker retained in SEC record')}</bdi></p>
+    </div>}
     <ol className="research-timeline">
       <li>{he ? 'סינון טכני' : 'Technical'}: {row.technical_recorded ? (he ? 'מועמד מתועד' : 'Candidate recorded') : (he ? 'לא זמין' : 'Unavailable')}</li>
       {row.target_checks.map((check: Row, i: number) => <li key={i}>
@@ -87,6 +104,9 @@ function Candidate({ row, he }: { row: Row, he: boolean }) {
       </li>)}
       {row.reviews.map((review: Row, i: number) => <li key={`ai${i}`}>AI · <bdi>{review.result}</bdi> · {review.attempts} {he ? 'ניסיונות' : 'attempts'}{review.rejection && <> · {reasonText(review.rejection, he)}</>}</li>)}
       {row.ai_decision && <li>{he ? 'החלטת AI שנשמרה' : 'Retained AI decision'}: <bdi>{row.ai_decision.action}</bdi> · {he ? 'ציון לא מכויל' : 'Uncalibrated score'}: <bdi>{value(row.ai_decision.confidence)}</bdi> · {he ? 'רלוונטיות' : 'Relevance'}: <bdi>{value(row.ai_decision.news_relevance)}</bdi>
+        <p>{he ? 'הסבר המודל, לא עובדה מאומתת' : 'Model explanation, not a verified fact'}:</p>
+        {row.ai_decision.reason ? <blockquote dir="auto">{row.ai_decision.reason}</blockquote>
+          : <p>{he ? 'לא זמין: לא נשמר הסבר מתאים להצגה.' : 'Unavailable: no displayable explanation retained.'}</p>}
         {(row.ai_decision.filter_failures || []).map((reason: string) => <p key={reason}>{reasonText(reason, he)}</p>)}</li>}
       {row.signals.map((s: Row) => <li key={s.id}>{he ? 'זכאות סיגנל: אושר; ביצוע דמה' : 'Signal qualified; paper execution'}: <bdi>{s.status}</bdi> · {he ? 'כניסה בפועל' : 'Actual entry'}: <bdi>{value(s.actual_entry)}</bdi> · {he ? 'תוקף' : 'Valid until'}: {stamp(s.valid_until)}</li>)}
       {row.orders.map((o: Row) => <li key={`order${o.id}`}>{he ? 'פקודה' : 'Order'} <bdi>#{o.id} · {o.purpose} · {o.status}</bdi></li>)}
@@ -170,6 +190,7 @@ export function ResearchView({ he, mode = 'research', data, error = '', hours = 
         <div className="scanner-table-wrap"><table className="scanner-table"><thead><tr>{[t('קבוצה', 'Cohort'),t('כיוון / אסטרטגיה','Side / strategy'),t('פתוחות / סגורות','Open / closed'),t('סגורות עם ראיות','Verified closed'),t('ממוצע נטו','Mean net'),t('תוחלת נטו R','Net expectancy R'),t('שיעור הצלחה','Win rate')].map(label => <th key={label}>{label}</th>)}</tr></thead>
           <tbody>{data.outcome_groups.map((g: Row) => <tr key={`${g.cohort}:${g.side}:${g.strategy}`}><td>{g.cohort}</td><td><bdi>{g.side} / {g.strategy}</bdi></td><td>{g.open} / {g.closed}</td><td>{g.verified_closed}</td><td><bdi>{value(g.mean_net_pct,'%')}</bdi></td><td><bdi>{value(g.expectancy_net_r,'R')}</bdi></td><td><bdi>{value(g.win_rate == null ? null : g.win_rate*100,'%')}</bdi></td></tr>)}</tbody></table></div>
         <p className="scanner-note">{t('כל עסקה נספרת פעם אחת; מימושים חלקיים משוקללים לפי הכמות המקורית. נטו כולל עמלות רשומות והחלקה שבמחיר הביצוע; Short אינו כולל עלויות השאלה שלא מדומות. MFE/MAE לא זמינים ללא סדרת מחירים היסטורית מתאימה.', 'Each trade counts once; partial exits are weighted by original quantity. Net includes recorded fees and execution-price slippage; Short excludes unmodelled borrow costs. MFE/MAE are unavailable without a suitable retained price series.')}</p>
+        <p className="scanner-note">{t('בחוזה LONG הקיים, נגיעה ביעד TP מפעילה מימוש עם החלקה: מחיר הביצוע עשוי להיות מעט מתחת ליעד, לפני עמלה. זה אינו חוזה SELL LIMIT עם מחיר גבול מובטח. גם Stop אינו מבטיח מחיר.', 'The existing LONG contract executes a touched TP with slippage: execution may be slightly below target before commission. It is not a floor-protected SELL LIMIT contract. Stops do not guarantee a price either.')}</p>
         {data.outcomes.slice(0,200).map((o: Row) => <details className="research-candidate" key={o.trade_id}><summary><bdi>{o.ticker} · {o.cohort} · {o.side} · {o.status}</bdi> · {o.status==='closed' ? <bdi>{value(o.closed_net_pct,'%')} / {value(o.closed_net_r,'R')}</bdi> : t('פתוחה — אינה תוצאה סופית','Open — not a final result')}</summary>
           <p>{t('ממומש נטו כולל עמלות ששולמו','Realized net including paid fees')}: <bdi>{value(o.realized_net_pct,'%')} / {value(o.realized_net_r,'R')}</bdi></p>
           {o.status==='open' && <><p>{t('פתוח ברוטו משוקלל בכמות שנותרה','Open gross weighted by remaining quantity')}: <bdi>{value(o.open_gross_pct,'%')} / {value(o.open_gross_r,'R')}</bdi></p><p>{t('משולב לפי נר ניטור, אחרי עמלות ששולמו בלבד','Combined monitor mark after paid fees only')}: <bdi>{value(o.marked_net_pct,'%')} / {value(o.marked_net_r,'R')}</bdi> · {stamp(o.mark_at)}{o.mark_stale && ` · ${t('מחיר ישן','stale mark')}`}</p></>}

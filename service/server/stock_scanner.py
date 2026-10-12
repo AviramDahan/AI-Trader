@@ -311,13 +311,21 @@ def load_universe() -> dict[str, dict[str, Any]]:
         raise
 
 
+class HistoryDownload(dict):
+    """Compatible mapping plus bounded metadata; short frames are not admitted."""
+    def __init__(self):
+        super().__init__()
+        self.gaps = {}
+
+
 def _download_history(symbols: list[str]) -> dict[str, pd.DataFrame]:
-    histories: dict[str, pd.DataFrame] = {}
+    histories = HistoryDownload()
     for offset in range(0, len(symbols), 100):
         chunk = symbols[offset:offset + 100]
         data = yf.download(chunk, period="6mo", interval="1d", group_by="ticker", auto_adjust=True,
                            progress=False, threads=True, timeout=25)
         if not isinstance(data, pd.DataFrame) or data.empty:
+            histories.gaps.update({s:dict(reason='provider_returned_no_rows') for s in chunk})
             continue
         for symbol in chunk:
             try:
@@ -325,7 +333,16 @@ def _download_history(symbols: list[str]) -> dict[str, pd.DataFrame]:
                 frame = frame[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close", "High", "Low", "Volume"])
                 if len(frame) >= 65:
                     histories[symbol] = frame
+                else:
+                    try:
+                        completed = _completed_daily(frame)
+                    except (TypeError, ValueError, OverflowError):
+                        histories.gaps[symbol] = dict(reason='invalid_provider_history_shape')
+                        continue  # Diagnostic parsing must not abort other symbols.
+                    histories.gaps[symbol] = dict(reason='insufficient_completed_history' if len(completed) else 'provider_returned_no_rows',
+                                                  completed_bars=len(completed), required_bars=65)
             except (KeyError, TypeError):
+                histories.gaps[symbol] = dict(reason='invalid_provider_history_shape')
                 continue
     return histories
 
@@ -395,10 +412,15 @@ def load_historical_data(symbols: list[str], cfg: dict[str, Any]) -> tuple[dict[
             **_history_coverage(cached, symbols, expected),
         }
     downloaded = {}
+    history_gaps = {}
     error_code = 'provider_refresh_failed'
     try:
         downloaded = _download_history(refresh_symbols)
+        history_gaps = getattr(downloaded, 'gaps', {})
         downloaded = {s: _finalize_download(f, now) for s, f in downloaded.items()}
+        for symbol, frame in downloaded.items():
+            if len(frame) < 65:
+                history_gaps[symbol] = dict(reason='insufficient_completed_history', completed_bars=len(frame), required_bars=65)
         downloaded = {s: f for s, f in downloaded.items() if len(f) >= 65}
         required_coverage = .85 if len(refresh_symbols) >= 20 else 1.0
         if len(downloaded) / max(len(refresh_symbols), 1) < required_coverage:
@@ -413,6 +435,8 @@ def load_historical_data(symbols: list[str], cfg: dict[str, Any]) -> tuple[dict[
             "age_seconds": 0 if full_refresh else round(cache_age or 0),
             "refreshed_symbols": len(downloaded), "expected_session": expected.isoformat(),
             **_history_coverage(merged, symbols, expected),
+            "history_gap_details": {s:history_gaps[s] for s in sorted(history_gaps)[:50]},
+            "history_gap_details_clipped": len(history_gaps)>50,
         }
     except Exception as exc:
         if fetched_at and cache_age is not None and cache_age <= cfg["history_stale_after"] and cached_coverage >= .95:
@@ -424,6 +448,8 @@ def load_historical_data(symbols: list[str], cfg: dict[str, Any]) -> tuple[dict[
                 **coverage, "refresh_requested_symbols": len(refresh_symbols),
                 "refresh_received_symbols": len(downloaded),
                 "refresh_error_type": type(exc).__name__, "refresh_error_code": error_code,
+                "history_gap_details": {s:history_gaps[s] for s in sorted(history_gaps)[:50]},
+                "history_gap_details_clipped": len(history_gaps)>50,
             }
         raise RuntimeError("Historical data unavailable; scan stopped safely")
 
@@ -1215,7 +1241,7 @@ def run_scan() -> dict[str, Any]:
                     (candidate.get('sec_intelligence') or {}).get('material_conflict')):
                 failures.append('sec_material_conflict_hold')
             if decision['news_relevance'] < .6 and not sec_evidence_current: failures.append('ai_news_relevance_below_threshold')
-            trace['decision'] = {k:decision[k] for k in ('action','confidence','news_sentiment','news_relevance')}
+            trace['decision'] = {k:decision[k] for k in ('action','confidence','news_sentiment','news_relevance','reason')}
             trace['decision'].update(filter_failures=failures, confidence_threshold=cfg['min_confidence'],
                 relevance_threshold=.6, quote={'price':quote[0],'as_of':quote[1]},
                 daily_reference_close=candidate.get('entry'), daily_reference_as_of=candidate.get('price_as_of'))

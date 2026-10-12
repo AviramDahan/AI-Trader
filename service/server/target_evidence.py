@@ -142,6 +142,8 @@ def persist_decision(conn, trace):
         allowed = {k:decision[k] for k in ('action','confidence','news_sentiment','news_relevance',
             'filter_failures','confidence_threshold','relevance_threshold','quote',
             'daily_reference_close','daily_reference_as_of') if k in decision}
+        from decision_explanation import public_reason
+        allowed['reason'] = public_reason(decision.get('reason'))
         allowed['observation_id'] = observation_id
         conn.execute("""INSERT INTO scanner_candidates(scan_id,ticker,company,stage,status,reason,metrics_json,created_at)
             VALUES(?,?,NULL,'ai_decision','observed',NULL,?,?)""",

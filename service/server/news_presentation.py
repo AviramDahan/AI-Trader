@@ -1,7 +1,7 @@
 """Public-news presentation only; never modify stored evidence or AI inputs."""
 import re
 
-OUTLET = r"(?:@(?:financialjuice|livesquaw)\b|Financial\s*Juice|Investing\.com|Yahoo(?:\s+Finance)?|PR\s*Newswire|GlobeNewswire|MarketBeat|Stocktwits|Barron['’]s|Quartz|Reuters|Bloomberg|CNBC|MarketWatch)"
+OUTLET = r"(?:@(?:financialjuice|livesquaw)\b|Financial\s*Juice|Investing\.com|Yahoo(?:\s+Finance)?|PR\s*Newswire|GlobeNewswire|MarketBeat|Stocktwits|Barron['’]s|Quartz|Reuters|Bloomberg|CNBC|MarketWatch|(?:The\s+)?Wall\s+Street\s+Journal|WSJ\b)"
 
 
 def _hide_outlet_wrappers(value):
@@ -31,4 +31,7 @@ def hide_relay_branding(value):
         line=re.sub(r'(?:ערוץ\s+)?'+relay,'דיווח',line,flags=re.I)
         line=re.sub(r'\s*\|\s*FJ\b','',line,flags=re.I)
         lines.append(re.sub(r'[ \t]{2,}',' ',line).strip())
-    return _hide_outlet_wrappers(re.sub(r'\n{3,}','\n\n','\n'.join(lines)).strip()).strip()
+    result = _hide_outlet_wrappers(re.sub(r'\n{3,}','\n\n','\n'.join(lines)).strip()).strip()
+    # Observed relay artifact, only at the start of an assertion. Never globally
+    # rewrite repeated words in quotes, subjects or the stored source evidence.
+    return re.sub(r'(?m)^דיווח\s+דיווח\s+כי\s+', 'לפי דיווח, ', result)

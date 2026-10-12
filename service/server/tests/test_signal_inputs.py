@@ -244,12 +244,14 @@ def test_decision_retained_once_allowlisted_and_not_prompt(db,monkeypatch):
     trace=final_ai.new_trace('synthetic','TEST',7)
     trace['decision']=dict(action='HOLD',confidence=.7,news_sentiment=0,news_relevance=.9,
         filter_failures=['ai_hold','ai_confidence_below_threshold'],confidence_threshold=.8,relevance_threshold=.6,
-        prompt='DO NOT RETAIN',reason='PRIVATE MODEL TEXT')
+        prompt='DO NOT RETAIN',reason='Synthetic evidence does not support entry.',
+        private_model_text='DO NOT RETAIN CHAIN OF THOUGHT')
     final_ai.persist(trace);final_ai.persist(trace)
     with database.get_db_connection() as c:
         rows=c.execute("SELECT metrics_json FROM scanner_candidates WHERE stage='ai_decision'").fetchall()
         assert len(rows)==1
-        assert 'DO NOT RETAIN' not in rows[0]['metrics_json'] and 'PRIVATE MODEL TEXT' not in rows[0]['metrics_json']
+        assert 'DO NOT RETAIN' not in rows[0]['metrics_json']
+        assert json.loads(rows[0]['metrics_json'])['reason']==trace['decision']['reason']
         assert json.loads(rows[0]['metrics_json'])['filter_failures']==trace['decision']['filter_failures']
 
 

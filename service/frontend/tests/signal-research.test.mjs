@@ -4,7 +4,7 @@ import { build } from 'esbuild'
 import { createRequire } from 'node:module'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 
 const result = await build({ entryPoints: ['src/SignalResearch.tsx'], bundle: true, write: false,
   platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react', 'react/jsx-runtime'],
@@ -85,4 +85,48 @@ assert.ok(cacheView({ status: 'stale_fallback' }).includes('נתונים היס�
 const styles = readFileSync('src/index.css', 'utf8')
 assert.match(styles, /\.signal-research \.scanner-table-wrap\s*\{[^}]*display:\s*block;[^}]*max-width:\s*100%;/)
 assert.ok(outcomes.includes('scanner-table-wrap') && outcomes.includes('Native'))
-console.log('Signal research and history rendering: 35 assertions passed')
+const breakout = render({ data: { ...data, rejection_stages: { targets: 1 },
+  records: [{ ...data.records[0], rejection: 'pre_entry_not_above_completed_high' }] } })
+assert.ok(/<small>[^<]*מחיר הכניסה אינו מעל השיא של 20 ימי המסחר שהושלמו/.test(breakout))
+assert.ok(breakout.includes('מבנה / יעד / RR'))
+const secRow = { ...data.records[0], sec_decision: { mode: 'paper', baseline_rank_score: .8,
+  enhanced_rank_score: .8, sec_adjustment: 0, evidence_status: 'UNKNOWN_NO_RETAINED_EVIDENCE' },
+  ai_decision: { action: 'HOLD', confidence: .75, news_relevance: .8, filter_failures: ['ai_hold'],
+    reason: '<script>untrusted</script> Synthetic explanation' } }
+const noSec = render({ data: { ...data, records: [secRow] } })
+assert.ok(noSec.includes('מצב הפעלת SEC') && noSec.includes('אין ראיית SEC שמורה מספקת'))
+assert.ok(!noSec.includes('ראיית SEC בהחלטה:'))
+assert.ok(noSec.includes('הסבר המודל, לא עובדה מאומתת') && noSec.includes('dir="auto"'))
+assert.ok(noSec.includes('&lt;script&gt;untrusted&lt;/script&gt;') && !noSec.includes('<script>untrusted'))
+const retainedSec = render({ data: { ...data, records: [{ ...secRow, sec_decision: {
+  ...secRow.sec_decision, evidence_status: 'RETAINED_EVIDENCE', ranking_changed_in_paper: false } }] } })
+assert.ok(retainedSec.includes('נשמרו תמונת מידע והפניות SEC בהחלטה') && retainedSec.includes('אין שינוי דירוג מתועד'))
+const adjustedSec = render({ data: { ...data, records: [{ ...secRow, sec_decision: {
+  ...secRow.sec_decision, evidence_status: 'RETAINED_EVIDENCE', ranking_changed_in_paper: true } }] } })
+assert.ok(adjustedSec.includes('הדירוג השתנה במסלול PAPER'))
+assert.ok(render({ data: referenceData }).includes('לא זמין: לא נשמר הסבר מתאים להצגה.'))
+assert.ok(cacheView({ missing_symbol_count: 1, missing_symbols: ['TEST'], requested_symbols: 518 }).includes('חוסר ללא אבחון מפורט נשאר לא ידוע'))
+const shortHistory = cacheView({ history_gap_details: { TEST: {
+  reason: 'insufficient_completed_history', completed_bars: 8, required_bars: 65 } } })
+assert.ok(shortHistory.includes('היסטוריה קצרה מדי לניתוח טכני') && shortHistory.includes('8/65'))
+console.log('Signal research, evidence, explanation and history rendering assertions passed')
+if (process.env.RESEARCH_PREVIEW_HTML) {
+  // Optional disposable visual-QA artifact. Real component/CSS, synthetic data;
+  // no app server, production connection, React effect, worker or AI request.
+  const preview = { ...data, counts: { ...data.counts, candidate_observations: 2, unique_tickers: 2,
+      target_pass: 1, ai_attempted: 1, ai_attempt_records: 1, ai_validated: 1 },
+    rejection_reasons: { pre_entry_not_above_completed_high: 1, ai_hold: 1 },
+    rejection_stages: { targets: 1, ai_filter: 1 }, quote_context: {}, records: [
+      { ...data.records[0], ticker: 'CHECK', company: 'מועמדת סינתטית שנפסלה', rejection: 'pre_entry_not_above_completed_high',
+        target_checks: [{ ...data.records[0].target_checks[0], rejection_reason: 'entry_not_above_completed_high',
+          geometry: { stop_rounded: 97 }, quote: { price: 100, as_of: '2026-10-07T14:00:00Z' },
+          source_inputs: { data_as_of: '2026-10-06', zones: [] } }] },
+      { ...secRow, ticker: 'TEST', company: 'מועמדת סינתטית בהמתנה', rejection: 'ai_hold', ai_attempts: 1,
+        target_checks: [{ ...data.records[0].target_checks[0], outcome: 'PASS',
+          geometry: { stop_rounded: 97, target_rounded: 106, nearest_resistance: { low: 106.5 } },
+          quote: { price: 100, as_of: '2026-10-07T14:00:00Z' }, source_inputs: { data_as_of: '2026-10-06', zones: [] },
+          accepted_levels: { stop: 97, active_target: 106, rr: [2] } }],
+        ai_decision: { ...secRow.ai_decision, reason: 'הראיות הסינתטיות אינן מספיקות לכניסה. TEST נשארת בהמתנה.' } }] }
+  writeFileSync(process.env.RESEARCH_PREVIEW_HTML,
+    `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Isolated research QA</title><style>${styles}</style></head><body><main style="padding:16px;max-width:1050px;margin:auto"><p>נתוני בדיקה סינתטיים בלבד; ללא חיבור למערכת.</p>${render({ data: preview })}${shortHistory}</main></body></html>`)
+}
