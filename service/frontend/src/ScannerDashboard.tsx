@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { API_ORIGIN, useLanguage } from './appShared'
-import { positionMove, unifiedSignals, activeTargetIndexes } from './signalPresentation'
+import { positionMove, unifiedSignals, activeTargetIndexes, entryRejectionCode, entryRejectionLabel } from './signalPresentation'
 import { SignalResearch } from './SignalResearch'
 import { HistoryCacheStatus } from './HistoryCacheStatus'
 import { SystemActivity } from './SystemActivity'
@@ -445,7 +445,7 @@ function SecSignalEvidence({ signal, he }: { signal: Record<string, any>, he: bo
   </details>
 }
 
-function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }) {
+export function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }) {
   const news = Array.isArray(signal.news_json) ? signal.news_json : []
   const basis = signal.confidence_basis || {}
   const plan = signal.technical_json?.target_plan
@@ -454,6 +454,8 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
   const activeTargets = activeTargetIndexes(signal)
   const statusLabels: Record<string, string> = he ? {ENTERED:'כניסה בוצעה', ACTIVE:'ממתין לכניסה', PENDING_ENTRY:'ממתין לכניסה', EXPIRED:'פג תוקף', CLOSED:'נסגר', RISK_BLOCKED:'נחסם בסיכון', DUPLICATE_BLOCKED:'כפילות נחסמה', BEARISH_ONLY:'איתות דובי', COMPLETED:'הושלם'} : {ENTERED:'Entry filled', ACTIVE:'Awaiting entry', PENDING_ENTRY:'Awaiting entry', EXPIRED:'Expired', CLOSED:'Closed', RISK_BLOCKED:'Risk blocked', DUPLICATE_BLOCKED:'Duplicate blocked', BEARISH_ONLY:'Bearish signal', COMPLETED:'Completed'}
   const horizon = he ? String(signal.time_horizon || '—').replace(/weeks?/gi, 'שבועות').replace(/days?/gi, 'ימים').replace(/hours?/gi, 'שעות') : signal.time_horizon
+  statusLabels.ENTRY_POLICY_REJECTED = he ? 'הכניסה לא עברה את בקרות הביצוע' : 'Entry failed execution checks'
+  statusLabels.RECOVERY_UNCERTAIN = he ? 'הביצוע חסום עד בירור אי־ודאות' : 'Execution blocked pending uncertainty review'
   const stamp = (value: any) => value ? new Date(value).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
   return <details className="scanner-signal-card signal-focused" id={`signal-${signal.id}`} onToggle={event => setOpened(event.currentTarget.open)}>
     <summary className="scanner-signal-summary">
@@ -462,6 +464,7 @@ function SignalCard({ signal, he }: { signal: Record<string, any>, he: boolean }
     </summary>
     <div className="scanner-signal-body">
       <em className="signal-status-label">{statusLabels[signal.status] || signal.status}</em>
+      {signal.status==='ENTRY_POLICY_REJECTED' && <p className="scanner-warning">{he ? 'סיבת פסילת הכניסה' : 'Entry rejection reason'}: {entryRejectionLabel(entryRejectionCode(signal),he)}</p>}
       {signal.policy_version && <p>{he ? 'זכאות הסיגנל: אושר; ביצוע דמה נפרד' : 'Signal qualified; paper execution is separate'} · {signal.execution_status} · {signal.position_activated ? (he ? 'כניסה בוצעה' : 'Entry filled') : (he ? 'הפוזיציה לא הופעלה' : 'Position not activated')}</p>}
       <SecSignalEvidence signal={signal} he={he} />
       <span className="signal-summary-levels">

@@ -1746,9 +1746,10 @@ def dashboard_payload() -> dict[str, Any]:
             saved_order = cur.fetchone()
             contract = _loads(saved_order['plan_json'], {}) if saved_order else {}
             window = contract.get('entry_execution') or {}
+            from entry_rejection import reason_code
             row.update(entry_eligible_from=window.get('entry_eligible_from'),
                        entry_execution_version=window.get('version'),
-                       entry_rejection_reason=contract.get('entry_rejection_reason'))
+                       entry_rejection_reason=reason_code(contract.get('entry_rejection_reason')))
         elif short_policy.is_short(plan):
             operational_strategy = 'single'
             row.update(policy_version=plan['policy_version'], active_target=plan['active_target'],

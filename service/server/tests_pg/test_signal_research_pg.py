@@ -5,6 +5,14 @@ import database
 import signal_research
 
 
+def test_pg_exact_execution_rejection_public_readback_is_linked_and_allowlisted(pg):
+    from test_recovery_holds import initialize_empty
+    from test_signal_research import seed_journal, test_exact_entry_rejection_is_linked_and_allowlisted_without_plan_leak
+    initialize_empty()
+    with database.get_db_connection() as c:seed_journal(c)
+    test_exact_entry_rejection_is_linked_and_allowlisted_without_plan_leak(None)
+
+
 def test_pg_report_readonly_repeated_journal_and_null_outcomes(pg):
     from test_recovery_holds import initialize_empty
     initialize_empty()

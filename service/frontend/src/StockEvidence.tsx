@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { activeTargetIndexes } from './signalPresentation'
+import { activeTargetIndexes, entryRejectionCode, entryRejectionLabel } from './signalPresentation'
 import { finite, LABELS, REASONS, recordTime, STATIONS, timestamp, type ActivityItem, type Row, type Station } from './systemActivityModel'
 import './stockEvidence.css'
 
@@ -21,6 +21,7 @@ const orderNames: Record<string, Pair> = {
   pending:['ממתינה לביצוע','Pending execution'], filled:['הפקודה סומנה כמבוצעת','Order marked filled'],
   expired:['פג תוקף','Expired'], cancelled:['בוטלה','Cancelled'], rejected:['נדחתה','Rejected'],
   recovery_uncertain:['חסומה עד בירור אי־ודאות','Blocked pending uncertainty review'],
+  invalid:['הפקודה לא עברה את בקרות הביצוע','Order failed execution checks'],
 }
 const reviewNames: Record<string, Pair> = {
   validated:['הפלט נבדק מבחינת המבנה — לא אישור כניסה','Response structure validated — not entry approval'],
@@ -58,6 +59,7 @@ export function StockEvidence({item:i,levels,he,records,onClose,stale=false}: {i
   const t=(a:string,b:string)=>he?a:b
   const r=i.record,s=i.signal,trade=i.trade,o=i.outcome
   const checks=rows(r?.target_checks),reviews=rows(r?.reviews),orders=rows(r?.orders),ai=r?.ai_decision,sec=r?.sec_decision
+  const entryReason=entryRejectionCode(s,orders)
   const {plan,entry,stop,activeTarget,rr}=levels
   const linkedSignals=rows(r?.signals)
   const validUntil=s?.valid_until ?? linkedSignals.find(v=>String(v.id)===String(s?.id))?.valid_until
@@ -76,7 +78,7 @@ export function StockEvidence({item:i,levels,he,records,onClose,stale=false}: {i
   const section=(stage:Station,summary:string,content:ReactNode)=><details className="evidence-stage" data-evidence-stage={stage} key={stage}><summary><span className="evidence-step" aria-hidden="true">{STATIONS.indexOf(stage)+1}</span><span><strong>{text(LABELS[stage],he)}</strong><small>{summary}</small></span><span className="evidence-disclosure" aria-hidden="true">+</span></summary><div className="evidence-stage-body">{content}</div></details>
   return <section className="system-journey stock-evidence" dir={he?'rtl':'ltr'} aria-label={t('מסלול המניה','Stock journey')}>
     <header><div><span className="system-eyebrow">{t('הסבר וראיות','EXPLANATION & EVIDENCE')}</span><h3><bdi>{i.ticker}</bdi></h3><p><bdi>{i.company || t('שם החברה לא נשמר','Company name not retained')}</bdi></p></div><button type="button" onClick={onClose}>{t('סגירה','Close')}</button></header>
-    <div className={`evidence-status state-${i.state}`}><strong>{status}</strong>{i.reason && <p className="evidence-main-reason">{evidenceReason(i.reason,he)}</p>}<p>{explanation}</p><small>{t('עדכון מתועד','Retained update')}: {at(i.at)} · {t('שעון ישראל','Israel time')}</small></div>
+    <div className={`evidence-status state-${i.state}`}><strong>{status}</strong>{i.reason && <p className="evidence-main-reason">{evidenceReason(i.reason,he)}</p>}{s?.status==='ENTRY_POLICY_REJECTED' && <p className="evidence-warning">{t('סיבת פסילת הכניסה','Entry rejection reason')}: {entryRejectionLabel(entryReason,he)}</p>}<p>{explanation}</p><small>{t('עדכון מתועד','Retained update')}: {at(i.at)} · {t('שעון ישראל','Israel time')}</small></div>
     {stale && <p className="evidence-warning">{t('העדכון מתעכב או אינו טרי. מוצג מידע שנשמר, לא פעילות חדשה.','Refresh delayed or stale. Retained information, not new activity.')}</p>}
     <section className="evidence-block"><h4>{t('כניסה, הגנה ויעד','Entry, protection & target')}</h4><dl className="evidence-grid">
       {field(t(trade?'כניסה שנשמרה':'כניסה / מחיר ייחוס',trade?'Retained entry':'Entry / reference'),num(entry))}
