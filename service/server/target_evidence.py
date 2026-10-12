@@ -98,6 +98,25 @@ def capture(candidate, action, price, quote_at, phase, policy, strategy, source,
         LOG.warning('target_evidence_capture_failed:%s', type(exc).__name__)
 
 
+def attach_review_context(trace, context):
+    """Freeze before provider IO, including failed attempts; no prompts/model output."""
+    try:
+        frozen = json.loads(json.dumps(context, allow_nan=False))
+        if len(json.dumps(frozen).encode()) > 8192:
+            raise ValueError('review_context_exceeds_8k')
+        check = trace.get('target_checks', {}).get('pre_ai')
+        if check is not None:
+            updated = dict(check, review_evidence_context=frozen)
+            if len(json.dumps(updated).encode()) > MAX_BYTES:
+                raise ValueError('target_observation_exceeds_64k')
+            trace['target_checks']['pre_ai'] = updated
+            return True
+    except Exception as exc:
+        # Telemetry failure must not become a new trading/admission rule.
+        LOG.warning('review_context_capture_failed:%s', type(exc).__name__)
+    return False
+
+
 def persist_checks(conn, trace):
     """Inside final_ai.persist's transaction, AFTER its unique review-row upsert.
 
