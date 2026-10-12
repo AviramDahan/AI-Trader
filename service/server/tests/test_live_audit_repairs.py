@@ -230,3 +230,12 @@ def test_successful_batch_refresh_also_explains_short_history(clock,tmp_path,mon
     assert meta['status']=='refreshed' and set(frames)==set(existing)
     assert meta['history_gap_details']['NEW']['completed_bars']==8
     assert meta['missing_symbols']==['NEW']
+
+
+def test_invalid_short_history_index_does_not_turn_diagnostics_into_scan_failure(clock,monkeypatch):
+    import stock_scanner as scanner
+    frame=history().iloc[-8:].copy()
+    frame.index=['invalid-date']*8
+    monkeypatch.setattr(scanner.yf,'download',lambda *_a,**_kw:frame)
+    result=scanner._download_history(['NEW'])
+    assert not result and result.gaps['NEW']['reason']=='invalid_provider_history_shape'

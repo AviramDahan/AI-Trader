@@ -334,7 +334,11 @@ def _download_history(symbols: list[str]) -> dict[str, pd.DataFrame]:
                 if len(frame) >= 65:
                     histories[symbol] = frame
                 else:
-                    completed = _completed_daily(frame)
+                    try:
+                        completed = _completed_daily(frame)
+                    except (TypeError, ValueError, OverflowError):
+                        histories.gaps[symbol] = dict(reason='invalid_provider_history_shape')
+                        continue  # Diagnostic parsing must not abort other symbols.
                     histories.gaps[symbol] = dict(reason='insufficient_completed_history' if len(completed) else 'provider_returned_no_rows',
                                                   completed_bars=len(completed), required_bars=65)
             except (KeyError, TypeError):
