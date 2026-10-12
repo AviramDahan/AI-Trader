@@ -195,7 +195,10 @@ def test_exact_entry_rejection_is_linked_and_allowlisted_without_plan_leak(db):
         c.execute("UPDATE scanner_orders SET status='invalid',plan_json=?", (json.dumps(dict(
             entry_rejection_reason='fill_rr_below_2',private='DO-NOT-EXPOSE',execution_settings=dict(secret='DO-NOT-EXPOSE'))),))
         c.commit()
-        c.execute('PRAGMA query_only=ON')
+        if database.using_postgres():
+            c.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        else:
+            c.execute('PRAGMA query_only=ON')
         result=research.report(c,48,NOW)
         case=next(r for r in result['records'] if r['scan_id']=='s2')
         assert case['signals'][0]['entry_rejection_reason']=='fill_rr_below_2'
