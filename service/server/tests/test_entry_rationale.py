@@ -143,6 +143,12 @@ def test_missing_new_fields_still_locks_original_valid_hold(transport,clock):
     assert transport.call_count==2
 
 
+def test_direct_validator_rejects_missing_fields_without_keyerror():
+    from review_rationale import Validator
+    validator=Validator({'relation':'unknown'},lambda v:scanner.validate_ai_decision(v,'BUY'))
+    with pytest.raises(final_ai.SchemaFailure,match='final_schema_fields'):validator(held())
+
+
 def test_cloud_schema_and_two_attempt_usage_remain_bounded(transport,clock,monkeypatch,db):
     monkeypatch.setenv('STOCK_SCANNER_FINAL_AI_PROVIDER','openrouter')
     monkeypatch.setenv('STOCK_SCANNER_FINAL_AI_MODEL','synthetic/model')

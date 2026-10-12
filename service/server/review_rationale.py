@@ -102,6 +102,7 @@ class Validator:
             dict(core,**self.locked)).repair_instruction
 
     def __call__(self,value):
+        value=validate_schema(value,self.response_schema)
         value=self.base_validator(value)  # Direction/score guards remain first.
         if self.locked is not None and any(value[k]!=v for k,v in self.locked.items()):
             raise ValueError('rationale_repair_changed_decision')
