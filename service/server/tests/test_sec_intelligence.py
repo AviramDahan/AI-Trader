@@ -377,7 +377,8 @@ def test_filing_text_is_untrusted_user_data_not_system_instructions(monkeypatch)
     def fake_review(messages, validator):
         seen["messages"] = messages
         return validator({"action": "HOLD", "confidence": .8, "news_sentiment": 0,
-                          "news_relevance": 0, "time_horizon": "1-4 weeks", "reason": "Insufficient evidence"})
+                          "news_relevance": 0, "time_horizon": "1-4 weeks", "reason": "Insufficient evidence",
+                          "entry_price_relation": "unknown", "entry_price_concern": "none"})
     monkeypatch.setattr(final_ai, "review", fake_review)
     candidate = {"ticker": "AAPL", "technical_direction": "BUY", "price_zones": [],
                  "sec_intelligence": {"coverage": "verified", "facts": [

@@ -145,5 +145,8 @@ def context(candidate,observed_at,expected_session):
         b['close_above_completed_20d_high']=(b['close']>high if finite(high,positive=True) else None)
     policy={k:plan[k] for k in ('policy_version','target_kind','source_data_at','completed_high',
                               'completed_high_sessions','minimum_rr') if k in plan}
-    return dict(version=VERSION,prepared_at=now.isoformat(),completed_daily=daily,
+    result=dict(version=VERSION,prepared_at=now.isoformat(),completed_daily=daily,
                 entry_quote=quote,intraday=intraday,target_policy=policy)
+    from review_rationale import price_facts
+    result['entry_price_facts']=price_facts(candidate,result)
+    return result
