@@ -167,7 +167,7 @@ def report(conn, hours=48, now=None):
     signals = _bounded(conn, '''SELECT id,scan_id,ticker,action,status,actual_entry,created_at,valid_until,legacy_unverified
         FROM scanner_signals WHERE agent_id=? AND created_at>=? AND created_at<=? ORDER BY id DESC''',
         (agent, since, until), clipped, 'signals')
-    orders = _bounded(conn, '''SELECT o.id,o.signal_id,o.purpose,o.status,o.created_at,o.valid_until
+    orders = _bounded(conn, '''SELECT o.id,o.signal_id,o.purpose,o.status,o.created_at,o.valid_until,o.plan_json
         FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
         WHERE s.agent_id=? AND s.created_at>=? AND s.created_at<=? ORDER BY o.id DESC''',
         (agent, since, until), clipped, 'orders')
@@ -224,13 +224,19 @@ def report(conn, hours=48, now=None):
                                      attempts=len(attempts), validated=any(a.get('result')=='validated' for a in attempts if isinstance(a,dict)),
                                      at=row['updated_at']))
     orders_by_signal = {}
+    from entry_rejection import order_reason
     for order in orders:
+        order['entry_rejection_reason'] = order_reason(order)
+        order.pop('plan_json', None)  # Never expose the raw execution/settings contract.
         orders_by_signal.setdefault(order['signal_id'], []).append(order)
     for s in signals:
         c = cases.get((s['scan_id'], s['ticker']))
         if c is not None:
-            c['signals'].append({k:s[k] for k in ('id','status','actual_entry','valid_until')})
-            c['orders'].extend({k:o[k] for k in ('id','status','purpose')} for o in orders_by_signal.get(s['id'], []))
+            linked_orders = orders_by_signal.get(s['id'], [])
+            entry = min((o for o in linked_orders if o['purpose']=='entry'), key=lambda o:o['id'], default=None)
+            c['signals'].append({k:s[k] for k in ('id','status','actual_entry','valid_until')} |
+                {'entry_rejection_reason':entry['entry_rejection_reason'] if entry and s['status']=='ENTRY_POLICY_REJECTED' else None})
+            c['orders'].extend({k:o[k] for k in ('id','signal_id','status','purpose','entry_rejection_reason')} for o in linked_orders)
     reasons, stages, quote_context, waits = Counter(), Counter(), Counter(), Counter()
     shapes = set()
     for c in cases.values():

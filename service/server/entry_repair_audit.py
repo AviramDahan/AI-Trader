@@ -28,22 +28,41 @@ def compare(check,high):
 
 def collect(conn,since):
     assert conn.execute('SHOW transaction_read_only').fetchone()['transaction_read_only']=='on'
-    evidence=conn.execute("""SELECT c.metrics_json,t.metrics_json technical FROM scanner_candidates c
-        LEFT JOIN LATERAL (SELECT metrics_json FROM scanner_candidates t
-          WHERE t.scan_id=c.scan_id AND t.ticker=c.ticker AND t.stage='technical' ORDER BY t.id LIMIT 1) t ON true
-        WHERE c.stage='target_check' AND c.created_at>=? ORDER BY c.id LIMIT 2001""",(since,)).fetchall()
+    # Filter before the cap: overnight NOT_EVALUATED observations must not
+    # crowd out the actual paired checks. Invalid JSON is explicit unknown.
+    # Two set-based reads replace one full technical-table scan per observation.
+    evidence=conn.execute("""WITH observed AS (
+        SELECT id,scan_id,ticker,metrics_json,
+          CASE WHEN pg_input_is_valid(metrics_json,'jsonb') THEN metrics_json::jsonb END body
+        FROM scanner_candidates WHERE stage='target_check' AND created_at>=?)
+        SELECT id,scan_id,ticker,metrics_json FROM observed
+        WHERE body IS NULL OR jsonb_typeof(body)<>'object' OR
+          (body->>'phase'='pre_ai' AND body->>'action'='BUY' AND body->'evaluated'='true'::jsonb)
+        ORDER BY id LIMIT 2001""",(since,)).fetchall()
+    pairs=sorted({(row['scan_id'],row['ticker']) for row in evidence[:2000]})
+    technical={}
+    if pairs:
+        values=','.join('(?,?)' for _ in pairs)
+        rows=conn.execute(f"""WITH wanted(scan_id,ticker) AS (VALUES {values})
+            SELECT DISTINCT ON (t.scan_id,t.ticker) t.scan_id,t.ticker,t.metrics_json
+            FROM scanner_candidates t JOIN wanted w ON w.scan_id=t.scan_id AND w.ticker=t.ticker
+            WHERE t.stage='technical' ORDER BY t.scan_id,t.ticker,t.id""",
+            tuple(value for pair in pairs for value in pair)).fetchall()
+        technical={(row['scan_id'],row['ticker']):row['metrics_json'] for row in rows}
     cohort=Counter();sources=set();rejections=Counter()
     for row in evidence[:2000]:
-        check=json.loads(row['metrics_json'])
-        if check.get('phase')!='pre_ai' or check.get('action')!='BUY' or not check.get('evaluated'):
-            continue
-        if check.get('rejection_reason'):rejections[check['rejection_reason']]+=1
         try:
-            technical=json.loads(row['technical'] or '{}')
-            high=check.get('source_inputs',{}).get('completed_high',technical.get('recent_high_20d'))
+            check=json.loads(row['metrics_json'])
+            if not isinstance(check,dict):raise ValueError('invalid_target_observation')
+            if check.get('phase')!='pre_ai' or check.get('action')!='BUY' or check.get('evaluated') is not True:
+                continue
+            if check.get('rejection_reason'):rejections[check['rejection_reason']]+=1
+            source=json.loads(technical.get((row['scan_id'],row['ticker'])) or '{}')
+            if not isinstance(source,dict):raise ValueError('invalid_technical_observation')
+            high=check.get('source_inputs',{}).get('completed_high',source.get('recent_high_20d'))
             cohort[compare(check,high)]+=1
             sources.add((check.get('ticker'),check.get('source_inputs_sha256')))
-        except (ValueError,KeyError,TypeError):
+        except (ValueError,KeyError,TypeError,AttributeError):
             cohort['NOT_VERIFIED_INVALID_OR_INCOMPLETE_EVIDENCE']+=1
     outcomes=[dict(r) for r in conn.execute("""SELECT s.status,count(*) count
         FROM scanner_signals s WHERE s.created_at>=?

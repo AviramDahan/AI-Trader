@@ -183,3 +183,22 @@ def test_real_entry_exit_readback_restart_and_no_report_mutations(db):
         assert r==again
         after={table:[dict(row) for row in c.execute('SELECT * FROM '+table)] for table in before}
         assert before==after
+
+
+def test_exact_entry_rejection_is_linked_and_allowlisted_without_plan_leak(db):
+    with patch('telegram_status.refresh_telegram_status_cards'), patch.object(scanner_engine,'now_z',return_value='2026-10-07T14:00:00Z'):
+        scanner_engine.initialize_runtime()
+        scanner_engine.record_signal(dict(ticker='TEST',company='Synthetic',action='BUY',entry=100,
+            stop_loss=97,confidence=.9,time_horizon='days',reason='synthetic',relevant_news=[]),{},{},{},'s2')
+    with database.get_db_connection() as c:
+        c.execute("UPDATE scanner_signals SET status='ENTRY_POLICY_REJECTED'")
+        c.execute("UPDATE scanner_orders SET status='invalid',plan_json=?", (json.dumps(dict(
+            entry_rejection_reason='fill_rr_below_2',private='DO-NOT-EXPOSE',execution_settings=dict(secret='DO-NOT-EXPOSE'))),))
+        c.commit()
+        c.execute('PRAGMA query_only=ON')
+        result=research.report(c,48,NOW)
+        case=next(r for r in result['records'] if r['scan_id']=='s2')
+        assert case['signals'][0]['entry_rejection_reason']=='fill_rr_below_2'
+        assert case['orders'][0]['entry_rejection_reason']=='fill_rr_below_2'
+        assert case['orders'][0]['signal_id']==case['signals'][0]['id']
+        assert 'DO-NOT-EXPOSE' not in json.dumps(result) and 'plan_json' not in json.dumps(result)
