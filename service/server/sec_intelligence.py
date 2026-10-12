@@ -333,8 +333,28 @@ def _processing_error_code(exc: Exception) -> str:
     return str(exc) if isinstance(exc, ValueError) and str(exc) in allowed else type(exc).__name__
 
 
+def _discovery_error_code(exc: Exception) -> str:
+    """Small safe vocabulary; never retain raw provider/exception text."""
+    known = {'submissions_issuer_mismatch', 'invalid_sec_continuation_file',
+             'invalid_sec_submissions_structure', 'sec_unexpected_not_modified',
+             'sec_document_too_large', 'sec_response_not_plain_200',
+             'sec_url_not_allowlisted', 'sec_host_path_mismatch',
+             'sec_query_not_allowlisted', 'sec_operator_contact_required'}
+    if isinstance(exc, ValueError) and str(exc) in known:
+        return str(exc)
+    classes = {'ValueError', 'JSONDecodeError', 'TypeError', 'RuntimeError',
+               'HTTPError', 'Timeout', 'ConnectionError', 'DeferredProviderError'}
+    return type(exc).__name__ if type(exc).__name__ in classes else 'unknown_discovery_error'
+
+
 def _rows(payload: dict, key: str):
+    if not isinstance(payload, dict):
+        raise ValueError('invalid_sec_submissions_structure')
+    if key == 'recent' and not isinstance(payload.get('filings', {}), dict):
+        raise ValueError('invalid_sec_submissions_structure')
     recent = payload.get("filings", {}).get(key, {}) if key == "recent" else payload
+    if not isinstance(recent, dict) or not isinstance(recent.get('accessionNumber', []), list):
+        raise ValueError('invalid_sec_submissions_structure')
     accessions = recent.get("accessionNumber") or []
     for index, accession in enumerate(accessions):
         yield {name: values[index] if index < len(values) else None
@@ -437,7 +457,7 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
     remaining = max(0, MAX_PENDING - pending)
     # Allocate bounded fair shares, not the entire queue to the first issuer.
     share = max(1, remaining // len(selected))
-    queued, errors, checked = 0, [], 0
+    queued, errors, checked, failure_details = 0, [], 0, []
     for cik in selected:
         if not remaining:
             errors.append("sec_filing_queue_capacity")
@@ -450,16 +470,21 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
         prior = dict(checkpoint) if checkpoint else {}
         if prior.get("retry_after") and _time(prior["retry_after"]) > now:
             continue
+        phase = 'recent_fetch'
         try:
             raw, meta = fetch(f"https://data.sec.gov/submissions/CIK{cik}.json", _user_agent(),
                               max_bytes=4_000_000,
                               etag="" if prior.get("catchup_active") else prior.get("etag") or "")
             if raw is not None:
+                phase = 'recent_metadata'
                 payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise ValueError('invalid_sec_submissions_structure')
                 if str(payload.get("cik", "")).zfill(10) != cik:
                     raise ValueError("submissions_issuer_mismatch")
                 symbols = sorted(t for t, issuer in verified.items() if issuer == cik)
                 recent = list(_rows(payload, "recent"))
+                phase = 'queue_recent'
                 for entry in recent:
                     queued += int(_queue_filing(entry, cik, symbols, snapshot_id, now, budget))
                 files = sorted((payload.get("filings") or {}).get("files") or [],
@@ -474,20 +499,31 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
                 if files and catchup and older_index < len(files):
                     item = files[older_index]
                     filename = str(item.get("name") or "")
-                    if re.fullmatch(r"CIK\d{10}-submissions-\d{3}\.json", filename):
-                        older_raw, _ = fetch("https://data.sec.gov/submissions/" + filename,
-                                             _user_agent(), max_bytes=4_000_000)
-                        older_rows = list(_rows(json.loads(older_raw), "older"))
-                        for entry in older_rows:
-                            queued += int(_queue_filing(entry, cik, symbols, snapshot_id, now, budget))
-                        if catchup_marker and any(r["accessionNumber"] == catchup_marker for r in older_rows):
-                            catchup = False
-                        # Initial import is bounded to the feature's 90-day
-                        # evidence horizon; older data is unknown, not negative.
-                        if (not catchup_marker and older_rows and
-                                min(str(r.get("acceptanceDateTime") or "")[:10] for r in older_rows)
-                                < (now-timedelta(days=90)).date().isoformat()):
-                            catchup = False
+                    phase = 'continuation_metadata'
+                    if not re.fullmatch(r'CIK' + cik + r'-submissions-\d{3}\.json', filename):
+                        raise ValueError('invalid_sec_continuation_file')
+                    phase = 'continuation_fetch'
+                    older_raw, _ = fetch("https://data.sec.gov/submissions/" + filename,
+                                         _user_agent(), max_bytes=4_000_000)
+                    if older_raw is None:
+                        raise ValueError('sec_unexpected_not_modified')
+                    older_rows = list(_rows(json.loads(older_raw), "older"))
+                    phase = 'queue_continuation'
+                    for entry in older_rows:
+                        queued += int(_queue_filing(entry, cik, symbols, snapshot_id, now, budget))
+                    if catchup_marker and any(r["accessionNumber"] == catchup_marker for r in older_rows):
+                        catchup = False
+                    # An unknown timestamp is NOT evidence of crossing the
+                    # existing 90-day initial-discovery boundary. Finish the
+                    # remaining official pages instead of comparing '' to a date.
+                    try:
+                        older_dates = [_time(r.get('acceptanceDateTime')) for r in older_rows]
+                    except (TypeError, ValueError, AttributeError):
+                        older_dates = []
+                    if (not catchup_marker and older_dates and
+                            all(t <= now+timedelta(minutes=10) for t in older_dates) and
+                            min(t.date() for t in older_dates) < (now-timedelta(days=90)).date()):
+                        catchup = False
                     older_index += 1
                     if older_index >= len(files):
                         catchup = False
@@ -505,6 +541,8 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
                          older_index if catchup else 0, int(catchup), catchup_marker if catchup else None))
                     conn.commit()
             else:
+                if prior.get('catchup_active') or not prior.get('last_checked_at'):
+                    raise ValueError('sec_unexpected_not_modified')
                 with get_db_connection() as conn:
                     conn.execute("UPDATE si_checkpoints SET last_checked_at=?,error_code=NULL WHERE issuer_cik=?",
                                  (_z(now), cik))
@@ -523,23 +561,33 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
         except Exception as exc:
             from retry_policy import DeferredProviderError
             delay = max(60, float(getattr(exc, "retry_after_seconds", 300))) if isinstance(exc, DeferredProviderError) else 300
+            code = _discovery_error_code(exc)
+            retry_at = _z(now + timedelta(seconds=delay))
+            detail = dict(issuer_cik=cik, phase=phase, error_code=code,
+                          attempted_at=_z(now), retry_after=retry_at)
+            if isinstance(exc, DeferredProviderError):
+                detail['http_status'] = exc.status
+            failure_details.append(detail)
             with get_db_connection() as conn:
                 conn.execute("""INSERT INTO si_checkpoints(issuer_cik,retry_after,error_code)
                     VALUES(?,?,?) ON CONFLICT(issuer_cik) DO UPDATE SET
                     retry_after=excluded.retry_after,error_code=excluded.error_code""",
-                    (cik, _z(now + timedelta(seconds=delay)), type(exc).__name__))
+                    (cik, retry_at, code))
                 conn.commit()
-            errors.append(type(exc).__name__)
+            errors.append(code)
         finally:
             remaining -= allowance - budget[0]
     with get_db_connection() as conn:
         conn.execute("""INSERT INTO scanner_settings(key,value_json,updated_at)
             VALUES('si_discovery_offset',?,?) ON CONFLICT(key) DO UPDATE SET
             value_json=excluded.value_json,updated_at=excluded.updated_at""",
-            (_json({"offset": (offset + checked) % len(ciks)}), _z(now)))
+            (_json({"offset": (offset + checked) % len(ciks),
+                    'last_cycle': {'at':_z(now), 'checked':checked, 'queued':queued,
+                                   'failure_details':failure_details[:8]}}), _z(now)))
         conn.commit()
     return {"status": "degraded" if errors else "ok", "queued": queued,
             "checked": checked, "issuer_count": len(ciks), "errors": list(dict.fromkeys(errors))[:5],
+            "failure_details": failure_details[:8],
             "universe_snapshot_id": snapshot_id}
 
 
@@ -1098,9 +1146,49 @@ def coverage_status() -> dict:
         alert_rows = conn.execute("""SELECT status,COUNT(*) n FROM scanner_telegram_outbox
             WHERE event_type='sec_intelligence' GROUP BY status""").fetchall()
         checkpoints = {r['issuer_cik']: dict(r) for r in conn.execute(
-            'SELECT issuer_cik,last_checked_at,catchup_active FROM si_checkpoints')}
+            'SELECT issuer_cik,last_checked_at,catchup_active,error_code,retry_after FROM si_checkpoints')}
+        oldest_pending = conn.execute("SELECT MIN(first_seen_at) at FROM si_filing_jobs WHERE status IN ('queued','retry')").fetchone()['at']
+        discovery = conn.execute("SELECT value_json FROM scanner_settings WHERE key='si_discovery_offset'").fetchone()
     members = json.loads(snapshot["members_json"]) if snapshot else {}
     issuers = {v['issuer_cik'] for v in members.values() if v['mapping']=='verified'}
+    try:
+        last_cycle = json.loads(discovery['value_json']).get('last_cycle', {}) if discovery else {}
+    except (TypeError, ValueError, AttributeError):
+        last_cycle = {}
+    # Only our small safe diagnostic vocabulary; never expose arbitrary old text.
+    diagnostic_errors = []
+    for cik in sorted(issuers):
+        cp = checkpoints.get(cik, {})
+        if cp.get('error_code'):
+            code = cp['error_code']
+            safe = _discovery_error_code(ValueError(code))
+            diagnostic_errors.append(dict(issuer_cik=cik, error_code=code if code in {'ValueError','JSONDecodeError','TypeError','RuntimeError','HTTPError','Timeout','ConnectionError','DeferredProviderError','unknown_discovery_error'} else safe,
+                retry_after=cp.get('retry_after'), last_successful_check_at=cp.get('last_checked_at')))
+    failure_details = []
+    phases = {'recent_fetch','recent_metadata','queue_recent','continuation_metadata',
+              'continuation_fetch','queue_continuation'}
+    cycle_failures = last_cycle.get('failure_details', []) if isinstance(last_cycle, dict) else []
+    cycle_failures = cycle_failures if isinstance(cycle_failures, list) else []
+    for item in cycle_failures[:8]:
+        if not isinstance(item, dict) or item.get('issuer_cik') not in issuers or item.get('phase') not in phases:
+            continue
+        code = item.get('error_code')
+        if not isinstance(code, str):
+            continue
+        safe_code = code if code in {'ValueError','JSONDecodeError','TypeError','RuntimeError','HTTPError','Timeout','ConnectionError','DeferredProviderError','unknown_discovery_error'} else _discovery_error_code(ValueError(code))
+        detail = dict(issuer_cik=item['issuer_cik'], phase=item['phase'], error_code=safe_code)
+        for key in ('attempted_at','retry_after'):
+            try:
+                detail[key] = _z(_time(item.get(key)))
+            except (TypeError, ValueError, AttributeError):
+                detail[key] = None
+        if item.get('http_status') in {403,429,500,502,503,504}:
+            detail['http_status'] = item['http_status']
+        failure_details.append(detail)
+    try:
+        cycle_at = _z(_time(last_cycle.get('at'))) if isinstance(last_cycle, dict) else None
+    except (TypeError, ValueError, AttributeError):
+        cycle_at = None
     return {"mode": mode(), "kill_switch": killed(), "universe_count": len(members),
             "mapped_count": sum(v["mapping"] == "verified" for v in members.values()),
             "universe_issuers": len(issuers),
@@ -1110,6 +1198,11 @@ def coverage_status() -> dict:
             "universe_observed_at": snapshot["observed_at"] if snapshot else None,
             "pending_filings": pending, "retrying_filings": retrying,
             "unsupported_filings": unsupported, "mapping_or_provider_errors": errors,
+            "oldest_pending_seen_at": oldest_pending,
+            "discovery_last_cycle_at": cycle_at,
+            "discovery_failure_details": failure_details,
+            "checkpoint_errors": diagnostic_errors[:10],
+            "checkpoint_error_details_clipped": len(diagnostic_errors)>10,
             "last_processed_at": last, "influenced_decisions": influenced,
             "public_sec_alerts": {row["status"]: row["n"] for row in alert_rows},
             "request_limit_per_second": 2, "policy_version": POLICY}

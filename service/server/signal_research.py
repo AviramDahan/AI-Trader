@@ -12,6 +12,7 @@ from time import monotonic
 
 from database import get_db_connection, using_postgres
 from scanner_engine import market_session_state, scanner_agent_id
+from decision_explanation import public_reason
 
 ROW_LIMIT = 5000
 CACHE_SECONDS = 60
@@ -47,6 +48,10 @@ def time(value):
 
 def reason_stage(reason):
     reason = (reason or '').removeprefix('pre_')
+    if reason in {'entry_not_above_completed_high', 'completed_high_unavailable',
+                  'breakout_requires_no_forward_zone', 'unsupported_breakout_policy',
+                  'breakout_policy_contract_mismatch', 'fill_no_longer_above_completed_high'}:
+        return 'targets'
     if reason in ('waiting_regular_session', 'post_waiting_regular_session'):
         return 'session_wait'
     if 'quote' in reason:
@@ -62,6 +67,18 @@ def reason_stage(reason):
     if any(word in reason for word in ('zone', 'resistance', 'rounded', 'stop', 'risk_reward', 'target', 'structure', 'pivot')):
         return 'targets'
     return 'other'
+
+
+def sec_evidence_view(row):
+    """Only retained decision-time evidence; current health cannot relabel history."""
+    try:
+        ids = json.loads(row.get('evidence_ids_json') or '[]')
+    except (TypeError, ValueError):
+        ids = []
+    ids = [v for v in ids if isinstance(v, str) and 0 < len(v) <= 180][:100] if isinstance(ids, list) else []
+    retained = bool(row.get('sec_snapshot_id') and ids)
+    return dict(evidence_ids=ids, evidence_status='RETAINED_EVIDENCE' if retained else 'UNKNOWN_NO_RETAINED_EVIDENCE',
+                ranking_changed_in_paper=retained and row.get('mode') == 'paper' and bool(number(row.get('sec_adjustment'))))
 
 
 def outcome(trade, fills, now=None):
@@ -158,7 +175,7 @@ def report(conn, hours=48, now=None):
         (since,until)).fetchone()['n']
     sec_decisions = _bounded(conn, '''SELECT scan_id,ticker,mode,baseline_rank_score,
         sec_adjustment,insider_adjustment,filing_adjustment,enhanced_rank_score,sec_snapshot_id,
-        review_baseline_score,review_enhanced_score,rejection_reason,decided_at
+        review_baseline_score,review_enhanced_score,evidence_ids_json,rejection_reason,decided_at
         FROM si_decisions WHERE decided_at>=? AND decided_at<=? ORDER BY decided_at DESC''',
         (since, until), clipped, 'sec_decisions')
     reviews = _bounded(conn, '''SELECT review_id,scan_id,ticker,result,reject_reason,attempts_json,updated_at
@@ -194,6 +211,7 @@ def report(conn, hours=48, now=None):
         elif row['stage'] == 'ai_decision':
             c['ai_decision'] = {k:data.get(k) for k in ('action','confidence','news_sentiment','news_relevance',
                 'filter_failures','confidence_threshold','relevance_threshold','quote','daily_reference_close','daily_reference_as_of')}
+            c['ai_decision']['reason'] = public_reason(data.get('reason'))
         elif row['stage'] == 'target_check':
             # Allowlist only: no prompts, news content, source-input hashes or model output.
             check = {k: data.get(k) for k in ('phase', 'policy_version', 'strategy', 'action',
@@ -216,6 +234,7 @@ def report(conn, hours=48, now=None):
                 'sec_adjustment','insider_adjustment','filing_adjustment',
                 'enhanced_rank_score','sec_snapshot_id','review_baseline_score','review_enhanced_score',
                 'rejection_reason','decided_at')}
+            c['sec_decision'].update(sec_evidence_view(row))
     for row in reviews:
         c = cases.get((row['scan_id'], row['ticker']))
         if c is not None:
