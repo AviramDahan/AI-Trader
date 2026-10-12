@@ -192,7 +192,9 @@ def test_actual_scanner_persists_input_before_ai_and_preserves_lifecycle(db,cloc
         if action=='ERROR':
             from ai_budget import BudgetUnavailable
             raise BudgetUnavailable('synthetic verification failure')
-        return validator(dict(held(),action=action,confidence=.91))
+        return validator(dict(held(),action=action,confidence=.91,
+            entry_price_relation=payload['review_evidence_context']['entry_price_facts']['relation'],
+            entry_price_concern='none'))
     transport=Mock(side_effect=model);monkeypatch.setattr(scanner.final_ai,'review',transport)
     result=scanner.run_scan();assert transport.call_count==1
     assert result['signals_published']==int(action=='BUY')

@@ -29,10 +29,11 @@ class SchemaFailure(ValueError):
     pass
 
 
-def validate_schema(value):
-    if not isinstance(value, dict) or set(value) != set(PROPERTIES):
+def validate_schema(value, schema=None):
+    properties=(schema or SCHEMA)['properties']
+    if not isinstance(value, dict) or set(value) != set(properties):
         raise SchemaFailure("final_schema_fields")
-    for key, rule in PROPERTIES.items():
+    for key, rule in properties.items():
         v = value[key]
         if rule["type"] == "number":
             if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not rule["minimum"] <= v <= rule["maximum"]:
@@ -101,12 +102,14 @@ def review(messages, validator):
         raise ValueError("final_ai_credentials_missing")
     timeout = min(300, max(20, int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))))
     trace = TRACE.get()
+    schema=getattr(validator,'response_schema',SCHEMA)
     for attempt in range(2):  # One shared budget: retry OR repair, never both.
         metrics = dict(retry_count=attempt, input_tokens=None, output_tokens=None,
                        estimated_cost=None, result="error", reject_reason=None)
         start = time.monotonic()
         retry = False
         body=None
+        value=None
         sent=False
         try:
             if provider == 'openrouter':
@@ -117,7 +120,7 @@ def review(messages, validator):
                 trace["ai_started"] = True
             if provider == "ollama":
                 response = requests.post(os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/") + "/api/chat",
-                    timeout=timeout, json={"model":model,"stream":False,"think":False,"format":SCHEMA,
+                    timeout=timeout, json={"model":model,"stream":False,"think":False,"format":schema,
                     "options":{"temperature":0,"num_predict":450},"messages":messages})
             else:
                 from ai_provider import request_options
@@ -127,7 +130,7 @@ def review(messages, validator):
                     json={"model":model,"messages":messages,"max_tokens":450,
                           "reasoning":{"enabled":False},
                           **request_options(),
-                          "response_format":{"type":"json_schema","json_schema":{"name":"stock_final_review","strict":True,"schema":SCHEMA}},
+                          "response_format":{"type":"json_schema","json_schema":{"name":"stock_final_review","strict":True,"schema":schema}},
                           "provider":{"require_parameters":True}})
             response.raise_for_status()
             body = response.json()
@@ -143,17 +146,24 @@ def review(messages, validator):
                 content = (body.get("choices") or [{}])[0].get("message",{}).get("content")
             if not isinstance(content,str):
                 raise SchemaFailure("final_schema_missing_content")
-            value = validate_schema(json.loads(content))
+            value = json.loads(content)
+            value = validate_schema(value,schema)
             # Semantic direction errors are NOT repaired into a different decision.
             result = validator(value)
             metrics["result"] = "validated"
             return result
         except (SchemaFailure, json.JSONDecodeError) as exc:
             metrics["reject_reason"] = type(exc).__name__
+            detail=getattr(exc,'entry_rationale_failure',None)
+            if detail is not None:metrics['entry_rationale_failure']=detail
             retry = attempt == 0
             if not retry:
                 raise
-            messages = messages + [{"role":"user","content":"The previous response was not valid for the required JSON schema. Return the complete schema object only. Do not change the decision to obtain acceptance; HOLD remains valid."}]
+            instruction=getattr(exc,'repair_instruction',None)
+            if instruction is None and hasattr(validator,'schema_repair_instruction'):
+                instruction=validator.schema_repair_instruction(value)
+            messages = messages + [{"role":"user","content":instruction or
+                "The previous response was not valid for the required JSON schema. Return the complete schema object only. Do not change the decision to obtain acceptance; HOLD remains valid."}]
         except requests.RequestException as exc:
             status = getattr(getattr(exc,"response",None),"status_code",None)
             metrics["reject_reason"] = "http_" + str(status) if status else type(exc).__name__
