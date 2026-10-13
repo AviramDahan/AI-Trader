@@ -770,7 +770,7 @@ def ai_review(candidate: dict[str, Any], news: list[dict[str, Any]], market_cont
                    "Current accession-backed structured SEC facts may substitute for a Yahoo article. "
                    "Do not invent numbers or imply that an insider P code proves an open-market purchase.")
     messages = [{"role": "system", "content": system},
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=True)}]
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(',', ':'), allow_nan=False)}]
     return final_ai.review(messages, Validator(facts,
         lambda value: validate_ai_decision(value, candidate["technical_direction"])))
 

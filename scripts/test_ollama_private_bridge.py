@@ -36,14 +36,21 @@ def main(image):
     processes=[];added_group=False;added_user=False
     class Gateway(http.server.BaseHTTPRequestHandler):
         def log_message(self,*args):pass
-        def respond(self,value):
-            raw=json.dumps(value).encode();self.send_response(200)
+        def respond(self,value,status=200):
+            raw=json.dumps(value).encode();self.send_response(status)
             self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
         def do_GET(self):
-            self.respond(dict(protocol=1,ready=True,model=MODEL,digest=DIGEST,capacity=1))
+            self.respond(dict(protocol=1,ready=True,model=MODEL,digest=DIGEST,capacity=1,
+                context_policy='no_truncate_no_shift_v1',context_length=8192))
         def do_POST(self):
             data=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             assert data['model']==MODEL and data['digest']==DIGEST
+            text=data['messages'][-1]['content']
+            if text.startswith('START-LARGE '):
+                assert text=='START-LARGE '+('x'*12000)+' END-LARGE', 'fixture evidence dropped'
+            if text=='synthetic-capacity-rejection':
+                self.respond({'reason':'local_context_capacity'},413)
+                return
             self.respond(dict(done=True,done_reason='stop',model=MODEL,model_digest=DIGEST,
                 message={'content':'{"ok":true}'},prompt_eval_count=5,eval_count=3))
     gateway=http.server.ThreadingHTTPServer(('127.0.0.1',0),Gateway)
@@ -97,7 +104,19 @@ def main(image):
             assert run(*ssh,user+'@127.0.0.1','true',check=False).returncode!=0,'shell unexpectedly allowed'
             denied=run(*ssh,'-NT','-R','127.0.0.1:17173:127.0.0.1:11434',user+'@127.0.0.1',check=False)
             assert denied.returncode!=0,'TCP forward unexpectedly allowed'
-            code="import ai_routing as r;assert r.ready();v,b=r.local_completion([{'role':'user','content':'fixture'}],{'type':'object'},16);assert v=={'ok':True};print('restricted private bridge PASS')"
+            code="""import ai_routing as r
+assert r.ready()
+v,b=r.local_completion([{'role':'user','content':'START-LARGE '+('x'*12000)+' END-LARGE'}],{'type':'object'},16)
+assert v=={'ok':True}
+route=r.Route('openrouter','synthetic-no-paid')
+try:r.local_completion([{'role':'user','content':'synthetic-capacity-rejection'}],{'type':'object'},16)
+except r.LocalCapacity as exc:route.fallback(r.fallback_reason(exc))
+else:raise AssertionError('capacity error was masked')
+assert route.fallback_reason=='local_context_capacity' and r._until==0 and r.ready()
+v,b=r.local_completion([{'role':'user','content':'small fixture after capacity rejection'}],{'type':'object'},16)
+assert v=={'ok':True}
+print('restricted private bridge large/full-input and capacity/small-followup PASS')
+"""
             run('docker','run','--rm','--network','none','--group-add','20001',
                 '-v',str(relay)+':/run/ollama:ro','-e','AI_INFERENCE_MODE=ollama_first',
                 '--entrypoint','python',image,'-c',code)

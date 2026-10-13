@@ -6,6 +6,7 @@ queue. Publish solely through a restricted outbound SSH Unix-socket tunnel.
 import argparse
 import http.server
 import json
+import re
 import threading
 import time
 
@@ -15,6 +16,52 @@ MODEL = 'gemma4:12b'
 DIGEST = '6114515d63c17436a7c0417d82820ac65ad643e2806c5a3c89cb62846436ed0b'
 MAX_BYTES = 131072
 CONTEXT = 8192
+CONTEXT_POLICY = 'no_truncate_no_shift_v1'
+
+
+class ContextCapacity(ValueError):
+    """A bounded request does not fit; not an unavailable GPU/tunnel."""
+
+
+def context_error(data):
+    error = data.get('error') if isinstance(data, dict) else None
+    # Native Gemma in the pinned runtime embeds the runner's structured 400
+    # error as a JSON string. Recognize only this validated capacity envelope;
+    # never classify arbitrary provider text/auth failures as a healthy GPU.
+    if isinstance(error, str) and error.startswith('{') and len(error) <= 2048:
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError('duplicate_error_key')
+                result[key] = value
+            return result
+        try:
+            wrapped = json.loads(error, object_pairs_hook=unique)
+            if not isinstance(wrapped, dict) or set(wrapped) != {'error'}:
+                return False
+            detail = wrapped['error']
+            if not isinstance(detail, dict) or set(detail) != {
+                    'code','message','type','n_prompt_tokens','n_ctx'}:
+                return False
+            if (type(detail['code']) is not int or detail['code'] != 400
+                    or detail['type'] != 'exceed_context_size_error'
+                    or type(detail['n_prompt_tokens']) is not int
+                    or type(detail['n_ctx']) is not int
+                    or detail['n_ctx'] != CONTEXT
+                    or detail['n_prompt_tokens'] <= detail['n_ctx']):
+                return False
+            match = re.fullmatch(r'request \((\d+) tokens\) exceeds the available context size '
+                                 r'\((\d+) tokens\), try increasing it', detail['message'])
+            return bool(match and (int(match[1]), int(match[2])) ==
+                        (detail['n_prompt_tokens'], detail['n_ctx']))
+        except (ValueError, TypeError, KeyError):
+            return False
+    return isinstance(error, str) and bool(re.fullmatch(
+        r'(?:the prompt is longer than the context length currently available to the model; '
+        r'shorten the prompt, adjust the context length in settings, or use a model with a longer context length'
+        r'|the input length exceeds the context length'
+        r'|request \(\d+ tokens\) exceeds the available context size \(\d+ tokens\), try increasing it)', error))
 
 
 class Inference:
@@ -23,21 +70,25 @@ class Inference:
         self.loaded = False
         self.at = 0.0
         self.version = None
+        self.guard_warmed = False
 
     def http(self, method, path, payload=None, timeout=2):
         with requests.Session() as session:
             session.trust_env = False
             with session.request(method, 'http://127.0.0.1:11434' + path, json=payload,
                                  timeout=(2, timeout), stream=True, allow_redirects=False) as r:
-                if r.status_code != 200:
-                    raise ValueError('ollama_unavailable')
                 raw = bytearray()
                 until = time.monotonic() + timeout
                 for part in r.iter_content(4096):
                     raw.extend(part)
                     if len(raw) > MAX_BYTES or time.monotonic() > until:
                         raise ValueError('ollama_response_limit')
-                return json.loads(raw)
+                data = json.loads(raw)
+                if path == '/api/chat' and context_error(data):
+                    raise ContextCapacity('local_context_capacity')
+                if r.status_code != 200 or isinstance(data, dict) and data.get('error'):
+                    raise ValueError('ollama_unavailable')
+                return data
 
     def refresh(self):
         """Metadata + bounded model preload; never warms while generating."""
@@ -52,12 +103,13 @@ class Inference:
             if tuple(int(v) for v in self.version.split('.')) < (0,34,4):
                 return
             models = self.http('GET', '/api/ps')['models']
-            if not any(m['name'] == MODEL and m['digest'] == DIGEST and m.get('context_length') == CONTEXT for m in models):
+            if not self.guard_warmed or not any(m['name'] == MODEL and m['digest'] == DIGEST and m.get('context_length') == CONTEXT for m in models):
                 self.http('POST', '/api/chat', dict(model=MODEL, messages=[], stream=False,
-                          keep_alive='20m', options={'num_ctx': CONTEXT}), timeout=90)
+                          keep_alive='20m', truncate=False, shift=False, options={'num_ctx': CONTEXT}), timeout=90)
             models = self.http('GET', '/api/ps')['models']
             self.loaded = any(m['name'] == MODEL and m['digest'] == DIGEST
                 and m.get('context_length') == CONTEXT for m in models)
+            self.guard_warmed = self.loaded
             self.at = time.monotonic()
         except Exception:
             self.loaded = False
@@ -66,7 +118,8 @@ class Inference:
 
     def health(self):
         return dict(protocol=1, model=MODEL, digest=DIGEST, ollama_version=self.version,
-            ready=self.loaded and time.monotonic()-self.at < 65 and not self.slot.locked(), capacity=1)
+            ready=self.loaded and time.monotonic()-self.at < 65 and not self.slot.locked(), capacity=1,
+            context_policy=CONTEXT_POLICY, context_length=CONTEXT)
 
     def complete(self, payload):
         if not isinstance(payload, dict) or set(payload) != {'protocol','model','digest','messages','schema','predict','request_id'}:
@@ -80,10 +133,12 @@ class Inference:
                 or any(not isinstance(m, dict) or set(m) != {'role','content'}
                     or m['role'] not in {'system','user','assistant'} or not isinstance(m['content'], str) for m in messages)):
             raise ValueError('invalid_messages')
-        # Conservative byte-token upper bound + template headroom. Never silently
-        # truncate verified evidence into an apparently successful local decision.
-        if sum(len(m['content'].encode())+128 for m in messages)+predict+512 > CONTEXT:
-            raise ValueError('local_context_capacity')
+        # Bytes are a transport limit, not a token count. The pinned runtime
+        # applies its actual tokenizer/template; BOTH history truncation and
+        # generation context shifting must be disabled. Oversize never drops
+        # facts, and a context-length/unfinished result is not a valid decision.
+        if len(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()) > MAX_BYTES:
+            raise ContextCapacity('local_context_capacity')
         if payload['schema'] is not None:
             import jsonschema
             jsonschema.Draft202012Validator.check_schema(payload['schema'])
@@ -96,6 +151,7 @@ class Inference:
                 raise ValueError('unapproved_model')
             result = self.http('POST', '/api/chat', dict(model=MODEL, messages=messages,
                 stream=False, think=False, keep_alive='20m', format=payload['schema'] or 'json',
+                truncate=False, shift=False,
                 options={'temperature': 0, 'num_ctx': CONTEXT, 'num_predict': predict}), timeout=45)
             # No response can execute a command. The cloud owns validation/action.
             tags = self.http('GET', '/api/tags')
@@ -136,6 +192,11 @@ def handler(engine):
                 self.connection.settimeout(3)
                 payload = json.loads(self.rfile.read(length))
                 self.respond(200, engine.complete(payload))
+            except ContextCapacity:
+                try:
+                    self.respond(413, {'reason': 'local_context_capacity'})
+                except OSError:
+                    pass
             except Exception:
                 try:
                     self.respond(503, {'reason': 'local_inference_unavailable'})

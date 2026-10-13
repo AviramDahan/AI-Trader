@@ -105,7 +105,7 @@ def review(messages, validator):
     timeout = min(300, max(20, int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))))
     trace = TRACE.get()
     schema=getattr(validator,'response_schema',SCHEMA)
-    from ai_routing import Route, local_completion, local_usage
+    from ai_routing import Route, local_completion, local_usage, fallback_reason
     route = Route(provider, model)
     for attempt in range(2):  # One shared budget: retry OR repair, never both.
         provider, model = route.provider, route.model
@@ -199,7 +199,9 @@ def review(messages, validator):
                 payment_rejected()
             metrics["reject_reason"] = "http_" + str(status) if status else type(exc).__name__
             retry = attempt == 0 and (isinstance(exc,(requests.Timeout,requests.ConnectionError)) or status in {408,429,500,502,503,504})
-            route.fallback('local_transport_failed')
+            reason=fallback_reason(exc)
+            if provider=='ollama_relay' and reason=='local_context_capacity':metrics['reject_reason']=reason
+            route.fallback(reason)
             if not retry:
                 raise
         except Exception as exc:
