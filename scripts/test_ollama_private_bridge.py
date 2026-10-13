@@ -20,14 +20,18 @@ DIGEST = '6114515d63c17436a7c0417d82820ac65ad643e2806c5a3c89cb62846436ed0b'
 
 
 def run(*args, check=True, **kwargs):
-    return subprocess.run(args, check=check, capture_output=True, text=True, timeout=30, **kwargs)
+    result = subprocess.run(args, check=False, capture_output=True, text=True, timeout=30, **kwargs)
+    if check and result.returncode:
+        # Disposable fixtures only; never print a key or model/user content.
+        raise RuntimeError('isolated command failed: '+str(args[0])+': '+result.stderr[-1200:])
+    return result
 
 
 def main(image):
     assert sys.platform == 'linux' and os.geteuid() == 0, 'disposable Linux/root required'
     sshd = shutil.which('sshd') or '/usr/sbin/sshd'
     user = 'inference-test-' + str(os.getpid())
-    group = 'inference-test-' + str(os.getpid())
+    group = 'inference-group-' + str(os.getpid())
     processes=[];added_group=False;added_user=False
     class Gateway(http.server.BaseHTTPRequestHandler):
         def log_message(self,*args):pass
@@ -62,12 +66,12 @@ def main(image):
             conf.write_text(f'Port {port}\nListenAddress 127.0.0.1\nHostKey {root}/host\n'
                 f'PidFile {root}/sshd.pid\nAuthorizedKeysFile {auth}\nAllowUsers {user}\n'
                 'UsePAM no\nStrictModes yes\n' + reviewed.replace('Match User ai-inference','Match User '+user))
+            Path('/run/sshd').mkdir(exist_ok=True)
             run(sshd,'-t','-f',str(conf))
             effective=run(sshd,'-T','-f',str(conf),'-C',f'user={user},host=localhost,addr=127.0.0.1').stdout
             for condition in ('allowtcpforwarding no','allowstreamlocalforwarding remote','maxsessions 0',
                 'passwordauthentication no','allowagentforwarding no','permittty no'):
                 assert condition in effective,condition
-            Path('/run/sshd').mkdir(exist_ok=True)
             daemon=subprocess.Popen([sshd,'-D','-e','-f',str(conf)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             processes.append(daemon)
             hosts=root/'known_hosts';hosts.write_text(f'[127.0.0.1]:{port} '+(root/'host.pub').read_text())

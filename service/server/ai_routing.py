@@ -54,15 +54,19 @@ def relay(method, path, payload=None, timeout=2):
     if body is not None and len(body) > MAX_BYTES:
         raise requests.ConnectionError('local_request_too_large')
     conn = UnixHTTP(endpoint, timeout=timeout)
+    active_socket = [None]
+    response = None
     def abort():
-        if conn.sock is not None:
-            try:conn.sock.shutdown(socket.SHUT_RDWR)
+        sock = active_socket[0] or conn.sock
+        if sock is not None:
+            try:sock.shutdown(socket.SHUT_RDWR)
             except OSError:pass
     timer = threading.Timer(timeout, abort)
     timer.daemon = True
     timer.start()
     try:
         conn.request(method, path, body=body, headers={'Content-Type': 'application/json'})
+        active_socket[0] = conn.sock
         response = conn.getresponse()
         raw = response.read(MAX_BYTES + 1)
         if response.status != 200 or len(raw) > MAX_BYTES:
@@ -72,6 +76,7 @@ def relay(method, path, payload=None, timeout=2):
         raise requests.ConnectionError('local_relay_unavailable') from None
     finally:
         timer.cancel()
+        if response is not None:response.close()
         conn.close()
 
 
@@ -83,9 +88,9 @@ def ready():
             return False
     try:
         state = relay('GET', '/health')
-        return (isinstance(state, dict) and state.get('protocol') == PROTOCOL
+        return (isinstance(state, dict) and type(state.get('protocol')) is int and state.get('protocol') == PROTOCOL
                 and state.get('ready') is True and state.get('model') == MODEL
-                and state.get('digest') == DIGEST and state.get('capacity') == 1)
+                and state.get('digest') == DIGEST and type(state.get('capacity')) is int and state.get('capacity') == 1)
     except requests.RequestException:
         failed()
         return False

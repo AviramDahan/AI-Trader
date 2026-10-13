@@ -71,7 +71,7 @@ class Inference:
     def complete(self, payload):
         if not isinstance(payload, dict) or set(payload) != {'protocol','model','digest','messages','schema','predict','request_id'}:
             raise ValueError('invalid_request')
-        if payload['protocol'] != 1 or payload['model'] != MODEL or payload['digest'] != DIGEST:
+        if type(payload['protocol']) is not int or payload['protocol'] != 1 or payload['model'] != MODEL or payload['digest'] != DIGEST:
             raise ValueError('unapproved_model')
         messages, predict = payload['messages'], payload['predict']
         if not isinstance(predict, int) or isinstance(predict, bool) or not 1 <= predict <= 2048:
