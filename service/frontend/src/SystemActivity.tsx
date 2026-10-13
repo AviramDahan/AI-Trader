@@ -5,13 +5,16 @@ import { activeTargetIndexes } from './signalPresentation'
 import { SystemNetwork } from './SystemNetwork'
 import { MiniAppActivity } from './MiniAppActivity'
 import { StockEvidence } from './StockEvidence'
-import { buildActivity, detectActivityUpdates, finite, LABELS, REASONS, STATE_LABELS, STATIONS, stockCount, timestamp, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
+import { ActivityExplanation } from './BlockerExplanation'
+import { activityStatusLabel, explainActivity } from './activityExplanation'
+import { reasonTitle } from './activityReasons'
+import { buildActivity, detectActivityUpdates, finite, LABELS, STATIONS, stockCount, timestamp, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
 import './systemActivity.css'
 
 const label = (names: [string, string], he: boolean) => names[he ? 0 : 1]
-const number = (v: unknown, suffix = '') => finite(v) == null ? '—' : `${finite(v)!.toFixed(2)}${suffix}`
+const number = (v: unknown, suffix = '', he = true) => finite(v) == null ? (he?'לא נשמר':'Not retained') : `${finite(v)!.toFixed(2)}${suffix}`
 const stamp = (v: unknown, he: boolean) => timestamp(v) ? new Date(String(v)).toLocaleString(he ? 'he-IL' : 'en-GB') : he ? 'לא מתועד' : 'Not recorded'
-const reason = (code: string | null | undefined, he: boolean) => code ? REASONS[code] ? label(REASONS[code], he) : code : he ? 'לא מתועד' : 'Not recorded'
+const reason = (code: string | null | undefined, he: boolean) => code ? reasonTitle(code,he) : he ? 'לא מתועד' : 'Not recorded'
 
 export function SystemActivity({ he, dashboard, dashboardError = '', miniApp = false }: { he: boolean, dashboard: Row | null, dashboardError?: string, miniApp?: boolean }) {
   const [research, setResearch] = useState<Row | null>(null)
@@ -185,8 +188,8 @@ export function StationFlow({he,items,station,selected,select,changed,stale,onDe
         </button>
         {!isOpen && <div className="system-flow-preview">
           {group.slice(0,3).map(i=><button type="button" key={i.id} className={`system-flow-chip state-${i.state} ${changed.has(i.id)?'system-arrival':''}`}
-            onClick={()=>select(i.id)} aria-label={`${t('פרטי מניה','Stock details')}: ${i.ticker} · ${label(STATE_LABELS[i.state],he)}`}>
-            <bdi>{i.ticker}</bdi><span>{i.reason==='allocation_blocked'?t('הקצאת דמה חסומה','Paper allocation blocked'):i.state==='recorded'?t('תיעוד בלבד','Recorded only'):label(STATE_LABELS[i.state],he)}</span></button>)}
+            onClick={()=>select(i.id)} aria-label={`${t('פרטי מניה','Stock details')}: ${i.ticker} · ${activityStatusLabel(i,he)}`}>
+            <bdi>{i.ticker}</bdi><span>{explainActivity(i,he).title}</span></button>)}
           {group.length>3 && <button className="system-flow-more" type="button" onClick={()=>setExpanded(v=>({...v,[s]:true}))}>{t(`עוד ${group.length-3}`,`${group.length-3} more`)}</button>}
           {!group.length && <span className="system-flow-empty">{t('אין מניות במדגם','No stocks in sample')}</span>}
         </div>}
@@ -196,7 +199,7 @@ export function StationFlow({he,items,station,selected,select,changed,stale,onDe
               <button type="button" className="system-stock-select" aria-pressed={selected===i.id} onClick={()=>select(selected===i.id?null:i.id)}>
                 <strong><bdi>{i.ticker}</bdi></strong>{selected===i.id ? <small>{t('פרטים פתוחים — לחצו לסגירה','Details open — select to close')}</small> : <>
                 <span><bdi>{i.company || t('שם חברה לא נשמר','Company name not retained')}</bdi></span>
-                <small>{label(STATE_LABELS[i.state],he)} · {i.kind==='position'?(i.trade?.legacy_position_id?'Legacy':'Native'):i.kind==='signal'?t('סיגנל','Signal'):t('סריקה','Scan')}</small>
+                <small>{activityStatusLabel(i,he)} · {i.kind==='position'?(i.trade?.legacy_position_id?'Legacy':'Native'):i.kind==='signal'?t('סיגנל','Signal'):t('סריקה','Scan')}</small>
                 {i.reason && <small className="system-stock-reason">{reason(i.reason,he)}</small>}
                 <time dateTime={i.at||undefined}>{stamp(i.at,he)}</time></>}
               </button>
@@ -231,12 +234,12 @@ export function StockFocus({item:i,he,stale,onClose,onDetails}:{item:ActivityIte
   return <aside className="system-focus-card" aria-label={t('תקציר המניה במיקוד','Focused stock summary')} onKeyDown={e=>{if(e.key==='Escape')onClose()}}>
     <header><div><span className="system-eyebrow">{t('מניה במיקוד','STOCK IN FOCUS')}</span><h3><bdi>{i.ticker}</bdi></h3><p><bdi>{i.company || t('שם חברה לא נשמר','Company name not retained')}</bdi></p></div>
       <button type="button" aria-label={t('בטל מיקוד','Clear focus')} onClick={onClose}>×</button></header>
-    <span className={`system-state-badge state-${i.state}`}>{label(STATE_LABELS[i.state],he)}</span>
+    <span className={`system-state-badge state-${i.state}`}>{activityStatusLabel(i,he)}</span>
     <p className="system-focus-station">{label(LABELS[i.station],he)}</p>
-    <p className="system-focus-reason">{i.reason?reason(i.reason,he):t('אין סיבה נוספת מתועדת. שלבים חסרים אינם אישור מעבר.','No further reason retained. Missing stages do not imply approval.')}</p>
+    <ActivityExplanation item={i} he={he}/>
     <time dateTime={i.at || undefined}>{t('זמן הראיה','Evidence time')}: <bdi>{stamp(i.at,he)}</bdi></time>
     {stale && <p className="scanner-warning">{t('מידע שמור — העדכון אינו זמין או אינו טרי.','Retained data — refresh unavailable or stale.')}</p>}
-    <dl className="system-focus-levels">{[[t(i.trade?'כניסה בפועל':'כניסה / ייחוס',i.trade?'Filled entry':'Entry / reference'),entry,''],[t('סטופ','Stop'),stop,''],[t('יעד פעיל','Active target'),activeTarget,''],[t('RR ברוטו','Gross RR'),rr,'R']].map(([name,v,suffix])=><div key={String(name)}><dt>{String(name)}</dt><dd><bdi>{number(v,String(suffix))}</bdi></dd></div>)}</dl>
+    <dl className="system-focus-levels">{[[t(i.trade?'כניסה בפועל':'כניסה / ייחוס',i.trade?'Filled entry':'Entry / reference'),entry,''],[t('סטופ','Stop'),stop,''],[t('יעד פעיל','Active target'),activeTarget,''],[t('RR ברוטו','Gross RR'),rr,'R']].map(([name,v,suffix])=><div key={String(name)}><dt>{String(name)}</dt><dd><bdi>{number(v,String(suffix),he)}</bdi></dd></div>)}</dl>
     <button className="system-focus-details" type="button" onClick={onDetails}>{t('הסבר וראיות','Explanation & evidence')} <span aria-hidden="true">↗</span></button>
   </aside>
 }

@@ -1,4 +1,19 @@
 /* Progressive disclosure, shared by website and Mini App; no decision logic. */
+.activity-explanation { margin-block:12px; padding:14px; border:1px solid var(--mini-line,var(--border-color)); border-radius:12px; background:#65ded308; font-size:14px; line-height:1.75; overflow-wrap:anywhere; }
+.activity-explanation-title { display:block; font-size:16px; line-height:1.6; }
+.activity-explanation p { margin:8px 0; }
+.activity-reason-facts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; padding-block:10px; margin:0; }
+.activity-reason-facts dt { font-size:12px; color:var(--mini-muted,var(--text-secondary)); }
+.activity-reason-facts dd { margin:4px 0 0; font-weight:650; font-size:16px; }
+.activity-extra-reasons { padding-inline-start:20px; margin-block:12px; }
+.activity-extra-reasons li { margin-block:10px; }
+.activity-extra-reasons p { font-size:13px; }
+.activity-next { padding-top:10px; border-top:1px solid var(--mini-line,var(--border-color)); }
+.activity-next strong,.activity-next span { display:block; }
+.activity-next span { color:var(--mini-muted,var(--text-secondary)); font-size:13px; margin-top:5px; }
+.activity-model-explanation { border-inline-start:2px solid var(--mini-accent,var(--system-accent)); padding-inline-start:12px; margin-block:12px; }
+.activity-model-explanation blockquote,.evidence-model-reason { margin:8px 0; white-space:pre-line; overflow-wrap:anywhere; unicode-bidi:plaintext; line-height:1.75; }
+.activity-model-explanation small { display:block; color:var(--mini-muted,var(--text-secondary)); font-size:12px; }
 .stock-evidence { --ev-panel:var(--mini-panel,var(--bg-secondary)); --ev-line:var(--mini-line,var(--border-color)); --ev-muted:var(--mini-muted,var(--text-secondary)); --ev-accent:var(--mini-accent,var(--system-accent)); color:var(--mini-text,var(--text-primary)); font-size:15px; line-height:1.65; min-width:0; }
 .stock-evidence > header { margin-bottom:16px; }
 .stock-evidence > header h3 { font-size:25px; margin:4px 0; }

@@ -1,4 +1,5 @@
 /** Read-only projection of retained evidence. Never synthesize a passed stage or fill. */
+import { reasonDefinition } from './activityReasons'
 export type Row = Record<string, any>
 export const STATIONS = ['technical', 'targets', 'evidence', 'ai', 'signal', 'order', 'position', 'exit'] as const
 export type Station = typeof STATIONS[number]
@@ -33,7 +34,7 @@ export function rejectionStation(r: Row): Station {
 }
 export function candidateItem(r: Row): ActivityItem {
   const attempts = finite(r.ai_attempts) || 0
-  const wait = r.rejection_stage === 'session_wait' || /waiting_regular_session|cooldown/.test(r.rejection || '')
+  const wait = r.rejection_stage === 'session_wait' || !!r.rejection && reasonDefinition(r.rejection).kind === 'wait'
   return { id: `scan:${r.scan_id}:${r.ticker}`, ticker: r.ticker, company: r.company || '', kind: 'candidate',
     station: r.rejection ? rejectionStation(r) : r.ai_decision || attempts > 0 ? 'ai' : (r.target_checks || []).length ? 'targets' : 'technical',
     state: wait ? 'waiting' : r.rejection ? 'blocked' : 'recorded', at: recordTime(r), reason: r.rejection || null, record: r }
@@ -67,18 +68,20 @@ export function buildActivity(research: Row | null, dashboard: Row | null): Acti
     if (tradeSignals.has(String(s.id))) continue
     const r = records.find(v => v.signals?.some((v: Row) => String(v.id) === String(s.id)))
     if (r) linked.add(`${r.scan_id}:${r.ticker}`)
-    const orders: Row[] = (r?.orders || []).filter((o: Row) => o.purpose === 'entry')
+    const orders: Row[] = (r?.orders || []).filter((o: Row) => o.purpose === 'entry' &&
+      o.signal_id != null && String(o.signal_id) === String(s.id))
     const uncertain = orders.some(o => o.status === 'recovery_uncertain') || s.status === 'RECOVERY_UNCERTAIN'
     const pending = orders.some(o => o.status === 'pending')
     const expired = ['EXPIRED', 'CANCELLED', 'REJECTED', 'CLOSED', 'COMPLETED'].includes(s.status)
-    const blocked = ['RISK_BLOCKED', 'DUPLICATE_BLOCKED', 'ENTRY_POLICY_REJECTED'].includes(s.status)
+    const invalidOrder = !expired && orders.some(o=>o.status==='invalid'||o.status==='risk_rejected')
+    const blocked = invalidOrder || ['RISK_BLOCKED', 'DUPLICATE_BLOCKED', 'ENTRY_POLICY_REJECTED'].includes(s.status)
     // Actual_entry alone without a linked trade is not a proven current position.
     const unlinkedFill = s.actual_entry != null || orders.some(o => o.status === 'filled')
     items.push({ id: `signal:${s.id}`, ticker: s.ticker, company: s.company || r?.company || '',
       station: uncertain || pending || orders.length ? 'order' : 'signal',
       state: uncertain || unlinkedFill ? 'uncertain' : blocked ? 'blocked' : expired ? 'closed' : 'waiting',
       at: newestTime([s.updated_at, s.created_at, recordTime(r || {})]),
-      reason: uncertain ? 'recovery_uncertain' : unlinkedFill ? 'unlinked_fill' : s.status === 'RISK_BLOCKED' ? 'allocation_blocked' : blocked || expired ? s.status : null,
+      reason: uncertain ? 'recovery_uncertain' : unlinkedFill ? 'unlinked_fill' : s.status === 'RISK_BLOCKED' ? 'allocation_blocked' : invalidOrder && s.status==='PENDING_ENTRY' ? 'entry_order_invalid' : blocked || expired ? s.status : null,
       kind: 'signal', signal: s, record: r })
   }
   // One latest retained scan per ticker; repeated scans remain separately accessible in detail.
@@ -117,7 +120,7 @@ export function detectActivityUpdates(previous: ActivityItem[] | null, current: 
 export const LABELS: Record<Station, [string, string]> = {
   technical: ['סריקה וטכני', 'Scan & technical'], targets: ['יעדים ו־RR', 'Targets & RR'],
   evidence: ['חדשות ו־SEC', 'News & SEC'], ai: ['סקירת AI', 'AI review'],
-  signal: ['סיגנל שנשמר', 'Retained signal'], order: ['פקודת דמה', 'Paper order'],
+  signal: ['סיגנל שנשמר', 'Retained signal'], order: ['ביצוע הדמה', 'Paper execution'],
   position: ['פוזיציה פעילה', 'Open position'], exit: ['יציאה ותוצאה', 'Exit & outcome'],
 }
 export const STATE_LABELS: Record<ActivityItem['state'], [string, string]> = {

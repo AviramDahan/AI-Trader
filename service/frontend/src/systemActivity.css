@@ -235,6 +235,12 @@
 .system-state-badge.state-blocked { color: #ffadb4; border-color: #fb718555; background: #fb71850b; }
 .system-state-badge.state-waiting, .system-state-badge.state-uncertain { color: #ffe09b; border-color: #fbbf2455; background: #fbbf240b; }
 .system-state-badge.state-open { color: #b4ffe6; border-color: #7ee5cc55; background: #7ee5cc0b; }
+/* Retained-state labels must remain readable on light phone sheets too. */
+[data-theme='light'] .system-state-badge { color:#50677a; }
+[data-theme='light'] .system-state-badge.state-blocked { color:#aa253b; }
+[data-theme='light'] .system-state-badge.state-waiting,
+[data-theme='light'] .system-state-badge.state-uncertain { color:#755006; }
+[data-theme='light'] .system-state-badge.state-open { color:#086549; }
 .system-focus-station { font-size: 15px; font-weight: 600; margin: 16px 0 8px; }
 .system-focus-reason { font-size: 13px; color: #b4c5d0; line-height: 1.7; margin: 0 0 12px; }
 .system-focus-card time { font-size: 11px; line-height: 1.6; color: #99aebc; }
@@ -326,6 +332,9 @@
 .system-flow-chip.state-blocked span { color: #ffadb4; }
 .system-flow-chip.state-waiting, .system-flow-chip.state-uncertain { border-inline-start: 3px solid #fbbf24; }
 .system-flow-chip.state-waiting span, .system-flow-chip.state-uncertain span { color: #ffe09b; }
+[data-theme='light'] .system-flow-chip.state-blocked span { color:#aa253b; }
+[data-theme='light'] .system-flow-chip.state-waiting span,
+[data-theme='light'] .system-flow-chip.state-uncertain span { color:#755006; }
 .system-flow-chip.state-open { border-inline-start: 3px solid #7ee5cc; }
 .system-flow-chip.state-open span { color: #a8f7da; }
 .system-flow-more { min-height: 44px; padding: 8px 12px; background: transparent; color: #a8c8bb; font: inherit; font-size: 12px; border: 1px dashed #7ee5cc33; border-radius: 9px; cursor: pointer; }

@@ -33,6 +33,14 @@ def test_pg_report_readonly_repeated_journal_and_null_outcomes(pg):
         assert c.execute('SELECT count(*) n FROM scanner_orders').fetchone()['n']==0
 
 
+def test_pg_retained_requirements_are_allowlisted_and_read_only(pg):
+    from test_recovery_holds import initialize_empty
+    from test_signal_research import seed_journal,test_retained_target_requirements_public_readback_never_exports_private_source
+    initialize_empty()
+    with database.get_db_connection() as c:seed_journal(c)
+    test_retained_target_requirements_public_readback_never_exports_private_source(None)
+
+
 def test_pg_linked_fills_and_cohorts_match_full_application_accounting(pg):
     from unittest.mock import patch
     from test_recovery_holds import initialize_empty

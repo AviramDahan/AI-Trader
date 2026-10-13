@@ -216,9 +216,10 @@ def report(conn, hours=48, now=None):
             # Allowlist only: no prompts, news content, source-input hashes or model output.
             check = {k: data.get(k) for k in ('phase', 'policy_version', 'strategy', 'action',
                 'observed_at', 'decided_at', 'outcome', 'rejection_reason', 'rejection_detail',
-                'quote', 'geometry', 'accepted_levels', 'evidence_gap', 'source_inputs', 'source_observed_at')}
+                'quote', 'geometry', 'accepted_levels', 'evidence_gap', 'source_inputs', 'source_observed_at', 'minimum_rr')}
             if check['source_inputs']:
-                check['source_inputs'] = {k: check['source_inputs'].get(k) for k in ('atr', 'data_as_of', 'zones')}
+                check['source_inputs'] = {k: check['source_inputs'].get(k) for k in (
+                    'atr', 'data_as_of', 'zones', 'completed_high', 'completed_high_sessions')}
             c['target_checks'].append(check)
             c['direction'] = c['direction'] or data.get('action')
     for row in technical:

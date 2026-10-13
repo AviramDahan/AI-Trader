@@ -260,7 +260,7 @@ def signals_status_messages() -> list[str]:
                 _rtl(return_text),
                 _rtl(f"סטופ: {_ltr(stop_text)}"),
                 _rtl(f"יעד: {_ltr(target_text)}"),
-                _rtl(f"רמת ביטחון: {_ltr(confidence_text)}"),
+                _rtl(f"ציון מודל לא־מכויל: {_ltr(confidence_text)}"),
                 _rtl(f"טווח זמן: {horizon}"),
             ))
         )
@@ -285,9 +285,10 @@ def signals_status_messages() -> list[str]:
     for index, chunk in enumerate(chunks, 1):
         page_label = _rtl(f"עמוד {_ltr(index)} מתוך {_ltr(page_count)}") if page_count > 1 else ""
         message = "\n\n".join(value for value in (
-            _rtl(f"📡 {SCANNER_DISPLAY_NAME_HE} — המשתמש הראשי והיחיד"),
+            _rtl('📡 פוזיציות דמה פעילות'),
             page_label,
             _rtl("⚠️ מסחר מדומה בלבד. זו תמונת מצב, לא המלצה או פקודת מסחר."),
+            _rtl('כאן מוצגות רק פוזיציות שנפתחה בהן כניסה. פקודות ממתינות אינן פוזיציות פעילות.'),
             _rtl(f"סה״כ פוזיציות פתוחות: {_ltr(len(trades))}"),
             separator.join(chunk),
             _rtl(f"עודכן: {_ltr(updated)} (שעון ישראל)"),

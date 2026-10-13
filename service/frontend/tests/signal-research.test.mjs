@@ -59,7 +59,7 @@ assert.ok(/<small>[^<]*מרווח ההתנגדות משאיר את היעד בכ
 assert.ok(!invalidSummary.includes('רמות לא תקינות אחרי עיגול'))
 const unknownDetail = render({ data: { ...referenceData, records: [{ ...referenceData.records[0],
   rejection: 'pre_invalid_rounded_levels', target_checks: [{ ...referenceData.records[0].target_checks[0], rejection_detail: ['unknown_future_code'] }] }] } })
-assert.ok(unknownDetail.includes('רמות יעד/סטופ אינן תקינות'))
+assert.ok(unknownDetail.includes('רמות אינן תקינות לאחר עיגול'))
 for (const reason of ['pre_insufficient_confirmed_price_zones','pre_price_structure_fails_risk_reward']) {
   const labels = render({ data: { ...data, records: [{ ...data.records[0], rejection: reason }] } })
   assert.ok(!new RegExp(`<small>[^<]*${reason}`).test(labels))
@@ -87,7 +87,7 @@ assert.match(styles, /\.signal-research \.scanner-table-wrap\s*\{[^}]*display:\s
 assert.ok(outcomes.includes('scanner-table-wrap') && outcomes.includes('Native'))
 const breakout = render({ data: { ...data, rejection_stages: { targets: 1 },
   records: [{ ...data.records[0], rejection: 'pre_entry_not_above_completed_high' }] } })
-assert.ok(/<small>[^<]*מחיר הכניסה אינו מעל השיא של 20 ימי המסחר שהושלמו/.test(breakout))
+assert.ok(/<small>[^<]*מחיר הכניסה אינו מעל שיא 20 הסשנים שהושלמו/.test(breakout))
 assert.ok(breakout.includes('מבנה / יעד / RR'))
 const secRow = { ...data.records[0], sec_decision: { mode: 'paper', baseline_rank_score: .8,
   enhanced_rank_score: .8, sec_adjustment: 0, evidence_status: 'UNKNOWN_NO_RETAINED_EVIDENCE' },
