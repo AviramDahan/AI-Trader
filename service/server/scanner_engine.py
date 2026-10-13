@@ -1222,8 +1222,9 @@ def ingest_market_news() -> int:
 def _ollama_json(system: str, payload: Any, predict: int = 1000, schema: dict | None = None, model: str | None = None, task: str = 'news') -> Any:
     if os.getenv("AI_TRADER_CLOUD") == "true" or os.getenv("AI_PROVIDER") == "openrouter":
         from ai_provider import json_completion
-        value = json_completion(system, payload, predict=predict, schema=schema, task=task)
-        _service("ollama", "ok", "OpenRouter structured response succeeded", success=True)
+        usage = {}
+        value = json_completion(system, payload, predict=predict, schema=schema, task=task, usage_sink=usage)
+        _service("ollama", "ok", "Structured inference succeeded: " + usage.get('provider','openrouter'), success=True)
         return value
     base = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
     model = model or os.getenv("OLLAMA_MODEL", "qwen3.5:9b-q4_K_M")

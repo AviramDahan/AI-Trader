@@ -7,9 +7,10 @@ from datetime import datetime, timezone
 from admin_messages import timestamped
 
 STAGES={'source_analysis','quality_review','editorial_repair','repair_review',
-        'schema_repair:source_analysis','schema_repair:quality_review'}
+        'schema_repair:source_analysis','schema_repair:quality_review',
+        'local_fallback:source_analysis','local_fallback:quality_review'}
 REASONS={'invalid_json','schema_validation_failed','invalid_response_structure',
-         'ai_object_required','completion_failed','ai_output_truncated'}
+         'ai_object_required','completion_failed','ai_output_truncated','local_transport_failed'}
 CHECKS={'faithful','fluent_hebrew','no_unsupported_claims','numbers_grounded',
         'terminology_grounded','hebrew_present','valid_duplicate_reference'}
 
@@ -20,7 +21,10 @@ def message(status,error,calls):
     if status=='interrupted_unknown':
         result='העיבוד נקטע; התוצאה אינה ידועה ונדרשת בדיקה. אין הרצה חוזרת אוטומטית.'
     elif status=='done':
-        result='התאוששות: כשל הפורמט תוקן; הניתוח ובקרת האיכות הושלמו.\nאין בכך אישור פרסום — עדיין חלים כללי הניתוב והרלוונטיות.'
+        result=('התאוששות: העיבוד המקומי לא הושלם; מסלול הגיבוי ובקרת האיכות הושלמו.'
+                if any(r.get('stage','').startswith('local_fallback:') for r in calls) else
+                'התאוששות: כשל הפורמט תוקן; הניתוח ובקרת האיכות הושלמו.')
+        result+='\nאין בכך אישור פרסום — עדיין חלים כללי הניתוב והרלוונטיות.'
     elif str(error or '').startswith('news_quality_rejected:'):
         checks=[v for v in error.split(':',1)[1].split(',') if v in CHECKS]
         result=('תיקון הפורמט הצליח, אך הידיעה נדחתה בבקרת האיכות.' if schema_fixed else 'הידיעה נדחתה בבקרת האיכות.')

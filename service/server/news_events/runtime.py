@@ -133,7 +133,7 @@ def completion(stage,system,payload,schema):
     token=CURRENT.set(dict(event_id=context['canonical_event_id'],version=context['evidence_version'],stage=stage,final_alert_owner=True))
     try:
         value=json_completion(system,payload,schema=schema,task='news',max_attempts=1,news_json_wrapping=True,structured_news=True,
-            usage_sink=usage,repair=stage in {'editorial_repair','repair_review'} or stage.startswith('schema_repair:'))
+            usage_sink=usage,repair=stage in {'editorial_repair','repair_review'} or stage.startswith(('schema_repair:','local_fallback:')))
     except Exception as exc:
         exc.canonical_usage=usage
         raise
@@ -142,7 +142,7 @@ def completion(stage,system,payload,schema):
 
 
 def analyze_jobs(at=None):
-    from ai_budget import check
+    from ai_routing import check_available as check
     from scanner_engine import set_service_status
     from .analysis import CanonicalAnalyzer
     from .evidence import SECEvidence

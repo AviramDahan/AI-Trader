@@ -1,4 +1,4 @@
-"""Shared cloud transport. No local fallback, no database transaction over IO."""
+"""Shared bounded inference transport; cloud-only remains the safe default."""
 import json
 import os
 import time
@@ -42,24 +42,34 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
             raise ValueError('invalid_structured_news_contract')
         from news_structured_envelope import request_contract
         contract = request_contract(schema)
+    from ai_routing import Route, local_completion, local_usage, native_messages
+    route = Route('openrouter', model)
     for attempt in range(max_attempts):
         from ai_budget import check, acquire_request_slot
-        check()  # Outside repair handling: never retry a blocked budget.
-        acquire_request_slot()
+        if route.provider == 'openrouter':
+            check()  # Outside repair handling: never retry a blocked budget.
+            acquire_request_slot()
         started=time.monotonic()
         body=None
         success=False
         failure='request_or_validation_failed'
         notify_failure=True
+        attempt_route = route.provenance()
         try:
-            response = requests.post("https://openrouter.ai/api/v1/chat/completions",
+            if route.provider == 'ollama_relay':
+                value, body = local_completion(native_messages(messages, structured_news), schema, predict)
+                if usage_sink is not None:usage_sink['json_normalization']='ollama_strict_schema'
+            else:
+                response = requests.post("https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": "Bearer " + key},
                 timeout=(10, min(180, max(10, int(os.getenv("AI_TIMEOUT_SECONDS", "120"))))),
                 json={"model": model, "messages": messages, **request_options(),
                       "max_tokens": predict, **contract})
-            response.raise_for_status()
-            body = response.json()
-            if structured_news:
+                response.raise_for_status()
+                body = response.json()
+            if route.provider == 'ollama_relay':
+                pass  # Exactly one strict object, with the unchanged schema.
+            elif structured_news:
                 from news_structured_envelope import result
                 value = result(body, schema)
                 if usage_sink is not None:usage_sink['json_normalization']='structured_function'
@@ -83,13 +93,18 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
             status = getattr(getattr(exc, "response", None), "status_code", None)
             from retry_policy import detail, defer_openrouter
             failure=detail(exc)
-            if exc.response is not None: defer_openrouter(exc.response)
-            if status == 402:
+            if route.provider == 'openrouter' and exc.response is not None: defer_openrouter(exc.response)
+            if route.provider == 'openrouter' and status == 402:
                 from ai_budget import payment_rejected
                 payment_rejected()
             if attempt + 1 >= max_attempts or not (isinstance(exc, (requests.Timeout, requests.ConnectionError)) or status in {408,429,500,502,503,504}):
-                raise ValueError("openrouter_transport_failed:"+failure) from None
+                local_failed = route.provider == 'ollama_relay'
+                route.fallback('local_transport_failed')
+                error = ValueError("openrouter_transport_failed:"+failure)
+                error.local_fallback_eligible = local_failed
+                raise error from None
             notify_failure=False  # Persist attempt cost/error, wait for bounded retry outcome.
+            route.fallback('local_transport_failed')
         except (ValueError, KeyError, IndexError, jsonschema.ValidationError) as exc:
             from retry_policy import validation_detail
             failure=validation_detail(exc,body)
@@ -97,8 +112,10 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
                 usage_sink['structure_detail']=json.loads(failure).get('structure_detail')
                 usage_sink['json_diagnostic']=json.loads(failure).get('json_diagnostic')
             if attempt + 1 >= max_attempts:
+                route.fallback('local_schema_failed')
                 raise ValueError("openrouter_schema_failed:"+failure) from None
             notify_failure=False
+            route.fallback('local_schema_failed')
             messages.append({"role": "user", "content": "Return valid JSON matching the required schema; do not invent missing source facts."})
         except (TypeError, AttributeError) as exc:
             # Diagnose malformed envelopes without making previously terminal
@@ -109,19 +126,24 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
                 usage_sink['structure_detail']=json.loads(failure).get('structure_detail')
             raise
         finally:
-            if news_json_wrapping and not success:
+            if news_json_wrapping and not success and attempt_route['provider'] == 'openrouter':
                 from news_forensics import capture
                 capture(body, schema, model, failure)
             # A non-object envelope cannot contain usable billing metadata.
             if not isinstance(body,dict):body=None
+            local_attempt = attempt_route['provider'] == 'ollama_relay'
+            billing_body = local_usage(body) if local_attempt else body
+            recorded_model = ('ollama/' + attempt_route['model'] + '@' + attempt_route['model_digest']
+                              if local_attempt else model)
             from ai_operations import record
             record('news_translation' if task in {'translation','news_translation','summary'} else 'news_analysis',
-                   model,body,started,success,None if success else failure,retry=repair or attempt>0,
+                   recorded_model,billing_body,started,success,None if success else failure,retry=repair or attempt>0,
                    notify_failure=notify_failure)
             if usage_sink is not None:
-                usage=(body or {}).get('usage') or {}
-                usage_sink.update(model=model,input_tokens=usage.get('prompt_tokens'),
+                usage=(billing_body or {}).get('usage') or {}
+                usage_sink.update(**attempt_route,latency=time.monotonic()-started,input_tokens=usage.get('prompt_tokens'),
                     output_tokens=usage.get('completion_tokens'),
                     reasoning_tokens=(usage.get('completion_tokens_details') or {}).get('reasoning_tokens'),
-                    cost=usage.get('cost'),request_id=(body or {}).get('id'))
+                    cost=usage.get('cost'),request_id=(billing_body or {}).get('id'))
+                if local_attempt:usage_sink['ollama_version']=(body or {}).get('ollama_version')
         time.sleep(.25)
