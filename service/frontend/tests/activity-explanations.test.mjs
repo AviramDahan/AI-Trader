@@ -84,6 +84,9 @@ const invalid=buildActivity({records:[candidate('TEST',{signals:[{id:4,status:'E
  {id:4,signal_id:4,purpose:'entry',status:'invalid',entry_rejection_reason:'fill_rr_below_2'},
  {id:5,signal_id:5,purpose:'entry',status:'invalid',entry_rejection_reason:'fill_inside_unresolved_zone'}]})]},null)[0]
 ok(markup(invalid,true).includes('במחיר הביצוע נמוך מ־2R'));ok(!markup(invalid,true).includes('בתוך אזור מחיר לא פתור'))
+eq(itemReasonCodes(invalid)[0],'fill_rr_below_2')
+ok(explainActivity(invalid,true).title.includes('במחיר הביצוע נמוך מ־2R'))
+ok(renderToStaticMarkup(createElement(MiniStockList,{he:true,rows:[invalid],known:true,onOpen:()=>{}})).includes('במחיר הביצוע נמוך מ־2R'))
 const unlinked=buildActivity(null,{signals:[{id:1,ticker:'TEST',status:'ENTERED',actual_entry:100}]})[0]
 eq(unlinked.state,'uncertain');ok(explainActivity(unlinked,true).detail.includes('פוזיציה מקושרת'))
 const close=buildActivity(null,{signals:[{id:1,ticker:'TEST',status:'PENDING_CLOSE'}]})[0]

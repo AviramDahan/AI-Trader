@@ -26,12 +26,13 @@ export function matchingTargetCheck(item:ActivityItem):Row|undefined {
 export function itemReasonCodes(item:ActivityItem):string[] {
   const codes:string[]=[]
   const add=(code:unknown)=>{if(typeof code==='string'&&code&&!codes.some(c=>reasonKey(c)===reasonKey(code)))codes.push(code)}
+  // A verified exact execution blocker leads the list, not its generic status.
+  if(item.signal?.status==='ENTRY_POLICY_REJECTED')add(entryRejectionCode(item.signal,linkedItemOrders(item)))
   add(item.reason)
   if(item.kind==='candidate' && item.station==='ai' && item.reason)
     for(const code of Array.isArray(item.record?.ai_decision?.filter_failures)?item.record!.ai_decision.filter_failures:[])add(code)
   const detail=matchingTargetCheck(item)?.rejection_detail
   for(const code of Array.isArray(detail)?detail:[])add(code)
-  if(item.signal?.status==='ENTRY_POLICY_REJECTED')add(entryRejectionCode(item.signal,linkedItemOrders(item)))
   return codes
 }
 export function activityStatusLabel(item:ActivityItem,he:boolean):string {
