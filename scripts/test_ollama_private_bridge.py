@@ -6,6 +6,7 @@ paid AI, app workers, DB or Telegram. Must run as root on a disposable CI runner
 import http.server
 import json
 import os
+import pwd
 from pathlib import Path
 import shutil
 import socket
@@ -54,6 +55,8 @@ def main(image):
             relay=root/'relay';relay.mkdir();os.chown(relay,0,20001);relay.chmod(0o770)
             home=root/'home';home.mkdir();home.chmod(0o755)
             run('useradd','-M','-d',str(home),'-g',group,'-s','/usr/sbin/nologin','-p','x',user);added_user=True
+            # Same owner/mode as the production provisioning contract.
+            os.chown(relay,pwd.getpwnam(user).pw_uid,20001);relay.chmod(0o750)
             for name in ('host','client'):
                 run('ssh-keygen','-q','-t','ed25519','-N','','-f',str(root/name))
             # StrictModes stops at the account home. Do not put authorized_keys
@@ -74,7 +77,7 @@ def main(image):
             for condition in ('allowtcpforwarding no','allowstreamlocalforwarding remote','maxsessions 0',
                 'passwordauthentication no','allowagentforwarding no','permittty no'):
                 assert condition in effective,condition
-            daemon=subprocess.Popen([sshd,'-D','-e','-f',str(conf)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            daemon=subprocess.Popen([sshd,'-D','-e','-f',str(conf)],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
             processes.append(daemon)
             hosts=root/'known_hosts';hosts.write_text(f'[127.0.0.1]:{port} '+(root/'host.pub').read_text())
             ssh=['ssh','-p',str(port),'-i',str(root/'client'),'-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
@@ -86,7 +89,9 @@ def main(image):
             for _ in range(100):
                 if (relay/'relay.sock').exists():break
                 if tunnel.poll() is not None:
-                    raise AssertionError('restricted fixture tunnel exited: '+tunnel.stderr.read()[-1000:])
+                    daemon.terminate();daemon.wait(5)
+                    raise AssertionError('restricted fixture tunnel exited: '+tunnel.stderr.read()[-1000:]
+                        +' daemon: '+daemon.stderr.read()[-2500:])
                 time.sleep(.05)
             sock=relay/'relay.sock';assert sock.exists() and sock.stat().st_mode & 0o777==0o660
             assert run(*ssh,user+'@127.0.0.1','true',check=False).returncode!=0,'shell unexpectedly allowed'
