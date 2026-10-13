@@ -19,6 +19,8 @@ import requests
 requests.sessions.Session.request=lambda *a,**k:(_ for _ in ()).throw(AssertionError('external_requests_forbidden'))
 import recovery_state as recovery
 ROOT=Path('/proof')
+retry_test=os.environ.get('ENTRY_PRICE_RETRY_TEST')=='true'
+expected_format=6 if retry_test else 5
 
 if action=='old_refused':
     try:
@@ -26,7 +28,7 @@ if action=='old_refused':
     except ValueError as exc:
         assert str(exc)=='not_a_recovery_snapshot'
     else:
-        raise AssertionError('old_binary_must_reject_format5')
+        raise AssertionError('old_binary_must_reject_new_format')
 else:
     sys.path.insert(0,'/app/service/server/tests')
     sys.path.insert(0,'/app/service/server/tests_pg')
@@ -36,6 +38,9 @@ else:
     from test_single_breakout import plan
     from test_recovery_holds import initialize_empty,seed_legacy,record,state
     from test_single_target_v2 import plan as old_plan
+    if retry_test:
+        import entry_price_retry
+        from test_entry_price_retry import narrow_plan
     stamp='2026-10-06T14:00:37Z'
     bar=dict(at='2026-10-06T14:05:00Z',open=100,high=101,low=99.8,close=100)
 
@@ -50,6 +55,7 @@ else:
 
     if action=='prepare':
         assert not policy.enabled()
+        if retry_test:assert not entry_price_retry.enabled()
         migrations.migrate();initialize_empty();seed_legacy()
         with patch.object(engine,'now_z',return_value=stamp):record('BASE')
         engine.process_bar('BASE',bar) # Real V1 Native and STAGED Shadow.
@@ -62,12 +68,28 @@ else:
         with patch.object(scanner,'datetime',wraps=datetime) as clock:
             clock.now.return_value=datetime(2026,10,6,14,0,37,tzinfo=timezone.utc)
             p=scanner._candidate_target_plan(c,'BUY',100,{'min_risk_reward':2})
+        if retry_test:
+            assert entry_price_retry.enabled()
+            p=narrow_plan(stamp)
         new('BRK',p);engine.process_bar('BRK',{**bar,'at':'2026-10-06T14:00:00Z'})
-        engine.process_bar('BRK',bar)
+        if retry_test:
+            bad={**bar,'open':99.8,'low':99.7,'close':99.85}
+            with patch.object(engine,'now_z',return_value='2026-10-06T14:30:00Z'):
+                engine.process_bar('BRK',bad)
+                with database.get_db_connection() as conn:
+                    assert conn.execute("SELECT status FROM scanner_orders WHERE signal_id=(SELECT id FROM scanner_signals WHERE ticker='BRK')").fetchone()['status']=='pending'
+                engine.process_bar('BRK',{**bar,'at':'2026-10-06T14:10:00Z','open':100.05,'low':99.95})
+        else:
+            engine.process_bar('BRK',bar)
         new('HELD',p)
-        engine._pending_recovery_check('HELD',[],datetime(2026,10,6,14,10,tzinfo=timezone.utc))
+        if retry_test:
+            with patch.object(engine,'now_z',return_value='2026-10-06T14:30:00Z'):
+                engine.process_bar('HELD',bad)
+            engine._pending_recovery_check('HELD',[],datetime(2026,10,6,14,20,tzinfo=timezone.utc))
+        else:
+            engine._pending_recovery_check('HELD',[],datetime(2026,10,6,14,10,tzinfo=timezone.utc))
         data=recovery.export_postgres(url)
-        assert data['version']==5 and len(data['hold_coverage']['order_ids'])==1
+        assert data['version']==expected_format and len(data['hold_coverage']['order_ids'])==1
         subprocess.run(['age-keygen','-o',str(ROOT/'identity')],check=True,capture_output=True)
         recipient=subprocess.check_output(['age-keygen','-y',str(ROOT/'identity')]).decode().strip()
         encrypted,_=recovery.encrypted_bytes(data,recipient)
@@ -75,14 +97,16 @@ else:
         (ROOT/'state.sha256').write_text(checksum())
     elif action in ('rollback','restart'):
         assert not policy.enabled()
+        if retry_test:assert not entry_price_retry.enabled()
         before=checksum();engine.initialize_runtime();engine.process_bar('BRK',bar)
         assert checksum()==before==(ROOT/'state.sha256').read_text()
         assert record('HELD')['status']=='DUPLICATE_BLOCKED'
         assert checksum()==before
         data=recovery.export_postgres(url)
-        assert data['version']==5 and len(data['hold_coverage']['order_ids'])==1
+        assert data['version']==expected_format and len(data['hold_coverage']['order_ids'])==1
     elif action=='restore':
         assert not policy.enabled()
+        if retry_test:assert not entry_price_retry.enabled()
         migrations.migrate()
         data=recovery.decrypt(ROOT/'synthetic.age',ROOT/'identity')
         recovery.restore(data,url,'synthetic-token-more-than-32-characters')
@@ -92,7 +116,7 @@ else:
             assert c.execute('SELECT count(*) n FROM scanner_telegram_outbox').fetchone()['n']==0
     elif action=='exit':
         before=state()
-        engine.process_bar('BRK',{**bar,'at':'2026-10-06T14:10:00Z','open':104.5,'high':105,'low':104,'close':104.5})
+        engine.process_bar('BRK',{**bar,'at':'2026-10-06T14:15:00Z' if retry_test else '2026-10-06T14:10:00Z','open':104.5,'high':105,'low':104,'close':104.5})
         after=state()
         assert after['holds']==before['holds'] and after['reserved']==before['reserved']
         assert len(after['fills'])==len(before['fills'])+1
@@ -103,7 +127,7 @@ else:
         assert policy.enabled()
         before=checksum();engine.initialize_runtime();engine.process_bar('BRK',bar)
         assert checksum()==before
-        assert recovery.export_postgres(url)['version']==5
+        assert recovery.export_postgres(url)['version']==expected_format
     else:
         raise ValueError('unsupported_test_phase')
 print(json.dumps(dict(phase=action,status='PASS',build_sha=os.environ.get('BUILD_SHA'))))

@@ -7,6 +7,7 @@ CODES = frozenset({
     'fill_introduces_forward_resistance', 'fill_changes_nearest_resistance',
     'order_plan_mismatch', 'order_levels_mismatch', 'single_policy_contract_mismatch',
     'breakout_policy_contract_mismatch', 'unsupported_single_policy', 'unsupported_breakout_policy',
+    'entry_price_retry_contract_invalid', 'unsupported_entry_price_retry',
 })
 
 

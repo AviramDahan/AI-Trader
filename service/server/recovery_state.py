@@ -27,7 +27,7 @@ CONFIG_FIELDS = {'active_strategy','entry_order_type','signal_validity_hours','p
     'max_symbol_exposure','max_total_exposure','slippage_bps','commission_per_share',
     'minimum_commission','breakeven_threshold','tp1_pct','tp2_pct','tp3_pct',
     'staged_stop_after_tp2','news_interval_hours','news_overlap_hours','monitor_interval',
-    'quote_refresh_seconds','strategy','captured_at','target_plan','entry_execution'}
+    'quote_refresh_seconds','strategy','captured_at','target_plan','entry_execution','entry_price_retry'}
 SECRET_PATTERN = re.compile(r'sk-or-v1-[a-zA-Z0-9]+|-----BEGIN .*PRIVATE KEY|postgres(?:ql)?://|\b\d{7,12}:[A-Za-z0-9_-]{30,}|\bgh[pousr]_[A-Za-z0-9_]{20,}')
 POLICY_DEFAULTS = {
     'STOCK_SCANNER_EXIT_STRATEGY':'single', 'STOCK_SCANNER_EXTENDED_EXITS_FROM':'',
@@ -80,7 +80,7 @@ def sanitize(data):
 
 
 def validate(data):
-    if data.get('recovery_format') not in (1,2,3,4,5): raise ValueError('not_a_recovery_snapshot')
+    if data.get('recovery_format') not in (1,2,3,4,5,6): raise ValueError('not_a_recovery_snapshot')
     if data['recovery_format']!=data.get('version'): raise ValueError('recovery_format_version_mismatch')
     if set(data.get('runtime_policy',{}))!=set(POLICY_DEFAULTS):
         raise ValueError('recovery_runtime_policy_missing_or_unknown')
@@ -154,7 +154,7 @@ def export_postgres(url):
 
 def restore(data,url,scanner_token):
     validate(data)
-    if data['recovery_format'] not in (2,3,4,5): raise ValueError('legacy_hold_coverage_unknown_restore_refused')
+    if data['recovery_format'] not in (2,3,4,5,6): raise ValueError('legacy_hold_coverage_unknown_restore_refused')
     if data['runtime_policy']!=runtime_policy():
         raise ValueError('restore_runtime_policy_mismatch_configure_saved_policy_before_import')
     return active.import_data(data,url,allow_defaults=True,scanner_token=scanner_token)

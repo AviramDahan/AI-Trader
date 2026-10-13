@@ -92,6 +92,26 @@ ok(explainActivity(invalid,true).title.includes('במחיר הביצוע נמו�
 ok(renderToStaticMarkup(createElement(MiniStockList,{he:true,rows:[invalid],known:true,onOpen:()=>{}})).includes('במחיר הביצוע נמוך מ־2R'))
 const unlinked=buildActivity(null,{signals:[{id:1,ticker:'TEST',status:'ENTERED',actual_entry:100}]})[0]
 const rejectedOrder=buildActivity({records:[candidate('TEST',{signals:[{id:9,status:'PENDING_ENTRY'}],orders:[{id:9,signal_id:9,purpose:'entry',status:'invalid'}]})]},null)[0]
+const priceWait={version:'single_entry_price_retry_v1',reason:'fill_stop_distance_invalid',price:99.8499,
+ bar_at:'2026-10-06T14:05:00Z',observed_at:'2026-10-06T14:10:00Z'}
+const pendingPrice=buildActivity({records:[candidate('TEST',{signals:[{id:71,status:'PENDING_ENTRY'}],orders:[
+ {id:71,signal_id:71,purpose:'entry',status:'pending',entry_price_wait:priceWait},
+ {id:72,signal_id:72,purpose:'entry',status:'pending',entry_price_wait:{...priceWait,reason:'fill_inside_unresolved_zone'}}]})]},null)[0]
+eq(pendingPrice.state,'waiting');eq(pendingPrice.station,'order');eq(pendingPrice.reason,'entry_price_wait')
+eq(itemReasonCodes(pendingPrice),['entry_price_wait','fill_stop_distance_invalid'])
+for(const he of [true,false]){
+ const e=explainActivity(pendingPrice,he), html=markup(pendingPrice,he)
+ ok(e.title.includes(he?'ממתין למחיר':'Waiting for a valid'));ok(e.next.includes(he?'התוקף המקורי':'original validity'))
+ ok(html.includes('99.85'));ok(html.includes(he?'הסטופ':'stop'));ok(!html.includes(he?'בתוך אזור מחיר':'inside an unresolved'))
+}
+const dashboardWait=buildActivity(null,{signals:[{id:71,ticker:'TEST',status:'PENDING_ENTRY',entry_price_wait:priceWait}]})[0]
+eq(dashboardWait.station,'order');eq(dashboardWait.reason,'entry_price_wait')
+for(const status of ['ENTERED','EXPIRED','ENTRY_POLICY_REJECTED','RECOVERY_UNCERTAIN']){
+ const ended=buildActivity(null,{signals:[{id:71,ticker:'TEST',status,entry_price_wait:priceWait}]})[0]
+ ok(ended.reason!=='entry_price_wait');ok(!explainActivity(ended,true).title.includes('ממתין למחיר'))
+}
+const badWait=buildActivity(null,{signals:[{id:71,ticker:'TEST',status:'PENDING_ENTRY',entry_price_wait:{...priceWait,version:'future'}}]})[0]
+ok(badWait.reason!=='entry_price_wait')
 eq(rejectedOrder.state,'blocked');eq(rejectedOrder.reason,'entry_order_invalid')
 ok(!activityStatusLabel(rejectedOrder,true).includes('ממתין לביצוע'))
 eq(unlinked.state,'uncertain');ok(explainActivity(unlinked,true).detail.includes('פוזיציה מקושרת'))

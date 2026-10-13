@@ -6,6 +6,7 @@ const r = (he: string, en: string, detailHe: string, detailEn: string, kind: Rea
   ({ title: [he,en], detail: [detailHe,detailEn], kind })
 export const reasonKey = (code: unknown) => typeof code === 'string' ? code.replace(/^pre_/, '') : ''
 export const REASON_DETAILS: Record<string, ReasonDefinition> = {
+  entry_price_wait:r('ממתין למחיר כניסה תקף','Waiting for a valid entry price','המחיר שנבדק לא עבר את בקרות הכניסה. הפקודה נשארת ממתינה, ללא פוזיציה חדשה וללא שינוי הסטופ, היעד או התוקף. הסיבה המדויקת מוצגת בהמשך.','The checked price failed entry gates. The order remains pending, with no new position and no change to stop, target or validity. Its precise reason follows.','wait'),
   no_fresh_quote:r('אין מחיר ייחוס טרי','No fresh reference quote','לא התקבל מחיר שעומד בדרישת הטריות בזמן הבדיקה. מחיר ישן אינו אישור כניסה.','No price met freshness requirements at the check time. An older price cannot authorize entry.'),
   no_fresh_intraday_quote_or_market_closed:r('אין מחיר כניסה טרי או שהמסחר סגור','No fresh entry quote or session closed','הבדיקה המאוחרת לא אישרה מחיר תוך־יומי טרי בזמן מסחר. ברשומה הזאת שתי האפשרויות לא הופרדו.','The final check did not confirm a fresh intraday price during the session. This record does not distinguish those two causes.'),
   waiting_regular_session:r('ממתין למסחר הרגיל','Waiting for regular session','הבדיקה נעצרה מחוץ לשעות המסחר הרגיל. זו המתנה, לא פסילה של איכות המניה.','The check stopped outside the regular session. This is waiting, not a stock-quality rejection.','wait'),

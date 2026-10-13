@@ -454,13 +454,18 @@ def _enqueue_order_execution_update(cur, order_id: int) -> None:
     row = dict(row)
     contract = _loads(row.get('plan_json'), {})
     reason = contract.get('entry_rejection_reason') if isinstance(contract,dict) else None
-    lines = order_update_lines(row['status'], row['action'], reason)
+    from entry_price_retry import public_wait
+    price_wait = public_wait(row)
+    lines = order_update_lines(row['status'], row['action'], reason, price_wait=price_wait)
     if not lines:
         return  # Pending and filled already have their own signal/entry alerts.
     text = '\n\n'.join(['AI-Trader · מסחר מדומה בלבד',
         'סימול: ' + str(row['ticker'])[:32], *lines,
         'זמן העדכון: ' + israel_time(row['updated_at'])])
-    enqueue_telegram(cur, f"order-status:{row['id']}:{row['status']}",
+    # One waiting notice per order, not per price/candle/reason. Entry/expiry
+    # keep their existing separately deduplicated transition messages.
+    state_key = 'price-wait' if price_wait else row['status']
+    enqueue_telegram(cur, f"order-status:{row['id']}:{state_key}",
                      'signals_status', telegram_text(text,limit=4000))
 
 
@@ -514,6 +519,9 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
     valid_until = (parse_time(created) + timedelta(hours=cfg["signal_validity_hours"])).isoformat().replace("+00:00", "Z")
     import entry_window
     window = entry_window.build(created, valid_until) if v2 and entry_window.enabled() else None
+    import entry_price_retry
+    price_retry = (entry_price_retry.build(created, valid_until, plan, window)
+                   if v2 and action == 'BUY' and window and entry_price_retry.enabled() else None)
     confidence = float(signal["confidence"])
     if not 0 <= confidence <= 1:
         raise ValueError("Invalid model score")
@@ -575,7 +583,8 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
             if v2 or short:
                 cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at,plan_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                             values + (_json({'target_plan': plan, 'execution_settings': cfg,
-                                             **({'entry_execution': window} if window else {})}),))
+                                             **({'entry_execution': window} if window else {}),
+                                             **({'entry_price_retry': price_retry} if price_retry else {})}),))
             else:
                 # Bridge must continue normal V1 admissions before migration 006.
                 cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", values)
@@ -884,17 +893,36 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
             _enqueue_order_execution_update(cur,order['id'])
             return
     if v2:
+        import entry_price_retry
+        retry_price = False
         try:
-            if contract.get('target_plan') != target_plan or contract.get('execution_settings', {}).get('active_strategy') != 'single':
+            execution_cfg = contract.get('execution_settings')
+            if (contract.get('target_plan') != target_plan or not isinstance(execution_cfg, dict) or
+                    execution_cfg.get('active_strategy') != 'single'):
                 raise ValueError('order_plan_mismatch')
             validate(target_plan, signal['planned_entry'], signal['original_stop'], signal['action'])
             if (order['limit_price'] != target_plan['entry'] or
                     [signal['tp1'], signal['tp2'], signal['tp3']] != [target_plan['active_target'], None, None] or
                     [signal['tp1_pct'], signal['tp2_pct'], signal['tp3_pct']] != [1, 0, 0]):
                 raise ValueError('order_levels_mismatch')
+            retry_price = entry_price_retry.validate_order(order, contract)
             validate_fill(target_plan, fill_price)
             cfg = contract['execution_settings']
         except (ValueError, KeyError, TypeError) as exc:
+            if retry_price and str(exc) in entry_price_retry.PRICE_REASONS:
+                # Decline this actual price, not the frozen order. A later
+                # completed eligible bar must independently pass every gate.
+                # This never substitutes a preferred limit price or changes levels.
+                try:
+                    waiting = entry_price_retry.observe(order, contract, fill_price, bar_at, now_z(), str(exc))
+                except (ValueError, KeyError, TypeError) as observation_error:
+                    exc = observation_error  # Malformed state stays fail-closed.
+                else:
+                    cur.execute("UPDATE scanner_orders SET plan_json=?,updated_at=? WHERE id=?",
+                                (_json(waiting), now_z(), order['id']))
+                    cur.execute("UPDATE scanner_signals SET updated_at=? WHERE id=?", (now_z(), signal['id']))
+                    _enqueue_order_execution_update(cur,order['id'])
+                    return
             contract['entry_rejection_reason'] = str(exc)[:120]
             cur.execute("UPDATE scanner_orders SET status='invalid',updated_at=?,plan_json=? WHERE id=?", (now_z(), _json(contract), order['id']))
             cur.execute("UPDATE scanner_signals SET status='ENTRY_POLICY_REJECTED',updated_at=? WHERE id=?", (now_z(), signal['id']))
@@ -945,6 +973,8 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
         snapshot = dict(cfg, strategy=strategy, captured_at=bar_at, target_plan=target_plan)
         if contract.get('entry_execution'):
             snapshot['entry_execution'] = contract['entry_execution']
+        if contract.get('entry_price_retry'):
+            snapshot['entry_price_retry'] = contract['entry_price_retry']
         cur.execute("""INSERT INTO scanner_trades(signal_id,order_id,agent_id,ticker,company,side,strategy,is_shadow,status,
             original_quantity,remaining_quantity,entry_price,original_stop,current_stop,original_r,tp1,tp2,tp3,tp1_pct,tp2_pct,tp3_pct,
             settings_json,fees,opened_at,last_price,last_bar_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -1781,7 +1811,7 @@ def dashboard_payload() -> dict[str, Any]:
                        signal_eligibility='QUALIFIED', execution_status=row['status'],
                        position_activated=row.get('actual_entry') is not None,
                        shadow_comparison=plan['shadow_comparison'])
-            cur.execute("SELECT plan_json FROM scanner_orders WHERE signal_id=? AND purpose='entry' ORDER BY id LIMIT 1", (row['id'],))
+            cur.execute("SELECT status,purpose,side,order_type,limit_price,created_at,updated_at,valid_until,plan_json FROM scanner_orders WHERE signal_id=? AND purpose='entry' ORDER BY id LIMIT 1", (row['id'],))
             saved_order = cur.fetchone()
             contract = _loads(saved_order['plan_json'], {}) if saved_order else {}
             window = contract.get('entry_execution') or {}
@@ -1789,6 +1819,8 @@ def dashboard_payload() -> dict[str, Any]:
             row.update(entry_eligible_from=window.get('entry_eligible_from'),
                        entry_execution_version=window.get('version'),
                        entry_rejection_reason=reason_code(contract.get('entry_rejection_reason')))
+            from entry_price_retry import public_wait
+            row['entry_price_wait'] = public_wait(dict(saved_order)) if saved_order else None
         elif short_policy.is_short(plan):
             operational_strategy = 'single'
             row.update(policy_version=plan['policy_version'], active_target=plan['active_target'],

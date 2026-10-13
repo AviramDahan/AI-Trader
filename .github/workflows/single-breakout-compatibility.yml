@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   images:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'codex/single-breakout-entry'
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'codex/single-breakout-entry' || github.head_ref == 'codex/single-entry-price-retry'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -18,9 +18,16 @@ jobs:
         run: |
           set -euo pipefail
           sha=$(git rev-parse HEAD)
-          git worktree add --detach /tmp/previous-reader 6429c42d3e77ae2879b7f8bc5fa0e8185a6d8aa0
+          previous=6429c42d3e77ae2879b7f8bc5fa0e8185a6d8aa0
+          retry=false
+          if test -f service/server/entry_price_retry.py; then
+            previous=268afbcb742a9a4607ee04ae036d92441c07d59f
+            retry=true
+          fi
+          printf 'ENTRY_PRICE_RETRY_TEST=%s\n' "$retry" >> "$GITHUB_ENV"
+          git worktree add --detach /tmp/previous-reader "$previous"
           docker build --build-arg BUILD_SHA="$sha" -t breakout-compatible:test .
-          docker build --build-arg BUILD_SHA=6429c42d3e77ae2879b7f8bc5fa0e8185a6d8aa0 -t breakout-previous:test /tmp/previous-reader
+          docker build --build-arg BUILD_SHA="$previous" -t breakout-previous:test /tmp/previous-reader
           mkdir -p /tmp/proof /tmp/artifacts
           chmod 777 /tmp/proof
           docker image inspect breakout-compatible:test breakout-previous:test --format '{{.Id}} {{json .Config.Env}}' | python -c 'import sys,json; rows=[]
@@ -39,6 +46,7 @@ jobs:
               -e DATABASE_URL="postgresql://isolated:disposable@breakout-pg:5432/${4:-isolated_breakout}" \
               -e STOCK_SCANNER_EXIT_STRATEGY=single -e STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED=true \
               -e STOCK_SCANNER_SINGLE_BREAKOUT_ENABLED="$3" -e STOCK_SCANNER_FULL_BAR_ENTRY_ENABLED="$3" \
+              -e STOCK_SCANNER_ENTRY_PRICE_RETRY_ENABLED="$3" -e ENTRY_PRICE_RETRY_TEST="$ENTRY_PRICE_RETRY_TEST" \
               -v "$PWD/scripts/single_breakout_image_probe.py:/probe.py:ro" -v /tmp/proof:/proof \
               --entrypoint python "$1" /probe.py "$2" | tee -a /tmp/artifacts/results.jsonl
           }
