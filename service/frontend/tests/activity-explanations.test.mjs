@@ -60,6 +60,9 @@ for(const code of ['pre_waiting_regular_session','post_waiting_regular_session',
 const failure=item({rejection:'timeout_fail_closed'})
 ok(activityStatusLabel(failure,true).includes('העיבוד לא הושלם'));ok(explainActivity(failure,true).detail.includes('לא פורסם סיגנל'))
 ok(reasonDefinition('ValueError_fail_closed').detail[0].includes('הסיבה המדויקת'))
+for(const code of ['SchemaFailure_fail_closed','BudgetUnavailable_fail_closed','LocalCapacity_fail_closed']){
+ eq(reasonDefinition(code).kind,'processing');ok(activityStatusLabel(item({rejection:code}),true).includes('העיבוד לא הושלם'))
+}
 const unknown=item({rejection:'UNKNOWN_NEW_RULE'})
 ok(explainActivity(unknown,true).title.includes('אינה זמינה'));ok(!markup(unknown,true).includes('UNKNOWN_NEW_RULE'))
 for(const code of ['__proto__','constructor','toString']){

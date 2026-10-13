@@ -63,7 +63,9 @@ export function reasonDefinition(code: unknown): ReasonDefinition {
   const key=reasonKey(code)
   const known=Object.prototype.hasOwnProperty.call(REASON_DETAILS,key)?REASON_DETAILS[key]:undefined
   if(known)return known
-  if(typeof code==='string' && /^(?:ValueError|RuntimeError|ConnectionError|HTTPError|ReadTimeout|Timeout|BudgetExceeded)_fail_closed$/.test(code))
+  // Scanner retains any exception class as <class>_fail_closed, not only a
+  // fixed list. The class establishes incomplete processing, not its root cause.
+  if(typeof code==='string' && /^[A-Za-z_][A-Za-z0-9_]{0,80}_fail_closed$/.test(code))
     return r('העיבוד לא הושלם — כניסה לא אושרה','Processing incomplete — entry not approved','נשמר כשל עיבוד, לא החלטת מסחר שלילית. הסיבה המדויקת אינה ניתנת להכרעה מהקוד הזה בלבד.','A processing failure was retained, not a negative trading decision. This code alone does not establish its precise cause.','processing')
   return r('סיבת החסימה המפורטת אינה זמינה','Detailed blocker unavailable','המדגם אינו כולל פירוט מוכר לסיבה הזאת. אין לנחש את הבקרה שנכשלה; הקוד השמור זמין במידע הטכני.','This sample lacks a recognized explanation for this cause. The failed gate is not guessed; its retained code is in technical data.','unknown')
 }
