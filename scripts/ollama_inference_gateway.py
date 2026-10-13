@@ -25,6 +25,38 @@ class ContextCapacity(ValueError):
 
 def context_error(data):
     error = data.get('error') if isinstance(data, dict) else None
+    # Native Gemma in the pinned runtime embeds the runner's structured 400
+    # error as a JSON string. Recognize only this validated capacity envelope;
+    # never classify arbitrary provider text/auth failures as a healthy GPU.
+    if isinstance(error, str) and error.startswith('{') and len(error) <= 2048:
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError('duplicate_error_key')
+                result[key] = value
+            return result
+        try:
+            wrapped = json.loads(error, object_pairs_hook=unique)
+            if not isinstance(wrapped, dict) or set(wrapped) != {'error'}:
+                return False
+            detail = wrapped['error']
+            if not isinstance(detail, dict) or set(detail) != {
+                    'code','message','type','n_prompt_tokens','n_ctx'}:
+                return False
+            if (type(detail['code']) is not int or detail['code'] != 400
+                    or detail['type'] != 'exceed_context_size_error'
+                    or type(detail['n_prompt_tokens']) is not int
+                    or type(detail['n_ctx']) is not int
+                    or detail['n_ctx'] != CONTEXT
+                    or detail['n_prompt_tokens'] <= detail['n_ctx']):
+                return False
+            match = re.fullmatch(r'request \((\d+) tokens\) exceeds the available context size '
+                                 r'\((\d+) tokens\), try increasing it', detail['message'])
+            return bool(match and (int(match[1]), int(match[2])) ==
+                        (detail['n_prompt_tokens'], detail['n_ctx']))
+        except (ValueError, TypeError, KeyError):
+            return False
     return isinstance(error, str) and bool(re.fullmatch(
         r'(?:the prompt is longer than the context length currently available to the model; '
         r'shorten the prompt, adjust the context length in settings, or use a model with a longer context length'

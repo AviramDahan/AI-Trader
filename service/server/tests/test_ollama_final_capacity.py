@@ -78,6 +78,56 @@ def test_native_capacity_error_is_allowlisted_not_raw_provider_text(error):
     assert not g.context_error({'error':'unauthorized'})
 
 
+def wrapped_capacity():
+    return {'code':400,'message':'request (93917 tokens) exceeds the available context size (8192 tokens), try increasing it',
+            'type':'exceed_context_size_error','n_prompt_tokens':93917,'n_ctx':8192}
+
+
+def test_actual_native_wrapped_capacity_refusal_is_recognized():
+    g=gateway()
+    assert g.context_error({'error':json.dumps({'error':wrapped_capacity()},separators=(',',':'))})
+    raw=json.dumps({'error':wrapped_capacity()})
+    assert not g.context_error({'error':raw.replace('"code": 400','"code": 401, "code": 400')})
+
+
+@pytest.mark.parametrize('change',[
+ {'code':401},{'type':'other_error'},{'n_prompt_tokens':8192},{'n_ctx':16384},
+ {'n_prompt_tokens':True},{'n_ctx':'8192'},{'message':'private diagnostic text'},
+ {'n_prompt_tokens':93918},{'unexpected':'field'}])
+def test_other_or_inconsistent_wrapped_errors_are_not_capacity(change):
+    g=gateway();error=wrapped_capacity();error.update(change)
+    assert not g.context_error({'error':json.dumps({'error':error})})
+    assert not g.context_error({'error':'{"error":'})
+    assert not g.context_error({'error':json.dumps({'error':error,'extra':1})})
+
+
+def test_wrapped_native_error_traverses_real_gateway_http(monkeypatch):
+    import threading
+    g=gateway();engine=g.Inference();engine.loaded=True;engine.at=time.monotonic()
+    response=Mock(status_code=400)
+    response.iter_content.return_value=[json.dumps({'error':json.dumps({'error':wrapped_capacity()})}).encode()]
+    response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False)
+    session=Mock();session.request.return_value=response
+    session.__enter__=Mock(return_value=session);session.__exit__=Mock(return_value=False)
+    monkeypatch.setattr(g.requests,'Session',lambda:session)
+    original=engine.http
+    engine.http=lambda method,path,payload=None,**kw: (
+        {'models':[{'name':g.MODEL,'digest':g.DIGEST}]} if path=='/api/tags'
+        else original(method,path,payload,**kw))
+    server=g.BoundedServer(('127.0.0.1',0),g.handler(engine))
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    # Direct Session construction avoids the isolated upstream mock above.
+    try:
+        with requests.sessions.Session() as client:
+            client.trust_env=False
+            r=client.post('http://127.0.0.1:'+str(server.server_port)+'/completion',
+                          json=request(g,'synthetic capacity fixture'),timeout=2)
+        assert r.status_code==413 and r.json()=={'reason':'local_context_capacity'}
+        assert engine.health()['ready'] and not engine.slot.locked()
+    finally:
+        server.shutdown();thread.join(2);server.server_close()
+
+
 def test_upstream_http_error_is_bounded_and_safely_classified(monkeypatch):
     g=gateway();engine=g.Inference()
     response=Mock(status_code=400)

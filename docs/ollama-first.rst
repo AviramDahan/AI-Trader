@@ -73,7 +73,12 @@ it must not return a successful decision from a cropped prompt. No context-size
 increase, tokenizer approximation, evidence truncation or parameter sweep.
 
 Only exact allowlisted capacity errors become private ``413`` /
-``local_context_capacity``. They do not start the healthy local provider's
+``local_context_capacity``.
+The native runner's JSON-string error envelope is also accepted only when its
+400 code, capacity type, complete key set and token/context counts agree with
+the exact message and pinned context. Duplicate keys, unrelated errors and
+inconsistent envelopes remain technical failures, without leaking raw errors.
+Capacity errors do not start the healthy local provider's
 60-second technical-outage cooldown. Actual transport/schema failures retain
 that cooldown. Capacity consumes the existing request/repair allowance; there
 is no additional model-shopping attempt. Every paid fallback still checks cap
