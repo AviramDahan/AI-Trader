@@ -13,7 +13,7 @@ import scanner_engine as engine
 import stock_scanner as scanner
 
 
-@pytest.mark.parametrize('block',[None,'hold','confidence','quote','session','targets'])
+@pytest.mark.parametrize('block',[None,'hold','confidence','quote','session','targets','disconnect_after_review'])
 def test_ollama_is_transport_not_permission_to_bypass_admission(db,clock,monkeypatch,block):
     candidate,_,_=prepare(monkeypatch,clock)
     monkeypatch.setattr(scanner,'ai_review',scanner_review)
@@ -36,11 +36,15 @@ def test_ollama_is_transport_not_permission_to_bypass_admission(db,clock,monkeyp
     def relay(method,path,payload=None,**kwargs):
         if path=='/health':return dict(protocol=1,ready=True,model=ai_routing.MODEL,digest=ai_routing.DIGEST,capacity=1)
         calls.append(payload)
+        if block=='disconnect_after_review':
+            from ai_budget import BudgetUnavailable
+            monkeypatch.setattr(ai_routing,'ready',lambda:False)
+            monkeypatch.setattr('ai_budget.check',Mock(side_effect=BudgetUnavailable('paid_cap')))
         return dict(done=True,done_reason='stop',model=ai_routing.MODEL,model_digest=ai_routing.DIGEST,
             message={'content':json.dumps(decision)},prompt_eval_count=12,eval_count=8)
     monkeypatch.setattr(ai_routing,'relay',relay)
     result=scanner.run_scan();paid.assert_not_called()
-    if block:
+    if block and block!='disconnect_after_review':
         assert result['signals_published']==0
         assert not rows('SELECT id FROM scanner_orders') and not rows('SELECT id FROM scanner_fills')
         return
@@ -57,3 +61,19 @@ def test_ollama_is_transport_not_permission_to_bypass_admission(db,clock,monkeyp
     scanner.run_scan()
     assert len(rows('SELECT id FROM scanner_orders'))==1 and len(rows('SELECT id FROM scanner_fills'))==2
     assert len(calls)==1 and engine.dashboard_payload()['lifecycle_verification']['accounting_ok']
+
+
+@pytest.mark.parametrize('provider',['ollama_relay','openrouter'])
+def test_translation_budget_cannot_retroactively_block_validated_local_decision(monkeypatch,provider):
+    from ai_budget import BudgetUnavailable
+    import final_ai
+    monkeypatch.setenv('AI_TRADER_CLOUD','true')
+    monkeypatch.setattr('ai_provider.json_completion',Mock(side_effect=BudgetUnavailable('paid_cap')))
+    token=final_ai.TRACE.set({'provider':provider})
+    try:
+        if provider=='openrouter':
+            with pytest.raises(BudgetUnavailable):scanner._localize_telegram_signal({'reason':'fixture','relevant_news':[]})
+        else:
+            signal=scanner._localize_telegram_signal({'reason':'fixture','relevant_news':[]})
+            assert signal['telegram_reason_he'] and signal['telegram_news_he']==[]
+    finally:final_ai.TRACE.reset(token)

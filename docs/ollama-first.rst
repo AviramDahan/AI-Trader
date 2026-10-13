@@ -32,6 +32,11 @@ The local gateway holds one GPU slot until the upstream request has ended.
 Every paid attempt still runs the existing budget/cooldown/credit checks and
 shared OpenRouter pacing. The $25 cap and Auto Top-Up OFF are unchanged.
 Local readiness bypasses only a *spend* precheck, never financial risk controls.
+Once a local decision has completed and passed validation, losing PC readiness
+must not re-block that decision on a paid-spend-only publication check. Optional
+Hebrew wording uses the existing deterministic fallback if paid budget is
+blocked; it never fabricates wording with an unpaid extra model request. Paid
+and legacy decisions retain their existing publication budget checks.
 If local processing and paid budget are unavailable, fail closed/defer under
 the existing queue policy; price/TP/SL monitoring does not depend on inference.
 Local API spend is known zero (not electricity amortization). Usage ledger
