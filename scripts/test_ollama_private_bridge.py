@@ -56,7 +56,9 @@ def main(image):
             run('useradd','-M','-d',str(home),'-g',group,'-s','/usr/sbin/nologin','-p','x',user);added_user=True
             for name in ('host','client'):
                 run('ssh-keygen','-q','-t','ed25519','-N','','-f',str(root/name))
-            auth=root/'authorized_keys';auth.write_text('restrict,port-forwarding '+(root/'client.pub').read_text())
+            # StrictModes stops at the account home. Do not put authorized_keys
+            # outside home under world-writable /tmp and weaken StrictModes.
+            auth=home/'authorized_keys';auth.write_text('restrict,port-forwarding '+(root/'client.pub').read_text())
             auth.chmod(0o644)
             with socket.socket() as probe:
                 probe.bind(('127.0.0.1',0));port=probe.getsockname()[1]
@@ -79,11 +81,12 @@ def main(image):
                  '-o','UserKnownHostsFile='+str(hosts),'-o','ConnectTimeout=3','-o','ExitOnForwardFailure=yes']
             time.sleep(.3)
             tunnel=subprocess.Popen(ssh+['-NT','-R',f'{relay}/relay.sock:127.0.0.1:{gateway.server_port}',user+'@127.0.0.1'],
-                stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
             processes.append(tunnel)
             for _ in range(100):
                 if (relay/'relay.sock').exists():break
-                assert tunnel.poll() is None,'restricted tunnel exited'
+                if tunnel.poll() is not None:
+                    raise AssertionError('restricted fixture tunnel exited: '+tunnel.stderr.read()[-1000:])
                 time.sleep(.05)
             sock=relay/'relay.sock';assert sock.exists() and sock.stat().st_mode & 0o777==0o660
             assert run(*ssh,user+'@127.0.0.1','true',check=False).returncode!=0,'shell unexpectedly allowed'
