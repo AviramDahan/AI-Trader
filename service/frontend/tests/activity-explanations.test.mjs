@@ -107,4 +107,10 @@ for(const file of ['src/activityExplanation.ts','src/activityReasons.ts','src/Bl
  const source=readFileSync(file,'utf8')
  for(const forbidden of ['fetch(','localStorage','sendMessage','dangerouslySetInnerHTML'])ok(!source.includes(forbidden))
 }
+// Readable retained-state labels in the light theme; not only color/shape cues.
+const css=readFileSync('src/systemActivity.css','utf8')
+const luminance=hex=>hex.match(/../g).map(v=>parseInt(v,16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((a,v,i)=>a+v*[.2126,.7152,.0722][i],0)
+for(const hex of ['50677a','aa253b','755006','086549']){
+ ok(css.includes('color:#'+hex));ok(1.05/(luminance(hex)+.05)>=4.5)
+}
 console.log(`Activity explanations: ${assertions} assertions passed; all stations, retained reasons, numeric gates, linkage and unknowns`)
