@@ -1,4 +1,5 @@
 /** Read-only projection of retained evidence. Never synthesize a passed stage or fill. */
+import { reasonDefinition } from './activityReasons'
 export type Row = Record<string, any>
 export const STATIONS = ['technical', 'targets', 'evidence', 'ai', 'signal', 'order', 'position', 'exit'] as const
 export type Station = typeof STATIONS[number]
@@ -33,7 +34,7 @@ export function rejectionStation(r: Row): Station {
 }
 export function candidateItem(r: Row): ActivityItem {
   const attempts = finite(r.ai_attempts) || 0
-  const wait = r.rejection_stage === 'session_wait' || /waiting_regular_session|cooldown/.test(r.rejection || '')
+  const wait = r.rejection_stage === 'session_wait' || !!r.rejection && reasonDefinition(r.rejection).kind === 'wait'
   return { id: `scan:${r.scan_id}:${r.ticker}`, ticker: r.ticker, company: r.company || '', kind: 'candidate',
     station: r.rejection ? rejectionStation(r) : r.ai_decision || attempts > 0 ? 'ai' : (r.target_checks || []).length ? 'targets' : 'technical',
     state: wait ? 'waiting' : r.rejection ? 'blocked' : 'recorded', at: recordTime(r), reason: r.rejection || null, record: r }
@@ -67,7 +68,8 @@ export function buildActivity(research: Row | null, dashboard: Row | null): Acti
     if (tradeSignals.has(String(s.id))) continue
     const r = records.find(v => v.signals?.some((v: Row) => String(v.id) === String(s.id)))
     if (r) linked.add(`${r.scan_id}:${r.ticker}`)
-    const orders: Row[] = (r?.orders || []).filter((o: Row) => o.purpose === 'entry')
+    const orders: Row[] = (r?.orders || []).filter((o: Row) => o.purpose === 'entry' &&
+      o.signal_id != null && String(o.signal_id) === String(s.id))
     const uncertain = orders.some(o => o.status === 'recovery_uncertain') || s.status === 'RECOVERY_UNCERTAIN'
     const pending = orders.some(o => o.status === 'pending')
     const expired = ['EXPIRED', 'CANCELLED', 'REJECTED', 'CLOSED', 'COMPLETED'].includes(s.status)

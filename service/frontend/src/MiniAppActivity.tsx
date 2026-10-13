@@ -2,7 +2,8 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { TopbarControls } from './appChrome'
 import { installMiniAppBackButton, preserveMiniApp } from './telegramMiniApp'
-import { activePositionItems, LABELS, STATE_LABELS, STATIONS, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
+import { activePositionItems, LABELS, STATIONS, type ActivityItem, type ActivityUpdate, type Row, type Station } from './systemActivityModel'
+import { activityStatusLabel, explainActivity, STATION_GUIDES } from './activityExplanation'
 import './miniAppActivity.css'
 
 type Sheet = { kind: 'station'; station: Station } | { kind: 'stock' | 'journey'; id: string } | { kind: 'info' | 'filters' }
@@ -15,6 +16,16 @@ type Props = {
 }
 const names = (pair: [string, string], he: boolean) => pair[he ? 0 : 1]
 const time = (value: unknown, he: boolean) => value ? new Date(String(value)).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
+
+export function MiniStockList({he,rows,known,onOpen,emptyMessage}:{he:boolean;rows:ActivityItem[];known:boolean;onOpen:(id:string)=>void;emptyMessage?:string}) {
+  const t=(a:string,b:string)=>he?a:b
+  return rows.length ? <ul className="mini-stock-list">{rows.map(item=><li key={item.id}>
+    <button className="mini-stock-row" type="button" onClick={()=>onOpen(item.id)} aria-label={`${t('פרטי מניה','Stock details')}: ${item.ticker}`}>
+      <span><strong><bdi>{item.ticker}</bdi></strong><small><bdi>{item.company||t('שם חברה לא נשמר','Company not retained')}</bdi></small></span>
+      <span className={`mini-stock-state state-${item.state}`}><span>{activityStatusLabel(item,he)}</span><small>{names(LABELS[item.station],he)}</small></span>
+      {explainActivity(item,he).title!==activityStatusLabel(item,he)&&<span className="mini-stock-reason">{explainActivity(item,he).title}</span>}
+    </button></li>)}</ul>:<p className="mini-empty">{known?emptyMessage||t('אין מניות תואמות במדגם הזה.','No matching stocks in this sample.'):t('הנתונים עדיין נטענים. אין להסיק שאין פעילות.','Data is loading; this does not indicate inactivity.')}</p>
+}
 
 /** A display-only shell over the same retained evidence as the full website. */
 export function MiniAppActivity(p: Props) {
@@ -60,11 +71,7 @@ export function MiniAppActivity(p: Props) {
   const selected = sheet && 'id' in sheet ? allItems.find(i => i.id === sheet.id) : undefined
   const title = sheet?.kind === 'station' ? names(LABELS[sheet.station], he) : selected ? sheet?.kind === 'journey' ? t(`הסבר וראיות · ${selected.ticker}`,`Explanation & evidence · ${selected.ticker}`) : selected.ticker : sheet?.kind === 'filters' ? t('חיפוש וסינון', 'Search and filters') : t('מה רואים כאן?', 'About this view')
   const state = p.error ? t('העדכון מתעכב', 'Refresh delayed') : !known ? t('טוען נתונים…', 'Loading data…') : !available ? t('מידע שמור', 'Retained data') : t('מחובר', 'Connected')
-  const list = (rows: ActivityItem[], emptyMessage?: string) => rows.length ? <ul className="mini-stock-list">{rows.map(item => <li key={item.id}>
-    <button className="mini-stock-row" type="button" onClick={() => open({ kind: 'stock', id: item.id })} aria-label={`${t('פרטי מניה', 'Stock details')}: ${item.ticker}`}>
-      <span><strong><bdi>{item.ticker}</bdi></strong><small><bdi>{item.company || t('שם חברה לא נשמר', 'Company not retained')}</bdi></small></span>
-      <span className="mini-stock-state"><span>{names(STATE_LABELS[item.state], he)}</span><small>{names(LABELS[item.station], he)}</small></span>
-    </button></li>)}</ul> : <p className="mini-empty">{known ? emptyMessage || t('אין מניות תואמות במדגם הזה.', 'No matching stocks in this sample.') : t('הנתונים עדיין נטענים. אין להסיק שאין פעילות.', 'Data is loading; this does not indicate inactivity.')}</p>
+  const list=(rows:ActivityItem[],emptyMessage?:string)=><MiniStockList he={he} rows={rows} known={known} emptyMessage={emptyMessage} onOpen={id=>open({kind:'stock',id})}/>
 
   return <section className="mini-workspace" dir={he ? 'rtl' : 'ltr'} aria-label={t('המערכת בפעולה', 'System in motion')}>
     <div ref={base} className="mini-base">
@@ -91,7 +98,7 @@ export function MiniAppActivity(p: Props) {
         <header className="mini-sheet-header"><button type="button" onClick={back} aria-label={stack.length > 1 ? t('חזרה', 'Back') : t('סגירה', 'Close')}>{stack.length > 1 ? '↪' : '×'}</button><h2 id={titleId}><bdi>{title}</bdi></h2>{stack.length > 1 && <button type="button" onClick={close} aria-label={t('סגירת כל הפרטים', 'Close all details')}>×</button>}</header>
         <div className="mini-sheet-content">
           {!available && sheet.kind !== 'info' && <p className="mini-retained-note">{known ? t('מידע אחרון שנשמר — לא פעילות חדשה.', 'Last retained data, not new activity.') : t('ממתין לנתונים.', 'Waiting for data.')}</p>}
-          {sheet.kind === 'station' && <><p className="mini-small-note">{t('מניות לפי התחנה האחרונה שתועדה; לא הוכחה שכל השלבים עברו.', 'Stocks by latest retained station; not proof that all earlier stages passed.')}</p>{list(items.filter(i => i.station === sheet.station))}</>}
+          {sheet.kind === 'station' && <><div className="mini-station-guide"><strong>{t('מה נבדק כאן?','What is checked here?')}</strong><p>{names(STATION_GUIDES[sheet.station].what,he)}</p><small>{names(STATION_GUIDES[sheet.station].next,he)}</small></div><p className="mini-small-note">{t('מניות לפי התחנה האחרונה שתועדה; לא הוכחה שכל השלבים עברו.', 'Stocks by latest retained station; not proof that all earlier stages passed.')}</p>{list(items.filter(i => i.station === sheet.station))}</>}
           {sheet.kind === 'stock' && selected && p.renderFocus(selected, back, () => open({ kind: 'journey', id: selected.id }))}
           {sheet.kind === 'journey' && selected && p.renderJourney(selected, back)}
           {(sheet.kind === 'stock' || sheet.kind === 'journey') && !selected && <p>{t('הרשומה כבר אינה במדגם. אין בכך הוכחה שהפוזיציה נסגרה.', 'Record left the sample; this does not prove closure.')}</p>}

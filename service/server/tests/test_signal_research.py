@@ -141,6 +141,26 @@ def test_journal_repeats_sessions_missing_stages_and_allowlist(db):
             assert c.execute('SELECT count(*) FROM '+table).fetchone()[0]==0
 
 
+def test_retained_target_requirements_public_readback_never_exports_private_source(db):
+    with database.get_db_connection() as c:
+        data=dict(phase='pre_ai',outcome='REJECT',rejection_reason='entry_not_above_completed_high',
+            minimum_rr=2,observed_at='2026-10-07T14:00:00Z',quote=dict(price=100),
+            source_inputs=dict(atr=1,data_as_of='2026-10-06',zones=[],completed_high=101.5,
+                completed_high_sessions=20,private_prompt='DO-NOT-EXPOSE'))
+        c.execute("UPDATE scanner_candidates SET metrics_json=? WHERE stage='target_check'",(json.dumps(data),))
+        c.commit()
+    with database.get_db_connection() as c:
+        c.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY' if database.using_postgres() else 'PRAGMA query_only=ON')
+        r=research.report(c,48,NOW)
+        check=r['records'][0]['target_checks'][0]
+        assert check['minimum_rr']==2
+        assert check['source_inputs']['completed_high']==101.5
+        assert check['source_inputs']['completed_high_sessions']==20
+        assert 'DO-NOT-EXPOSE' not in json.dumps(r) and 'private_prompt' not in json.dumps(r)
+        for table in ('scanner_signals','scanner_orders','scanner_fills','scanner_telegram_outbox'):
+            assert c.execute('SELECT count(*) n FROM '+table).fetchone()['n']==0
+
+
 def test_clipping_is_explicit_and_bad_json_never_fabricates_evidence(db,monkeypatch):
     monkeypatch.setattr(research,'ROW_LIMIT',2)
     with database.get_db_connection() as c:

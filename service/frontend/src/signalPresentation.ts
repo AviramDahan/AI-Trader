@@ -1,6 +1,6 @@
 type Row = Record<string, any>
 
-const ENTRY_REJECTIONS: Record<string, [string, string]> = {
+export const ENTRY_REJECTIONS: Record<string, [string, string]> = {
   fill_rr_below_2: ['יחס הסיכוי־סיכון במחיר הביצוע נמוך מ־2R', 'Execution-price reward/risk is below 2R'],
   fill_outside_plan: ['מחיר הביצוע מחוץ לטווח הסטופ והיעד השמורים', 'Execution price is outside the saved stop/target range'],
   fill_stop_distance_invalid: ['מרחק הסטופ במחיר הביצוע אינו עומד בהגנות', 'Execution-price stop distance fails the safeguards'],

@@ -1,39 +1,15 @@
 import { useEffect, useState } from 'react'
 import { API_ORIGIN } from './appShared'
+import { REASON_DETAILS, reasonTitle } from './activityReasons'
 
 type Row = Record<string, any>
 const value = (v: any, suffix = '') => v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(2)}${suffix}` : '—'
-const reasonNames: Record<string, string> = {
-  pre_no_fresh_quote: 'אין מחיר ייחוס טרי', no_fresh_intraday_quote_or_market_closed: 'אין מחיר תוך־יומי טרי / שוק סגור',
-  pre_no_forward_zone: 'אין אזור התנגדות קדמי', pre_nearest_resistance_below_2r: 'ההתנגדות הקרובה לפני 2R',
-  pre_entry_inside_unresolved_price_zone: 'הכניסה בתוך אזור לא פתור', pre_invalid_rounded_levels: 'רמות יעד/סטופ אינן תקינות',
-  pre_insufficient_confirmed_price_zones: 'אין מספיק אזורי מחיר מאושרים לתוכנית',
-  pre_price_structure_fails_risk_reward: 'מבנה היעדים אינו עומד בדרישות הסיכון־סיכוי',
-  pre_no_structural_stop_anchor: 'אין עוגן סטופ מבני', pre_structural_stop_too_distant: 'הסטופ המבני רחוק מדי',
-  pre_entry_not_above_completed_high: 'מחיר הכניסה אינו מעל השיא של 20 ימי המסחר שהושלמו',
-  pre_completed_high_unavailable: 'חסר שיא מאומת של 20 ימי המסחר שהושלמו',
-  pre_breakout_requires_no_forward_zone: 'מסלול פריצה אינו זמין כשקיימת התנגדות קדמית',
-  pre_unsupported_breakout_policy: 'חוזה מדיניות הפריצה אינו נתמך',
-  pre_breakout_policy_contract_mismatch: 'תוכנית הפריצה אינה תואמת לחוזה השמור',
-  pre_fill_no_longer_above_completed_high: 'מחיר הביצוע כבר אינו מעל השיא המאומת',
-  insufficient_current_news: 'אין די חדשות עדכניות', news_provider_unavailable_fail_closed: 'נתוני החדשות אינם זמינים',
-  ai_or_confidence_filter: 'החלטת AI / ציון / רלוונטיות לא עברו', news_sentiment_conflict: 'סתירה בכיוון החדשות',
-  pre_duplicate_cooldown: 'המתנה אחרי סיגנל קודם', duplicate_cooldown: 'המתנה אחרי סיגנל קודם',
-  pre_waiting_regular_session: 'ממתין למסחר הרגיל — לא פסילת איכות', post_waiting_regular_session: 'המסחר הרגיל הסתיים במהלך הבדיקה',
-  ai_hold: 'החלטת AI: המתנה', ai_confidence_below_threshold: 'ציון המודל מתחת לסף',
-  ai_news_relevance_below_threshold: 'רלוונטיות החדשות מתחת לסף',
-  sec_material_conflict_hold: 'סתירה מהותית בנתוני SEC מאומתים — המתנה',
-  target_buffer_reaches_entry: 'מרווח ההתנגדות משאיר את היעד בכניסה או מתחתיה',
-  target_rounds_to_or_below_entry: 'עיגול היעד מביא אותו לכניסה או מתחתיה',
-  non_positive_stop: 'הסטופ אינו מחיר חיובי', stop_not_below_entry: 'הסטופ אינו מתחת לכניסה',
-  rounded_target_not_before_resistance: 'היעד לאחר עיגול אינו לפני ההתנגדות',
-}
-const reasonText = (reason: string, he: boolean) => he ? reasonNames[reason] || reasonNames[`pre_${reason}`] || reason : reason
+const reasonText = (reason: string, he: boolean) => reasonTitle(reason,he)
 const candidateReason = (row: Row, he: boolean) => {
   // Use only a detail belonging to the same persisted rejection; no historical rewrite.
   const check = [...(row.target_checks || [])].reverse().find((c: Row) =>
     `pre_${String(c.rejection_reason || '').replace(/^pre_/, '')}` === row.rejection)
-  const detail = check?.rejection_detail?.find((code: string) => reasonNames[code])
+  const detail = (Array.isArray(check?.rejection_detail)?check.rejection_detail:[]).find((code: string) => Object.prototype.hasOwnProperty.call(REASON_DETAILS,code))
   return reasonText(detail || row.rejection, he)
 }
 const stageNames: Record<string, string> = { quote: 'נתוני מחיר', news: 'חדשות', targets: 'מבנה / יעד / RR', ai_filter: 'סינון AI', cooldown: 'המתנה', other: 'אחר / חסרה ראיה' }
