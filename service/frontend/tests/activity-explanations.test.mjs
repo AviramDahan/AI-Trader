@@ -91,6 +91,9 @@ eq(itemReasonCodes(invalid)[0],'fill_rr_below_2')
 ok(explainActivity(invalid,true).title.includes('במחיר הביצוע נמוך מ־2R'))
 ok(renderToStaticMarkup(createElement(MiniStockList,{he:true,rows:[invalid],known:true,onOpen:()=>{}})).includes('במחיר הביצוע נמוך מ־2R'))
 const unlinked=buildActivity(null,{signals:[{id:1,ticker:'TEST',status:'ENTERED',actual_entry:100}]})[0]
+const rejectedOrder=buildActivity({records:[candidate('TEST',{signals:[{id:9,status:'PENDING_ENTRY'}],orders:[{id:9,signal_id:9,purpose:'entry',status:'invalid'}]})]},null)[0]
+eq(rejectedOrder.state,'blocked');eq(rejectedOrder.reason,'entry_order_invalid')
+ok(!activityStatusLabel(rejectedOrder,true).includes('ממתין לביצוע'))
 eq(unlinked.state,'uncertain');ok(explainActivity(unlinked,true).detail.includes('פוזיציה מקושרת'))
 const close=buildActivity(null,{signals:[{id:1,ticker:'TEST',status:'PENDING_CLOSE'}]})[0]
 ok(explainActivity(close,true).detail.includes('בקשת יציאה'))

@@ -4,9 +4,10 @@ Mini App: clear retained blockers
 Scope
 -----
 
-Display-only explanations in the existing public Mini App, stock journey,
-website station cards and signal research. No scanner gates, thresholds,
-strategy, execution, AI calls, Telegram delivery or refresh cadence changes.
+Presentation explanations in the existing public Mini App, stock journey,
+website station cards, signal research and paper Telegram notifications.
+No scanner gates, thresholds, strategy, execution rules, AI calls or refresh
+cadence changes. The existing Telegram outbox delivers state updates.
 No migration, new storage or production configuration is required.
 
 Each of the eight stations explains what it checks and what passing it does
@@ -57,3 +58,28 @@ Responsive manual checks cover 360/390/430 pixel phones, short-sheet vertical
 scrolling, all eight station sheets, stock/journey navigation, desktop,
 Hebrew/English, and loading/empty/error/stale states. Publication still uses
 the existing protected release mechanism; creating a PR does not deploy it.
+
+Paper Telegram clarification
+----------------------------
+
+Signal alerts explicitly distinguish pending entry, allocation/duplicate blocks,
+pending exit, HOLD and bearish-only indications, without raw status enums.
+Validity/entry-window times are shown in Israel time from aware retained times.
+Only an actual entry fill produces the existing active-position entry alert.
+The open-position status card excludes pending orders and explains this.
+
+An actual order transition to invalid, risk_rejected, recovery_uncertain or
+expired queues one signals_status update through the existing outbox, routed
+to the existing signals topic and gated by the existing entry-alert switch.
+The key is order-status:<order ID>:<stored status>. Restart/repeated processing
+cannot queue a second copy. Initialization/restore do not backfill old failures.
+No Telegram message is sent by the monitoring transaction itself. Existing
+fills, quantities, fees, reservation and TP/SL calculations are unchanged.
+Rejections use only allowlisted reasons, never arbitrary exception content.
+Unknown historical causes stay explicitly unavailable; no fill is guessed.
+The existing signals_status event/route is understood by the previous binary;
+no new event type, topic, provider, schema or dispatcher is introduced.
+
+tests/test_paper_execution_alerts.py and its isolated PostgreSQL counterpart
+cover a full pending-to-rejected chain, valid entry, expiry, uncertainty,
+unchanged balances/reservation, restart/dedupe and mocked delivery/switches.

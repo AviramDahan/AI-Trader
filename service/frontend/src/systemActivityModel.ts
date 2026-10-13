@@ -73,14 +73,15 @@ export function buildActivity(research: Row | null, dashboard: Row | null): Acti
     const uncertain = orders.some(o => o.status === 'recovery_uncertain') || s.status === 'RECOVERY_UNCERTAIN'
     const pending = orders.some(o => o.status === 'pending')
     const expired = ['EXPIRED', 'CANCELLED', 'REJECTED', 'CLOSED', 'COMPLETED'].includes(s.status)
-    const blocked = ['RISK_BLOCKED', 'DUPLICATE_BLOCKED', 'ENTRY_POLICY_REJECTED'].includes(s.status)
+    const invalidOrder = !expired && orders.some(o=>o.status==='invalid'||o.status==='risk_rejected')
+    const blocked = invalidOrder || ['RISK_BLOCKED', 'DUPLICATE_BLOCKED', 'ENTRY_POLICY_REJECTED'].includes(s.status)
     // Actual_entry alone without a linked trade is not a proven current position.
     const unlinkedFill = s.actual_entry != null || orders.some(o => o.status === 'filled')
     items.push({ id: `signal:${s.id}`, ticker: s.ticker, company: s.company || r?.company || '',
       station: uncertain || pending || orders.length ? 'order' : 'signal',
       state: uncertain || unlinkedFill ? 'uncertain' : blocked ? 'blocked' : expired ? 'closed' : 'waiting',
       at: newestTime([s.updated_at, s.created_at, recordTime(r || {})]),
-      reason: uncertain ? 'recovery_uncertain' : unlinkedFill ? 'unlinked_fill' : s.status === 'RISK_BLOCKED' ? 'allocation_blocked' : blocked || expired ? s.status : null,
+      reason: uncertain ? 'recovery_uncertain' : unlinkedFill ? 'unlinked_fill' : s.status === 'RISK_BLOCKED' ? 'allocation_blocked' : invalidOrder && s.status==='PENDING_ENTRY' ? 'entry_order_invalid' : blocked || expired ? s.status : null,
       kind: 'signal', signal: s, record: r })
   }
   // One latest retained scan per ticker; repeated scans remain separately accessible in detail.
@@ -119,7 +120,7 @@ export function detectActivityUpdates(previous: ActivityItem[] | null, current: 
 export const LABELS: Record<Station, [string, string]> = {
   technical: ['סריקה וטכני', 'Scan & technical'], targets: ['יעדים ו־RR', 'Targets & RR'],
   evidence: ['חדשות ו־SEC', 'News & SEC'], ai: ['סקירת AI', 'AI review'],
-  signal: ['סיגנל שנשמר', 'Retained signal'], order: ['פקודת דמה', 'Paper order'],
+  signal: ['סיגנל שנשמר', 'Retained signal'], order: ['ביצוע הדמה', 'Paper execution'],
   position: ['פוזיציה פעילה', 'Open position'], exit: ['יציאה ותוצאה', 'Exit & outcome'],
 }
 export const STATE_LABELS: Record<ActivityItem['state'], [string, string]> = {

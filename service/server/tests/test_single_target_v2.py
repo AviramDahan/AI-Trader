@@ -234,7 +234,7 @@ def test_v2_render_retains_context_rtl_and_length():
         reason_he='סיבה קיימת',news_json=json.dumps([{'title_he':'חדשות קיימות'}]),status='RISK_BLOCKED')
     msg=engine._signal_telegram_message(signal)
     for expected in ('Test Company','קנייה','סיבה קיימת','חדשות קיימות','לא־מכויל','91%',
-                     '100%','ברוטו','RISK_BLOCKED','זכאות סיגנל','תוקף','single_target_v2'):
+                     '100%','ברוטו','ההקצאה לא אושרה','זכאות סיגנל','תוקף','single_target_v2'):
         assert expected in msg
     assert msg.count('יעד פעיל')==1 and 'יעד 2' not in msg
     assert '\u200f' in msg and msg.count('\u2066')==msg.count('\u2069')
