@@ -19,6 +19,8 @@ ENTRY_REASONS_HE = {
     'breakout_policy_contract_mismatch': 'תוכנית הפריצה אינה תואמת לחוזה שנשמר.',
     'unsupported_single_policy': 'חוזה היעד היחיד אינו נתמך.',
     'unsupported_breakout_policy': 'חוזה הפריצה אינו נתמך.',
+    'entry_price_retry_contract_invalid': 'חוזה ההמתנה למחיר או תיעוד הבדיקה אינו תקין.',
+    'unsupported_entry_price_retry': 'גרסת חוזה ההמתנה למחיר אינה נתמכת.',
 }
 
 
@@ -59,11 +61,18 @@ def signal_state_lines(signal):
             'אין להסיק מהסיגנל לבדו שנפתחה או נסגרה פוזיציה.']
 
 
-def order_update_lines(status, action, rejection=None):
+def order_update_lines(status, action, rejection=None, *, price_wait=None):
     """Only an actual stored order transition; never a hypothetical fill."""
     closing = action == 'SELL'
     not_executed = ('לא בוצעה יציאה מהפקודה הזאת; אין להסיק שהפוזיציה נסגרה.' if closing
                     else 'לא נפתחה פוזיציה חדשה מהפקודה הזאת.')
+    if status == 'pending' and action == 'BUY' and price_wait:
+        detail = ENTRY_REASONS_HE.get(reason_code(price_wait.get('reason')))
+        if detail:
+            return ['אירוע: ממתין למחיר כניסה תקף', not_executed,
+                    'סיבת דחיית המחיר שנבדק: ' + detail,
+                    'הפקודה נשארת ממתינה עד תום התוקף. רק נר מאוחר שהושלם ומחיר שעובר את כל הבקרות יכולים לפתוח פוזיציה.',
+                    'הסטופ, היעד והתוקף לא השתנו. אין הבטחה שהכניסה תתבצע.']
     if status == 'invalid':
         detail = ENTRY_REASONS_HE.get(reason_code(rejection),
                                      'בקרת הביצוע נכשלה; סיבה פרטנית מאומתת לא נשמרה.')

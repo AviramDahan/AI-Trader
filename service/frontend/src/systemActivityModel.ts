@@ -1,5 +1,6 @@
 /** Read-only projection of retained evidence. Never synthesize a passed stage or fill. */
 import { reasonDefinition } from './activityReasons'
+import { entryPriceWait } from './signalPresentation'
 export type Row = Record<string, any>
 export const STATIONS = ['technical', 'targets', 'evidence', 'ai', 'signal', 'order', 'position', 'exit'] as const
 export type Station = typeof STATIONS[number]
@@ -71,7 +72,8 @@ export function buildActivity(research: Row | null, dashboard: Row | null): Acti
     const orders: Row[] = (r?.orders || []).filter((o: Row) => o.purpose === 'entry' &&
       o.signal_id != null && String(o.signal_id) === String(s.id))
     const uncertain = orders.some(o => o.status === 'recovery_uncertain') || s.status === 'RECOVERY_UNCERTAIN'
-    const pending = orders.some(o => o.status === 'pending')
+    const priceWait = entryPriceWait(s,orders)
+    const pending = orders.some(o => o.status === 'pending') || !!priceWait
     const expired = ['EXPIRED', 'CANCELLED', 'REJECTED', 'CLOSED', 'COMPLETED'].includes(s.status)
     const invalidOrder = !expired && orders.some(o=>o.status==='invalid'||o.status==='risk_rejected')
     const blocked = invalidOrder || ['RISK_BLOCKED', 'DUPLICATE_BLOCKED', 'ENTRY_POLICY_REJECTED'].includes(s.status)
@@ -81,7 +83,7 @@ export function buildActivity(research: Row | null, dashboard: Row | null): Acti
       station: uncertain || pending || orders.length ? 'order' : 'signal',
       state: uncertain || unlinkedFill ? 'uncertain' : blocked ? 'blocked' : expired ? 'closed' : 'waiting',
       at: newestTime([s.updated_at, s.created_at, recordTime(r || {})]),
-      reason: uncertain ? 'recovery_uncertain' : unlinkedFill ? 'unlinked_fill' : s.status === 'RISK_BLOCKED' ? 'allocation_blocked' : invalidOrder && s.status==='PENDING_ENTRY' ? 'entry_order_invalid' : blocked || expired ? s.status : null,
+      reason: uncertain ? 'recovery_uncertain' : unlinkedFill ? 'unlinked_fill' : s.status === 'RISK_BLOCKED' ? 'allocation_blocked' : invalidOrder && s.status==='PENDING_ENTRY' ? 'entry_order_invalid' : blocked || expired ? s.status : priceWait ? 'entry_price_wait' : null,
       kind: 'signal', signal: s, record: r })
   }
   // One latest retained scan per ticker; repeated scans remain separately accessible in detail.
@@ -99,7 +101,7 @@ export function activityRevision(item: ActivityItem): string {
   // Ignore wall-clock response timestamps: polling the same evidence must not animate.
   return JSON.stringify([item.id, item.station, item.state, item.at, item.reason,
     item.record?.target_checks, item.record?.reviews, item.record?.ai_decision,
-    item.record?.orders, item.signal?.status, item.trade?.remaining_quantity,
+    item.record?.orders, item.signal?.status, item.signal?.entry_price_wait, item.trade?.remaining_quantity,
     item.trade?.current_stop, item.outcome?.exit_types])
 }
 

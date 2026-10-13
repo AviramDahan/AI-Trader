@@ -10,6 +10,11 @@ def plan(row, field):
 def version(tables):
     from short_policy import in_snapshot
     from single_breakout_policy import is_breakout
+    if any('entry_price_retry' in json.loads(r.get(field) or '{}') or
+           'last_entry_price_block' in json.loads(r.get(field) or '{}')
+           for table, field in (('scanner_orders','plan_json'), ('scanner_trades','settings_json'))
+           for r in tables[table]):
+        return 6
     if any(is_breakout(plan(r, field)) or json.loads(r.get(field) or '{}').get('entry_execution')
            for table, field in (('scanner_signals','technical_json'), ('scanner_orders','plan_json'),
                                 ('scanner_trades','settings_json')) for r in tables[table]):
@@ -23,9 +28,11 @@ def version(tables):
 
 def validate_snapshot(data):
     tables = data['tables']
-    if version(tables) == 5 and data['version'] != 5:
+    if version(tables) == 6 and data['version'] != 6:
+        raise ValueError('entry_price_retry_requires_format6')
+    if version(tables) == 5 and data['version'] not in (5,6):
         raise ValueError('entry_policy_requires_format5')
-    if version(tables) == 3 and data['version'] not in (3,4,5):
+    if version(tables) == 3 and data['version'] not in (3,4,5,6):
         raise ValueError('single_policy_requires_format3')
     from short_policy import is_short
     for table, field in (('scanner_signals','technical_json'), ('scanner_orders','plan_json'),
@@ -45,6 +52,8 @@ def validate_snapshot(data):
             if [s['tp1_pct'],s['tp2_pct'],s['tp3_pct']] != [1,0,0]:
                 raise ValueError('single_signal_fractions_mismatch')
     for o in orders.values():
+        from entry_price_retry import validate_order
+        validate_order(o)
         from entry_window import eligible_from
         eligible_from(o)  # Validates the immutable window even with creation disabled.
         p = plan(o, 'plan_json')
@@ -66,6 +75,12 @@ def validate_snapshot(data):
         order_window = json.loads(orders[t['order_id']].get('plan_json') or '{}').get('entry_execution')
         if saved_window != order_window:
             raise ValueError('trade_entry_window_mismatch')
+        saved_retry = json.loads(t.get('settings_json') or '{}').get('entry_price_retry')
+        order_retry = json.loads(orders[t['order_id']].get('plan_json') or '{}').get('entry_price_retry')
+        if saved_retry != order_retry:
+            raise ValueError('trade_entry_price_retry_mismatch')
+        if saved_retry and (t['side'] not in ('long','BUY') or t['signal_id'] != orders[t['order_id']]['signal_id']):
+            raise ValueError('trade_entry_price_retry_mismatch')
         if saved_window:
             from entry_window import instant
             if instant(t['opened_at']) < instant(saved_window['entry_eligible_from']):

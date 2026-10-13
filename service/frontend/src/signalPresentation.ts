@@ -14,6 +14,19 @@ export const ENTRY_REJECTIONS: Record<string, [string, string]> = {
   breakout_policy_contract_mismatch: ['תוכנית הפריצה אינה תואמת לחוזה שנשמר', 'Breakout plan does not match the saved contract'],
   unsupported_single_policy: ['חוזה היעד היחיד אינו נתמך', 'Single-target contract is unsupported'],
   unsupported_breakout_policy: ['חוזה הפריצה אינו נתמך', 'Breakout contract is unsupported'],
+  entry_price_retry_contract_invalid: ['חוזה ההמתנה למחיר או תיעוד הבדיקה אינו תקין', 'Price-wait contract or retained check is invalid'],
+  unsupported_entry_price_retry: ['גרסת חוזה ההמתנה למחיר אינה נתמכת', 'Price-wait contract version is unsupported'],
+}
+
+export function entryPriceWait(signal: Row | undefined, orders: Row[] = []): Row | null {
+  if (signal?.status !== 'PENDING_ENTRY' || signal.id == null) return null
+  const entry = orders.filter(o => o.signal_id != null && String(o.signal_id) === String(signal.id) &&
+    o.purpose === 'entry' && o.status === 'pending').sort((a,b) => Number(a.id)-Number(b.id))[0]
+  const wait = signal.entry_price_wait ?? entry?.entry_price_wait
+  return wait && wait.version === 'single_entry_price_retry_v1' &&
+    typeof wait.reason === 'string' && wait.reason.startsWith('fill_') &&
+    Object.prototype.hasOwnProperty.call(ENTRY_REJECTIONS, wait.reason) &&
+    typeof wait.price === 'number' && Number.isFinite(wait.price) && wait.price > 0 ? wait : null
 }
 
 export function entryRejectionCode(signal: Row | undefined, orders: Row[] = []): string | null {

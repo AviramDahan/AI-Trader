@@ -1,7 +1,7 @@
 /** Explanations from the exact retained chain only; never a new trading decision. */
 import { finite, type ActivityItem, type Row, type Station } from './systemActivityModel'
 import { reasonDefinition, reasonKey, reasonTitle, type Pair } from './activityReasons'
-import { entryRejectionCode } from './signalPresentation'
+import { entryRejectionCode, entryPriceWait } from './signalPresentation'
 const text=(pair:Pair,he:boolean)=>pair[he?0:1]
 const rows=(value:unknown):Row[]=>Array.isArray(value)?value.filter(v=>v&&typeof v==='object'):[]
 export const STATION_GUIDES: Record<Station, { what:Pair; next:Pair }> = {
@@ -28,6 +28,8 @@ export function itemReasonCodes(item:ActivityItem):string[] {
   const add=(code:unknown)=>{if(typeof code==='string'&&code&&!codes.some(c=>reasonKey(c)===reasonKey(code)))codes.push(code)}
   // A verified exact execution blocker leads the list, not its generic status.
   if(item.signal?.status==='ENTRY_POLICY_REJECTED')add(entryRejectionCode(item.signal,linkedItemOrders(item)))
+  const wait=item.state==='waiting'?entryPriceWait(item.signal,linkedItemOrders(item)):null
+  if(wait){add('entry_price_wait');add(wait.reason)}
   add(item.reason)
   if(item.kind==='candidate' && item.station==='ai' && item.reason)
     for(const code of Array.isArray(item.record?.ai_decision?.filter_failures)?item.record!.ai_decision.filter_failures:[])add(code)
@@ -60,6 +62,8 @@ export function explainActivity(item:ActivityItem,he:boolean):Explanation {
     title=activityStatusLabel(item,he)
     detail=item.trade?.status==='open'?t('נמצאה פוזיציית דמה פתוחה. מנגנון הניטור ממשיך לנהל את הסטופ והיעד שלה.','An open paper position is retained. Monitoring manages its stop and target.'):t('נמצאה פוזיציה סגורה. סיבת היציאה נקבעת רק ממילויי יציאה מקושרים.','A closed position is retained. Only linked exit fills establish the exit cause.')
     next=item.trade?.legacy_position_id?t('זו פוזיציה מיובאת; אין להשלים היסטוריית כניסה או תוצאה שחסרה.','This is imported; missing entry history or outcomes are not reconstructed.'):t('התוצאה מוצגת לפי החלקים שמומשו והחלק שנותר פתוח, לא כתשואת תיק.','Outcomes reflect exited portions and the remaining open portion, not portfolio return.')
+  }else if(item.state==='waiting'&&entryPriceWait(item.signal,linkedItemOrders(item))){
+    next=t('הפקודה ממשיכה להמתין בתוך התוקף המקורי. רק מחיר חדש מנר מאוחר שהושלם ועובר את כל הבקרות יוכל לפתוח פוזיציה; אין הבטחת ביצוע.','The order keeps waiting within its original validity. Only a new price from a later completed candle passing all gates can open a position; execution is not guaranteed.')
   }else if(!reasons.length && item.state==='waiting'){
     title=activityStatusLabel(item,he)
     detail=item.signal?.status==='PENDING_CLOSE'?t('נשמרה בקשת יציאה ממתינה, לא יציאה שבוצעה. אין להסיק שהפוזיציה נסגרה.','A pending exit request is retained, not an executed exit. Position closure is not inferred.'):item.station==='order'?t('פקודה ממתינה נשמרה, אך לא נמצא ביצוע כניסה מקושר. אין להסיק שמחיר הכניסה לא נגע רק מסטטוס ממתין.','A pending order is retained but no entry fill is linked. Pending status alone does not prove that price never touched entry.'):t('הסיגנל נשמר, אך טרם נמצא ביצוע מקושר במדגם.','The signal is retained, but a linked execution is not present in this sample.')
@@ -88,6 +92,8 @@ export function explainActivity(item:ActivityItem,he:boolean):Explanation {
       fact(t('שיא סשנים שהושלמו שנשמר','Retained completed-session high'),check.source_inputs?.completed_high)
   }
   if(item.kind==='position')fact(t('יתרה מהפוזיציה','Position remaining'),item.outcome?.remaining_pct,'%')
+  const priceWait=item.state==='waiting'?entryPriceWait(item.signal,linkedItemOrders(item)):null
+  if(priceWait)fact(t('מחיר שנבדק ולא אושרה בו כניסה','Checked price with no entry approval'),priceWait.price)
   const modelReason=item.kind==='candidate'&&item.station==='ai'&&typeof ai?.reason==='string'&&ai.reason.trim()?ai.reason.slice(0,800):null
   return {title,detail,next,reasons,facts,modelReason}
 }

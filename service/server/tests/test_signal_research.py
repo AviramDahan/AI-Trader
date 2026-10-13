@@ -225,3 +225,31 @@ def test_exact_entry_rejection_is_linked_and_allowlisted_without_plan_leak(db):
         assert case['orders'][0]['entry_rejection_reason']=='fill_rr_below_2'
         assert case['orders'][0]['signal_id']==case['signals'][0]['id']
         assert 'DO-NOT-EXPOSE' not in json.dumps(result) and 'plan_json' not in json.dumps(result)
+
+
+def test_price_wait_readback_is_derived_same_chain_and_read_only(db):
+    from test_entry_price_retry import narrow_plan,FLAGS
+    import entry_price_retry
+    stamp='2026-10-07T14:00:00Z'
+    p=narrow_plan(stamp)
+    with patch('telegram_status.refresh_telegram_status_cards'),patch.dict('os.environ',FLAGS),patch.object(scanner_engine,'now_z',return_value=stamp):
+        scanner_engine.initialize_runtime()
+        scanner_engine.record_signal(dict(ticker='TEST',company='Synthetic',action='BUY',entry=100,
+            stop_loss=p['stop'],target_plan=p,confidence=.9,time_horizon='days',reason='synthetic',relevant_news=[]),{},{},{},'s2')
+    with patch.object(scanner_engine,'now_z',return_value='2026-10-07T14:10:00Z'):
+        scanner_engine.process_bar('TEST',dict(at='2026-10-07T14:05:00Z',open=99.8,high=100.2,low=99.7,close=99.85))
+    with database.get_db_connection() as c:
+        o=c.execute("SELECT * FROM scanner_orders WHERE purpose='entry'").fetchone()
+        contract=json.loads(o['plan_json']);contract['execution_settings']['private_prompt']='DO-NOT-EXPOSE'
+        c.execute('UPDATE scanner_orders SET plan_json=? WHERE id=?',(json.dumps(contract),o['id']));c.commit()
+        before=[dict(r) for r in c.execute('SELECT * FROM scanner_orders')]
+        c.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY' if database.using_postgres() else 'PRAGMA query_only=ON')
+        result=research.report(c,48,NOW)
+        case=next(r for r in result['records'] if r['scan_id']=='s2')
+        wait=case['orders'][0]['entry_price_wait']
+        assert wait['version']==entry_price_retry.VERSION and wait['reason']=='fill_stop_distance_invalid'
+        assert case['signals'][0]['entry_price_wait']==wait
+        assert case['signals'][0]['status']=='PENDING_ENTRY' and not result['outcomes']
+        assert set(wait)=={'version','reason','price','bar_at','observed_at'}
+        assert 'DO-NOT-EXPOSE' not in json.dumps(result) and 'plan_json' not in json.dumps(result)
+        assert before==[dict(r) for r in c.execute('SELECT * FROM scanner_orders')]

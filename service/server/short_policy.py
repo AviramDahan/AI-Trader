@@ -102,7 +102,7 @@ def validate_snapshot(data):
     tables = data['tables']
     if not in_snapshot(tables):
         return
-    if data['version'] not in (4,5):
+    if data['version'] not in (4,5,6):
         raise ValueError('short_requires_format4')
     signals = {s['id']: s for s in tables['scanner_signals']}
     orders = {o['id']: o for o in tables['scanner_orders']}
