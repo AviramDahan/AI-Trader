@@ -74,7 +74,7 @@ def main(image):
             Path('/run/sshd').mkdir(exist_ok=True)
             run(sshd,'-t','-f',str(conf))
             effective=run(sshd,'-T','-f',str(conf),'-C',f'user={user},host=localhost,addr=127.0.0.1').stdout
-            for condition in ('allowtcpforwarding no','allowstreamlocalforwarding remote','maxsessions 0',
+            for condition in ('allowtcpforwarding remote','permitlisten none','permitopen none','allowstreamlocalforwarding remote','maxsessions 0',
                 'passwordauthentication no','allowagentforwarding no','permittty no'):
                 assert condition in effective,condition
             daemon=subprocess.Popen([sshd,'-D','-e','-f',str(conf)],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)

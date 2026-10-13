@@ -70,6 +70,10 @@ Provisioning requires separately approved production release/operator access:
    Confirm TCP/sessions/password/agent forwarding denied, remote stream-local
    allowed. Reload (not restart) SSH without interrupting existing connections.
    Do not proceed if the effective policy differs.
+   OpenSSH 9.x needs ``AllowTcpForwarding remote`` for its shared remote
+   permission set even for Unix sockets. ``PermitListen none`` denies ALL TCP
+   listeners and ``PermitOpen none`` denies TCP destinations; the real harness
+   tests the denial, not just a configuration string. Never omit those rules.
 4. Deploy the exact CI/Readiness-approved app SHA using the existing release
    path, encrypted backup and compatible actual server-image rollback. Keep
    cloud_only until loopback gateway + restricted tunnel + container health
@@ -96,3 +100,8 @@ Verification gaps must be explicit: local fixtures are not a live private
 tunnel, a native JSON schema is not a forced OpenRouter function envelope,
 and a model's score has not been calibrated to Luna's score. Audit actual
 providers/costs and quality rejects separately after an approved activation.
+
+Primary transport references: https://docs.ollama.com/api/chat and
+https://man.openbsd.org/sshd_config.5; OpenSSH 9.6 implementation of the shared
+remote forwarding permission set:
+https://github.com/openssh/openssh-portable/blob/V_9_6_P1/session.c

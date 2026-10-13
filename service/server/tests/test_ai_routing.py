@@ -111,6 +111,18 @@ def test_one_request_stage_never_adds_hidden_fallback_generation(fixture):
     paid.assert_not_called();assert ledger.call_count==1 and not routing.ready()
 
 
+def test_native_truncation_retains_terminal_canonical_policy(fixture):
+    relay,paid,*_=fixture
+    body=native({'ok':True});body['done_reason']='length'
+    relay.side_effect=lambda method,path,*a,**k: dict(protocol=1,ready=True,model=routing.MODEL,
+        digest=routing.DIGEST,capacity=1) if path=='/health' else body
+    from news_events.analysis import schema_reason
+    with pytest.raises(ValueError) as caught:
+        ai_provider.json_completion('fixture',{},schema=SCHEMA,max_attempts=1)
+    assert schema_reason(caught.value) is None
+    paid.assert_not_called()
+
+
 @pytest.mark.parametrize('state',[{'ready':False},{'capacity':0},{'model':'other'},{'digest':'0'*64},{'protocol':2}])
 def test_unavailable_model_capacity_or_protocol_uses_cloud_before_generation(fixture,state):
     relay,paid,budget,*_=fixture

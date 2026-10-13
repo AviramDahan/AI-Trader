@@ -135,6 +135,8 @@ def local_completion(messages, schema, predict, *, validate_response=True):
         messages=messages, schema=schema, predict=predict, request_id=uuid.uuid4().hex), timeout=50)
     if time.monotonic() > deadline:
         raise requests.Timeout('local_deadline_exceeded')
+    if isinstance(body, dict) and body.get('done_reason') == 'length':
+        raise ValueError('ai_output_truncated')
     if (not isinstance(body, dict) or body.get('model') != MODEL or body.get('model_digest') != DIGEST
             or body.get('done') is not True or body.get('done_reason') != 'stop'
             or not isinstance(body.get('message'), dict) or body['message'].get('tool_calls')
