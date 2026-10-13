@@ -49,11 +49,58 @@ Private connection and resource bounds
 
 The inference gateway uses only loopback Ollama, pinned weights and an 8192
 context. It has one GPU slot/no generation queue, eight HTTP handlers, bounded
-input/output bytes, conservative context rejection and a 45-second generation
+input/output bytes, native no-truncation context rejection and a 45-second generation
 deadline. Warmup is separate and bounded (90 seconds); health remains false
 until the exact model is loaded. Busy, asleep, cold, disconnected, changed
 weights or oversized context is unavailable, not an opportunity to invent data.
 Large prompts may use paid fallback; "local when ready" includes capacity.
+
+Final-review capacity correction
+-------------------------------
+
+The original byte-as-token upper bound rejected complete stock inputs before
+generation, even when their tokenized prompt could fit. Final input JSON is now
+compact UTF-8, without deleting fields, zones, candles, timestamps, news, SEC
+facts, unknowns or negative evidence. System instructions, decision validation
+and all trading gates are unchanged. The paid fallback sees the same facts.
+
+The pinned Ollama 0.34.4 API supports ``truncate=false`` and ``shift=false``.
+The gateway explicitly uses BOTH, including its first bounded empty warmup,
+retains context 8192, output/deadline/transport bounds and one GPU slot, and
+delegates actual token/template fit to that runtime rather than confusing bytes
+with tokens. Over-context error or incomplete output must fall back/fail closed;
+it must not return a successful decision from a cropped prompt. No context-size
+increase, tokenizer approximation, evidence truncation or parameter sweep.
+
+Only exact allowlisted capacity errors become private ``413`` /
+``local_context_capacity``. They do not start the healthy local provider's
+60-second technical-outage cooldown. Actual transport/schema failures retain
+that cooldown. Capacity consumes the existing request/repair allowance; there
+is no additional model-shopping attempt. Every paid fallback still checks cap
+and pace. Valid HOLD/low confidence is never retried with another model.
+
+The new health capability is ``context_policy=no_truncate_no_shift_v1`` with
+``context_length=8192``. During a rolling update, a new client must retain the
+original conservative guard for an old/unverified gateway; it never sends that
+gateway a large prompt. A capacity fallback does not poison subsequent smaller
+jobs. An old client can use the new gateway's unchanged protocol 1.
+
+Deploy the reviewed PC gateway and cloud application as a coordinated release,
+through existing readiness/backup/rollback gates only. No schema, saved trading
+contract, live flag, model or strategy change is required. Keep the previous
+gateway file/actual application image for return; never rewind the database.
+Synthetic/mocked tests prove the code contract, not actual native token fit,
+model quality parity or a natural trade. Before declaring local coverage fixed,
+verify a synthetic full-input and an intentionally over-context request against
+the exact installed runtime, without DB/paid AI/public Telegram, and audit the
+next natural final-review provider/decision. Missing natural BUY is not a
+release failure or permission to loosen confidence/news/risk gates.
+
+Frozen primary contract:
+https://github.com/ollama/ollama/blob/v0.34.4/api/types.go
+and runtime forwarding / refusal paths:
+https://github.com/ollama/ollama/blob/v0.34.4/server/routes.go
+https://github.com/ollama/ollama/blob/v0.34.4/llm/llama_server.go
 
 Cloud apps use ``/run/ollama/relay.sock`` mounted read-only. The PC opens a
 dedicated outbound SSH Unix-socket reverse tunnel to this socket. No host TCP

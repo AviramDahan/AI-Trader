@@ -247,9 +247,9 @@ def test_gateway_no_model_download_single_slot_and_pinned_identity():
     with pytest.raises(ValueError,match='unapproved'):engine.complete(payload)
 
 
-def test_gateway_context_capacity_fails_before_inference():
+def test_gateway_transport_capacity_fails_before_inference():
     g=gateway();engine=g.Inference();engine.http=Mock()
-    payload=dict(protocol=1,model=g.MODEL,digest=g.DIGEST,messages=[{'role':'user','content':'x'*8192}],
+    payload=dict(protocol=1,model=g.MODEL,digest=g.DIGEST,messages=[{'role':'user','content':'x'*g.MAX_BYTES}],
                  schema=SCHEMA,predict=50,request_id='synthetic')
     with pytest.raises(ValueError,match='context_capacity'):engine.complete(payload)
     engine.http.assert_not_called()

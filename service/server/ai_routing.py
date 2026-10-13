@@ -19,8 +19,18 @@ MODEL = 'gemma4:12b'
 DIGEST = '6114515d63c17436a7c0417d82820ac65ad643e2806c5a3c89cb62846436ed0b'
 PROTOCOL = 1
 MAX_BYTES = 131072
+CONTEXT = 8192
+CONTEXT_POLICY = 'no_truncate_no_shift_v1'
 _lock = threading.Lock()
 _until = 0.0
+
+
+class LocalCapacity(requests.ConnectionError):
+    """Capacity rejection: fail over without poisoning healthy smaller jobs."""
+
+
+def fallback_reason(exc):
+    return 'local_context_capacity' if isinstance(exc, LocalCapacity) else 'local_transport_failed'
 
 
 def enabled():
@@ -69,9 +79,13 @@ def relay(method, path, payload=None, timeout=2):
         active_socket[0] = conn.sock
         response = conn.getresponse()
         raw = response.read(MAX_BYTES + 1)
+        if response.status == 413 and len(raw) <= MAX_BYTES and _strict(raw) == {'reason': 'local_context_capacity'}:
+            raise LocalCapacity('local_context_capacity')
         if response.status != 200 or len(raw) > MAX_BYTES:
             raise requests.ConnectionError('local_relay_unavailable')
         return _strict(raw)
+    except LocalCapacity:
+        raise
     except (OSError, http.client.HTTPException, ValueError, RecursionError):
         raise requests.ConnectionError('local_relay_unavailable') from None
     finally:
@@ -119,7 +133,8 @@ class Route:
 
     def fallback(self, reason):
         if self.provider == 'ollama_relay':
-            failed()
+            if reason != 'local_context_capacity':
+                failed()
             self.provider, self.model = self.cloud_provider, self.cloud_model
             self.fallback_reason = reason
 
@@ -131,6 +146,13 @@ class Route:
 
 def local_completion(messages, schema, predict, *, validate_response=True):
     deadline = time.monotonic() + 50
+    # Rolling update: the old gateway remains safe for its conservative bound,
+    # but must NEVER receive an oversized request on the new token-aware path.
+    state = relay('GET', '/health')
+    guarded = (isinstance(state, dict) and state.get('context_policy') == CONTEXT_POLICY
+               and type(state.get('context_length')) is int and state['context_length'] == CONTEXT)
+    if not guarded and sum(len(m['content'].encode())+128 for m in messages)+predict+512 > CONTEXT:
+        raise LocalCapacity('local_context_capacity')
     body = relay('POST', '/completion', dict(protocol=PROTOCOL, model=MODEL, digest=DIGEST,
         messages=messages, schema=schema, predict=predict, request_id=uuid.uuid4().hex), timeout=50)
     if time.monotonic() > deadline:

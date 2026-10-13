@@ -42,7 +42,7 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
             raise ValueError('invalid_structured_news_contract')
         from news_structured_envelope import request_contract
         contract = request_contract(schema)
-    from ai_routing import Route, local_completion, local_usage, native_messages
+    from ai_routing import Route, local_completion, local_usage, native_messages, fallback_reason
     route = Route('openrouter', model)
     for attempt in range(max_attempts):
         from ai_budget import check, acquire_request_slot
@@ -99,12 +99,12 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
                 payment_rejected()
             if attempt + 1 >= max_attempts or not (isinstance(exc, (requests.Timeout, requests.ConnectionError)) or status in {408,429,500,502,503,504}):
                 local_failed = route.provider == 'ollama_relay'
-                route.fallback('local_transport_failed')
+                route.fallback(fallback_reason(exc))
                 error = ValueError("openrouter_transport_failed:"+failure)
                 error.local_fallback_eligible = local_failed
                 raise error from None
             notify_failure=False  # Persist attempt cost/error, wait for bounded retry outcome.
-            route.fallback('local_transport_failed')
+            route.fallback(fallback_reason(exc))
         except (ValueError, KeyError, IndexError, jsonschema.ValidationError) as exc:
             from retry_policy import validation_detail
             failure=validation_detail(exc,body)
