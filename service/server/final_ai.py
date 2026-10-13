@@ -11,6 +11,7 @@ from contextvars import ContextVar
 from datetime import datetime, timezone
 
 import requests
+import jsonschema
 
 TRACE = ContextVar("final_review_trace", default=None)
 PROPERTIES = {
@@ -74,6 +75,7 @@ def persist(trace):
              retry_count,result,reject_reason,ai_call_saved,estimated_cost,attempts_json,updated_at)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(review_id) DO UPDATE SET input_tokens=excluded.input_tokens,
+            provider=excluded.provider,model=excluded.model,
             output_tokens=excluded.output_tokens,latency=excluded.latency,retry_count=excluded.retry_count,
             result=excluded.result,reject_reason=excluded.reject_reason,ai_call_saved=excluded.ai_call_saved,
             estimated_cost=excluded.estimated_cost,attempts_json=excluded.attempts_json,updated_at=excluded.updated_at""",
@@ -103,9 +105,14 @@ def review(messages, validator):
     timeout = min(300, max(20, int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))))
     trace = TRACE.get()
     schema=getattr(validator,'response_schema',SCHEMA)
+    from ai_routing import Route, local_completion, local_usage
+    route = Route(provider, model)
     for attempt in range(2):  # One shared budget: retry OR repair, never both.
+        provider, model = route.provider, route.model
         metrics = dict(retry_count=attempt, input_tokens=None, output_tokens=None,
                        estimated_cost=None, result="error", reject_reason=None)
+        metrics.update(route.provenance())
+        if provider == 'ollama_relay':metrics['estimated_cost']=0
         start = time.monotonic()
         retry = False
         body=None
@@ -118,7 +125,17 @@ def review(messages, validator):
                 acquire_request_slot()
             if trace is not None:
                 trace["ai_started"] = True
-            if provider == "ollama":
+            if provider == 'ollama_relay':
+                sent=True
+                try:
+                    # Keep parseable HOLD for the existing protected repair.
+                    value, body = local_completion(messages, schema, 450, validate_response=False)
+                except (ValueError, jsonschema.ValidationError) as exc:
+                    raise SchemaFailure('local_schema_failed') from exc
+                metrics.update(input_tokens=_number(body.get('prompt_eval_count')),
+                               output_tokens=_number(body.get('eval_count')),estimated_cost=0)
+                content = json.dumps(value, allow_nan=False)
+            elif provider == "ollama":
                 response = requests.post(os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/") + "/api/chat",
                     timeout=timeout, json={"model":model,"stream":False,"think":False,"format":schema,
                     "options":{"temperature":0,"num_predict":450},"messages":messages})
@@ -132,9 +149,12 @@ def review(messages, validator):
                           **request_options(),
                           "response_format":{"type":"json_schema","json_schema":{"name":"stock_final_review","strict":True,"schema":schema}},
                           "provider":{"require_parameters":True}})
-            response.raise_for_status()
-            body = response.json()
-            if provider == "ollama":
+            if provider != 'ollama_relay':
+                response.raise_for_status()
+                body = response.json()
+            if provider == 'ollama_relay':
+                pass
+            elif provider == "ollama":
                 metrics.update(input_tokens=_number(body.get("prompt_eval_count")),output_tokens=_number(body.get("eval_count")))
                 content = body.get("message",{}).get("content")
             else:
@@ -151,11 +171,16 @@ def review(messages, validator):
             # Semantic direction errors are NOT repaired into a different decision.
             result = validator(value)
             metrics["result"] = "validated"
+            if trace is not None:trace.update(provider=provider,model=model)
+            if provider == 'ollama_relay':metrics['ollama_version']=body.get('ollama_version')
             return result
         except (SchemaFailure, json.JSONDecodeError) as exc:
             metrics["reject_reason"] = type(exc).__name__
             detail=getattr(exc,'entry_rationale_failure',None)
             if detail is not None:metrics['entry_rationale_failure']=detail
+            # A semantic/rationale defect is not permission to shop decisions.
+            if provider == 'ollama_relay' and detail is None:
+                route.fallback('local_schema_failed')
             retry = attempt == 0
             if not retry:
                 raise
@@ -169,11 +194,12 @@ def review(messages, validator):
             metrics["reject_reason"] = "http_" + str(status) if status else type(exc).__name__
             from retry_policy import defer_openrouter
             if provider=='openrouter' and exc.response is not None: defer_openrouter(exc.response)
-            if status == 402:
+            if provider=='openrouter' and status == 402:
                 from ai_budget import payment_rejected
                 payment_rejected()
             metrics["reject_reason"] = "http_" + str(status) if status else type(exc).__name__
             retry = attempt == 0 and (isinstance(exc,(requests.Timeout,requests.ConnectionError)) or status in {408,429,500,502,503,504})
+            route.fallback('local_transport_failed')
             if not retry:
                 raise
         except Exception as exc:
@@ -181,9 +207,10 @@ def review(messages, validator):
             raise
         finally:
             metrics["latency"] = time.monotonic() - start
-            if provider=='openrouter' and sent:
+            if provider in {'openrouter','ollama_relay'} and sent:
                 from ai_operations import record
-                record('final_stock_review',model,body,start,metrics['result']=='validated',
+                recorded_model = ('ollama/' + model + '@' + metrics['model_digest'] if provider=='ollama_relay' else model)
+                record('final_stock_review',recorded_model,local_usage(body) if provider=='ollama_relay' else body,start,metrics['result']=='validated',
                        metrics['reject_reason'],retry=attempt>0,notify_failure=not retry)
             if trace is not None:
                 trace["attempts"].append(metrics)

@@ -348,6 +348,7 @@ def reply_text(item):
     from database import get_db_connection
     from ai_operations import record
     from ai_provider import request_options
+    from ai_routing import Route, local_completion, local_usage, ledger_model
     # Conversation never competes with a busy news queue, or last 25% of budget.
     with get_db_connection() as conn:
         busy = conn.execute("SELECT count(*) n FROM scanner_news_jobs WHERE status IN ('pending','running','retry')").fetchone()['n']
@@ -361,15 +362,17 @@ def reply_text(item):
     success = False
     started = time.monotonic()
     model = os.getenv('OPENROUTER_NEWS_MODEL','').strip()
+    route = Route('openrouter', model)
     try:
         if not model or not os.getenv('OPENROUTER_API_KEY'):
             return fallback(item)
-        check()
-        with get_db_connection() as conn:
-            budget = json.loads(conn.execute("SELECT value_json FROM scanner_settings WHERE key='ai_budget'").fetchone()['value_json'])
-        if budget['usage_usd'] >= budget['limit_usd']*.75:
-            return fallback(item)
-        acquire_request_slot()
+        if route.provider == 'openrouter':
+            check()
+            with get_db_connection() as conn:
+                budget = json.loads(conn.execute("SELECT value_json FROM scanner_settings WHERE key='ai_budget'").fetchone()['value_json'])
+            if budget['usage_usd'] >= budget['limit_usd']*.75:
+                return fallback(item)
+            acquire_request_slot()
         messages = [dict(role='system', content=
             'אתה הבוט הרשמי של AI Trader Community, לא משתתף אנושי. ענה בעברית טבעית בשניים או שלושה משפטים קצרים '
             'ישירות לנקודה שהמשתמש העלה, וסיים בשאלת המשך עניינית אחת. אל תשתמש במקף ארוך או קו מפריד. '
@@ -381,20 +384,27 @@ def reply_text(item):
             dict(role='user', content=json.dumps(dict(verified_facts=item['facts'],
                 previous_bot_message=item['context'], human_message=item['text']), ensure_ascii=False))]
         sent = True
-        with requests.Session() as session:
-            session.trust_env = False
-            response = session.post('https://openrouter.ai/api/v1/chat/completions',
+        if route.provider == 'ollama_relay':
+            model = ledger_model(route)
+            value, local_body = local_completion(messages, {'type':'object','properties':{'text':{'type':'string'}},
+                'required':['text'],'additionalProperties':False}, 220)
+            body = local_usage(local_body)
+            raw = value['text']
+        else:
+            with requests.Session() as session:
+                session.trust_env = False
+                response = session.post('https://openrouter.ai/api/v1/chat/completions',
                 headers={'Authorization':'Bearer '+os.environ['OPENROUTER_API_KEY']}, timeout=(3,20),
                 json={'model':model,'messages':messages,'max_tokens':220,'reasoning':{'enabled':False}, **request_options()})
-        if response.status_code == 402:
-            from ai_budget import payment_rejected
-            payment_rejected()
-        if response.status_code in (429,503):
-            from retry_policy import defer_openrouter
-            defer_openrouter(response)
-        response.raise_for_status()
-        body = response.json()
-        raw = body['choices'][0]['message']['content']
+            if response.status_code == 402:
+                from ai_budget import payment_rejected
+                payment_rejected()
+            if response.status_code in (429,503):
+                from retry_policy import defer_openrouter
+                defer_openrouter(response)
+            response.raise_for_status()
+            body = response.json()
+            raw = body['choices'][0]['message']['content']
         text = safe_text(raw, 800)
         # Fail closed on unverifiable numeric claims, links, instructions, or prose
         # claiming actions. Model output is never a command or a trading input.

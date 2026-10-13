@@ -21,6 +21,7 @@ class AnalysisFailure(ValueError):
 
 def completion_reason(exc):
     """Allowlisted diagnostics only; never copy a response or exception body."""
+    if getattr(exc,'local_fallback_eligible',False):return 'local_transport_failed'
     if isinstance(exc, json.JSONDecodeError):return 'invalid_json'
     if isinstance(exc, jsonschema.ValidationError):return 'schema_validation_failed'
     if isinstance(exc, ValueError) and str(exc).startswith('openrouter_schema_failed:'):
@@ -86,7 +87,7 @@ class CanonicalAnalyzer:
                 usage['failure_reason']=completion_reason(exc) or 'completion_failed'
                 raise
             finally:
-                allowed=('model','input_tokens','output_tokens','reasoning_tokens','cost','request_id','failure_reason','final_alert_owner','structure_detail','json_diagnostic','json_normalization')
+                allowed=('provider','model_digest','ollama_version','fallback_reason','model','input_tokens','output_tokens','reasoning_tokens','cost','request_id','failure_reason','final_alert_owner','structure_detail','json_diagnostic','json_normalization')
                 calls.append({'stage':stage,'success':success,'latency':time.monotonic()-start,
                               **{k:usage.get(k) for k in allowed}})
 
@@ -101,7 +102,7 @@ class CanonicalAnalyzer:
                 # Rebuild only the failed stage; keep the original facts/schema.
                 repair_used=True
                 try:
-                    return request('schema_repair:'+stage,
+                    return request(('local_fallback:' if getattr(exc,'local_fallback_eligible',False) else 'schema_repair:')+stage,
                         prompt+' Return one valid structured result matching the schema. '
                         'Escape double quotes inside strings; no markdown or commentary.',payload,schema)
                 except Exception as retry_exc:

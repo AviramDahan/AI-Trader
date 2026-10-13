@@ -102,6 +102,8 @@ services:
       postgres: {condition: service_healthy}
   api:
     <<: *app
+    group_add: ["20001"]
+    volumes: [runtime:/app/.runtime, logs:/app/service/server/logs, /opt/ai-trader-ollama:/run/ollama:ro]
     command: [api]
     mem_limit: 768m
     cpus: 0.5
@@ -115,6 +117,7 @@ services:
       retries: 3
   scanner:
     <<: *app
+    group_add: ["20001"]
     command: [scanner]
     mem_limit: 2g
     cpus: 1.0
@@ -126,7 +129,7 @@ services:
       TELEGRAM_SESSION_PATH: /reader/telegram-reader.session
       NEWS_FORENSICS_RECIPIENT_FILE: /run/secrets/age_recipient
     secrets: [database_url, openrouter_key, scanner_token, telegram_bot_token, telegram_api_id, telegram_api_hash, age_recipient]
-    volumes: [runtime:/app/.runtime, logs:/app/service/server/logs, reader_session:/reader]
+    volumes: [runtime:/app/.runtime, logs:/app/service/server/logs, reader_session:/reader, /opt/ai-trader-ollama:/run/ollama:ro]
     depends_on:
       api: {condition: service_healthy}
     healthcheck:
@@ -155,6 +158,8 @@ services:
       retries: 3
   telegram:
     <<: *app
+    group_add: ["20001"]
+    volumes: [runtime:/app/.runtime, logs:/app/service/server/logs, /opt/ai-trader-ollama:/run/ollama:ro]
     command: [telegram]
     mem_limit: 512m
     cpus: 0.25

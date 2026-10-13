@@ -1303,7 +1303,7 @@ def run_scan() -> dict[str, Any]:
             if quote is None:
                 rejected.append({"ticker": ticker, "reason": "no_fresh_intraday_quote_or_market_closed"})
                 continue
-            from ai_budget import check as check_ai_budget
+            from ai_routing import check_available as check_ai_budget
             check_ai_budget()  # Cloud spend gate; never changes trading filters.
             signal = _paper_order(candidate, decision, news, quote, {}, cfg, api)
             if signal:
