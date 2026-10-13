@@ -126,10 +126,16 @@ def check_available():
 class Route:
     def __init__(self, provider, model):
         requested = enabled()
-        self.provider = 'ollama_relay' if requested and ready() else provider
+        from news_events.call_context import CURRENT
+        # A canonical stage owns its ONE shared fallback. Provider selection
+        # must not depend on an unrelated process-wide outage cooldown.
+        stage = (CURRENT.get() or {}).get('stage', '')
+        canonical_fallback = isinstance(stage, str) and stage.startswith('local_fallback:')
+        self.provider = 'ollama_relay' if requested and not canonical_fallback and ready() else provider
         self.model = MODEL if self.provider == 'ollama_relay' else model
         self.cloud_provider, self.cloud_model = provider, model
-        self.fallback_reason = 'local_not_ready' if requested and self.provider != 'ollama_relay' else None
+        self.fallback_reason = ('canonical_local_fallback' if requested and canonical_fallback else
+                               'local_not_ready' if requested and self.provider != 'ollama_relay' else None)
 
     def fallback(self, reason):
         if self.provider == 'ollama_relay':

@@ -147,6 +147,36 @@ def test_capacity_fallback_still_enforces_paid_cap(fixture):
     paid.assert_not_called();assert routing._until==0
 
 
+def test_canonical_capacity_fallback_is_request_scoped_not_outage_dependent(fixture):
+    relay,paid,*_=fixture
+    from news_events.analysis import CanonicalAnalyzer
+    from news_events.runtime import completion
+    from news_events.call_context import CURRENT
+    from news_quality import ANALYSIS_SCHEMA
+    from news_structured_envelope import FUNCTION_NAME
+    draft=dict(related=True,title_he='דיווח בדיקה',summary_he='דיווח בדיקה',interpretation_he='פרשנות בדיקה',
+               sentiment='neutral',materiality='medium',relevance=.6)
+    review=dict(faithful=True,fluent_hebrew=True,unsupported_claims=False,duplicate_of=0,
+                material_new_fact=False,explanation='בדיקה')
+    attempted=[0]
+    def invoke(method,path,payload=None,**kwargs):
+        if path=='/health':return guarded_health()
+        attempted[0]+=1
+        if attempted[0]==1:raise routing.LocalCapacity('local_context_capacity')
+        return native(draft if payload['schema']==ANALYSIS_SCHEMA else review)
+    relay.side_effect=invoke;paid.side_effect=None
+    paid.return_value=Mock(json=Mock(return_value={'choices':[{'finish_reason':'tool_calls','message':{
+        'content':None,'tool_calls':[{'type':'function','function':{'name':FUNCTION_NAME,'arguments':json.dumps(draft)}}]}}],
+        'usage':{'cost':.001}}))
+    event=dict(event_id='synthetic',company_identity=[],evidence_version='v1',event_type='market',tickers=[],
+        title='Synthetic factual event',normalized_evidence=[{'text':'Synthetic factual event.'}],conflicts=[],sources=[])
+    result=CanonicalAnalyzer(completion)(event)
+    assert result.result==draft and len(result.calls)==3
+    assert [r['stage'] for r in result.calls]==['source_analysis','local_fallback:source_analysis','quality_review']
+    assert [r['provider'] for r in result.calls]==['ollama_relay','openrouter','ollama_relay']
+    assert paid.call_count==1 and routing._until==0 and CURRENT.get() is None
+
+
 @pytest.mark.parametrize('health',[{}, {'context_policy':'unknown'},
  {'context_policy':routing.CONTEXT_POLICY,'context_length':16384}])
 def test_old_or_unverified_gateway_never_receives_large_new_request(fixture,health):

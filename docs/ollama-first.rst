@@ -78,6 +78,10 @@ Only exact allowlisted capacity errors become private ``413`` /
 that cooldown. Capacity consumes the existing request/repair allowance; there
 is no additional model-shopping attempt. Every paid fallback still checks cap
 and pace. Valid HOLD/low confidence is never retried with another model.
+The canonical ``local_fallback:`` stage explicitly selects its existing paid
+provider for that request only, rather than relying on a global outage timer.
+The following independent stage can use the healthy local model again; the
+canonical job's shared repair allowance is neither reset nor expanded.
 
 The new health capability is ``context_policy=no_truncate_no_shift_v1`` with
 ``context_length=8192``. During a rolling update, a new client must retain the
