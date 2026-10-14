@@ -4,7 +4,8 @@ export type OpsNode = {
   age_seconds?: number | null; last_success_at?: string | null; lease_holders?: number | null
   metrics: Record<string, number | boolean | string | null>
   reason_codes?: string[]
-  providers?: { id: string; status: string; last_success_at: string | null }[]
+  providers?: { id: string; status: string; last_success_at: string | null; last_attempt_at?: string | null;
+    next_check_at?: string | null; error_code?: string | null; http_status?: number | null }[]
   bars?: { ticker: string; bar_started_at: string | null; fresh_regular_session: boolean | null }[]
 }
 export type OpsSnapshot = {
@@ -63,6 +64,13 @@ export const OPS_ERROR_CODES: Record<string, string> = {
   ConnectTimeout:'לא נוצר חיבור בזמן', ConnectionError:'שגיאת חיבור', HTTPError:'המקור דחה את הבקשה',
   ValueError:'הנתון או המבנה אינם תקינים', RuntimeError:'כשל תפעולי מדווח', OperationalError:'כשל גישה למסד',
   invalid_json:'תשובת AI אינה JSON תקין', budget_exhausted:'תקציב AI חסום', news_quality_rejected:'דחיית תוכן בבקרת איכות, לא כשל שירות',
+}
+export function providerExplanation(provider: NonNullable<OpsNode['providers']>[number]): string | null {
+  if (provider.http_status === 403) return 'המקור דחה את הגישה (403); לא אומתה התאוששות'
+  if (provider.http_status === 429) return 'המקור הגביל בקשות (429); ממתינים לפי מדיניות ההתאוששות'
+  return ({ transport_failure:'הבקשה לא הושלמה בגלל כשל בחיבור', transport_TimeoutError:'המקור לא השלים תשובה בזמן',
+    source_metadata_invalid:'מטא־דאטה של המקור לא עבר אימות', press_feed_activation_required:'חסרה הגדרת תחילת איסוף מאושרת',
+    license_required:'חסרה הרשאת שימוש מאושרת', http_error:'המקור דחה את בקשת האיסוף' } as Record<string,string>)[provider.error_code ?? ''] ?? null
 }
 export const OPS_METRICS: Record<string, string> = {
   queue: 'אירועים בתור', oldest_queue_seconds: 'גיל האירוע הוותיק (שניות)', provider_issues: 'מקורות דורשים טיפול',

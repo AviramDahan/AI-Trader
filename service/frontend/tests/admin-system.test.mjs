@@ -39,6 +39,12 @@ assert.ok(render(hostile).includes('&lt;script&gt;'))
 hostile.nodes[0].reason_codes=['invalid_json','untrusted_unknown_code']
 assert.ok(render(hostile).includes('תשובת AI אינה JSON תקין'))
 assert.equal(render(hostile).includes('untrusted_unknown_code'),false)
+hostile.nodes[0].providers=[{id:'globenewswire',status:'requires_configuration',last_success_at:new Date().toISOString(),last_attempt_at:new Date().toISOString(),http_status:403,error_code:'http_error'}]
+assert.ok(render(hostile).includes('המקור דחה את הגישה (403); לא אומתה התאוששות'))
+assert.ok(render(hostile).includes('הצלחה אחרונה'))
+hostile.nodes[0].providers[0].error_code='SECRET_UNTRUSTED'
+hostile.nodes[0].providers[0].http_status=null
+assert.equal(render(hostile).includes('SECRET_UNTRUSTED'),false)
 const source=readFileSync('src/AdminSystemMiniApp.tsx','utf8')+readFileSync('src/adminSystemModel.ts','utf8')
 for(const forbidden of ['localStorage','sessionStorage','initDataUnsafe','sendData','/completion','method:'])assert.equal(source.includes(forbidden),false)
 const poller=readFileSync('src/readPoller.ts','utf8');assert.ok(poller.includes('options.headers()'))
