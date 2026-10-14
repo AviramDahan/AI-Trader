@@ -7,6 +7,8 @@ import { ScannerDashboard } from './ScannerDashboard'
 import { type Language, getT } from './i18n'
 import { isMiniAppEntry, mountTelegramMiniApp } from './telegramMiniApp'
 import './telegramMiniApp.css'
+import { AdminSystemMiniApp } from './AdminSystemMiniApp'
+import { isAdminSystemEntry } from './adminSystemModel'
 
 function DisplayShell({ children }: { children: React.ReactNode }) {
   const location = useLocation()
@@ -15,6 +17,13 @@ function DisplayShell({ children }: { children: React.ReactNode }) {
     <main className="main-content" style={{ display: 'flex', gap: '24px' }}><div className="app-main-column">
       {!mini && <BackendStatusBanner />}{children}
     </div></main></div>
+}
+
+function ScannerEntry({ token }: { token: string | null }) {
+  const location = useLocation()
+  const safeToken = isMiniAppEntry(location.search) ? null : token
+  return isAdminSystemEntry(location.search, location.hash)
+    ? <AdminSystemMiniApp token={safeToken} /> : <ScannerDashboard token={safeToken} />
 }
 
 function App() {
@@ -52,7 +61,7 @@ function App() {
           <DisplayShell>
                 <Routes>
                   <Route path="/" element={<Navigate to="/market?tab=signals" replace />} />
-                  <Route path="/market" element={<ScannerDashboard token={operatorToken} />} />
+                  <Route path="/market" element={<ScannerEntry token={operatorToken} />} />
                   <Route path="/login" element={<Navigate to="/market?tab=signals" replace />} />
                   <Route path="/register" element={<Navigate to="/market?tab=signals" replace />} />
                   <Route path="*" element={<Navigate to="/market?tab=signals" replace />} />
