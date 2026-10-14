@@ -456,6 +456,8 @@ export function SignalCard({ signal, he }: { signal: Record<string, any>, he: bo
   const horizon = he ? String(signal.time_horizon || '—').replace(/weeks?/gi, 'שבועות').replace(/days?/gi, 'ימים').replace(/hours?/gi, 'שעות') : signal.time_horizon
   statusLabels.ENTRY_POLICY_REJECTED = he ? 'הכניסה לא עברה את בקרות הביצוע' : 'Entry failed execution checks'
   statusLabels.RECOVERY_UNCERTAIN = he ? 'הביצוע חסום עד בירור אי־ודאות' : 'Execution blocked pending uncertainty review'
+  statusLabels.INVALID = he ? 'לא תקין — מצב הביצוע אינו מאומת' : 'Invalid — execution state unverified'
+  statusLabels.PENDING_CLOSE = he ? 'ממתין לביצוע יציאה — הסגירה טרם אומתה' : 'Awaiting exit — closure not yet verified'
   const stamp = (value: any) => value ? new Date(value).toLocaleString(he ? 'he-IL' : 'en-GB') : '—'
   return <details className="scanner-signal-card signal-focused" id={`signal-${signal.id}`} onToggle={event => setOpened(event.currentTarget.open)}>
     <summary className="scanner-signal-summary">

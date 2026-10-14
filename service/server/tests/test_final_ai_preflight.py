@@ -45,7 +45,7 @@ def transport(monkeypatch):
 
 def response(value=DECISION, cloud=False):
     content = value if isinstance(value, str) else json.dumps(value)
-    body = ({"choices":[{"message":{"content":content}}],
+    body = ({"choices":[{"finish_reason":"stop","message":{"content":content}}],
              "usage":{"prompt_tokens":101,"completion_tokens":32,"cost":.001}}
             if cloud else {"message":{"content":content},"prompt_eval_count":101,"eval_count":32})
     return Mock(json=Mock(return_value=body))

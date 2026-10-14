@@ -1066,22 +1066,31 @@ def snapshots_for(candidates: list[dict], decided_at: datetime) -> dict[str, dic
         if os.getenv("AI_TRADER_CLOUD") == "true":
             conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             conn.execute("SET LOCAL statement_timeout='8s'")
-        latest = conn.execute("SELECT id,members_json FROM si_universe_snapshots WHERE observed_at<=? ORDER BY observed_at DESC LIMIT 1",
+        latest = conn.execute("SELECT id,members_json FROM si_universe_snapshots WHERE observed_at<=? ORDER BY observed_at DESC,id DESC LIMIT 1",
                               (_z(decided_at),)).fetchone()
         if not latest:
             return {}
         membership = json.loads(latest["members_json"])
-        rows = conn.execute(f"""SELECT id,ticker,issuer_cik,effective_available_at,created_at,
-            expires_at,data_confidence,adjustment,status,evidence_json,evidence_ids_json,policy_version
+        # Resolve the latest state before checking its eligibility. A later
+        # correction/unknown/expired state must not revive an older positive
+        # snapshot. Partitioning also bounds results to one row per ticker,
+        # without letting a busy issuer crowd another company out of the read.
+        rows = conn.execute(f"""WITH available AS (
+            SELECT id,ticker,issuer_cik,effective_available_at,created_at,
+                expires_at,data_confidence,adjustment,status,evidence_json,evidence_ids_json,policy_version,
+                ROW_NUMBER() OVER (PARTITION BY ticker
+                    ORDER BY created_at DESC,effective_available_at DESC,id DESC) snapshot_rank
             FROM si_company_snapshots WHERE ticker IN ({placeholders})
-            AND effective_available_at<=? AND created_at<=? AND expires_at>=?
-            ORDER BY effective_available_at DESC LIMIT ?""",
-            (*tickers, _z(decided_at), _z(decided_at), _z(decided_at), len(tickers)*8)).fetchall()
+                AND effective_available_at<=? AND created_at<=?)
+            SELECT id,ticker,issuer_cik,effective_available_at,created_at,
+                expires_at,data_confidence,adjustment,status,evidence_json,evidence_ids_json,policy_version
+            FROM available WHERE snapshot_rank=1 ORDER BY ticker""",
+            (*tickers, _z(decided_at), _z(decided_at))).fetchall()
     result = {}
     for raw in rows:
         row = dict(raw)
         ticker = row["ticker"]
-        if ticker in result or row["status"] != "verified":
+        if row["status"] != "verified" or _time(row["expires_at"]) < decided_at:
             continue
         if (membership.get(ticker) or {}).get("issuer_cik") != row["issuer_cik"]:
             continue

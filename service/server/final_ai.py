@@ -96,6 +96,40 @@ def _number(value):
     return value if isinstance(value,(int,float)) and not isinstance(value,bool) and math.isfinite(value) and value >= 0 else None
 
 
+def _cloud_content(body):
+    """One completed text result; never select a preferred ambiguous decision."""
+    if not isinstance(body, dict):
+        raise SchemaFailure('final_response_structure')
+    choices = body.get('choices')
+    if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict):
+        raise SchemaFailure('final_response_structure')
+    choice = choices[0]
+    if choice.get('finish_reason') != 'stop':
+        raise SchemaFailure('final_response_incomplete')
+    message = choice.get('message')
+    if (not isinstance(message, dict) or message.get('refusal')
+            or message.get('tool_calls') or message.get('function_call')):
+        raise SchemaFailure('final_response_structure')
+    content = message.get('content')
+    if not isinstance(content, str) or not content.strip() or len(content.encode()) > 65536:
+        raise SchemaFailure('final_schema_missing_content')
+    return content
+
+
+def _usage(body):
+    """Keep known billing fields even when the completion envelope is invalid."""
+    value = body.get('usage') if isinstance(body, dict) else None
+    usage = dict(value) if isinstance(value, dict) else {}
+    if not isinstance(usage.get('completion_tokens_details'), dict):
+        usage['completion_tokens_details'] = {}
+    return usage
+
+
+def _metadata_string(value):
+    """Optional provider identifiers must be bounded text, never SQL objects."""
+    return value if isinstance(value, str) and value.strip() and len(value) <= 256 else None
+
+
 def review(messages, validator):
     provider, model = configuration()
     if provider not in {"ollama", "openrouter"} or not model:
@@ -105,7 +139,7 @@ def review(messages, validator):
     timeout = min(300, max(20, int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))))
     trace = TRACE.get()
     schema=getattr(validator,'response_schema',SCHEMA)
-    from ai_routing import Route, local_completion, local_usage, fallback_reason
+    from ai_routing import Route, local_completion, local_usage, fallback_reason, _strict
     route = Route(provider, model)
     for attempt in range(2):  # One shared budget: retry OR repair, never both.
         provider, model = route.provider, route.model
@@ -158,15 +192,21 @@ def review(messages, validator):
                 metrics.update(input_tokens=_number(body.get("prompt_eval_count")),output_tokens=_number(body.get("eval_count")))
                 content = body.get("message",{}).get("content")
             else:
-                usage = body.get("usage") or {}
+                usage = _usage(body)
                 metrics.update(input_tokens=_number(usage.get("prompt_tokens")),output_tokens=_number(usage.get("completion_tokens")),
                                estimated_cost=_number(usage.get("cost")))
-                metrics["resolved_model"] = body.get("model")
-                metrics["resolved_provider"] = body.get("provider")
-                content = (body.get("choices") or [{}])[0].get("message",{}).get("content")
+                if isinstance(body, dict):
+                    metrics["resolved_model"] = _metadata_string(body.get("model"))
+                    metrics["resolved_provider"] = _metadata_string(body.get("provider"))
+                content = _cloud_content(body)
             if not isinstance(content,str):
                 raise SchemaFailure("final_schema_missing_content")
-            value = json.loads(content)
+            try:
+                value = _strict(content)
+            except json.JSONDecodeError:
+                raise  # Retain the existing bounded JSON syntax repair.
+            except ValueError as exc:
+                raise SchemaFailure('final_schema_invalid_json') from exc
             value = validate_schema(value,schema)
             # Semantic direction errors are NOT repaired into a different decision.
             result = validator(value)
@@ -212,7 +252,10 @@ def review(messages, validator):
             if provider in {'openrouter','ollama_relay'} and sent:
                 from ai_operations import record
                 recorded_model = ('ollama/' + model + '@' + metrics['model_digest'] if provider=='ollama_relay' else model)
-                record('final_stock_review',recorded_model,local_usage(body) if provider=='ollama_relay' else body,start,metrics['result']=='validated',
+                billing_body = (local_usage(body) if provider=='ollama_relay' else
+                                {'id': _metadata_string(body.get('id')), 'usage': _usage(body)}
+                                if isinstance(body, dict) else None)
+                record('final_stock_review',recorded_model,billing_body,start,metrics['result']=='validated',
                        metrics['reject_reason'],retry=attempt>0,notify_failure=not retry)
             if trace is not None:
                 trace["attempts"].append(metrics)

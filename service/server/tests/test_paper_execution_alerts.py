@@ -40,6 +40,30 @@ def test_close_order_failure_does_not_claim_existing_position_disappeared():
     assert not order_update_lines('filled','BUY')
 
 
+def test_invalid_close_wording_requires_original_link_without_inventing_the_cause():
+    text='\n'.join(order_update_lines('invalid','SELL','fill_rr_below_2'))
+    assert 'בקשת היציאה המקורית אינה ניתנת לביצוע' in text
+    assert 'קישור תקף לפוזיציה המקורית' in text
+    assert 'סיבת אי־התקינות הפרטנית אינה מאומתת' in text
+    assert 'לא בוצעה יציאה מהפקודה הזאת' in text and 'אין להסיק שהפוזיציה נסגרה' in text
+    for entry_wording in ('לא נפתחה פוזיציה','יחס הסיכוי־סיכון','הסטופ והיעד לא הוזזו'):
+        assert entry_wording not in text
+    wire=telegram_text('סימול: BRK.B\n' + text)
+    assert wire==telegram_text(wire) and '\u2066BRK.B\u2069' in wire
+    assert wire.count('\u2066')==wire.count('\u2069') and utf16_length(wire)<=4000
+
+
+@pytest.mark.parametrize('status,event', [('expired','פג תוקף פקודת היציאה'),
+                                         ('recovery_uncertain','יציאת הדמה חסומה עד בירור')])
+def test_other_close_states_explain_exit_without_claiming_an_entry_or_closed_position(status,event):
+    text='\n'.join(order_update_lines(status,'SELL'))
+    assert event in text and 'כניסה' not in text
+    assert 'אין להסיק שהפוזיציה נסגרה' in text or 'אין לנחש מילוי או סגירת פוזיציה' in text
+    assert 'לא נפתחה פוזיציה' not in text
+    wire=telegram_text('סימול: BRK.B\n' + text)
+    assert wire==telegram_text(wire) and wire.count('\u2066')==wire.count('\u2069')
+
+
 def test_israel_display_requires_an_unambiguous_retained_timestamp():
     assert israel_time('2026-10-13T17:30:00Z')=='13/10/2026 20:30 (שעון ישראל)'
     assert 'חד־משמעי' in israel_time('2026-10-13T17:30:00')

@@ -28,7 +28,7 @@ def native(value):
 
 
 def cloud(value):
-    return Mock(json=Mock(return_value={'choices':[{'message':{'content':json.dumps(value)}}],
+    return Mock(json=Mock(return_value={'choices':[{'finish_reason':'stop','message':{'content':json.dumps(value)}}],
         'usage':{'cost':.001,'prompt_tokens':12,'completion_tokens':8}}))
 
 

@@ -864,11 +864,51 @@ def _process_trade_bar(cur, trade: dict[str, Any], bar: dict[str, Any]) -> None:
                     (unrealized, bar["close"], bar["at"], trade["id"]))
 
 
+def _single_entry_contract(order, signal, contract):
+    """Shared frozen-contract checks for execution and recovery evidence."""
+    from single_target_policy import validate_single
+    import entry_price_retry
+    target_plan = _loads(signal.get('technical_json'), {}).get('target_plan')
+    execution_cfg = contract.get('execution_settings')
+    if (contract.get('target_plan') != target_plan or not isinstance(execution_cfg, dict) or
+            execution_cfg.get('active_strategy') != 'single'):
+        raise ValueError('order_plan_mismatch')
+    validate_single(target_plan, signal['planned_entry'], signal['original_stop'], signal['action'])
+    if (order['limit_price'] != target_plan['entry'] or
+            [signal['tp1'], signal['tp2'], signal['tp3']] != [target_plan['active_target'], None, None] or
+            [signal['tp1_pct'], signal['tp2_pct'], signal['tp3_pct']] != [1, 0, 0]):
+        raise ValueError('order_levels_mismatch')
+    return execution_cfg, entry_price_retry.validate_order(order, contract)
+
+
+def _retry_declines_touch(cur, order, bar):
+    """A retryable rejected price is not evidence of an entry before a gap."""
+    if order['purpose'] != 'entry' or order['side'] != 'buy':
+        return False
+    contract = _loads(order.get('plan_json'), {})
+    if not isinstance(contract, dict) or 'entry_price_retry' not in contract:
+        return False
+    signal = cur.execute('SELECT * FROM scanner_signals WHERE id=?', (order['signal_id'],)).fetchone()
+    if not signal:
+        return False
+    import entry_price_retry
+    from single_target_policy import validate_single_fill
+    retry_price = False
+    try:
+        cfg, retry_price = _single_entry_contract(order, dict(signal), contract)
+        raw = min(bar['open'], float(order['limit_price']))
+        price = min(float(order['limit_price']), raw * (1 + cfg['slippage_bps'] / 10000))
+        validate_single_fill(contract['target_plan'], price)
+    except (ValueError, KeyError, TypeError) as exc:
+        return retry_price and str(exc) in entry_price_retry.PRICE_REASONS
+    return False
+
+
 def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: str) -> None:
     cur.execute("SELECT * FROM scanner_signals WHERE id=?", (order["signal_id"],))
     signal = dict(cur.fetchone())
     cfg = lifecycle_settings()
-    from single_target_policy import is_single, validate_single_fill as validate_fill, validate_single as validate
+    from single_target_policy import is_single, validate_single_fill as validate_fill
     contract = _loads(order.get('plan_json'), {})
     target_plan = _loads(signal.get('technical_json'), {}).get('target_plan')
     v2 = is_single(target_plan) or is_single(contract.get('target_plan'))
@@ -896,18 +936,9 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
         import entry_price_retry
         retry_price = False
         try:
-            execution_cfg = contract.get('execution_settings')
-            if (contract.get('target_plan') != target_plan or not isinstance(execution_cfg, dict) or
-                    execution_cfg.get('active_strategy') != 'single'):
-                raise ValueError('order_plan_mismatch')
-            validate(target_plan, signal['planned_entry'], signal['original_stop'], signal['action'])
-            if (order['limit_price'] != target_plan['entry'] or
-                    [signal['tp1'], signal['tp2'], signal['tp3']] != [target_plan['active_target'], None, None] or
-                    [signal['tp1_pct'], signal['tp2_pct'], signal['tp3_pct']] != [1, 0, 0]):
-                raise ValueError('order_levels_mismatch')
-            retry_price = entry_price_retry.validate_order(order, contract)
+            execution_cfg, retry_price = _single_entry_contract(order, signal, contract)
             validate_fill(target_plan, fill_price)
-            cfg = contract['execution_settings']
+            cfg = execution_cfg
         except (ValueError, KeyError, TypeError) as exc:
             if retry_price and str(exc) in entry_price_retry.PRICE_REASONS:
                 # Decline this actual price, not the frozen order. A later
@@ -1005,6 +1036,34 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
     enqueue_telegram(cur, f"entry:{signal['id']}", "entry", message)
 
 
+def _linked_close_trades(cur, order):
+    """Resolve retained close keys to the original primary and its own shadow."""
+    match = re.fullmatch(rf"signal:{order['signal_id']}:close:([1-9][0-9]*)",
+                         str(order.get('client_order_key') or ''))
+    if (not match or len(match.group(1)) > 19 or int(match.group(1)) > 9223372036854775807
+            or order['side'] != 'sell' or order['order_type'] != 'limit'):
+        return []
+    anchor = cur.execute('''SELECT t.* FROM scanner_trades t
+        JOIN scanner_signals s ON s.id=? AND s.agent_id=t.agent_id AND s.ticker=t.ticker
+        WHERE t.id=? AND s.action='SELL' AND t.is_shadow=0 AND t.status='open'
+          AND t.side IN ('long','BUY') AND t.remaining_quantity>0''',
+        (order['signal_id'], int(match.group(1)))).fetchone()
+    if not anchor:
+        return []
+    anchor = dict(anchor)
+    shadows = [dict(r) for r in cur.execute('''SELECT * FROM scanner_trades
+        WHERE signal_id=? AND order_id=? AND agent_id=? AND ticker=? AND is_shadow=1
+          AND side IN ('long','BUY') AND status='open' AND remaining_quantity>0
+        ORDER BY id''', (anchor['signal_id'], anchor['order_id'], anchor['agent_id'], anchor['ticker']))]
+    return [anchor, *shadows]
+
+
+def _invalidate_close_order(cur, order):
+    cur.execute("UPDATE scanner_orders SET status='invalid',updated_at=? WHERE id=?", (now_z(), order['id']))
+    cur.execute("UPDATE scanner_signals SET status='INVALID',updated_at=? WHERE id=?", (now_z(), order['signal_id']))
+    _enqueue_order_execution_update(cur, order['id'])
+
+
 def process_bar(ticker: str, bar: dict[str, Any]) -> None:
     """Atomically process one complete OHLC bar and its cursor."""
     values = [float(bar[key]) for key in ("open", "high", "low", "close")]
@@ -1050,6 +1109,10 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
             # entries or discretionary SELL-order fills.
             continue
         order_id = int(order["id"])
+        linked_closes = _linked_close_trades(cur, order) if order['purpose'] == 'close_long' else None
+        if linked_closes == []:
+            _invalidate_close_order(cur, order)
+            continue
         # Yahoo labels candles by their opening time. The entire candle must
         # follow order creation; a low reached before creation cannot fill it.
         try:
@@ -1084,12 +1147,11 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
             entered_ids.add(int(order["signal_id"]))
         elif order["purpose"] == "close_long" and bar["high"] >= float(order["limit_price"]):
             fill = max(float(order["limit_price"]), bar["open"] * (1 - slip))
-            cur.execute("SELECT * FROM scanner_trades WHERE ticker=? AND status='open' AND side IN ('long','BUY') ORDER BY is_shadow,id", (ticker,))
-            for trade_row in cur.fetchall():
-                trade = dict(trade_row)
+            quantity = float(linked_closes[0]['remaining_quantity'])
+            for trade in linked_closes:
                 _close_quantity(cur, trade, float(trade["remaining_quantity"]), fill, "sell", None, bar["at"], _loads(trade["settings_json"], lifecycle_settings()))
-            cur.execute("UPDATE scanner_orders SET status='filled',filled_quantity=quantity,average_fill_price=?,updated_at=? WHERE id=?",
-                        (fill, now_z(), order_id))
+            cur.execute("UPDATE scanner_orders SET status='filled',filled_quantity=?,average_fill_price=?,updated_at=? WHERE id=?",
+                        (quantity, fill, now_z(), order_id))
             cur.execute("UPDATE scanner_signals SET status='CLOSED',actual_entry=?,updated_at=? WHERE id=?", (fill, now_z(), order["signal_id"]))
     cur.execute("SELECT * FROM scanner_trades WHERE ticker=? AND status='open' ORDER BY id", (ticker,))
     for row in cur.fetchall():
@@ -1134,6 +1196,9 @@ def _pending_recovery_check(ticker, bars, observed_at):
         cursor = cur.execute('SELECT last_bar_at FROM scanner_price_cursors WHERE ticker=?', (ticker,)).fetchone()
         last = parse_time(cursor['last_bar_at']) if cursor else datetime.fromtimestamp(0, UTC)
         for order in orders:
+            if order['purpose'] == 'close_long' and not _linked_close_trades(cur, order):
+                _invalidate_close_order(cur, order)
+                continue
             try:
                 from entry_window import eligible_from
                 created = eligible_from(order)
@@ -1158,6 +1223,9 @@ def _pending_recovery_check(ticker, bars, observed_at):
                     touched = (bar['low'] <= float(order['limit_price']) if order['side']=='buy'
                                else bar['high'] >= float(order['limit_price']))
                     if touched:
+                        if at >= created and at + timedelta(minutes=5) <= expires and _retry_declines_touch(cur, order, bar):
+                            at += timedelta(minutes=5)
+                            continue
                         uncertain = at < created or at+timedelta(minutes=5) > expires
                         # Only evidence before the first possible fill matters to
                         # this order. Later gaps cannot undo an already proven fill.

@@ -49,7 +49,7 @@ export function buildActivity(research: Row | null, dashboard: Row | null): Acti
   const signalMap = new Map<string, Row>()
   for (const r of records) for (const s of r.signals || []) signalMap.set(String(s.id), { ...s, ticker: r.ticker, company: r.company, created_at: r.at })
   for (const s of dashboard?.signals || []) {
-    const terminal = ['EXPIRED','CANCELLED','REJECTED','CLOSED','COMPLETED'].includes(s.status)
+    const terminal = ['EXPIRED','CANCELLED','REJECTED','CLOSED','COMPLETED','INVALID'].includes(s.status)
     if (!s.legacy_unverified && !(terminal && since && timestamp(s.updated_at || s.created_at) && timestamp(s.updated_at || s.created_at) < since)) signalMap.set(String(s.id), s)
   }
   const signals = [...signalMap.values()]
@@ -69,8 +69,15 @@ export function buildActivity(research: Row | null, dashboard: Row | null): Acti
     if (tradeSignals.has(String(s.id))) continue
     const r = records.find(v => v.signals?.some((v: Row) => String(v.id) === String(s.id)))
     if (r) linked.add(`${r.scan_id}:${r.ticker}`)
-    const orders: Row[] = (r?.orders || []).filter((o: Row) => o.purpose === 'entry' &&
+    const linkedOrders: Row[] = (r?.orders || []).filter((o: Row) =>
       o.signal_id != null && String(o.signal_id) === String(s.id))
+    const orders = linkedOrders.filter(o => o.purpose === 'entry')
+    // Research signals omit action; only this signal's retained close order proves purpose.
+    const closeOrders = linkedOrders.filter(o => o.purpose === 'close_long')
+    const invalidClose = s.status === 'INVALID' && closeOrders.some(o => o.status === 'invalid')
+    const expiredClose = s.status === 'EXPIRED' && closeOrders.some(o => o.status === 'expired')
+    const uncertainClose = s.status === 'RECOVERY_UNCERTAIN' && closeOrders.some(o => o.status === 'recovery_uncertain')
+    const closeReason = invalidClose ? 'close_order_invalid' : expiredClose ? 'close_order_expired' : uncertainClose ? 'close_recovery_uncertain' : null
     const uncertain = orders.some(o => o.status === 'recovery_uncertain') || s.status === 'RECOVERY_UNCERTAIN'
     const priceWait = entryPriceWait(s,orders)
     const pending = orders.some(o => o.status === 'pending') || !!priceWait
@@ -80,10 +87,10 @@ export function buildActivity(research: Row | null, dashboard: Row | null): Acti
     // Actual_entry alone without a linked trade is not a proven current position.
     const unlinkedFill = s.actual_entry != null || orders.some(o => o.status === 'filled')
     items.push({ id: `signal:${s.id}`, ticker: s.ticker, company: s.company || r?.company || '',
-      station: uncertain || pending || orders.length ? 'order' : 'signal',
-      state: uncertain || unlinkedFill ? 'uncertain' : blocked ? 'blocked' : expired ? 'closed' : 'waiting',
+      station: closeReason || uncertain || pending || orders.length ? 'order' : 'signal',
+      state: invalidClose ? 'blocked' : uncertain || unlinkedFill ? 'uncertain' : blocked ? 'blocked' : expired ? 'closed' : 'waiting',
       at: newestTime([s.updated_at, s.created_at, recordTime(r || {})]),
-      reason: uncertain ? 'recovery_uncertain' : unlinkedFill ? 'unlinked_fill' : s.status === 'RISK_BLOCKED' ? 'allocation_blocked' : invalidOrder && s.status==='PENDING_ENTRY' ? 'entry_order_invalid' : blocked || expired ? s.status : priceWait ? 'entry_price_wait' : null,
+      reason: closeReason || (uncertain ? 'recovery_uncertain' : unlinkedFill ? 'unlinked_fill' : s.status === 'RISK_BLOCKED' ? 'allocation_blocked' : invalidOrder && s.status==='PENDING_ENTRY' ? 'entry_order_invalid' : blocked || expired ? s.status : priceWait ? 'entry_price_wait' : null),
       kind: 'signal', signal: s, record: r })
   }
   // One latest retained scan per ticker; repeated scans remain separately accessible in detail.

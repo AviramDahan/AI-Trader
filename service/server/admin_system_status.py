@@ -186,7 +186,7 @@ def build(conn, now):
         'oldest_queue_seconds': count(canonical.get('oldest_queue_seconds')) if canonical_recent else None,
         'provider_issues': sum(p['status'] not in {'ok','no_new','not_modified','disabled','retired'} for p in providers)}
     by_id['news_feed']['providers'] = providers
-    if canonical_recent and canonical.get('alarms'):
+    if by_id['news_feed']['state'] != 'failed' and canonical_recent and canonical.get('alarms'):
         by_id['news_feed'].update(state='degraded', reason='canonical_alarm')
     elif by_id['news_feed']['state'] in {'healthy','idle'} and by_id['news_feed']['metrics']['provider_issues']:
         by_id['news_feed'].update(state='degraded', reason='partial_provider_coverage')
@@ -202,10 +202,17 @@ def build(conn, now):
             by_id['scan']['metrics'][field] = datetime.fromtimestamp(stamp, timezone.utc).isoformat()
     for field in ('universe_count','technical_candidates_count','ai_selected_count','signals_published'):
         by_id['scan']['metrics'][field] = count(runtime.get(field))
-    cursor_rows = conn.execute('''SELECT ticker,last_bar_at FROM scanner_price_cursors
-        WHERE ticker IN (SELECT ticker FROM scanner_trades WHERE status='open'
-            UNION SELECT ticker FROM scanner_orders WHERE status IN ('pending','recovery_uncertain'))
-        ORDER BY ticker LIMIT 32''').fetchall()
+    # Orders have no ticker column. An unqualified subquery ticker would bind
+    # to the outer cursor and include every historical cursor when any order
+    # is pending. Start with the active linked cohort; keep missing cursors
+    # visible rather than silently certifying an unobserved active symbol.
+    cursor_rows = conn.execute('''SELECT active.ticker,cursor.last_bar_at FROM (
+        SELECT ticker FROM scanner_trades WHERE status='open'
+        UNION SELECT signal.ticker FROM scanner_orders orders
+            JOIN scanner_signals signal ON signal.id=orders.signal_id
+            WHERE orders.status IN ('pending','recovery_uncertain')) active
+        LEFT JOIN scanner_price_cursors cursor ON cursor.ticker=active.ticker
+        ORDER BY active.ticker LIMIT 32''').fetchall()
     marks = []
     for row in cursor_rows:
         stamp = instant(row['last_bar_at'])
@@ -216,7 +223,8 @@ def build(conn, now):
                       'fresh_regular_session': bool(recent) if market['is_open'] else None})
     by_id['monitor']['bars'] = marks
     by_id['monitor']['metrics'] = {'sampled_cursors': len(marks), 'regular_session_open': market['is_open']}
-    if market['is_open'] and marks and any(m['fresh_regular_session'] is False for m in marks):
+    if (by_id['monitor']['state'] != 'failed' and market['is_open'] and marks
+            and any(m['fresh_regular_session'] is False for m in marks)):
         by_id['monitor'].update(state='degraded', reason='completed_bars_not_fresh')
     orders = conn.execute('''SELECT COUNT(*) pending,
         SUM(CASE WHEN status='recovery_uncertain' THEN 1 ELSE 0 END) holds
@@ -259,7 +267,7 @@ def build(conn, now):
         by_id['telegram']['metrics'][key+'_queued'] = count(result['queued'])
         by_id['telegram']['metrics'][key+'_oldest_seconds'] = age(result['oldest'], now) if result['queued'] else 0
         oldest = by_id['telegram']['metrics'][key+'_oldest_seconds']
-        if result['queued'] and oldest is not None and oldest > 300:
+        if by_id['telegram']['state'] != 'failed' and result['queued'] and oldest is not None and oldest > 300:
             by_id['telegram'].update(state='degraded', reason='delivery_backlog')
     version = conn.execute('SELECT MAX(version) version FROM schema_migrations').fetchone()['version'] if using_postgres() else None
     nodes.extend([{'id':'database','state':'healthy','reason':'read_only_snapshot_succeeded',
