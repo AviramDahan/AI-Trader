@@ -89,6 +89,20 @@ def component(key, rows, now, *, lease=None):
     return node
 
 
+def scan_activity(node, runtime, now):
+    """Same overdue grace as the existing public_status; does not run a scan."""
+    if node['state'] == 'failed':
+        return
+    due, started = runtime.get('next_scan_at'), runtime.get('last_started_at')
+    valid = lambda v: type(v) in (float, int) and math.isfinite(v) and 0 < v < 10**11
+    if valid(due) and now.timestamp() > due + 300:
+        node.update(state='stale', reason='scan_schedule_overdue')
+    elif runtime.get('status') == 'scanning' and valid(started) and -5 <= now.timestamp()-started <= 7200:
+        node.update(state='idle', reason='scan_in_progress',
+                    observed_at=datetime.fromtimestamp(started, timezone.utc).isoformat(),
+                    age_seconds=max(0, round(now.timestamp()-started)))
+
+
 def build(conn, now):
     """One already read-only/repeatable snapshot. No init, reports, network or AI."""
     from scanner_engine import market_session_state, _regular_session_bar_stale
@@ -156,6 +170,7 @@ def build(conn, now):
         SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END) errors FROM si_checkpoints''').fetchone()
     by_id['sec_intelligence']['metrics'] = {k: count(sec[k]) for k in ('issuers','completed','errors')}
     runtime = settings.get('scanner_runtime', {})
+    scan_activity(by_id['scan'], runtime, now)
     for field in ('next_scan_at', 'last_completed_at'):
         stamp = runtime.get(field)
         if type(stamp) in (int, float) and math.isfinite(stamp) and 0 < stamp < 10**11:

@@ -144,6 +144,17 @@ def test_component_missing_stale_future_error_and_idle():
     assert value['state'] == 'failed' and 'secret' not in json.dumps(value) and 'bad.invalid' not in json.dumps(value)
 
 
+def test_live_scan_phase_and_existing_overdue_grace_do_not_fake_completion():
+    node = {'state':'idle','reason':'no_signals'}
+    ops.scan_activity(node, {'status':'scanning','last_started_at':NOW.timestamp()-20,'next_scan_at':NOW.timestamp()+1800}, NOW)
+    assert node['state'] == 'idle' and node['reason'] == 'scan_in_progress'
+    ops.scan_activity(node, {'status':'scanning','last_started_at':NOW.timestamp()-1900,'next_scan_at':NOW.timestamp()-301}, NOW)
+    assert node['state'] == 'stale' and node['reason'] == 'scan_schedule_overdue'
+    node.update(state='failed',reason='lease_missing')
+    ops.scan_activity(node, {'status':'scanning','last_started_at':NOW.timestamp(),'next_scan_at':NOW.timestamp()+1800}, NOW)
+    assert node['state'] == 'failed' and node['reason'] == 'lease_missing'
+
+
 def seed(conn, local=None):
     for key in ops.SERVICE_LIMITS:
         conn.execute('INSERT INTO scanner_service_status VALUES(?,?,?,?,?)', (key,'ok',NOW.isoformat(),NOW.isoformat(),'fixture only'))
