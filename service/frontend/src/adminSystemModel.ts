@@ -1,3 +1,4 @@
+import type { TeamReport } from './adminAgentOfficeModel'
 export type OpsState = 'healthy' | 'idle' | 'failed' | 'degraded' | 'stale' | 'unknown' | 'disabled'
 export type OpsNode = {
   id: string; state: OpsState; reason: string; observed_at: string | null
@@ -12,6 +13,7 @@ export type OpsSnapshot = {
   version: number; observed_at: string; build_sha: string | null; read_only: boolean
   overall: 'failed' | 'attention' | 'observed_operational'
   market: { is_open: boolean; reason: string }; nodes: OpsNode[]
+  agent_team?: TeamReport | null
 }
 export const OPS_GROUPS = [
   { title: 'מקורות ומידע', ids: ['news_feed', 'sec_intelligence'] },

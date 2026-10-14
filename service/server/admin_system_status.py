@@ -277,10 +277,11 @@ def build(conn, now):
     critical = any(n['state'] == 'failed' for n in nodes)
     incomplete = any(n['state'] in {'unknown','stale','degraded'} for n in nodes)
     sha = os.getenv('BUILD_SHA', '')
+    from agent_team_status import snapshot as team_snapshot
     return {'version':1, 'observed_at':now.isoformat(), 'refresh_seconds':15,
             'build_sha':sha if len(sha)==40 and all(c in '0123456789abcdef' for c in sha) else None,
             'overall':'failed' if critical else 'attention' if incomplete else 'observed_operational',
-            'market':market, 'nodes':nodes, 'read_only':True,
+            'market':market, 'nodes':nodes, 'read_only':True, 'agent_team':team_snapshot(now),
             'limits':['retained_observations_not_docker_health_or_oom','no_natural_trading_e2e_claim',
                       'on_demand_ai_not_continuous_work','outbox_not_telegram_readback']}
 

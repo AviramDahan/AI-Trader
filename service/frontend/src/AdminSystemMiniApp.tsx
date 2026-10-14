@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { API_ORIGIN } from './appShared'
 import { createReadPoller } from './readPoller'
+import { AdminAgentOffice } from './AdminAgentOffice'
 import { OPS_GROUPS, OPS_NODES, OPS_STATES, OPS_REASONS, OPS_METRICS, OPS_ERROR_CODES, OPS_ROLE_LEASE_NODES, secDiscoveryCoverage, marketDescription, providerExplanation, opsTime, snapshotFresh, telegramAdminData, type OpsNode, type OpsSnapshot } from './adminSystemModel'
 import './adminSystemMiniApp.css'
 
@@ -40,6 +41,7 @@ function OpsCard({ node, retained }: { node: OpsNode; retained: boolean }) {
 export function AdminSystemPanel({ data, error = '', now = Date.now(), onRefresh, updating = false }: {
   data: OpsSnapshot | null; error?: string; now?: number; onRefresh?: () => void; updating?: boolean
 }) {
+  const [view,setView] = useState<'systems' | 'team'>('systems')
   const fresh = snapshotFresh(data, now) && !error
   const nodes = new Map(data?.nodes.map(n => [n.id, n]) ?? [])
   const getNode = (id: string): OpsNode => nodes.get(id) ?? { id, state: 'unknown', reason: 'no_observation', observed_at: null, metrics: {} }
@@ -49,15 +51,27 @@ export function AdminSystemPanel({ data, error = '', now = Date.now(), onRefresh
   const summary = !data ? 'ממתין לתמונת מצב מורשית' : !fresh ? 'העדכון האחרון אינו מאומת כעת' : status === 'failed' ? 'יש רכיב שדורש טיפול' : data?.overall === 'observed_operational' && discovery && discovery.remaining > 0 ? 'המערכת פועלת; גילוי הדיווחים בהשלמה' : status === 'degraded' ? 'המערכת פועלת; יש פערים לבדיקה' : 'פעילות תקינה לפי התצפיות הזמינות'
   return <section className="ops-app" dir="rtl" aria-label="מרכז בקרת המערכת">
     <header className="ops-header"><div className="ops-eyebrow"><span className="ops-lock" aria-hidden="true">◈</span> AI TRADER <span>ADMIN ONLY</span></div>
-      <h1>המערכת, במבט אחד</h1><p>מהמקורות ועד ניטור הפוזיציות. מידע אמיתי, ללא פעולות מהמסך.</p>
+      <h1>חדר הבקרה</h1><p>שירותי המערכת וצוות הביקורת. שתי תצוגות נפרדות, ללא פעולות מהמסך.</p>
       <div className={`ops-overview ops-${status}`} aria-live="polite"><span className="ops-indicator" aria-hidden="true" /><div><strong>{summary}</strong><small>{data ? `תמונת מצב: ${opsTime(data.observed_at)} · שעון ישראל` : 'אין נתונים עד לאימות הגישה'}</small></div></div>
       {error && <p className="ops-warning" role="alert">{error}</p>}
       <div className="ops-toolbar"><span>{marketDescription(data, Boolean(fresh))}<br /><small>רענון אוטומטי כל 15 שניות כשהמסך פתוח</small></span><button type="button" onClick={onRefresh} disabled={!onRefresh || updating}>{updating ? 'קורא מצב…' : 'רענון תצוגה'}</button></div>
     </header>
+    <div className="ops-view-switch" role="tablist" aria-label="תצוגת חדר הבקרה" onKeyDown={event => {
+      if (!['ArrowRight','ArrowLeft','Home','End'].includes(event.key)) return
+      event.preventDefault()
+      const next = event.key === 'Home' ? 'systems' : event.key === 'End' ? 'team' : view === 'systems' ? 'team' : 'systems'
+      setView(next); event.currentTarget.querySelector<HTMLButtonElement>(`#ops-${next}-tab`)?.focus()
+    }}>
+      <button type="button" id="ops-systems-tab" role="tab" aria-selected={view === 'systems'} aria-controls="ops-systems-panel" tabIndex={view === 'systems' ? 0 : -1} onClick={() => setView('systems')}>המערכות</button>
+      <button type="button" id="ops-team-tab" role="tab" aria-selected={view === 'team'} aria-controls="ops-team-panel" tabIndex={view === 'team' ? 0 : -1} onClick={() => setView('team')}>צוות Agents</button>
+    </div>
+    <div id="ops-team-panel" role="tabpanel" aria-labelledby="ops-team-tab" hidden={view !== 'team'}>{view === 'team' && <AdminAgentOffice report={data?.agent_team} now={now} fresh={Boolean(fresh)} />}</div>
+    <div id="ops-systems-panel" role="tabpanel" aria-labelledby="ops-systems-tab" hidden={view !== 'systems'}>
     <div className="ops-flow" aria-label="זרימת המערכת"><p className="ops-map-note">הקווים מציגים קשרים בין רכיבים, לא הוכחה שעסקה עברה את כל השלבים. לחצו על רכיב לפירוט.</p>
       {OPS_GROUPS.map((group, i) => <section className="ops-stage" key={group.title}><div className="ops-stage-heading"><span>{i+1}</span><h2>{group.title}</h2></div><div className="ops-stage-cards">{group.ids.map(id => <OpsCard key={id} node={getNode(id)} retained={Boolean(data && !fresh)} />)}</div></section>)}
     </div>
     <section className="ops-infrastructure"><h2>תשתית שמחזיקה את המערכת</h2><p>מסד הנתונים והגיבוי תומכים בכל השלבים; הם אינם תחנות ביצוע עסקה.</p><div className="ops-stage-cards">{['api','database','backup'].map(id => <OpsCard key={id} node={getNode(id)} retained={Boolean(data && !fresh)} />)}</div></section>
+    </div>
     <footer className="ops-footer"><details><summary>מה התצוגה מוכיחה, ומה לא?</summary><p>הנתונים נקראים מתמונת מצב עקבית בקריאה בלבד. סימון תקין מתייחס לבדיקה ולזמן שמוצגים, לא להבטחת זמינות רציפה.</p><p>אין כאן בדיקת Docker/OOM, קריאת AI יזומה, אימות קריאת הודעה בטלגרם, שחזור גיבוי או הוכחה לשרשרת מסחר טבעית מלאה. נתון חסר אינו אפס ואינו הצלחה.</p><p>התצוגה אינה משנה ספים, פקודות, פוזיציות או תקציב.</p></details><span>גרסת שרת <bdi>{data?.build_sha?.slice(0, 7) ?? 'לא אומתה'}</bdi> · תצוגה פרטית לקריאה בלבד</span></footer>
   </section>
 }

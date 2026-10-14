@@ -7,7 +7,7 @@ const output=await build({stdin:{resolveDir:process.cwd(),sourcefile:'admin-prev
   import './src/adminSystemMiniApp.css';
   function Preview(){const [mode,setMode]=useState(new URLSearchParams(location.search).get('state')||'normal'),[tick,setTick]=useState(0);
     const data=React.useMemo(()=>opsFixture(mode),[mode,tick]);return <><div style={{padding:12,background:'#282132',color:'#fff',font:'12px Arial',textAlign:'center'}}>תצוגת בדיקה בלבד · נתונים סינתטיים · לא Production
-    <div style={{display:'flex',gap:6,justifyContent:'center',flexWrap:'wrap',marginTop:8}}>{['normal','partial','failure','busy','stale','closed','empty'].map(v=><button onClick={()=>setMode(v)} key={v}>{v}</button>)}</div></div>
+    <div style={{display:'flex',gap:6,justifyContent:'center',flexWrap:'wrap',marginTop:8}}>{['normal','partial','failure','busy','stale','closed','empty','team-running','team-stale','team-blocked','team-missing'].map(v=><button onClick={()=>setMode(v)} key={v}>{v}</button>)}</div></div>
     <AdminSystemPanel data={data} onRefresh={()=>setTick(t=>t+1)}/></>}
   createRoot(document.getElementById('root')).render(<Preview/>);`},bundle:true,write:false,outdir:'unused',platform:'browser',jsx:'automatic',
   plugins:[{name:'no-live-api',setup(b){b.onResolve({filter:/^\.\/appShared$/},()=>({path:'shared',namespace:'stub'}));b.onLoad({filter:/.*/,namespace:'stub'},()=>({contents:"export const API_ORIGIN='http://isolated.invalid'"}))}}]})
