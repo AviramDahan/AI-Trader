@@ -6,6 +6,7 @@ import pytest
 import psycopg
 import database
 import admin_system_status as ops
+import agent_team_status as team
 
 
 def test_readonly_projection_does_not_create_jobs_or_trades(pg, monkeypatch):
@@ -58,3 +59,23 @@ def test_canonical_providers_survive_evidence_leases_and_keep_actual_times(pg):
     assert feed['metrics']['provider_issues']==1
     assert 'DO-NOT-EXPOSE' not in json.dumps(value) and 'evidence:0000' not in json.dumps(value)
     ops._cached=None
+
+
+def test_agent_team_report_is_private_operational_metadata_not_trading(pg, monkeypatch, tmp_path):
+    now=datetime.now(timezone.utc)
+    target=tmp_path/'agent-team-status.json'
+    monkeypatch.setattr(team,'RUNTIME_REPORT',target)
+    team.publish({'version':1,'run_id':'synthetic-pg','reported_at':now.isoformat(),'report_url':None,
+        'agents':[{'id':'trading','state':'blocked','task':'trading_correctness','observed_at':now.isoformat()}]},now)
+    tables=('scanner_orders','scanner_trades','scanner_fills','scanner_telegram_outbox','ai_call_usage')
+    with database.get_db_connection() as c:
+        before={t:c.execute('SELECT count(*) n FROM '+t).fetchone()['n'] for t in tables}
+    with database.get_db_connection() as c:
+        c.execute('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        assert c.execute('SHOW transaction_read_only').fetchone()[0]=='on'
+        value=ops.build(c,now)
+        after={t:c.execute('SELECT count(*) n FROM '+t).fetchone()['n'] for t in tables}
+    assert before==after and value['read_only'] and len(value['nodes'])==13
+    assert value['agent_team']['agents'][0]['state']=='blocked'
+    assert value['agent_team']['source']=='coordinator_report'
+    assert next(n for n in value['nodes'] if n['id']=='paper')['metrics']['holds']==0
