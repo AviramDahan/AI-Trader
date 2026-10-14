@@ -36,6 +36,9 @@ assert.ok(render(opsFixture(),'Synthetic timeout').includes('העדכון האח
 const hostile=opsFixture();hostile.nodes[0].metrics.queue='<script>alert(1)</script>'
 assert.equal(render(hostile).includes('<script>'),false)
 assert.ok(render(hostile).includes('&lt;script&gt;'))
+hostile.nodes[0].reason_codes=['invalid_json','untrusted_unknown_code']
+assert.ok(render(hostile).includes('תשובת AI אינה JSON תקין'))
+assert.equal(render(hostile).includes('untrusted_unknown_code'),false)
 const source=readFileSync('src/AdminSystemMiniApp.tsx','utf8')+readFileSync('src/adminSystemModel.ts','utf8')
 for(const forbidden of ['localStorage','sessionStorage','initDataUnsafe','sendData','/completion','method:'])assert.equal(source.includes(forbidden),false)
 const poller=readFileSync('src/readPoller.ts','utf8');assert.ok(poller.includes('options.headers()'))

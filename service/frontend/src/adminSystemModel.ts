@@ -57,6 +57,12 @@ export const OPS_REASONS: Record<string, string> = {
   read_only_snapshot_succeeded: 'שאילתות תמונת המצב הצליחו', authenticated_api_response: 'בקשת הניטור המורשית נענתה',
 }
 export const OPS_STATES: Record<OpsState, string> = { healthy: 'תקין לפי התצפית', idle: 'פעיל / בהמתנה', failed: 'דורש טיפול', degraded: 'פעולה חלקית', stale: 'תצפית ישנה', unknown: 'לא אומת', disabled: 'כבוי בהגדרה' }
+export const OPS_ERROR_CODES: Record<string, string> = {
+  stale_or_missing_bars:'נרות חסרים או ישנים', TimeoutError:'תם זמן ההמתנה', ReadTimeout:'המקור לא השלים תשובה בזמן',
+  ConnectTimeout:'לא נוצר חיבור בזמן', ConnectionError:'שגיאת חיבור', HTTPError:'המקור דחה את הבקשה',
+  ValueError:'הנתון או המבנה אינם תקינים', RuntimeError:'כשל תפעולי מדווח', OperationalError:'כשל גישה למסד',
+  invalid_json:'תשובת AI אינה JSON תקין', budget_exhausted:'תקציב AI חסום', news_quality_rejected:'דחיית תוכן בבקרת איכות, לא כשל שירות',
+}
 export const OPS_METRICS: Record<string, string> = {
   queue: 'אירועים בתור', oldest_queue_seconds: 'גיל האירוע הוותיק (שניות)', provider_issues: 'מקורות דורשים טיפול',
   issuers: 'מנפיקים עם checkpoint', completed: 'checkpoints שהושלמו', errors: 'שגיאות checkpoints',

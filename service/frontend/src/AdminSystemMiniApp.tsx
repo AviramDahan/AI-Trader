@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { API_ORIGIN } from './appShared'
 import { createReadPoller } from './readPoller'
-import { OPS_GROUPS, OPS_NODES, OPS_STATES, OPS_REASONS, OPS_METRICS, opsTime, snapshotFresh, telegramAdminData, type OpsNode, type OpsSnapshot } from './adminSystemModel'
+import { OPS_GROUPS, OPS_NODES, OPS_STATES, OPS_REASONS, OPS_METRICS, OPS_ERROR_CODES, opsTime, snapshotFresh, telegramAdminData, type OpsNode, type OpsSnapshot } from './adminSystemModel'
 import './adminSystemMiniApp.css'
 
 function OpsCard({ node, retained }: { node: OpsNode; retained: boolean }) {
@@ -16,6 +16,7 @@ function OpsCard({ node, retained }: { node: OpsNode; retained: boolean }) {
       <time className="ops-time">{opsTime(node.observed_at)} · ישראל</time>
     </summary>
     <div className="ops-evidence"><p>{identity.purpose}</p>
+      {node.reason_codes?.some(code => code in OPS_ERROR_CODES) && <p>סוג הכשל שדווח: {node.reason_codes.filter(code => code in OPS_ERROR_CODES).map(code => OPS_ERROR_CODES[code]).join(' · ')}</p>}
       <dl><dt>זמן התצפית</dt><dd><bdi>{opsTime(node.observed_at)}</bdi></dd>
         {node.last_success_at && <><dt>הצלחה אחרונה</dt><dd><bdi>{opsTime(node.last_success_at)}</bdi></dd></>}
         {node.lease_holders !== undefined && <><dt>בעלות עובד לתפקיד</dt><dd>{node.lease_holders === null ? 'לא אומתה' : node.lease_holders === 1 ? 'יחידה' : node.lease_holders}</dd></>}
