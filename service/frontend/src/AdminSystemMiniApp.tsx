@@ -1,25 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
 import { API_ORIGIN } from './appShared'
 import { createReadPoller } from './readPoller'
-import { OPS_GROUPS, OPS_NODES, OPS_STATES, OPS_REASONS, OPS_METRICS, OPS_ERROR_CODES, providerExplanation, opsTime, snapshotFresh, telegramAdminData, type OpsNode, type OpsSnapshot } from './adminSystemModel'
+import { OPS_GROUPS, OPS_NODES, OPS_STATES, OPS_REASONS, OPS_METRICS, OPS_ERROR_CODES, OPS_ROLE_LEASE_NODES, secDiscoveryCoverage, marketDescription, providerExplanation, opsTime, snapshotFresh, telegramAdminData, type OpsNode, type OpsSnapshot } from './adminSystemModel'
 import './adminSystemMiniApp.css'
 
 function OpsCard({ node, retained }: { node: OpsNode; retained: boolean }) {
   const identity = OPS_NODES[node.id]
   if (!identity) return null
   const state = retained ? 'stale' : node.state
+  const discovery = node.id === 'sec_intelligence' ? secDiscoveryCoverage(node) : null
   return <details className={`ops-card ops-${state}`}>
     <summary><div className="ops-card-name"><span className="ops-indicator" aria-hidden="true" /><h3>{identity.title}</h3><span className="ops-expand" aria-hidden="true">＋</span></div>
       <p className="ops-subtitle">{identity.subtitle}</p>
-      <span className="ops-state">{OPS_STATES[state] ?? 'לא אומת'}</span>
+      <span className="ops-state">{node.id === 'sec_intelligence' ? 'תקינות הרכיב: ' : ''}{OPS_STATES[state] ?? 'לא אומת'}</span>
       <p className="ops-reason">{retained ? 'מציג מידע שמור; העדכון הנוכחי לא אומת' : OPS_REASONS[node.reason] ?? 'אין הסבר מאומת לתצפית זו'}</p>
+      {node.id === 'sec_intelligence' && <div className={`ops-coverage ops-${retained || !discovery ? 'unknown' : discovery.remaining ? 'degraded' : 'healthy'}`}>
+        <span>{retained ? 'השלמת הגילוי לפי הנתונים השמורים' : 'השלמת גילוי דיווחים'}</span>
+        <strong>{discovery ? <><bdi>{`הושלמו ${discovery.completed} מתוך ${discovery.total}`}</bdi><br />{discovery.remaining ? `נותרו ${discovery.remaining} להשלמה` : 'שלב הגילוי הושלם'}</> : 'מצב השלמת הגילוי לא אומת'}</strong>
+      </div>}
       <time className="ops-time">{opsTime(node.observed_at)} · ישראל</time>
     </summary>
     <div className="ops-evidence"><p>{identity.purpose}</p>
       {node.reason_codes?.some(code => code in OPS_ERROR_CODES) && <p>סוג הכשל שדווח: {node.reason_codes.filter(code => code in OPS_ERROR_CODES).map(code => OPS_ERROR_CODES[code]).join(' · ')}</p>}
       <dl><dt>זמן התצפית</dt><dd><bdi>{opsTime(node.observed_at)}</bdi></dd>
         {node.last_success_at && <><dt>הצלחה אחרונה</dt><dd><bdi>{opsTime(node.last_success_at)}</bdi></dd></>}
-        {node.lease_holders !== undefined && <><dt>בעלות עובד לתפקיד</dt><dd>{node.lease_holders === null ? 'לא אומתה' : node.lease_holders === 1 ? 'יחידה' : node.lease_holders}</dd></>}
+        {OPS_ROLE_LEASE_NODES.has(node.id) && node.lease_holders !== undefined && <><dt>בעלות עובד לתפקיד</dt><dd>{node.lease_holders === null ? 'לא אומתה' : node.lease_holders === 1 ? 'יחידה' : node.lease_holders}</dd></>}
         {Object.entries(node.metrics).filter(([key]) => key in OPS_METRICS).map(([key, value]) => <div className="ops-metric-row" key={key}><dt>{OPS_METRICS[key]}</dt><dd><bdi>{value === null ? 'לא זמין' : typeof value === 'boolean' ? value ? 'כן' : 'לא' : key.endsWith('_at') ? opsTime(String(value)) : String(value)}</bdi></dd></div>)}
       </dl>
       {node.providers && <div className="ops-providers"><h4>מצב המקורות</h4>{node.providers.map(p => <div className="ops-provider" key={p.id}><div><bdi>{p.id}</bdi><span>{({'ok':'תקין','no_new':'אין מידע חדש','not_modified':'ללא שינוי','disabled':'כבוי','retired':'לא פעיל','error':'תקלה','requires_configuration':'נדרש טיפול / אישור גישה','backoff':'בהמתנה להתאוששות','rate_limited':'הוגבל קצב הבקשות','degraded':'כיסוי חלקי'} as Record<string,string>)[p.status] ?? 'לא אומת'}</span></div>
@@ -38,14 +43,16 @@ export function AdminSystemPanel({ data, error = '', now = Date.now(), onRefresh
   const fresh = snapshotFresh(data, now) && !error
   const nodes = new Map(data?.nodes.map(n => [n.id, n]) ?? [])
   const getNode = (id: string): OpsNode => nodes.get(id) ?? { id, state: 'unknown', reason: 'no_observation', observed_at: null, metrics: {} }
-  const status = !fresh ? 'unknown' : data?.overall === 'failed' ? 'failed' : data?.overall === 'attention' ? 'degraded' : 'healthy'
-  const summary = !data ? 'ממתין לתמונת מצב מורשית' : !fresh ? 'העדכון האחרון אינו מאומת כעת' : status === 'failed' ? 'יש רכיב שדורש טיפול' : status === 'degraded' ? 'המערכת פועלת; יש פערים לבדיקה' : 'פעילות תקינה לפי התצפיות הזמינות'
+  const discovery = secDiscoveryCoverage(getNode('sec_intelligence'))
+  const incompleteDiscovery = !discovery || discovery.remaining > 0
+  const status = !fresh ? 'unknown' : data?.overall === 'failed' ? 'failed' : data?.overall === 'attention' || incompleteDiscovery ? 'degraded' : 'healthy'
+  const summary = !data ? 'ממתין לתמונת מצב מורשית' : !fresh ? 'העדכון האחרון אינו מאומת כעת' : status === 'failed' ? 'יש רכיב שדורש טיפול' : data?.overall === 'observed_operational' && discovery && discovery.remaining > 0 ? 'המערכת פועלת; גילוי הדיווחים בהשלמה' : status === 'degraded' ? 'המערכת פועלת; יש פערים לבדיקה' : 'פעילות תקינה לפי התצפיות הזמינות'
   return <section className="ops-app" dir="rtl" aria-label="מרכז בקרת המערכת">
     <header className="ops-header"><div className="ops-eyebrow"><span className="ops-lock" aria-hidden="true">◈</span> AI TRADER <span>ADMIN ONLY</span></div>
       <h1>המערכת, במבט אחד</h1><p>מהמקורות ועד ניטור הפוזיציות. מידע אמיתי, ללא פעולות מהמסך.</p>
       <div className={`ops-overview ops-${status}`} aria-live="polite"><span className="ops-indicator" aria-hidden="true" /><div><strong>{summary}</strong><small>{data ? `תמונת מצב: ${opsTime(data.observed_at)} · שעון ישראל` : 'אין נתונים עד לאימות הגישה'}</small></div></div>
       {error && <p className="ops-warning" role="alert">{error}</p>}
-      <div className="ops-toolbar"><span>{data?.market.is_open ? 'המסחר הרגיל פתוח' : data ? 'מחוץ למסחר הרגיל; הניטור לפי חלונו' : 'מצב השוק לא אומת'}<br /><small>רענון אוטומטי כל 15 שניות כשהמסך פתוח</small></span><button type="button" onClick={onRefresh} disabled={!onRefresh || updating}>{updating ? 'קורא מצב…' : 'רענון תצוגה'}</button></div>
+      <div className="ops-toolbar"><span>{marketDescription(data, Boolean(fresh))}<br /><small>רענון אוטומטי כל 15 שניות כשהמסך פתוח</small></span><button type="button" onClick={onRefresh} disabled={!onRefresh || updating}>{updating ? 'קורא מצב…' : 'רענון תצוגה'}</button></div>
     </header>
     <div className="ops-flow" aria-label="זרימת המערכת"><p className="ops-map-note">הקווים מציגים קשרים בין רכיבים, לא הוכחה שעסקה עברה את כל השלבים. לחצו על רכיב לפירוט.</p>
       {OPS_GROUPS.map((group, i) => <section className="ops-stage" key={group.title}><div className="ops-stage-heading"><span>{i+1}</span><h2>{group.title}</h2></div><div className="ops-stage-cards">{group.ids.map(id => <OpsCard key={id} node={getNode(id)} retained={Boolean(data && !fresh)} />)}</div></section>)}

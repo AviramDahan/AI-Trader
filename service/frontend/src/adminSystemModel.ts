@@ -20,9 +20,22 @@ export const OPS_GROUPS = [
   { title: 'מחזור חיי הדמה', ids: ['paper', 'monitor'] },
   { title: 'מסירת עדכונים', ids: ['telegram'] },
 ]
+export const OPS_ROLE_LEASE_NODES = new Set(['news_feed', 'sec_intelligence', 'scan', 'quotes', 'news_ai', 'monitor', 'telegram'])
+/** Checkpoint completion is discovery coverage, not all documents parsed. */
+export function secDiscoveryCoverage(node: OpsNode): { completed: number; total: number; remaining: number } | null {
+  const total = node.metrics.issuers, completed = node.metrics.completed
+  if (typeof total !== 'number' || typeof completed !== 'number' || !Number.isSafeInteger(total) ||
+      !Number.isSafeInteger(completed) || total <= 0 || total > 10**9 || completed < 0 || completed > total) return null
+  return { completed, total, remaining: total - completed }
+}
+export function marketDescription(data: OpsSnapshot | null, fresh: boolean): string {
+  if (!data || typeof data.market?.is_open !== 'boolean') return 'מצב השוק לא אומת'
+  if (!fresh) return `מצב השוק לא אומת כעת; בתמונה השמורה: ${data.market.is_open ? 'מסחר פתוח' : 'מחוץ למסחר הרגיל'}`
+  return data.market.is_open ? 'המסחר הרגיל פתוח' : 'מחוץ למסחר הרגיל; הניטור לפי חלונו'
+}
 export const OPS_NODES: Record<string, { title: string; subtitle: string; purpose: string }> = {
   news_feed: { title: 'מקורות חדשות', subtitle: 'איסוף ותור עיבוד', purpose: 'מצב האיסוף והכיסוי לפי הספקים; אין כאן הורדת חדשות יזומה.' },
-  sec_intelligence: { title: 'דיווחי SEC', subtitle: 'דוחות ובעלי עניין', purpose: 'בדיקת המנפיקים והשלמת checkpoints אינן אותו דבר. השלמה חלקית אינה כיסוי מלא.' },
+  sec_intelligence: { title: 'דיווחי SEC', subtitle: 'דוחות ובעלי עניין', purpose: 'תקינות הרכיב והשלמת גילוי הדיווחים מוצגות בנפרד. מוני ההשלמה מתייחסים לגילוי אצל המנפיקים, לא להוכחה שכל מסמך עובד או שכל המידע נתמך.' },
   quotes: { title: 'נתוני מחירים', subtitle: 'ציטוטים שמורים', purpose: 'מצב רענון המחירים הקיים. מחוץ למסחר הרגיל אין כאן הוכחה למחיר מסחר חי.' },
   scan: { title: 'סורק מניות', subtitle: 'סינון ודירוג', purpose: 'מצב המחזור האחרון והבא. אין סיגנלים הוא מצב תקין, לא תקלה כשלעצמו.' },
   ai_local: { title: 'Ollama במחשב', subtitle: 'שער AI פרטי', purpose: 'תצפית החיבור והמוכנות מהענן. מוכנות מודל אינה הוכחה לסקירת מניה מוצלחת; עומס או טעינה אינם ניתוק.' },
@@ -74,7 +87,7 @@ export function providerExplanation(provider: NonNullable<OpsNode['providers']>[
 }
 export const OPS_METRICS: Record<string, string> = {
   queue: 'אירועים בתור', oldest_queue_seconds: 'גיל האירוע הוותיק (שניות)', provider_issues: 'מקורות דורשים טיפול',
-  issuers: 'מנפיקים עם checkpoint', completed: 'checkpoints שהושלמו', errors: 'שגיאות checkpoints',
+  issuers: 'מנפיקים במעקב איסוף', completed: 'מנפיקים ששלב הגילוי הושלם אצלם', errors: 'שגיאות במעקב האיסוף',
   next_scan_at: 'סריקה הבאה', last_completed_at: 'הסריקה שהושלמה', universe_count: 'מניות ביקום',
   technical_candidates_count: 'מועמדות טכניות במחזור', ai_selected_count: 'נבחרו לסקירה במחזור', signals_published: 'סיגנלים שנשמרו במחזור',
   sampled_cursors: 'נרות מניות במדגם', regular_session_open: 'המסחר הרגיל פתוח', open_positions: 'פוזיציות פעילות',

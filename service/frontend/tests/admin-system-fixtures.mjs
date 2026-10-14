@@ -14,9 +14,11 @@ export function opsFixture(mode='normal') {
   get('paper').metrics={open_positions:2,pending_orders:1,holds:0}
   get('telegram').metrics={public_delivery_queued:0,admin_delivery_queued:0}
   get('database').metrics={schema:7}
+  get('backup').lease_holders=null // No dedicated role lease is checked for this component.
   const data={version:1,observed_at:at,build_sha:'1'.repeat(40),read_only:true,overall:'attention',market:{is_open:true,reason:'open'},nodes}
   if(mode==='failure'){get('ai_local').state='failed';get('ai_local').reason='private_relay_unavailable';data.overall='failed'}
   if(mode==='busy'){get('ai_local').state='idle';get('ai_local').reason='gpu_busy_or_loading'}
+  if(mode==='partial')get('sec_intelligence').metrics.completed=460
   if(mode==='stale')data.observed_at=new Date(Date.now()-120000).toISOString()
   if(mode==='closed'){data.market.is_open=false;get('monitor').bars[0].fresh_regular_session=null}
   if(mode==='empty')return null
