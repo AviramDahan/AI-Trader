@@ -91,7 +91,7 @@ export const OPS_METRICS: Record<string, string> = {
   next_scan_at: 'סריקה הבאה', last_completed_at: 'הסריקה שהושלמה', universe_count: 'מניות ביקום',
   technical_candidates_count: 'מועמדות טכניות במחזור', ai_selected_count: 'נבחרו לסקירה במחזור', signals_published: 'סיגנלים שנשמרו במחזור',
   sampled_cursors: 'נרות מניות במדגם', regular_session_open: 'המסחר הרגיל פתוח', open_positions: 'פוזיציות פעילות',
-  pending_orders: 'פקודות ממתינות לכניסה', holds: 'פקודות באי־ודאות', budget_available: 'תקציב גיבוי זמין',
+  pending_orders: 'פקודות דמה ממתינות לביצוע', holds: 'פקודות באי־ודאות', budget_available: 'תקציב גיבוי זמין',
   public_delivery_queued: 'הודעות קהילה בתור', admin_delivery_queued: 'הודעות Admin בתור',
   public_delivery_oldest_seconds: 'גיל הודעת קהילה (שניות)', admin_delivery_oldest_seconds: 'גיל הודעת Admin (שניות)', schema: 'גרסת Schema',
 }

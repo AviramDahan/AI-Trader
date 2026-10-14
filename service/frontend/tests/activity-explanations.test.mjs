@@ -6,7 +6,7 @@ import {createElement} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
 import {readFileSync} from 'node:fs'
 import {candidate,fixtureResearch,fixtureDashboard} from './system-activity-fixtures.mjs'
-const bundle=await build({entryPoints:['src/activityExplanation.ts','src/activityReasons.ts','src/systemActivityModel.ts','src/BlockerExplanation.tsx','src/MiniAppActivity.tsx'],
+const bundle=await build({entryPoints:['src/activityExplanation.ts','src/activityReasons.ts','src/systemActivityModel.ts','src/BlockerExplanation.tsx','src/MiniAppActivity.tsx','src/StockEvidence.tsx'],
  outdir:'unused',bundle:true,write:false,platform:'node',format:'cjs',jsx:'automatic',external:['react','react/jsx-runtime','react-router-dom'],
  plugins:[{name:'isolated',setup(b){
   b.onResolve({filter:/^\.\/appChrome$/},()=>({path:'chrome',namespace:'stub'}))
@@ -18,10 +18,12 @@ const {explainActivity,itemReasonCodes,linkedItemOrders,STATION_GUIDES,activityS
 const {REASON_DETAILS,reasonDefinition}=load('activityReasons')
 const {buildActivity,candidateItem,STATIONS}=load('systemActivityModel')
 const {ActivityExplanation}=load('BlockerExplanation'),{MiniStockList}=load('MiniAppActivity')
+const {StockEvidence}=load('StockEvidence')
 let assertions=0
 const ok=v=>{assert.ok(v);assertions++},eq=(a,b)=>{assert.deepEqual(a,b);assertions++}
 const item=changes=>candidateItem(candidate('TEST',changes))
 const markup=(i,he)=>renderToStaticMarkup(createElement(ActivityExplanation,{item:i,he}))
+const evidenceMarkup=(i,he)=>renderToStaticMarkup(createElement(StockEvidence,{item:i,he,levels:{},records:[],onClose:()=>{}}))
 const check={phase:'pre_ai',outcome:'REJECT',rejection_reason:'nearest_resistance_below_2r',minimum_rr:2,
  quote:{price:100,as_of:'2026-10-09T15:00:00Z'},geometry:{rr_rounded:1.72,nearest_resistance:{low:105.3}}}
 const blocked=item({rejection:'pre_nearest_resistance_below_2r',rejection_stage:'targets',target_checks:[check]})
@@ -117,6 +119,60 @@ ok(!activityStatusLabel(rejectedOrder,true).includes('ממתין לביצוע'))
 eq(unlinked.state,'uncertain');ok(explainActivity(unlinked,true).detail.includes('פוזיציה מקושרת'))
 const close=buildActivity(null,{signals:[{id:1,ticker:'TEST',status:'PENDING_CLOSE'}]})[0]
 ok(explainActivity(close,true).detail.includes('בקשת יציאה'))
+// The research wire omits signal.action: exact linked order purpose identifies the close.
+const invalidCloseRecord=candidate('BRK.B',{signals:[{id:81,status:'INVALID'}],orders:[
+ {id:81,signal_id:81,purpose:'close_long',status:'invalid'},
+ {id:82,signal_id:82,purpose:'entry',status:'invalid',entry_rejection_reason:'fill_rr_below_2'}]})
+const invalidClose=buildActivity({records:[invalidCloseRecord]},null)[0]
+eq(invalidClose.station,'order');eq(invalidClose.state,'blocked');eq(invalidClose.reason,'close_order_invalid')
+eq(linkedItemOrders(invalidClose).map(o=>o.id),[81])
+for(const he of [true,false]){
+ const e=explainActivity(invalidClose,he),html=markup(invalidClose,he)
+ ok(e.title.includes(he?'בקשת היציאה המקורית':'Original exit request'))
+ ok(e.detail.includes(he?'קישור תקף לפוזיציה המקורית':'valid link to the original position'))
+ ok(e.detail.includes(he?'אינה מאמתת את הסיבה':'does not verify the precise cause'))
+ ok(e.next.includes(he?'לא בוצעה ממנה יציאה':'performed no exit'))
+ ok(!html.includes(he?'לא הופעלה ממנו פוזיציה חדשה':'did not activate a new position'))
+ ok(!html.includes(he?'יחס הסיכוי־סיכון':'reward/risk'))
+ const list=renderToStaticMarkup(createElement(MiniStockList,{he,rows:[invalidClose],known:true,onOpen:()=>{}}))
+ ok(list.includes(e.title));ok(list.includes('<bdi>BRK.B</bdi>'));ok(!list.includes('$'))
+ const evidence=evidenceMarkup(invalidClose,he),statusHtml=evidence.match(/class="evidence-status[^>]*>(.*?)<\/div>/s)[1]
+ ok(statusHtml.includes(e.title));ok(!statusHtml.includes(he?'כניסה':'entry'))
+ ok(evidence.includes(he?'תוקף פקודת היציאה':'Exit order valid until'))
+}
+const unrelatedClose=buildActivity({records:[candidate('TEST',{signals:[{id:81,status:'INVALID'}],orders:[
+ {id:82,signal_id:82,purpose:'close_long',status:'invalid'}]})]},null)[0]
+ok(unrelatedClose.reason!=='close_order_invalid')
+eq(buildActivity({window_since:'2026-10-14T00:00:00Z',records:[]},{signals:[
+ {id:81,ticker:'TEST',status:'INVALID',updated_at:'2026-10-13T12:00:00Z'}]}),[])
+const invalidEntry=buildActivity({records:[candidate('TEST',{signals:[{id:81,status:'ENTRY_POLICY_REJECTED'}],orders:[
+ {id:81,signal_id:81,purpose:'entry',status:'invalid',entry_rejection_reason:'fill_rr_below_2'}]})]},null)[0]
+eq(invalidEntry.reason,'ENTRY_POLICY_REJECTED');eq(itemReasonCodes(invalidEntry)[0],'fill_rr_below_2')
+for(const [status,orderStatus,state,reason] of [['EXPIRED','expired','closed','close_order_expired'],
+ ['RECOVERY_UNCERTAIN','recovery_uncertain','uncertain','close_recovery_uncertain']]){
+ const i=buildActivity({records:[candidate('BRK.B',{signals:[{id:81,status}],orders:[
+  {id:81,signal_id:81,purpose:'close_long',status:orderStatus},
+  {id:82,signal_id:82,purpose:'entry',status:'pending'}]})]},null)[0]
+ eq(i.station,'order');eq(i.state,state);eq(i.reason,reason)
+ for(const he of [true,false]){
+  const e=explainActivity(i,he),html=markup(i,he)
+  ok(e.title.includes(he?'יציאה':'exit'));ok(!html.includes(he?'כניסה':'entry'))
+  ok(e.detail.includes(he?'אין להסיק':'does not establish')||e.detail.includes(he?'אין לנחש':'No fill'))
+  const list=renderToStaticMarkup(createElement(MiniStockList,{he,rows:[i],known:true,onOpen:()=>{}}))
+  ok(list.includes(e.title));ok(list.includes('<bdi>BRK.B</bdi>'));ok(!list.includes('$'))
+  const evidence=evidenceMarkup(i,he),statusHtml=evidence.match(/class="evidence-status[^>]*>(.*?)<\/div>/s)[1]
+  ok(statusHtml.includes(e.title));ok(!statusHtml.includes(he?'כניסה':'entry'))
+  ok(evidence.includes(he?'תוקף פקודת היציאה':'Exit order valid until'))
+  if(status==='RECOVERY_UNCERTAIN')ok(activityStatusLabel(i,he).includes(he?'יציאה לא מאומתת':'Exit unverified'))
+ }
+ const unrelated=buildActivity({records:[candidate('TEST',{signals:[{id:81,status}],orders:[
+  {id:82,signal_id:82,purpose:'close_long',status:orderStatus}]})]},null)[0]
+ ok(unrelated.reason!==reason)
+ const entry=buildActivity({records:[candidate('TEST',{signals:[{id:81,status}],orders:[
+  {id:81,signal_id:81,purpose:'entry',status:orderStatus}]})]},null)[0]
+ eq(entry.reason,status==='EXPIRED'?'EXPIRED':'recovery_uncertain')
+ ok(explainActivity(entry,false).title.includes('entry'))
+}
 for(const status of ['EXPIRED','CANCELLED','CLOSED','COMPLETED','REJECTED']){
  const i=buildActivity(null,{signals:[{id:1,ticker:'TEST',status}]})[0]
  eq(i.state,'closed');ok(explainActivity(i,true).next.includes('אין החייאה'))

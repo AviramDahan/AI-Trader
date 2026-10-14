@@ -34,5 +34,14 @@ for(const he of [true,false]) {
   assert.ok(!card.includes('NaN')&&!card.includes('Infinity'))
   const warning=card.match(/class="scanner-warning">(.*?)<\/p>/s)[1]
   assert.ok(!warning.includes('$')) // Existing quote-price formatting is not changed.
+  for(const [status,label] of [['INVALID',he?'לא תקין — מצב הביצוע אינו מאומת':'Invalid — execution state unverified'],
+    ['PENDING_CLOSE',he?'ממתין לביצוע יציאה — הסגירה טרם אומתה':'Awaiting exit — closure not yet verified']]) {
+    const closeCard=renderToStaticMarkup(createElement(SignalCard,{signal:{...signal,action:'SELL',status},he}))
+    const statusLabel=closeCard.match(/class="signal-status-label">(.*?)<\/em>/s)[1]
+    assert.equal(statusLabel,label)
+    assert.ok(!statusLabel.includes(status))
+    assert.ok(!statusLabel.includes(he?'כניסה בוצעה':'Entry filled'))
+    assert.ok(!statusLabel.includes(he?'נסגרה':'Position closed'))
+  }
 }
 console.log('Entry rejection: exact reasons, missing evidence, signal linkage and Hebrew/English rendering PASS')
