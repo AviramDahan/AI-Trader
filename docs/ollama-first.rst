@@ -150,6 +150,34 @@ Provisioning requires separately approved production release/operator access:
 Stop and rollback
 ------------------
 
+Private connectivity notifications
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The existing cloud Telegram operations worker observes the private gateway
+with one bounded GET /health per minute while ``ollama_first`` is enabled.
+There is no generation, paid request, local trading worker or new scheduled
+task. Monitoring therefore works even when the PC is powered off. Missing AI
+jobs do not indicate stale connectivity.
+
+Three consecutive failed connection/identity checks spanning at least two
+minutes enqueue one private Admin failure. Two ready checks spanning at least
+one minute enqueue one recovery. Episode state and Admin outbox insertion
+commit together and persist across worker restarts; unchanged failures do not
+repeat. Busy/cold but reachable does not mean disconnected and cannot by
+itself trigger either message. A recovery verifies the pinned model and ready
+gateway, not a successful new inference. Raw errors/URLs/credentials are not
+included, and no public chat fallback exists.
+
+``cloud_only`` stops the observer without claiming a local recovery. No schema
+migration, model/sizing/trading/TP-SL/budget/routing change is required. The
+observer does not change local routing cooldowns. Existing outbox delivery
+rules, including ambiguous-delivery handling, remain unchanged. A full cloud
+or Telegram outage still cannot be reported by this in-process observer.
+
+The PC connector is session-scoped unless an operator separately configures
+Windows logon startup. It reconnects after a transient network/sleep break,
+but a PC reboot terminates that process; do not claim logon autostart exists.
+
 Kill switch ``cloud_only`` stops local selection for NEW calls; it does not
 undo previous decisions or stop positions/TP/SL. Preserve current data and
 schema 7. A compatible previous actual server image is the binary rollback,
