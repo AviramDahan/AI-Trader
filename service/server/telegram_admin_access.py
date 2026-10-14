@@ -94,10 +94,12 @@ def require_logs_member(raw):
                         raise ValueError()
                 data = json.loads(content)
         member = data.get('result', {}) if isinstance(data, dict) else {}
-        if not data.get('ok') or not isinstance(member, dict):
+        if data.get('ok') is not True or not isinstance(member, dict):
             raise ValueError()
         # Binding to the requested ID guards malformed/misrouted provider replies.
-        if member.get('user', {}).get('id') != uid:
+        provider_user = member.get('user')
+        provider_id = provider_user.get('id') if isinstance(provider_user, dict) else None
+        if type(provider_id) is not int or provider_id != uid:
             raise ValueError()
         allowed = member.get('status') in {'creator', 'administrator', 'member'} or (
             member.get('status') == 'restricted' and member.get('is_member') is True)

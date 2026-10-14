@@ -107,7 +107,7 @@ def test_existing_main_bot_can_authorize_private_logs_without_new_credentials(mo
     assert session.get.call_args.args[0] == 'https://api.telegram.org/botfixture-bot/getChatMember'
 
 
-@pytest.mark.parametrize('status,uid,expected', [('left',42,403),('kicked',42,403),('member',43,503),('restricted',42,403)])
+@pytest.mark.parametrize('status,uid,expected', [('left',42,403),('kicked',42,403),('member',43,503),('member',42.0,503),('restricted',42,403)])
 def test_nonmembers_and_wrong_provider_identity_denied(monkeypatch, status, uid, expected):
     membership(monkeypatch, status, uid)
     with pytest.raises(HTTPException) as error:
