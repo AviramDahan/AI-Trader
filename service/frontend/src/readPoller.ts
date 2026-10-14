@@ -1,6 +1,7 @@
 /** Display-only reads: one request, bounded time, immediate foreground recovery. */
 export function createReadPoller<T>(options: {
   url: string; intervalMs: number; timeoutMs?: number
+  headers?: () => HeadersInit
   onData: (data: T) => void; onError: (error: string) => void; onSettled?: () => void
 }) {
   let stopped = true, pending = false, flight: Promise<void> | null = null
@@ -21,7 +22,8 @@ export function createReadPoller<T>(options: {
     flight = (async () => {
       try {
         const data = await Promise.race([abort, (async () => {
-          const response = await fetch(options.url, { cache: 'no-store', signal: request.signal })
+          const response = await fetch(options.url, { cache: 'no-store', signal: request.signal,
+            ...(options.headers ? { headers: options.headers() } : {}) })
           if (!response.ok) throw new Error(`HTTP ${response.status}`)
           return await response.json() as T
         })()])

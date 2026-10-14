@@ -39,6 +39,22 @@ def _require_scanner_manager(authorization: str):
 
 
 def register_scanner_routes(app: FastAPI) -> None:
+    @app.get('/api/admin/system-status')
+    def admin_system_status(response: Response, authorization: str = Header(None),
+                            x_telegram_init_data: str = Header(None)):
+        response.headers['Cache-Control'] = 'no-store, private'
+        response.headers['Vary'] = 'Authorization, X-Telegram-Init-Data'
+        if x_telegram_init_data:
+            from telegram_admin_access import require_logs_member
+            require_logs_member(x_telegram_init_data)
+        else:
+            _require_scanner_manager(authorization)
+        from admin_system_status import payload
+        try:
+            return payload()
+        except Exception:
+            raise HTTPException(503, 'system_observation_unavailable') from None
+
     @app.get("/api/scanner/sec-intelligence/status")
     def sec_intelligence_status(authorization: str = Header(None)):
         _require_scanner_manager(authorization)
