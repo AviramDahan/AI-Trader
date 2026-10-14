@@ -19,6 +19,13 @@ function DisplayShell({ children }: { children: React.ReactNode }) {
     </div></main></div>
 }
 
+function ScannerEntry({ token }: { token: string | null }) {
+  const location = useLocation()
+  const safeToken = isMiniAppEntry(location.search) ? null : token
+  return isAdminSystemEntry(location.search, location.hash)
+    ? <AdminSystemMiniApp token={safeToken} /> : <ScannerDashboard token={safeToken} />
+}
+
 function App() {
   const [language, setLanguage] = useState<Language>(() => {
     const savedLanguage = localStorage.getItem('ai_trader_language')
@@ -54,8 +61,7 @@ function App() {
           <DisplayShell>
                 <Routes>
                   <Route path="/" element={<Navigate to="/market?tab=signals" replace />} />
-                  <Route path="/market" element={isAdminSystemEntry(window.location.search, window.location.hash)
-                    ? <AdminSystemMiniApp token={operatorToken} /> : <ScannerDashboard token={operatorToken} />} />
+                  <Route path="/market" element={<ScannerEntry token={operatorToken} />} />
                   <Route path="/login" element={<Navigate to="/market?tab=signals" replace />} />
                   <Route path="/register" element={<Navigate to="/market?tab=signals" replace />} />
                   <Route path="*" element={<Navigate to="/market?tab=signals" replace />} />
