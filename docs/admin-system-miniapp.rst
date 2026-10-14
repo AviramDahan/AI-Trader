@@ -72,6 +72,21 @@ accounting reconciliation, model calibration, Telegram readback or an independen
 backup restore. These limits are visible in the UI. No money totals/returns are
 invented, and no cash/sizing/TP/SL/news thresholds are changed.
 
+Presentation separates SEC component liveness from discovery completion.
+The collapsed card shows completed/total issuer checkpoints and remaining
+issuers; completing discovery is not proof that every document was parsed or
+supported. Missing, zero-total or inconsistent counters are explicitly unknown.
+Partial discovery keeps the overview in attention even if all component checks
+are otherwise operational. Failed/stale observations are never overridden by
+coverage counts. Retained coverage and market-session labels are explicitly
+last-observed, not current verified state.
+
+Role lease ownership is shown only for scanner/monitor/Telegram-owned nodes.
+The backup/API/database cards do not label a non-applicable lease as missing;
+actual missing/unknown/duplicate worker leases remain visible for their roles.
+At phone widths up to 480px cards use one column and larger summary typography,
+with the same numbered stage order, read-only evidence and desktop layout.
+
 Canonical provider status is filtered by the exact provider allowlist BEFORE
 the row limit: the same table contains many unrelated evidence leases. The
 collector's actual last_success and last_attempt fields are projected as

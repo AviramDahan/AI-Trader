@@ -33,6 +33,34 @@ assert.ok(empty.includes('ממתין לתמונת מצב מורשית'))
 assert.equal(empty.includes('>0<'),false)
 assert.equal(empty.includes('פעילות תקינה לפי'),false)
 assert.ok(render(opsFixture(),'Synthetic timeout').includes('העדכון האחרון אינו מאומת'))
+// Audited live ambiguities: complete work != full coverage, null != missing lease.
+assert.ok(render(opsFixture('partial')).includes('הושלמו 460 מתוך 515'))
+assert.ok(render(opsFixture('partial')).includes('נותרו 55 להשלמה'))
+assert.ok(normal.includes('שלב הגילוי הושלם'))
+const onlyBackup={...opsFixture(),nodes:opsFixture().nodes.filter(n=>n.id==='backup')}
+assert.equal(render(onlyBackup).includes('בעלות עובד לתפקיד'),false)
+const onlyMonitor={...opsFixture(),nodes:opsFixture().nodes.filter(n=>n.id==='monitor').map(n=>({...n,lease_holders:null}))}
+assert.ok(render(onlyMonitor).includes('בעלות עובד לתפקיד'))
+assert.ok(render(onlyMonitor).includes('לא אומתה'))
+assert.ok(render(opsFixture('stale')).includes('מצב השוק לא אומת כעת'))
+assert.ok(render(opsFixture(),'Synthetic timeout').includes('מצב השוק לא אומת כעת'))
+const partialHealthy={...opsFixture('partial'),overall:'observed_operational'}
+assert.ok(render(partialHealthy).includes('המערכת פועלת; גילוי הדיווחים בהשלמה'))
+const missingCoverage=opsFixture();missingCoverage.nodes.find(n=>n.id==='sec_intelligence').metrics={}
+assert.ok(render(missingCoverage).includes('מצב השלמת הגילוי לא אומת'))
+assert.equal(render(missingCoverage).includes('הושלמו 0 מתוך'),false)
+const secNode=opsFixture().nodes.find(n=>n.id==='sec_intelligence')
+for(const metrics of [{issuers:0,completed:0},{issuers:515,completed:null},{issuers:515,completed:516},
+  {issuers:515,completed:-1},{issuers:515,completed:NaN},{issuers:'515',completed:460},
+  {issuers:515.1,completed:460},{issuers:Infinity,completed:460}])assert.equal(model.secDiscoveryCoverage({...secNode,metrics}),null)
+assert.deepEqual(model.secDiscoveryCoverage({...secNode,metrics:{issuers:515,completed:0}}),{completed:0,total:515,remaining:515})
+assert.deepEqual(model.secDiscoveryCoverage({...secNode,metrics:{issuers:515,completed:515}}),{completed:515,total:515,remaining:0})
+const stalePartial={...opsFixture('partial'),observed_at:new Date(Date.now()-120000).toISOString()}
+assert.ok(render(stalePartial).includes('השלמת הגילוי לפי הנתונים השמורים'))
+assert.ok(render({...partialHealthy,overall:'failed'}).includes('יש רכיב שדורש טיפול'))
+assert.ok(model.marketDescription(opsFixture('closed'),false).includes('מצב השוק לא אומת כעת'))
+assert.ok(model.marketDescription(opsFixture('closed'),true).includes('מחוץ למסחר הרגיל'))
+assert.equal(model.marketDescription(null,false),'מצב השוק לא אומת')
 const hostile=opsFixture();hostile.nodes[0].metrics.queue='<script>alert(1)</script>'
 assert.equal(render(hostile).includes('<script>'),false)
 assert.ok(render(hostile).includes('&lt;script&gt;'))

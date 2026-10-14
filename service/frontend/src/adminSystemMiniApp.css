@@ -39,6 +39,8 @@
 .ops-state { display:inline-block; color:var(--ops-color); margin-top:13px; font-size:11px; font-weight:700; }
 .ops-reason { font-size:12px; line-height:1.7; color:#c7d4e6; margin-top:5px!important; }
 .ops-time { display:block; color:#8ea4be; font:11px/1.5 Arial,sans-serif; margin-top:9px; }
+.ops-coverage { margin-top:12px; border:1px solid color-mix(in srgb,var(--ops-color),transparent 60%); border-radius:9px; padding:10px 12px; background:color-mix(in srgb,var(--ops-color),transparent 94%); font-size:12px; line-height:1.7; }
+.ops-coverage > span { display:block; color:var(--ops-muted); }.ops-coverage > strong { display:block; color:var(--ops-color); font-weight:600; }
 .ops-evidence { border-top:1px solid var(--ops-line); padding:14px; font-size:12px; line-height:1.7; color:#c9d5e5; overflow-wrap:anywhere; }
 .ops-evidence dl { margin:14px 0 0; display:grid; grid-template-columns:1fr auto; gap:6px 10px; font-size:11px; }
 .ops-evidence dt { color:var(--ops-muted); }.ops-evidence dd { margin:0; text-align:left; }.ops-metric-row { display:contents; }
@@ -49,3 +51,4 @@
 @media (min-width:720px) { .ops-app { padding-top:38px; }.ops-stage-cards { grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); }.ops-card summary { min-height:168px; }.ops-card h3 { font-size:17px; }.ops-reason { font-size:12px; } }
 @media (max-width:719px) { .ops-card[open] { grid-column:1/-1; }.ops-card[open] summary { min-height:0; }.ops-card[open] .ops-evidence { font-size:14px; }.ops-card[open] .ops-evidence dl { font-size:12px; } }
 @media (max-width:370px) { .ops-app { padding-left:12px; padding-right:12px; }.ops-card summary { padding:14px 11px; }.ops-card-name { gap:6px; }.ops-card h3 { font-size:14px; }.ops-stage-cards { gap:8px; } }
+@media (max-width:480px) { .ops-stage-cards { grid-template-columns:minmax(0,1fr); gap:12px; }.ops-card summary { min-height:0; padding:18px 16px; }.ops-card h3 { font-size:17px; }.ops-subtitle { font-size:13px; }.ops-state { font-size:13px; }.ops-reason { font-size:14px; }.ops-time { font-size:12px; }.ops-coverage { font-size:13px; }.ops-toolbar { font-size:13px; }.ops-toolbar small { font-size:12px; }.ops-map-note { font-size:12px; }.ops-providers > div { font-size:12px; } }
