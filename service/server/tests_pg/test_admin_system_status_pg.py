@@ -37,3 +37,24 @@ def test_readonly_projection_does_not_create_jobs_or_trades(pg, monkeypatch):
     finally:
         roles.close()
         ops._cached = None
+
+
+def test_canonical_providers_survive_evidence_leases_and_keep_actual_times(pg):
+    now=datetime.now(timezone.utc).isoformat()
+    with database.get_db_connection() as c:
+        c.execute("UPDATE ne_control SET mode='canonical' WHERE id=1")
+        for i in range(120):
+            c.execute('INSERT INTO ne_provider_state VALUES(?,?)',(f'evidence:{i:04}',json.dumps({'status':'degraded','secret':'DO-NOT-EXPOSE'})))
+        c.execute('INSERT INTO ne_provider_state VALUES(?,?)',('globenewswire',json.dumps({'status':'requires_configuration','last_success':now,'last_attempt':now,'error':'http_error','http_status':403,'secret':'DO-NOT-EXPOSE'})))
+        c.execute('INSERT INTO ne_provider_state VALUES(?,?)',('prnewswire',json.dumps({'status':'ok','last_success':now,'last_attempt':now})))
+    ops._cached=None
+    value=ops.payload()
+    feed=next(n for n in value['nodes'] if n['id']=='news_feed')
+    providers={p['id']:p for p in feed['providers']}
+    assert set(providers)=={'globenewswire','prnewswire'}
+    assert providers['globenewswire']['http_status']==403
+    assert providers['globenewswire']['error_code']=='http_error'
+    assert providers['prnewswire']['last_success_at'] is not None
+    assert feed['metrics']['provider_issues']==1
+    assert 'DO-NOT-EXPOSE' not in json.dumps(value) and 'evidence:0000' not in json.dumps(value)
+    ops._cached=None

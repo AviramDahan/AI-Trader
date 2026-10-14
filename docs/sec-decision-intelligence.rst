@@ -24,6 +24,26 @@ are bounded, and XML DTD/entities are rejected. An operator User-Agent with a
 real contact email is mandatory. EdgarTools is not required; SEC XML/XBRL
 definitions and original filing references are authoritative.
 
+Operational initial-catch-up correction
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Both the recent columnar submissions block and continuation pages apply the
+documented 90-day horizon while an issuer's INITIAL checkpoint is incomplete.
+Previously only continuation pages applied it, so recent blocks could fill
+the bounded queue with unnecessary 400-day history. Normal delta collection
+stops at the completed accession marker; a partial delta retains that original
+marker across restart. Known-accession outage recovery keeps its existing
+retention coverage. Existing jobs and immutable decisions are not deleted or
+rewritten. Unknown acceptance times remain unknown, not a time boundary.
+
+This changes no scoring/evidence/trading threshold, retention period, queue
+capacity, processing batch or shared SEC request rate. Large valid submissions
+metadata has a dedicated 8 MB ceiling; an official issuer's current metadata
+exceeded the old 4 MB cap. Document/XML/exhibit/company-facts limits remain
+unchanged. Recent rows are read lazily from the columnar payload rather than
+copied into a second large dictionary list. Natural completion is still needed
+before full catch-up coverage can be claimed.
+
 Document recovery (parser v2)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

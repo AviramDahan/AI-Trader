@@ -20,10 +20,12 @@ _cached_at = 0
 SERVICE_LIMITS = {'scan': 7200, 'monitor': 900, 'quotes': 900, 'telegram': 180,
                   'backup': 7500, 'news_feed': 900, 'news_ai': 900, 'sec_intelligence': 900}
 SAFE_STATUSES = {'ok', 'no_new', 'not_modified', 'idle', 'waiting', 'market_closed',
-                 'error', 'degraded', 'disabled', 'retired', 'requires_configuration', 'backoff'}
+                 'error', 'degraded', 'disabled', 'retired', 'requires_configuration', 'backoff', 'rate_limited'}
 PROVIDERS = {'ftc', 'doj', 'existing_market', 'yahoo_priority', 'ecb', 'global_voices',
              'eia', 'federal_reserve', 'telegram_channels', 'fda', 'bls', 'sec_edgar',
              'intel_ir', 'benzinga', 'investing', 'prnewswire', 'globenewswire', 'tipranks'}
+PROVIDER_ERRORS = {'http_error', 'transport_failure', 'transport_TimeoutError',
+                   'source_metadata_invalid', 'press_feed_activation_required', 'license_required'}
 
 
 def instant(value):
@@ -103,6 +105,34 @@ def scan_activity(node, runtime, now):
                     age_seconds=max(0, round(now.timestamp()-started)))
 
 
+def canonical_providers(conn):
+    """Filter before LIMIT: the table also contains thousands of evidence leases.
+
+    The collector's actual fields are last_success/last_attempt, not *_at.
+    Project allowlisted scalars in PostgreSQL, not large/free-form state bodies.
+    """
+    names = sorted(PROVIDERS)
+    return conn.execute('''SELECT provider_id,state_json::jsonb->>'status' status,
+        COALESCE(state_json::jsonb->>'last_success',state_json::jsonb->>'last_success_at') last_success_at,
+        state_json::jsonb->>'last_attempt' last_attempt_at,
+        state_json::jsonb->>'next_at' next_check_at,
+        state_json::jsonb->>'error' error_code,
+        state_json::jsonb->>'http_status' http_status
+        FROM ne_provider_state WHERE provider_id IN (''' + ','.join('?' for _ in names) +
+        ') ORDER BY provider_id LIMIT 64', tuple(names)).fetchall()
+
+
+def provider_view(row):
+    http = str(row.get('http_status') or '')
+    return {'id':row['provider_id'],
+            'status':row['status'] if row['status'] in SAFE_STATUSES else 'unknown',
+            'last_success_at':instant(row['last_success_at']).isoformat() if instant(row['last_success_at']) else None,
+            'last_attempt_at':instant(row.get('last_attempt_at')).isoformat() if instant(row.get('last_attempt_at')) else None,
+            'next_check_at':instant(row.get('next_check_at')).isoformat() if instant(row.get('next_check_at')) else None,
+            'error_code':row.get('error_code') if row.get('error_code') in PROVIDER_ERRORS else None,
+            'http_status':int(http) if http.isdigit() and 100<=int(http)<=599 else None}
+
+
 def build(conn, now):
     """One already read-only/repeatable snapshot. No init, reports, network or AI."""
     from scanner_engine import market_session_state, _regular_session_bar_stale
@@ -145,13 +175,8 @@ def build(conn, now):
         control = conn.execute('SELECT mode FROM ne_control WHERE id=1').fetchone()
         if control and control['mode'] == 'canonical':
             merged = {p['id']:p for p in providers}
-            for row in conn.execute('''SELECT provider_id,state_json::jsonb->>'status' status,
-                    state_json::jsonb->>'last_success_at' last_success_at
-                    FROM ne_provider_state LIMIT 64'''):
-                if row['provider_id'] in PROVIDERS:
-                    merged[row['provider_id']] = {'id':row['provider_id'],
-                        'status':row['status'] if row['status'] in SAFE_STATUSES else 'unknown',
-                        'last_success_at':instant(row['last_success_at']).isoformat() if instant(row['last_success_at']) else None}
+            for row in canonical_providers(conn):
+                merged[row['provider_id']] = provider_view(dict(row))
             providers = list(merged.values())
     canonical = settings.get('news_canonical_health', {})
     canonical_age = age(canonical.get('checked_at'), now)

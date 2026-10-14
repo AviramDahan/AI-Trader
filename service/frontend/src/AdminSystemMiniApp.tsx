@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { API_ORIGIN } from './appShared'
 import { createReadPoller } from './readPoller'
-import { OPS_GROUPS, OPS_NODES, OPS_STATES, OPS_REASONS, OPS_METRICS, OPS_ERROR_CODES, opsTime, snapshotFresh, telegramAdminData, type OpsNode, type OpsSnapshot } from './adminSystemModel'
+import { OPS_GROUPS, OPS_NODES, OPS_STATES, OPS_REASONS, OPS_METRICS, OPS_ERROR_CODES, providerExplanation, opsTime, snapshotFresh, telegramAdminData, type OpsNode, type OpsSnapshot } from './adminSystemModel'
 import './adminSystemMiniApp.css'
 
 function OpsCard({ node, retained }: { node: OpsNode; retained: boolean }) {
@@ -22,7 +22,11 @@ function OpsCard({ node, retained }: { node: OpsNode; retained: boolean }) {
         {node.lease_holders !== undefined && <><dt>בעלות עובד לתפקיד</dt><dd>{node.lease_holders === null ? 'לא אומתה' : node.lease_holders === 1 ? 'יחידה' : node.lease_holders}</dd></>}
         {Object.entries(node.metrics).filter(([key]) => key in OPS_METRICS).map(([key, value]) => <div className="ops-metric-row" key={key}><dt>{OPS_METRICS[key]}</dt><dd><bdi>{value === null ? 'לא זמין' : typeof value === 'boolean' ? value ? 'כן' : 'לא' : key.endsWith('_at') ? opsTime(String(value)) : String(value)}</bdi></dd></div>)}
       </dl>
-      {node.providers && <div className="ops-providers"><h4>מצב המקורות</h4>{node.providers.map(p => <div key={p.id}><bdi>{p.id}</bdi><span>{({'ok':'תקין','no_new':'אין מידע חדש','not_modified':'ללא שינוי','disabled':'כבוי','retired':'לא פעיל','error':'תקלה','requires_configuration':'נדרשת הגדרה','backoff':'בהמתנה להתאוששות','degraded':'כיסוי חלקי'} as Record<string,string>)[p.status] ?? 'לא אומת'}</span></div>)}</div>}
+      {node.providers && <div className="ops-providers"><h4>מצב המקורות</h4>{node.providers.map(p => <div className="ops-provider" key={p.id}><div><bdi>{p.id}</bdi><span>{({'ok':'תקין','no_new':'אין מידע חדש','not_modified':'ללא שינוי','disabled':'כבוי','retired':'לא פעיל','error':'תקלה','requires_configuration':'נדרש טיפול / אישור גישה','backoff':'בהמתנה להתאוששות','rate_limited':'הוגבל קצב הבקשות','degraded':'כיסוי חלקי'} as Record<string,string>)[p.status] ?? 'לא אומת'}</span></div>
+        {providerExplanation(p) && <p>{providerExplanation(p)}</p>}
+        {p.last_attempt_at && <small>בדיקת מקור: <bdi>{opsTime(p.last_attempt_at)}</bdi> · ישראל</small>}
+        {p.last_success_at && <small>הצלחה אחרונה: <bdi>{opsTime(p.last_success_at)}</bdi> · ישראל</small>}
+      </div>)}</div>}
       {node.bars && <div className="ops-providers"><h4>נרות שהושלמו · מדגם עד 32 מניות</h4>{node.bars.length === 0 ? <p>אין נרות למדגם במסלול הפעיל.</p> : node.bars.map(bar => <div key={bar.ticker}><bdi>{bar.ticker}</bdi><span>{opsTime(bar.bar_started_at)}<br />{bar.fresh_regular_session === null ? 'טריות מסחר רגיל לא נבדקה: שוק סגור' : bar.fresh_regular_session ? 'נר מלא ועדכני' : 'חסר / ישן / לא גמור'}</span></div>)}</div>}
     </div>
   </details>

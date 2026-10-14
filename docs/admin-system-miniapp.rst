@@ -72,6 +72,14 @@ accounting reconciliation, model calibration, Telegram readback or an independen
 backup restore. These limits are visible in the UI. No money totals/returns are
 invented, and no cash/sizing/TP/SL/news thresholds are changed.
 
+Canonical provider status is filtered by the exact provider allowlist BEFORE
+the row limit: the same table contains many unrelated evidence leases. The
+collector's actual last_success and last_attempt fields are projected as
+timestamps, and only allowlisted failure codes and valid HTTP status numbers
+are exposed. A persisted 403 remains visible as denied access, not recovery.
+Large historical evidence state and free-form exception text are never loaded
+or displayed by this provider view.
+
 Release and rollback
 --------------------
 

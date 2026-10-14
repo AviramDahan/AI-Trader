@@ -20,6 +20,8 @@ from sec_transport import fetch
 POLICY = "sec-intelligence-v1"
 PARSER = "sec-structured-v2"
 MAX_PENDING = 600
+INITIAL_DISCOVERY_DAYS = 90
+SUBMISSIONS_MAX_BYTES = 8_000_000
 FORMS = {"4", "4/A", "10-Q", "10-Q/A", "10-K", "10-K/A", "8-K", "8-K/A"}
 FINANCIAL_TAGS = {
     "Revenues": "revenue", "RevenueFromContractWithCustomerExcludingAssessedTax": "revenue",
@@ -361,6 +363,26 @@ def _rows(payload: dict, key: str):
                for name, values in recent.items() if isinstance(values, list)} | {"accessionNumber": accession}
 
 
+def _discovery_rows(rows, seen: datetime, *, initial: bool, stop_accession=None):
+    """Apply the documented initial horizon, not the 400-day retention horizon.
+
+    Outage recovery with a known accession still visits the retained history.
+    Missing/invalid acceptance metadata must be processed as unknown, never used
+    to claim a time boundary. Previously stored jobs/decisions are not altered.
+    """
+    cutoff = seen - timedelta(days=INITIAL_DISCOVERY_DAYS)
+    for row in rows:
+        if stop_accession and row.get('accessionNumber') == stop_accession:
+            return  # Normal delta: entries behind the completed marker are old.
+        if initial:
+            try:
+                if _time(row.get('acceptanceDateTime')) < cutoff:
+                    continue
+            except (TypeError, ValueError, AttributeError):
+                pass
+        yield row
+
+
 def save_universe(universe: dict, mapping: dict, at: datetime) -> tuple[str, dict[str, str]]:
     """Only exact issuer CIK/ticker matches are decision eligible."""
     reverse: dict[str, set[str]] = {}
@@ -468,12 +490,14 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
         with get_db_connection() as conn:
             checkpoint = conn.execute("SELECT * FROM si_checkpoints WHERE issuer_cik=?", (cik,)).fetchone()
         prior = dict(checkpoint) if checkpoint else {}
+        initial = (not prior.get('last_accession') or
+                   bool(prior.get('catchup_active') and not prior.get('catchup_marker')))
         if prior.get("retry_after") and _time(prior["retry_after"]) > now:
             continue
         phase = 'recent_fetch'
         try:
             raw, meta = fetch(f"https://data.sec.gov/submissions/CIK{cik}.json", _user_agent(),
-                              max_bytes=4_000_000,
+                              max_bytes=SUBMISSIONS_MAX_BYTES,
                               etag="" if prior.get("catchup_active") else prior.get("etag") or "")
             if raw is not None:
                 phase = 'recent_metadata'
@@ -483,16 +507,22 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
                 if str(payload.get("cik", "")).zfill(10) != cik:
                     raise ValueError("submissions_issuer_mismatch")
                 symbols = sorted(t for t, issuer in verified.items() if issuer == cik)
-                recent = list(_rows(payload, "recent"))
+                marker = prior.get('last_accession')
+                delta_marker = ((prior.get('catchup_marker') if prior.get('catchup_active') else marker)
+                                if not initial else None)
                 phase = 'queue_recent'
-                for entry in recent:
+                # Keep SEC's columnar payload; do not build 26k row dictionaries
+                # for active issuers whose valid metadata exceeds the old 4 MB cap.
+                for entry in _discovery_rows(_rows(payload, 'recent'), now, initial=initial, stop_accession=delta_marker):
                     queued += int(_queue_filing(entry, cik, symbols, snapshot_id, now, budget))
+                accessions = (payload['filings']['recent'].get('accessionNumber') or [])
                 files = sorted((payload.get("filings") or {}).get("files") or [],
                                key=lambda f: str(f.get("filingTo") or ""), reverse=True)
-                marker = prior.get("last_accession")
                 catchup = bool(prior.get("catchup_active")) or bool(
-                    files and (not marker or marker not in {r["accessionNumber"] for r in recent}))
+                    files and (not marker or marker not in set(accessions)))
                 catchup_marker = prior.get("catchup_marker") if prior.get("catchup_active") else marker
+                if catchup_marker and catchup_marker in set(accessions):
+                    catchup = False  # The completed recent delta reached its original marker.
                 # If an outage eclipsed the compact recent block, read one
                 # official continuation file per turn; never trust page one.
                 older_index = int(prior.get("older_file_index") or 0) if prior.get("catchup_active") else 0
@@ -509,7 +539,7 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
                         raise ValueError('sec_unexpected_not_modified')
                     older_rows = list(_rows(json.loads(older_raw), "older"))
                     phase = 'queue_continuation'
-                    for entry in older_rows:
+                    for entry in _discovery_rows(older_rows, now, initial=initial):
                         queued += int(_queue_filing(entry, cik, symbols, snapshot_id, now, budget))
                     if catchup_marker and any(r["accessionNumber"] == catchup_marker for r in older_rows):
                         catchup = False
@@ -522,7 +552,7 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
                         older_dates = []
                     if (not catchup_marker and older_dates and
                             all(t <= now+timedelta(minutes=10) for t in older_dates) and
-                            min(t.date() for t in older_dates) < (now-timedelta(days=90)).date()):
+                            min(t.date() for t in older_dates) < (now-timedelta(days=INITIAL_DISCOVERY_DAYS)).date()):
                         catchup = False
                     older_index += 1
                     if older_index >= len(files):
@@ -537,7 +567,7 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
                         etag=excluded.etag,older_file_index=excluded.older_file_index,
                         catchup_active=excluded.catchup_active,catchup_marker=excluded.catchup_marker,
                         retry_after=NULL,error_code=NULL""",
-                        (cik, _z(now), recent[0]["accessionNumber"] if recent else marker, meta.get("etag") or "",
+                        (cik, _z(now), accessions[0] if accessions else marker, meta.get("etag") or "",
                          older_index if catchup else 0, int(catchup), catchup_marker if catchup else None))
                     conn.commit()
             else:
@@ -553,10 +583,13 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
             # Keep the prior accession/page and force an unconditional refetch
             # on its next fair turn; dedupe skips already retained accessions.
             with get_db_connection() as conn:
-                conn.execute("""INSERT INTO si_checkpoints(issuer_cik,last_checked_at,catchup_active)
-                    VALUES(?,?,1) ON CONFLICT(issuer_cik) DO UPDATE SET
+                checkpoint_marker = (prior.get('catchup_marker') if prior.get('catchup_active')
+                                     else prior.get('last_accession'))
+                conn.execute("""INSERT INTO si_checkpoints(issuer_cik,last_checked_at,catchup_active,catchup_marker)
+                    VALUES(?,?,1,?) ON CONFLICT(issuer_cik) DO UPDATE SET
                     last_checked_at=excluded.last_checked_at,catchup_active=1,
-                    retry_after=NULL,error_code=NULL""", (cik, _z(now)))
+                    catchup_marker=excluded.catchup_marker,
+                    retry_after=NULL,error_code=NULL""", (cik, _z(now), checkpoint_marker))
                 conn.commit()
         except Exception as exc:
             from retry_policy import DeferredProviderError
