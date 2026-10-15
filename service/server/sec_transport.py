@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import threading
 import time
 from datetime import datetime, timezone
@@ -15,9 +16,16 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPSConnection
+from urllib3.connectionpool import HTTPSConnectionPool
 
 _LOCAL_LOCK = threading.Lock()
 _LOCAL_NEXT = 0.0
+# Cumulative HTTP response time after verified TLS connection establishment.
+# DNS and connection/TLS establishment retain Requests' existing limits; this
+# is not a hard whole-fetch deadline for an uninterruptible system resolver.
+RESPONSE_TIMEOUT_SECONDS = 12
 _ALLOWED = (
     re.compile(r"/submissions/CIK\d{10}(?:-submissions-\d{3})?\.json"),
     re.compile(r"/api/xbrl/companyfacts/CIK\d{10}\.json"),
@@ -75,8 +83,71 @@ def reserve() -> None:
         time.sleep(delay)
 
 
+class _ResponseDeadline:
+    """Own one connected socket and a joined, response-only abort timer."""
+    def __init__(self):
+        self.transport = None
+        self.timer = None
+        self.deadline = None
+        self.expired = threading.Event()
+
+    def bind(self, transport):
+        self.transport = transport
+        self.deadline = time.monotonic() + RESPONSE_TIMEOUT_SECONDS
+        self.timer = threading.Timer(RESPONSE_TIMEOUT_SECONDS, self.abort)
+        self.timer.daemon = True
+        try:
+            self.timer.start()
+        except BaseException:
+            self.timer = None
+            transport.close()
+            raise
+        self.check()  # Expiry may race with returning from connect().
+
+    def abort(self):
+        self.expired.set()
+        if self.transport is not None:
+            try:
+                self.transport.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def check(self):
+        if self.expired.is_set() or (self.deadline is not None and time.monotonic() >= self.deadline):
+            self.abort()
+            raise requests.exceptions.Timeout('sec_response_deadline')
+
+    def close(self):
+        if self.timer is not None:
+            self.timer.cancel()
+            self.timer.join()
+        if self.transport is not None:
+            self.transport.close()
+
+
+class _ResponseAdapter(HTTPAdapter):
+    """Keep Requests TLS behavior; customize only this SEC session's pool."""
+    def __init__(self, deadline):
+        self.deadline = deadline
+        super().__init__()
+
+    def init_poolmanager(self, *args, **kwargs):
+        super().init_poolmanager(*args, **kwargs)
+        deadline = self.deadline
+        class Connection(HTTPSConnection):
+            def connect(self):
+                super().connect()
+                deadline.bind(self.sock)
+        class Pool(HTTPSConnectionPool):
+            ConnectionCls = Connection
+        # The default mapping is shared by urllib3; never mutate it in place.
+        self.poolmanager.pool_classes_by_scheme = {
+            **self.poolmanager.pool_classes_by_scheme, 'https': Pool}
+
+
 def fetch(url: str, user_agent: str, *, max_bytes: int = 2_000_000,
           etag: str = "", modified: str = "") -> tuple[bytes | None, dict[str, str]]:
+    """Bound established-response reads; DNS/TLS are not a whole-call cap."""
     validate_url(url)
     if not re.search(r"[^\s@]+@[^\s@]+\.[^\s@]+", user_agent or "") or "\n" in user_agent:
         raise ValueError("sec_operator_contact_required")
@@ -87,9 +158,22 @@ def fetch(url: str, user_agent: str, *, max_bytes: int = 2_000_000,
         headers["If-None-Match"] = etag
     if modified:
         headers["If-Modified-Since"] = modified
+    deadline = _ResponseDeadline()
+    try:
+        return _read_response(url, headers, max_bytes, etag, modified, deadline)
+    except requests.exceptions.RequestException:
+        deadline.check()
+        raise
+    finally:
+        deadline.close()
+
+
+def _read_response(url, headers, max_bytes, etag, modified, deadline):
     with requests.Session() as session:
         session.trust_env = False
+        session.mount('https://', _ResponseAdapter(deadline))
         with session.get(url, headers=headers, timeout=(4, 12), stream=True, allow_redirects=False) as response:
+            deadline.check()
             if response.status_code == 304:
                 return None, {"etag": etag, "modified": modified}
             if response.status_code in {403, 429, 500, 502, 503, 504}:
@@ -112,9 +196,11 @@ def fetch(url: str, user_agent: str, *, max_bytes: int = 2_000_000,
                 raise ValueError("sec_document_too_large")
             chunks, length = [], 0
             for chunk in response.iter_content(16384):
+                deadline.check()
                 length += len(chunk)
                 if length > max_bytes:
                     raise ValueError("sec_document_too_large")
                 chunks.append(chunk)
+            deadline.check()
             return b"".join(chunks), {"etag": response.headers.get("ETag", ""),
                                       "modified": response.headers.get("Last-Modified", "")}
