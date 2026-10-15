@@ -14,9 +14,10 @@ jobs:
   deploy:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - name: Require CI success for the exact same commit
+        timeout-minutes: 11
         uses: actions/github-script@v7
         with:
           script: |
@@ -30,22 +31,41 @@ jobs:
             }
             throw new Error('CI not complete; no deployment');
       - name: Verify server pull-deployment and all-role readiness marker
+        timeout-minutes: 28
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           python - <<'PY'
           import os,json,time,urllib.request
           sha=os.environ['SHA']
-          for _ in range(90):
+          # Polling deadline, not a hard DNS/TLS whole-call deadline. The step
+          # timeout is the backstop. Cover 5m timer + 20m service + 2m margin.
+          deadline=time.monotonic()+27*60
+          max_body_bytes=16*1024
+          verified=False
+          while True:
+              remaining=deadline-time.monotonic()
+              if remaining<=0:
+                  break
               try:
-                  with urllib.request.urlopen('https://2-28-100-77.sslip.io/health',timeout=10) as r:
-                      data=json.load(r)
-                  if data.get('build_sha')==sha and data.get('deployed_sha')==sha:
-                      print('Backend deployment and all-role readiness PASS:',sha)
+                  with urllib.request.urlopen('https://2-28-100-77.sslip.io/health',timeout=min(10,remaining)) as r:
+                      status=r.status
+                      raw=r.read(max_body_bytes+1)
+                  if time.monotonic()>=deadline:
                       break
+                  if status==200 and len(raw)<=max_body_bytes:
+                      data=json.loads(raw)
+                      if (isinstance(data,dict) and data.get('build_sha')==sha
+                              and data.get('deployed_sha')==sha and time.monotonic()<deadline):
+                          verified=True
+                          print('Backend deployment and all-role readiness PASS:',sha)
+                          break
               except Exception:
                   pass
-              time.sleep(10)
-          else:
+              remaining=deadline-time.monotonic()
+              if remaining<=0:
+                  break
+              time.sleep(min(10,remaining))
+          if not verified:
               raise SystemExit('Deployment not verified; inspect server deployment service. No success assumed.')
           PY
