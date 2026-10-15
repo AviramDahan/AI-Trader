@@ -1,6 +1,6 @@
 """Provider enablement requires an explicit, retained license approval reference.
 
-Default blocked states are based on the 2026-09-27 access/terms review. Secrets
+Configuration disablement is separate from retained access failures. Secrets
 come from server environment only. An RSS URL alone never constitutes a license.
 """
 import json
@@ -9,12 +9,44 @@ from dataclasses import replace
 from .providers import DEFAULT_CONFIGS, registry
 
 BLOCKERS={
- 'investing':'UTC operational rule requires explicit activation boundary and enablement',
- 'globenewswire':'cloud_http_response_timeout_after_successful_dns_tls; feed_license_confirmation_required',
- 'prnewswire':'not_enabled',
+ 'investing':'activation_boundary_required',
+ 'globenewswire':'provider_not_enabled',
+ 'prnewswire':'provider_not_enabled',
  'benzinga':'free_news_api_credential_missing; official_rss_unavailable',
  'tipranks':'enterprise_market_news_contract_endpoint_schema_and_credentials_required',
 }
+
+
+def disabled_reason(provider_id):
+    """Explain current configuration, never invent a vendor/payment response."""
+    enabled=set(filter(None,os.getenv('NEWS_EVENTS_PROVIDERS','').split(',')))
+    if provider_id not in enabled:return 'provider_not_enabled'
+    approvals=json.loads(os.getenv('NEWS_EVENTS_PROVIDER_APPROVALS','{}'))
+    if not approvals.get(provider_id):return 'approval_reference_missing'
+    return BLOCKERS.get(provider_id,'provider_configuration_required')
+
+
+def suspended(previous,reason):
+    # Snapshot once, not once per poll; preserve every cursor/replay fence and
+    # consumed recovery marker. The visible disabled reason is not the old HTTP
+    # failure, whose complete state remains available for exact restoration.
+    saved=previous.get('disabled_resume_state',previous) if previous.get('status')=='disabled' else previous
+    retained=saved if isinstance(saved,dict) else {}
+    return {**retained,'status':'disabled','error':reason,'http_status':None,'terminal':True,
+            'next_at':None,'disabled_resume_state':saved}
+
+
+def resumed(previous):
+    saved=previous.get('disabled_resume_state')
+    known={'ok','no_new','not_modified','degraded','rate_limited','requires_configuration'}
+    if isinstance(saved,dict) and (not saved or saved.get('status') in known):return dict(saved)
+    # Old binaries discarded disabled checkpoints. Their absence cannot prove
+    # a clean/new provider or replenish a recovery allowance. Keep the original
+    # row for diagnosis; legitimate operator verification is required, not a
+    # fabricated reconstruction from today's configuration or old headlines.
+    retained={k:v for k,v in previous.items() if k!='disabled_resume_state'}
+    return {**retained,'status':'requires_configuration','resume_state_unavailable':True,
+            'error':'provider_resume_state_unavailable','terminal':True,'next_at':None}
 
 
 def configured():
@@ -37,8 +69,11 @@ def collect(p,at):
     with p.store.transaction(True) as c:
         before={r['provider_id']:json.loads(r['state_json']) for r in c.execute('SELECT * FROM ne_provider_state')}
         for cfg in configs:
-            if cfg.enabled:continue
-            value={'status':'disabled','error':BLOCKERS[cfg.provider_id],'next_at':None}
+            previous=before.get(cfg.provider_id,{})
+            if cfg.enabled:
+                if previous.get('status')!='disabled':continue
+                value=resumed(previous)
+            else:value=suspended(previous,disabled_reason(cfg.provider_id))
             c.execute('INSERT INTO ne_provider_state VALUES(?,?) ON CONFLICT(provider_id) DO UPDATE SET state_json=excluded.state_json',
                 (cfg.provider_id,json.dumps(value)))
     result=p.collect(registry([cfg for cfg in configs if cfg.enabled]),at)
