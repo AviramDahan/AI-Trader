@@ -121,6 +121,39 @@ def exercise_grant_never_becomes_unverified_market_news(isolated, monkeypatch):
     assert p.deliver_preview(eid, NOW) == []
 
 
+def exercise_resume_keeps_outage_fence_and_dedupe(isolated, monkeypatch):
+    p, store = isolated
+    before = {**prior_state(), 'status': 'ok', 'terminal': False, 'http_status': None, 'error': None,
+              'checkpoint_json': json.dumps({'recovery_not_before': NOW.isoformat()})}
+    seed(store, before)
+    configure(monkeypatch, False)
+    controls.collect(p, NOW)
+    cfg = configure(monkeypatch, True)
+    xml = b'''<rss><channel>
+    <item><guid>old</guid><title>Test Devices Incorporated reports old earnings</title>
+    <link>https://www.globenewswire.com/news-release/synthetic-old-12345</link>
+    <pubDate>Thu, 15 Oct 2026 07:59:00 GMT</pubDate></item>
+    <item><guid>new</guid><title>Test Devices Incorporated reports new earnings</title>
+    <link>https://www.globenewswire.com/news-release/synthetic-new-12345</link>
+    <pubDate>Thu, 15 Oct 2026 08:00:00 GMT</pubDate></item>
+    </channel></rss>'''
+    request = Mock(return_value=xml)
+    monkeypatch.setattr(controls, 'registry', lambda _: [PressFeedProvider(cfg, Mock(request=request))])
+    controls.collect(p, NOW+timedelta(minutes=1))
+    checkpoint = json.loads(saved(store)['checkpoint_json'])
+    assert checkpoint['activation_boundary'] == NOW.isoformat() and checkpoint['replay_blocked'] == 1
+    restarted = Pipeline(Store(store.connect, sandbox=True), UNIVERSE, p.membership, not_before=p.not_before)
+    controls.collect(restarted, NOW+timedelta(minutes=2))
+    assert request.call_count == 1, 'restart must honor the saved next-at'
+    controls.collect(restarted, NOW+timedelta(minutes=7))
+    assert request.call_count == 2
+    with store.transaction() as c:
+        assert c.execute('SELECT COUNT(*) n FROM ne_sources').fetchone()['n'] == 1
+        assert c.execute('SELECT COUNT(*) n FROM ne_events').fetchone()['n'] == 1
+        assert c.execute('SELECT COUNT(*) n FROM ne_analysis').fetchone()['n'] == 0
+        assert c.execute('SELECT COUNT(*) n FROM ne_delivery').fetchone()['n'] == 0
+
+
 def test_disabled_checkpoint_preservation(isolated, monkeypatch):
     exercise_disabled_checkpoint_preservation(isolated, monkeypatch)
 
@@ -131,6 +164,10 @@ def test_consumed_probe_survives_disable_and_restart(isolated, monkeypatch):
 
 def test_grant_never_becomes_unverified_market_news(isolated, monkeypatch):
     exercise_grant_never_becomes_unverified_market_news(isolated, monkeypatch)
+
+
+def test_resume_keeps_outage_fence_and_dedupe(isolated, monkeypatch):
+    exercise_resume_keeps_outage_fence_and_dedupe(isolated, monkeypatch)
 
 
 def test_pending_backoff_is_not_reset_on_enable(isolated, monkeypatch):

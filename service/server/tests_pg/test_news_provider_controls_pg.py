@@ -4,7 +4,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tests'))
 from test_news_provider_controls import (make_pipeline, exercise_disabled_checkpoint_preservation,
-    exercise_consumed_probe_survives_disable_and_restart, exercise_grant_never_becomes_unverified_market_news)
+    exercise_consumed_probe_survives_disable_and_restart, exercise_grant_never_becomes_unverified_market_news,
+    exercise_resume_keeps_outage_fence_and_dedupe)
 
 
 def test_pg_disabled_checkpoint_preservation(pg, monkeypatch):
@@ -20,3 +21,8 @@ def test_pg_consumed_probe_survives_disable_and_restart(pg, monkeypatch):
 def test_pg_grant_never_becomes_unverified_market_news(pg, monkeypatch):
     from database import get_db_connection
     exercise_grant_never_becomes_unverified_market_news(make_pipeline(get_db_connection), monkeypatch)
+
+
+def test_pg_resume_keeps_outage_fence_and_dedupe(pg, monkeypatch):
+    from database import get_db_connection
+    exercise_resume_keeps_outage_fence_and_dedupe(make_pipeline(get_db_connection), monkeypatch)
