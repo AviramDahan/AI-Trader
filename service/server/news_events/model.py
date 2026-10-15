@@ -143,6 +143,12 @@ def event_type(title, excerpt):
     if market_headline(title):return 'market'
     value=title+' '+excerpt
     for kind,pattern in EVENT_PATTERNS:
+        # Routine corporate grants mention "employment" in their boilerplate;
+        # that does not make an unidentified issuer a macro employment report.
+        # Preserve stronger corporate classifications above and true macro
+        # headlines, then apply the usual verified-company/materiality gates.
+        if kind=='market' and re.search(r'\binducement grants?\b',title,re.I):
+            return 'business_update'
         if re.search(pattern,value,re.I):return kind
     return 'unknown'
 
