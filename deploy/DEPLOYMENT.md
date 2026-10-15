@@ -11,6 +11,15 @@ not replaced by a repository release. A failed commit is latched in failed-relea
 to prevent deployment loops; an operator may clear the latch after diagnosis, or
 push a corrected commit. Unauthenticated GitHub API limits defer a poll safely.
 
+The read-only GitHub observer has a 27-minute monotonic polling window: five
+minutes for the pull timer, the installed service's 20-minute budget, and two
+minutes of margin. Each request uses at most ten seconds (or the remaining
+window) as its socket timeout and reads at most 16 KiB plus one overflow byte.
+Only HTTP 200 with an object containing both exact commit fields before the deadline
+passes. This is not a hard DNS/TLS or whole-request deadline; the 28-minute
+observer step is the backstop. The exact-CI step has 11 minutes and the job 40.
+An observation failure never initiates a deployment or changes server gates.
+
 The server verifies the current main SHA, obtains a deployment lock, builds an image
 tagged with the full commit and runs Compose using its immutable image ID. A
 Recovery-State predeploy backup is required. Writers stop before migration; API,
