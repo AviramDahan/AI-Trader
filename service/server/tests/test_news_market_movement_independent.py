@@ -100,7 +100,9 @@ def test_actual_reported_index_or_commodity_move_is_title_evidence(title):
     'Gold hits 3000 tomorrow',
     'Nasdaq rises 2% next week',
     'Gold reaches a record high tomorrow',
-    'Gold hits 2jobs'])
+    'Gold hits 2jobs',
+    'Gold hits 3000 next Monday',
+    'Nasdaq rises 2% next Friday'])
 def test_new_movement_rule_never_promotes_company_or_speculative_titles(title):
     # Other historical macro rules are not broadened by this new rule.
     assert not market_headline(title)

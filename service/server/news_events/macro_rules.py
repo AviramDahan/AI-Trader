@@ -38,7 +38,8 @@ MOVEMENT_NONFACT = re.compile(
     r'\?|\b(?:may|might|could|should|would|will|shall|can|if|unless|whether|likely|poised|'
     r'forecast\w*|predict\w*|expect\w*|project\w*|outlook|preview|opinion|analysis|why|how|guide|'
     r'subscribe|sponsored|promotion\w*|advertisement|secret)\b|'
-    r'\b(?:tomorrow|tonight|next\s+(?:week|month|year|quarter)|by\s+20\d{2}|'
+    r'\b(?:tomorrow|tonight|next\s+(?:week|weekends?|month|year|quarter|'
+    r'monday|tuesday|wednesday|thursday|friday|saturday|sunday)|by\s+20\d{2}|'
     r'set to|buy now|sign up|trade idea|investment advice)\b', re.I)
 MOVEMENT_CORPORATE = re.compile(
     r'\b(?:earnings|EPS|revenue|dividend|buyback|repurchase|merger|acquisition|acquires?|'
