@@ -319,7 +319,7 @@ def test_canonical_transport_uses_existing_global_repair_not_new_budget(fixture)
     draft=dict(related=True,title_he='דיווח בדיקה',summary_he='דיווח בדיקה',interpretation_he='פרשנות בדיקה',
         sentiment='neutral',materiality='medium',relevance=.6)
     review=dict(faithful=True,fluent_hebrew=True,unsupported_claims=False,duplicate_of=0,
-                material_new_fact=False,explanation='בדיקה')
+                material_new_fact=False,explanation='בדיקה',scope_related=True)
     relay.side_effect=lambda method,path,*a,**k: dict(protocol=1,ready=True,model=routing.MODEL,
         digest=routing.DIGEST,capacity=1) if path=='/health' else (_ for _ in ()).throw(requests.Timeout())
     paid.side_effect=[Mock(json=Mock(return_value={'choices':[{'finish_reason':'tool_calls','message':{

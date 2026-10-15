@@ -207,7 +207,7 @@ def test_canonical_capacity_fallback_is_request_scoped_not_outage_dependent(fixt
     draft=dict(related=True,title_he='דיווח בדיקה',summary_he='דיווח בדיקה',interpretation_he='פרשנות בדיקה',
                sentiment='neutral',materiality='medium',relevance=.6)
     review=dict(faithful=True,fluent_hebrew=True,unsupported_claims=False,duplicate_of=0,
-                material_new_fact=False,explanation='בדיקה')
+                material_new_fact=False,explanation='בדיקה',scope_related=True)
     attempted=[0]
     def invoke(method,path,payload=None,**kwargs):
         if path=='/health':return guarded_health()

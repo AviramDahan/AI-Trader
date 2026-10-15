@@ -12,7 +12,7 @@ STAGES={'source_analysis','quality_review','editorial_repair','repair_review',
 REASONS={'invalid_json','schema_validation_failed','invalid_response_structure',
          'ai_object_required','completion_failed','ai_output_truncated','local_transport_failed'}
 CHECKS={'faithful','fluent_hebrew','no_unsupported_claims','numbers_grounded',
-        'terminology_grounded','hebrew_present','valid_duplicate_reference'}
+        'terminology_grounded','hebrew_present','valid_duplicate_reference','scope_related_consistent'}
 
 
 def message(status,error,calls):
