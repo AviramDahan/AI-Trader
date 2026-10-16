@@ -57,6 +57,7 @@ export const OPS_REASONS: Record<string, string> = {
   market_closed: 'מחוץ לחלון המסחר הפעיל', no_new: 'הבדיקה הושלמה ללא מידע חדש',
   not_modified: 'הבדיקה הושלמה ללא שינוי במקור', no_signals: 'הסריקה הושלמה ללא סיגנל שעבר את הבקרות',
   retry_backoff: 'ממתין לניסיון חוזר לפי מדיניות ההתאוששות', component_disabled: 'הרכיב כבוי או אינו פעיל בהגדרה',
+  scheduled_wait: 'ממתין למחזור האיסוף המתוזמן הבא; אין כאן ניסיון התאוששות',
   scan_schedule_overdue: 'זמן המחזור הבא חלף ללא השלמה עדכנית', scan_in_progress: 'מחזור סריקה בתהליך לפי הסטטוס השמור; טרם הושלם',
   recent_completed_check: 'בדיקת הרכיב האחרונה הושלמה', lease_missing: 'אין עובד בעל lease פעיל לתפקיד',
   duplicate_role_lease: 'נצפתה יותר מבעלות אחת לתפקיד', canonical_alarm: 'בדיקת הצינור דיווחה על חריגה',

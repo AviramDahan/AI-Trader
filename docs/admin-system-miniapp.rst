@@ -95,6 +95,19 @@ are exposed. A persisted 403 remains visible as denied access, not recovery.
 Large historical evidence state and free-form exception text are never loaded
 or displayed by this provider view.
 
+Ordinary cadence is not recovery backoff. A fresh ``news_feed`` backoff row is
+shown as ``idle / scheduled_wait`` only with its exact checked-zero,
+inserted-zero, errors-empty summary, one scanner lease, fresh canonical health
+with explicit empty alarms and zero queue/age, and a nonempty uncapped provider
+cohort. Every active original legacy and canonical row must have a known good
+status, no error evidence and a valid strictly future due time. Canonical
+overlays cannot hide legacy errors or due rows; disabled/retired sources are
+not expected to run. Missing, unknown, overdue, malformed or conflicting
+evidence keeps attention; errors, stale observations, alarms and lease failures
+retain their precedence. This is retained schedule evidence, not a new source
+check, recovery, delivery or content-quality proof. No collector cadence or
+stored status is changed.
+
 Release and rollback
 --------------------
 

@@ -37,6 +37,14 @@ for(const text of ['מקורות חדשות','דיווחי SEC','Ollama במחש
 assert.equal((normal.match(/class="ops-stage"/g)||[]).length,5)
 assert.equal((normal.match(/class="ops-card /g)||[]).length,13)
 assert.ok(render(opsFixture('failure')).includes('יש רכיב שדורש טיפול'))
+const scheduledWait=opsFixture()
+scheduledWait.nodes.find(n=>n.id==='news_feed').state='idle'
+scheduledWait.nodes.find(n=>n.id==='news_feed').reason='scheduled_wait'
+assert.ok(render(scheduledWait).includes('ממתין למחזור האיסוף המתוזמן הבא; אין כאן ניסיון התאוששות'))
+assert.notEqual(model.OPS_REASONS.scheduled_wait,model.OPS_REASONS.retry_backoff)
+const retryWait=opsFixture()
+retryWait.nodes.find(n=>n.id==='news_feed').reason='retry_backoff'
+assert.ok(render(retryWait).includes('ממתין לניסיון חוזר לפי מדיניות ההתאוששות'))
 assert.ok(render(opsFixture('busy')).includes('המודל עסוק או נטען'))
 assert.ok(render(opsFixture('stale')).includes('מציג מידע שמור'))
 assert.ok(render(opsFixture('closed')).includes('שוק סגור'))
