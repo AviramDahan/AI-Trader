@@ -72,3 +72,26 @@ collector is not proof of preserved checkpoints: it can discard the overlay on
 its next disabled poll. Keep providers disabled during any such return and do
 not enable them without a compatible collector and operator verification. No
 database rewind, source replay or historical-message change is part of rollback.
+
+SEC excerpt failure diagnostics
+-------------------------------
+The canonical SEC evidence adapter preserves ten fixed local extraction/URL
+failure codes in its existing per-evidence state and enrichment metric instead
+of collapsing them to ``EvidenceError``. Examples are ``invalid_xml``,
+``issuer_mismatch``, ``excerpt_too_large`` and ``tabular_layout_unsupported``.
+Unknown/non-string reasons and other exception types keep the generic path;
+document text, exception messages and URLs are not added to diagnostics.
+
+This is observability only. The same inputs remain rejected and terminal,
+with unchanged attempts, retry timing, HTTP metadata, cache keys, identity,
+publication timestamps and restart protection. Fetch/429 retry handling is
+unchanged. No old states are cleared, retried, reclassified or reconstructed.
+It does not add a parser, loosen extraction/size/security/AI/trading gates,
+promise more news, or change Telegram formatting/delivery. Schema and backup
+contracts are unchanged; older readers can read the existing JSON fields, but
+an older adapter will again lose the detailed reason on new failures.
+
+Synthetic SQLite and PostgreSQL regressions exercise the real adapter/engine,
+terminal-state restart, unknown-reason privacy, unchanged rate-limit handling
+and successful cached extraction. Tests use fixtures only; a deployment and a
+new naturally occurring failure would be separate evidence, not implied here.

@@ -40,8 +40,20 @@ class SECEvidence:
             raise ProviderFailure(exc.reason,exc.status,exc.delay,not exc.transient) from None
 
     def normalize_evidence(self,raw,event):
-        from news_evidence import extract, filing_url
-        parsed=extract(raw['content'],raw['url'],event['tickers'])
+        from news_evidence import extract, filing_url, EvidenceError
+        try:
+            parsed=extract(raw['content'],raw['url'],event['tickers'])
+        except EvidenceError as exc:
+            # Preserve only fixed local extractor codes, never document text.
+            # These failures were already terminal in Pipeline.enrich; keep
+            # that decision, HTTP metadata and retry timing unchanged.
+            if type(exc.reason) is not str or exc.reason not in {
+                'unsafe_url', 'unsupported_filing_url', 'unsafe_xml', 'invalid_xml',
+                'unsupported_document', 'issuer_mismatch', 'no_transaction_facts',
+                'excerpt_too_large', 'tabular_layout_unsupported', 'insufficient_excerpt',
+            }:
+                raise
+            raise ProviderFailure(exc.reason, terminal=True) from None
         if filing_url(raw['url'])[:2]!=filing_url(self.target(event))[:2]:
             raise ProviderFailure('sec_event_mismatch',terminal=True)
         claims={}
