@@ -96,4 +96,3 @@ def test_failure_diagnostic_is_a_sanitized_copy_not_mutable_input():
     actual = routing.safe_local_transport_failure(original)
     original['reason'] = 'PRIVATE_SENTINEL'
     assert actual == {'reason': 'relay_http_error', 'http_status': 503}
-
