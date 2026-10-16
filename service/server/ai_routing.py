@@ -164,7 +164,13 @@ def local_completion(messages, schema, predict, *, validate_response=True):
     if time.monotonic() > deadline:
         raise requests.Timeout('local_deadline_exceeded')
     if isinstance(body, dict) and body.get('done_reason') == 'length':
-        raise ValueError('ai_output_truncated')
+        error = ValueError('ai_output_truncated')
+        if (body.get('model') == MODEL and body.get('model_digest') == DIGEST
+                and body.get('done') is True):
+            # Never attach the response/content to an exception. Failure occurs
+            # before the caller receives body, so carry only bounded metadata.
+            error.local_failure_usage = safe_local_failure_usage(body)
+        raise error from None
     if (not isinstance(body, dict) or body.get('model') != MODEL or body.get('model_digest') != DIGEST
             or body.get('done') is not True or body.get('done_reason') != 'stop'
             or not isinstance(body.get('message'), dict) or body['message'].get('tool_calls')
@@ -179,6 +185,18 @@ def local_completion(messages, schema, predict, *, validate_response=True):
     if not isinstance(value, dict):
         raise ValueError('ai_object_required')
     return value, body
+
+
+def safe_local_failure_usage(value):
+    """Revalidate the narrow truncation bridge at capture and persistence."""
+    if type(value) is not dict or value.get('done_reason') != 'length':
+        return {}
+    def counter(name):
+        v = value.get(name)
+        # Telemetry bound only; never a generation/context setting or estimate.
+        return v if type(v) is int and 0 <= v <= 10_000_000 else None
+    return {'done_reason': 'length', 'prompt_eval_count': counter('prompt_eval_count'),
+            'eval_count': counter('eval_count')}
 
 
 def local_usage(body):

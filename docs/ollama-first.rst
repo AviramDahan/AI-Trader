@@ -44,6 +44,39 @@ model names begin ``ollama/`` and include the digest; paid names are unchanged.
 Canonical calls and final attempts also store actual provider/digest/latency
 and fallback reason. A local failed attempt is not an unknown cloud charge.
 
+Failed local truncation diagnostics
+-----------------------------------
+
+An incomplete local response still fails closed. In particular, a native
+``done_reason=length`` never becomes a successful analysis or an extra retry.
+The shared repair allowance, provider selection/cooldown, output and context
+limits, quality checks and trading rules are unchanged by this diagnostic fix.
+
+When a response with the expected native model/digest and completed-response
+identity supplies valid token counters, those counters survive the truncation
+exception and reach the existing ``ai_call_usage`` input/output columns and
+canonical call metrics. Only bounded, nonnegative integer counters are retained;
+missing or invalid counts remain unknown, not zero and not the requested limit.
+The fixed ``local_finish_reason=length`` diagnostic is retained in the existing
+failure JSON and canonical usage metadata. No response text, partial JSON,
+prompt, message, tool arguments or arbitrary provider metadata is added to the
+exception metadata or persisted diagnostic fields.
+
+Known zero local API spend remains separate from unknown token usage. There is
+still exactly one ledger record per actual attempt, with the original local
+provider identity. Paid usage, successful local responses and final-stock-review
+behavior retain their existing contracts. This change requires no migration,
+new flag, PC gateway update or historical-data rewrite. Existing readers can
+ignore the additive JSON diagnostic field; the database remains schema 7.
+
+Synthetic length/stop controls prove metadata retention and terminal behavior,
+not why a historical model generation stopped. The repair does not recover
+previously lost counters, replay failed versions, prove that a longer limit
+would help or establish a reduction in natural generation failures. After a
+separately approved release, inspect only naturally occurring failures and
+distinguish configured output limits from observed counters. Do not force an
+inference, publication or trade to demonstrate diagnostic coverage.
+
 Private connection and resource bounds
 --------------------------------------
 
