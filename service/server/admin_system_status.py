@@ -117,9 +117,10 @@ def canonical_providers(conn):
         state_json::jsonb->>'last_attempt' last_attempt_at,
         state_json::jsonb->>'next_at' next_check_at,
         state_json::jsonb->>'error' error_code,
+        CASE WHEN COALESCE(state_json::jsonb->>'error','')<>'' THEN 1 ELSE 0 END error_present,
         state_json::jsonb->>'http_status' http_status
         FROM ne_provider_state WHERE provider_id IN (''' + ','.join('?' for _ in names) +
-        ') ORDER BY provider_id LIMIT 64', tuple(names)).fetchall()
+        ') ORDER BY provider_id LIMIT 65', tuple(names)).fetchall()
 
 
 def provider_view(row):
@@ -131,6 +132,44 @@ def provider_view(row):
             'next_check_at':instant(row.get('next_check_at')).isoformat() if instant(row.get('next_check_at')) else None,
             'error_code':row.get('error_code') if row.get('error_code') in PROVIDER_ERRORS else None,
             'http_status':int(http) if http.isdigit() and 100<=int(http)<=599 else None}
+
+
+def scheduled_feed_wait(node, row, legacy, canonical_rows, canonical, now):
+    """Prove ordinary cadence, not recovery, from the same retained snapshot.
+
+    Never infer this from checked=0 alone or sanitized/merged provider rows.
+    Missing, capped or conflicting evidence keeps the original attention state.
+    """
+    if ((node['state'], node['reason']) != ('degraded', 'retry_backoff')
+            or type(node['lease_holders']) is not int or node['lease_holders'] != 1):
+        return False
+    if not row or row.get('detail') != 'checked=0 inserted=0 errors=':
+        return False
+    stamps = [instant(row.get('last_attempt_at')), instant(canonical.get('checked_at'))]
+    if any(stamp is None or stamp > now for stamp in stamps) or (now-stamps[1]).total_seconds() > 180:
+        return False
+    exact_zero = lambda value: type(value) in (int, float) and value == 0
+    if (canonical.get('alarms') != [] or not exact_zero(canonical.get('queue_size'))
+            or not exact_zero(canonical.get('oldest_queue_seconds'))):
+        return False
+    if not legacy or not canonical_rows or len(legacy) >= 65 or len(canonical_rows) >= 65:
+        return False
+    active = 0
+    for source, name in ((legacy, 'provider'), (canonical_rows, 'provider_id')):
+        for provider in source:
+            if provider[name] not in PROVIDERS:
+                return False
+            if provider['status'] in {'disabled', 'retired'}:
+                continue
+            active += 1
+            due = instant(provider.get('next_check_at'))
+            http = provider.get('http_status')
+            if (provider['status'] not in {'ok', 'no_new', 'not_modified'}
+                    or provider.get('error_present') != 0 or due is None or due <= now
+                    or (http not in (None, '') and
+                        (not str(http).isdigit() or not 200 <= int(http) < 400))):
+                return False
+    return active > 0
 
 
 def build(conn, now):
@@ -166,16 +205,23 @@ def build(conn, now):
         ('news_feed', 11), ('sec_intelligence', 11), ('scan', 11), ('quotes', 12),
         ('news_ai', 11), ('monitor', 12), ('telegram', 13), ('backup', None))]
     by_id = {n['id']: n for n in nodes}
+    # Keep original rows for cadence proof: canonical overlay must not hide a
+    # legacy error or due source. Only error presence, never free-form text.
+    legacy = [dict(row) for row in conn.execute('''SELECT provider,status,last_success_at,next_check_at,
+        CASE WHEN error IS NOT NULL AND error<>'' THEN 1 ELSE 0 END error_present
+        FROM scanner_news_providers ORDER BY provider LIMIT 65''')]
     providers = []
-    for row in conn.execute('SELECT provider,status,last_success_at,next_check_at FROM scanner_news_providers LIMIT 64'):
+    for row in legacy[:64]:
         if row['provider'] in PROVIDERS:
             providers.append({'id': row['provider'], 'status': row['status'] if row['status'] in SAFE_STATUSES else 'unknown',
                               'last_success_at': instant(row['last_success_at']).isoformat() if instant(row['last_success_at']) else None})
+    canonical_rows = []
     if using_postgres():
         control = conn.execute('SELECT mode FROM ne_control WHERE id=1').fetchone()
         if control and control['mode'] == 'canonical':
             merged = {p['id']:p for p in providers}
-            for row in canonical_providers(conn):
+            canonical_rows = [dict(row) for row in canonical_providers(conn)]
+            for row in canonical_rows[:64]:
                 merged[row['provider_id']] = provider_view(dict(row))
             providers = list(merged.values())
     canonical = settings.get('news_canonical_health', {})
@@ -186,6 +232,8 @@ def build(conn, now):
         'oldest_queue_seconds': count(canonical.get('oldest_queue_seconds')) if canonical_recent else None,
         'provider_issues': sum(p['status'] not in {'ok','no_new','not_modified','disabled','retired'} for p in providers)}
     by_id['news_feed']['providers'] = providers
+    if scheduled_feed_wait(by_id['news_feed'], states.get('news_feed'), legacy, canonical_rows, canonical, now):
+        by_id['news_feed'].update(state='idle', reason='scheduled_wait')
     if by_id['news_feed']['state'] != 'failed' and canonical_recent and canonical.get('alarms'):
         by_id['news_feed'].update(state='degraded', reason='canonical_alarm')
     elif by_id['news_feed']['state'] in {'healthy','idle'} and by_id['news_feed']['metrics']['provider_issues']:
