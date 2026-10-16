@@ -127,8 +127,10 @@ class CanonicalAnalyzer:
                 raise
             finally:
                 allowed=('provider','model_digest','ollama_version','fallback_reason','model','input_tokens','output_tokens','reasoning_tokens','cost','request_id','failure_reason','final_alert_owner','structure_detail','json_diagnostic','json_normalization')
+                finish=({'local_finish_reason':'length'} if usage.get('provider')=='ollama_relay'
+                        and usage.get('local_finish_reason')=='length' else {})
                 calls.append({'stage':stage,'success':success,'latency':time.monotonic()-start,
-                              **{k:usage.get(k) for k in allowed}})
+                              **{k:usage.get(k) for k in allowed},**finish})
 
         def call(stage,prompt,payload,schema):
             nonlocal repair_used
