@@ -80,6 +80,29 @@ inference, publication or trade to demonstrate diagnostic coverage.
 Private connection and resource bounds
 --------------------------------------
 
+Local transport diagnostics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The cloud preserves six fixed, cloud-observed transport categories: HTTP
+rejection, excessive response bytes, invalid JSON, timeout, socket failure and
+HTTP protocol failure. An observed HTTP status is retained only as a true
+integer from 100 through 599. These diagnostics do not identify why the PC or
+Ollama failed; a gateway 503 is not proof of a broken tunnel or model crash.
+No response body, exception text, URL, prompt or output is retained.
+
+Only local failures receive this additive metadata. Shared completion attempts
+store ``local_transport`` in the existing failure JSON in ``ai_call_usage``;
+final stock reviews store it in that failed attempt's existing ``attempts_json``.
+The final-review ledger rejection string is unchanged. Existing readers may
+ignore this optional field; no migration, flag, backup format or PC gateway
+update is required. Missing historical metadata remains unknown and is not
+reconstructed. No production failure is forced to demonstrate coverage.
+
+Exception type/message, timeouts, byte limits, capacity-413 semantics, cooldown,
+paid fallback, repair allowance and Telegram notifications are unchanged.
+A valid HOLD remains final. A failed fourth canonical stage after editorial
+repair remains terminal; this change does not authorize another model call.
+
 The inference gateway uses only loopback Ollama, pinned weights and an 8192
 context. It has one GPU slot/no generation queue, eight HTTP handlers, bounded
 input/output bytes, native no-truncation context rejection and a 45-second generation

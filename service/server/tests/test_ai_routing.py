@@ -338,3 +338,63 @@ def test_canonical_transport_uses_existing_global_repair_not_new_budget(fixture)
     assert stages==['source_analysis','local_fallback:source_analysis','quality_review']
     assert paid.call_count==2
     assert result.calls[0]['failure_reason']=='local_transport_failed'
+
+
+@pytest.mark.parametrize('attempts', [1, 2])
+def test_shared_transport_diagnostic_revalidated_once_without_new_attempt(fixture, monkeypatch, attempts):
+    relay, paid, budget, _, ledger = fixture
+    failure = requests.ConnectionError('local_relay_unavailable')
+    failure.local_transport_failure = {'reason': 'relay_http_error', 'http_status': 503,
+                                       'body': 'PRIVATE_SENTINEL'}
+    monkeypatch.setattr(routing, 'local_completion', Mock(side_effect=failure))
+    paid.side_effect = None
+    paid.return_value = cloud({'ok': True})
+    usage = {}
+    if attempts == 1:
+        with pytest.raises(ValueError, match='transport_failed'):
+            ai_provider.json_completion('fixture', {}, schema=SCHEMA, max_attempts=attempts, usage_sink=usage)
+        paid.assert_not_called()
+    else:
+        assert ai_provider.json_completion('fixture', {}, schema=SCHEMA, max_attempts=attempts, usage_sink=usage) == {'ok': True}
+        paid.assert_called_once()
+        assert ledger.call_args_list[1].args[5] is None
+    assert ledger.call_count == attempts
+    detail = json.loads(ledger.call_args_list[0].args[5])
+    assert detail['exception'] == 'ConnectionError' and detail['http_status'] is None
+    assert detail['local_transport'] == {'reason': 'relay_http_error', 'http_status': 503}
+    assert 'PRIVATE_SENTINEL' not in json.dumps(detail)
+    assert 'local_transport' not in usage
+
+
+def test_final_transport_attempt_diagnostic_does_not_leak_into_paid_attempt(fixture, monkeypatch):
+    _, paid, _, _, ledger = fixture
+    failure = requests.ConnectionError('local_relay_unavailable')
+    failure.local_transport_failure = {'reason': 'relay_http_error', 'http_status': 503,
+                                       'body': 'PRIVATE_SENTINEL'}
+    monkeypatch.setattr(routing, 'local_completion', Mock(side_effect=failure))
+    paid.side_effect = None
+    paid.return_value = cloud(DECISION)
+    trace = final_ai.new_trace('synthetic-scan', 'FIXTURE', 1)
+    token = final_ai.TRACE.set(trace)
+    try:
+        assert final_ai.review([{'role': 'user', 'content': 'fixture'}], lambda v: v) == DECISION
+    finally:
+        final_ai.TRACE.reset(token)
+    assert len(trace['attempts']) == ledger.call_count == 2
+    assert trace['attempts'][0]['local_transport'] == {'reason': 'relay_http_error', 'http_status': 503}
+    assert 'local_transport' not in trace['attempts'][1]
+    assert trace['attempts'][1]['fallback_reason'] == 'local_transport_failed'
+    assert ledger.call_args_list[0].args[5] == 'ConnectionError'
+    assert 'PRIVATE_SENTINEL' not in json.dumps(trace)
+
+
+def test_paid_error_cannot_inject_local_transport_metadata(fixture, monkeypatch):
+    _, paid, _, _, ledger = fixture
+    monkeypatch.setenv('AI_INFERENCE_MODE', 'cloud_only')
+    failure = requests.ConnectionError('PRIVATE_SENTINEL')
+    failure.local_transport_failure = {'reason': 'relay_http_error', 'http_status': 503}
+    paid.side_effect = failure
+    with pytest.raises(ValueError, match='transport_failed'):
+        ai_provider.json_completion('fixture', {}, schema=SCHEMA, max_attempts=1)
+    detail = json.loads(ledger.call_args.args[5])
+    assert 'local_transport' not in detail and 'PRIVATE_SENTINEL' not in json.dumps(detail)

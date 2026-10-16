@@ -4,10 +4,12 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
+import requests
 
 
 @pytest.mark.parametrize('stage', ['editorial_repair', 'repair_review'])
-def test_failed_native_usage_survives_persistence_and_restart_without_publication(pg, monkeypatch, stage):
+@pytest.mark.parametrize('failure_kind', ['length', 'transport'])
+def test_failed_native_usage_survives_persistence_and_restart_without_publication(pg, monkeypatch, stage, failure_kind):
     import ai_routing
     from database import get_db_connection
     from news_events.analysis import CanonicalAnalyzer
@@ -63,6 +65,10 @@ def test_failed_native_usage_survives_persistence_and_restart_without_publicatio
     secret = 'PRIVATE_PARTIAL_OUTPUT_NOT_TO_PERSIST'
     terminal = native({'private': secret}, 'length')
     terminal['private_metadata'] = secret
+    if failure_kind == 'transport':
+        terminal = requests.ConnectionError('local_relay_unavailable')
+        terminal.local_transport_failure = {'reason': 'relay_http_error', 'http_status': 503,
+                                            'body': secret}
     responses.append(terminal)
     iterator = iter(responses)
     generated = []
@@ -73,7 +79,10 @@ def test_failed_native_usage_survives_persistence_and_restart_without_publicatio
         assert method == 'POST' and path == '/completion' and kwargs['timeout'] == 50
         assert payload['predict'] == 1000
         generated.append(payload)
-        return next(iterator)
+        value = next(iterator)
+        if isinstance(value, Exception):
+            raise value
+        return value
 
     monkeypatch.setattr(ai_routing, 'relay', relay)
     assert pipeline.analyze(eid, CanonicalAnalyzer(completion), now) == 'failed'
@@ -95,18 +104,28 @@ def test_failed_native_usage_survives_persistence_and_restart_without_publicatio
         assert all(r['model'].startswith('ollama/') and r['actual_cost'] == 0 for r in calls)
         failed = calls[-1]
         assert failed['success'] == 0
-        assert (failed['input_tokens'], failed['output_tokens']) == (143, 37)
         diagnostic = json.loads(failed['failure'])
-        assert diagnostic['reason'] == 'ai_output_truncated'
-        assert diagnostic['local_finish_reason'] == 'length'
+        if failure_kind == 'length':
+            assert (failed['input_tokens'], failed['output_tokens']) == (143, 37)
+            assert diagnostic['reason'] == 'ai_output_truncated'
+            assert diagnostic['local_finish_reason'] == 'length'
+        else:
+            assert (failed['input_tokens'], failed['output_tokens']) == (None, None)
+            assert diagnostic['exception'] == 'ConnectionError' and diagnostic['http_status'] is None
+            assert diagnostic['local_transport'] == {'reason': 'relay_http_error', 'http_status': 503}
         metric = c.execute("SELECT data_json FROM ne_metrics WHERE event_id=? AND stage='analysis'", (eid,)).fetchone()
         saved = json.loads(metric['data_json'])['calls']
         assert [r['stage'] for r in saved] == expected_stages
-        assert saved[-1]['local_finish_reason'] == 'length'
-        assert (saved[-1]['input_tokens'], saved[-1]['output_tokens']) == (143, 37)
+        if failure_kind == 'length':
+            assert saved[-1]['local_finish_reason'] == 'length'
+            assert (saved[-1]['input_tokens'], saved[-1]['output_tokens']) == (143, 37)
+        else:
+            assert saved[-1]['failure_reason'] == 'local_transport_failed'
+            assert 'local_finish_reason' not in saved[-1]
         analysis = c.execute('SELECT status,error,result_json FROM ne_analysis WHERE event_id=?', (eid,)).fetchone()
         assert analysis['status'] == 'failed'
-        assert analysis['error'] == 'completion_failed:' + stage + ':ai_output_truncated'
+        reason = 'ai_output_truncated' if failure_kind == 'length' else 'local_transport_failed'
+        assert analysis['error'] == 'completion_failed:' + stage + ':' + reason
         alerts = [dict(r) for r in c.execute('SELECT status,attempts,message FROM admin_alerts')]
         assert len(alerts) == 1 and alerts[0]['status'] == 'pending' and alerts[0]['attempts'] == 0
         for table in ('ne_delivery', 'ne_outbox', 'scanner_telegram_outbox', 'scanner_signals',
