@@ -566,7 +566,9 @@ def test_joint_owner_repeat_does_not_count_as_independent_buyers(isolated, monke
                          "0000320193", ["AAPL"], uid, now, [10])
     def fake_fetch(url, *_a, **_k):
         owners = ("0000000042", "0000000043") if accessions[0].replace('-', '') in url else ("0000000042",)
-        return ownership_xml(owners=owners), {}
+        # This tests owner deduplication, not expiry of the default XML date.
+        day = now.date().isoformat()
+        return ownership_xml(owners=owners, date=day, period=day), {}
     monkeypatch.setattr(si, "fetch", fake_fetch)
     assert si.process_jobs(now, limit=2)["processed"] == 2
     with isolated() as conn:
