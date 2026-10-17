@@ -21,6 +21,10 @@ PROTOCOL = 1
 MAX_BYTES = 131072
 CONTEXT = 8192
 CONTEXT_POLICY = 'no_truncate_no_shift_v1'
+LOCAL_TRANSPORT_REASONS = frozenset({
+    'relay_http_error', 'relay_response_too_large', 'relay_invalid_json',
+    'relay_timeout', 'relay_socket_error', 'relay_http_protocol_error',
+})
 _lock = threading.Lock()
 _until = 0.0
 
@@ -31,6 +35,27 @@ class LocalCapacity(requests.ConnectionError):
 
 def fallback_reason(exc):
     return 'local_context_capacity' if isinstance(exc, LocalCapacity) else 'local_transport_failed'
+
+
+def safe_local_transport_failure(value):
+    """Fixed cloud-observed categories, not an inference about the PC cause."""
+    if type(value) is not dict:
+        return {}
+    reason = value.get('reason')
+    if type(reason) is not str or reason not in LOCAL_TRANSPORT_REASONS:
+        return {}
+    result = {'reason': reason}
+    status = value.get('http_status')
+    if type(status) is int and 100 <= status <= 599:
+        result['http_status'] = status
+    return result
+
+
+def _local_transport_error(reason, status=None):
+    error = requests.ConnectionError('local_relay_unavailable')
+    error.local_transport_failure = safe_local_transport_failure(
+        {'reason': reason, 'http_status': status})
+    return error
 
 
 def enabled():
@@ -66,6 +91,7 @@ def relay(method, path, payload=None, timeout=2):
     conn = UnixHTTP(endpoint, timeout=timeout)
     active_socket = [None]
     response = None
+    decoding = False
     def abort():
         sock = active_socket[0] or conn.sock
         if sock is not None:
@@ -79,15 +105,31 @@ def relay(method, path, payload=None, timeout=2):
         active_socket[0] = conn.sock
         response = conn.getresponse()
         raw = response.read(MAX_BYTES + 1)
-        if response.status == 413 and len(raw) <= MAX_BYTES and _strict(raw) == {'reason': 'local_context_capacity'}:
-            raise LocalCapacity('local_context_capacity')
-        if response.status != 200 or len(raw) > MAX_BYTES:
-            raise requests.ConnectionError('local_relay_unavailable')
+        if len(raw) > MAX_BYTES:
+            raise _local_transport_error('relay_response_too_large', response.status)
+        if response.status == 413:
+            decoding = True
+            capacity = _strict(raw) == {'reason': 'local_context_capacity'}
+            decoding = False
+            if capacity:
+                raise LocalCapacity('local_context_capacity')
+        if response.status != 200:
+            raise _local_transport_error('relay_http_error', response.status)
+        decoding = True
         return _strict(raw)
     except LocalCapacity:
         raise
-    except (OSError, http.client.HTTPException, ValueError, RecursionError):
-        raise requests.ConnectionError('local_relay_unavailable') from None
+    except TimeoutError:
+        raise _local_transport_error('relay_timeout', getattr(response, 'status', None)) from None
+    except http.client.HTTPException:
+        raise _local_transport_error('relay_http_protocol_error', getattr(response, 'status', None)) from None
+    except OSError as exc:
+        known = safe_local_transport_failure(getattr(exc, 'local_transport_failure', None))
+        raise _local_transport_error(known.get('reason', 'relay_socket_error'),
+            known.get('http_status', getattr(response, 'status', None))) from None
+    except (ValueError, RecursionError):
+        reason = 'relay_invalid_json' if decoding else 'relay_http_protocol_error'
+        raise _local_transport_error(reason, getattr(response, 'status', None)) from None
     finally:
         timer.cancel()
         if response is not None:response.close()

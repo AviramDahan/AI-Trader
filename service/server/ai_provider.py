@@ -43,7 +43,7 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
         from news_structured_envelope import request_contract
         contract = request_contract(schema)
     from ai_routing import (Route, local_completion, local_usage, native_messages,
-                            fallback_reason, safe_local_failure_usage)
+                            fallback_reason, safe_local_failure_usage, safe_local_transport_failure)
     route = Route('openrouter', model)
     for attempt in range(max_attempts):
         from ai_budget import check, acquire_request_slot
@@ -95,6 +95,9 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
             status = getattr(getattr(exc, "response", None), "status_code", None)
             from retry_policy import detail, defer_openrouter
             failure=detail(exc)
+            if route.provider == 'ollama_relay':
+                diagnostic=safe_local_transport_failure(getattr(exc,'local_transport_failure',None))
+                if diagnostic:failure=json.dumps({**json.loads(failure),'local_transport':diagnostic})
             if route.provider == 'openrouter' and exc.response is not None: defer_openrouter(exc.response)
             if route.provider == 'openrouter' and status == 402:
                 from ai_budget import payment_rejected
