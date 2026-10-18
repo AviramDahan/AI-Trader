@@ -548,3 +548,46 @@ def test_opposing_baseline_sell_is_explicit_conflict_not_false_buy_attribution()
     assert all(record['direction'] == 'SELL' for record in candidates[0]['entry_discovery']['detections'])
     assert observations[0]['strategy_results']['STOCKBEE_MOMENTUM_BURST']['state'] == 'DETECTED'
     assert observations[0]['common_reasons'] == ['opposing_baseline_direction']
+
+
+@pytest.mark.parametrize('exit_strategy', ('single', 'staged'))
+def test_new_attribution_with_original_v1_exit_policy_sanitizes_without_policy_conversion(
+        db, clock, monkeypatch, exit_strategy):
+    import active_snapshot
+    import recovery_state as recovery
+    frame, _, quote, _, _, _ = prepare_route(monkeypatch, clock, 'PEAD')
+    # Three genuinely confirmed source pivots feed the ORIGINAL V1 planner.
+    # No V2 contract is forged, and global defaults are not changed in source.
+    frame.iloc[133, frame.columns.get_loc('High')] = 150
+    frame.iloc[137, frame.columns.get_loc('High')] = 160
+    for flag in ('STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED',
+                 'STOCK_SCANNER_SINGLE_BREAKOUT_ENABLED',
+                 'STOCK_SCANNER_FULL_BAR_ENTRY_ENABLED',
+                 'STOCK_SCANNER_ENTRY_PRICE_RETRY_ENABLED'):
+        monkeypatch.setenv(flag, 'false')
+    engine.set_active_strategy(exit_strategy)
+    assert scanner.run_scan()['signals_published'] == 1
+    order = json.loads(rows('SELECT plan_json FROM scanner_orders')[0]['plan_json'])
+    assert order['target_plan']['method'] == 'confirmed_daily_swing_zones_v1'
+    assert order['execution_settings']['active_strategy'] == exit_strategy
+    assert len(order['target_plan']['targets']) == 3
+    package = order['entry_discovery']
+    clock.instant = datetime(2026, 10, 6, 14, 10, tzinfo=timezone.utc)
+    engine.process_bar('TEST', dict(at='2026-10-06T14:05:00Z', open=quote,
+        high=quote+.2, low=quote-.1, close=quote))
+    assert {row['strategy'] for row in rows('SELECT strategy FROM scanner_trades')} == {'single', 'staged'}
+    assert rows('SELECT strategy FROM scanner_trades WHERE is_shadow=0') == [{'strategy': exit_strategy}]
+    raw = active_snapshot.export_data(database._SQLITE_DB_PATH)
+    sanitized = recovery.sanitize(raw)
+    assert sanitized['version'] == sanitized['recovery_format'] == 2
+    recovery.validate(json.loads(json.dumps(sanitized)))
+    assert all(json.loads(row['technical_json']) == {'entry_discovery': package}
+               for row in sanitized['tables']['scanner_signals'])
+    assert all(json.loads(row['settings_json'])['entry_discovery'] == package
+               and 'target_plan' not in json.loads(row['settings_json'])
+               for row in sanitized['tables']['scanner_trades'])
+    assert json.loads(sanitized['tables']['scanner_orders'][0]['plan_json']) == order
+    assert [(row['original_stop'], row['tp1'], row['tp2'], row['tp3'])
+            for row in raw['tables']['scanner_trades']] == [
+           (row['original_stop'], row['tp1'], row['tp2'], row['tp3'])
+            for row in sanitized['tables']['scanner_trades']]
