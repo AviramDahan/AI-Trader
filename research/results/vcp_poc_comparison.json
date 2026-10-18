@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "classification": "SANITIZED_AGGREGATES_ONLY_NOT_A_PROFIT_BACKTEST",
+  "as_run_at_utc": "2026-10-18T17:03:24Z",
+  "baseline_source_commit": "1d61cc182e27696cd182555c4640ed3c257e7cf8",
+  "donor_commit": "b29c6dfc2d4dc82bdfcfc13891e490863283405f",
+  "policy": "vcp_breakout_evidence_v1",
+  "comparison_script_sha256": "7c6442d8f626409d2fecd9f228ce1613666939008efbfa5d1be189e157d928f3",
+  "synthetic_fixture_sha256": "e52ad07c09efa39d479b4b0be39f59a445202348f5437c371dbad632f4a2fb51",
+  "adapter_as_run_sha256": "e48836f9bb027fd6766049bc759a226d21db93ffead64c35ffb5cb2ab289a394",
+  "actual_cached_daily_reference": {
+    "input_sha256": "2c4b10baa7e772f8fcfb242243960d20823a212601e09ce4b825871517693c63",
+    "snapshot_at": "2026-09-26T02:28:12.592650Z",
+    "symbols": 523,
+    "rows_min": 72,
+    "rows_max": 127,
+    "source_structures": 523,
+    "baseline_V2_structural_approvals": 4,
+    "candidate_same_V2_approvals": 4,
+    "structural_rejections_unchanged": 519,
+    "applicable_breakout_VCP_gate_observations": 0,
+    "VCP_evidence_UNKNOWN": 523,
+    "SMA200_coverage": 0,
+    "VCP253_coverage": 0,
+    "verdict": "DATA_INSUFFICIENT: daily close cannot exceed the same source's20-sessionhigh; no applicable breakout cohort, no VCP selectivity/quality/neutrality inference. Not Technical/News/AI approval or executed entry."
+  },
+  "actual_frozen_source_reference_cases": {
+    "packet_sha256s": [
+      "efd4cb71c746a830acc1e3cafcb33c70fc9a7b77401d8e4efeae80e48140d895",
+      "36c52d71a9e4f034383fed3828adaafd599f6d396031f4f3d2f1546fae3f5f03"
+    ],
+    "observations": 12,
+    "unique_tickers": 12,
+    "unique_source_structures": 12,
+    "A_approved": 0,
+    "B_approved": 0,
+    "unchanged_invalid_rounded_levels": 12,
+    "applicable_breakout_VCP_gate_observations": 0,
+    "VCP_evidence_UNKNOWN": 12,
+    "verdict": "Original structure/quote replay using real unchanged builders only; no archived full OHLCV to evaluate VCP.12cases, not all87."
+  },
+  "separate_dated94_cohort": {
+    "conclusion": "VCP cannot rescue these87 existing structural failures without changing protected gates. Full individual OHLCV/setup inputs missing, so added selectivity/quality on the other7 observations is DATA_INSUFFICIENT.",
+    "counts": {
+      "ai_hold": 1,
+      "pre_entry_inside_unresolved_price_zone": 16,
+      "pre_entry_not_above_completed_high": 8,
+      "pre_insufficient_confirmed_price_zones": 10,
+      "pre_invalid_rounded_levels": 12,
+      "pre_nearest_resistance_below_2r": 28,
+      "pre_price_structure_fails_risk_reward": 13,
+      "pre_waiting_regular_session": 6
+    },
+    "do_not_merge": "News candidate cohort and later/older price cache are separate denominators. Tickers are not trades; repeated rows are not newAIcalls.",
+    "observations": 94,
+    "paired_VCP_rescues": 0,
+    "requested_window_end_exclusive": "2026-10-16T20:08:00+00:00",
+    "scans": 2,
+    "source_sha256": "d8c8a2a781e4e583b71bbafe9dfe1e557bd3ce5e82545b5c61ffc8b1c41966c3",
+    "structural_rejection_observation_rate": 0.925531914893617,
+    "structural_rejections": 87,
+    "unique_tickers": 88,
+    "window_end_exclusive": "2026-10-16T20:05:07.943146+00:00",
+    "window_start": "2026-10-16T19:09:58.665535+00:00"
+  },
+  "synthetic_253_session_controls": {
+    "fixture_label": "INVENTED_NOT_HISTORICAL",
+    "observations": 5,
+    "unique_source_structures": 4,
+    "A_approved_observations": 4,
+    "A_unique_approved_structures": 3,
+    "B_approved_observations": 2,
+    "B_unique_approved_structures": 1,
+    "one_repeat_same_valid_setup": true,
+    "one_weak_trigger_filtered": true,
+    "one_unknown_warmup": true,
+    "one_existing_RR_failure_unchanged": true,
+    "applicable_breakout_VCP_gate_observations": 4,
+    "paired_matrix": [
+      {
+        "A": "APPROVED",
+        "B": "APPROVED",
+        "observations": 2
+      },
+      {
+        "A": "APPROVED",
+        "B": "REJECTED",
+        "observations": 1
+      },
+      {
+        "A": "APPROVED",
+        "B": "UNKNOWN",
+        "observations": 1
+      },
+      {
+        "A": "REJECTED",
+        "B": "REJECTED",
+        "observations": 1
+      }
+    ],
+    "verdict": "Calculation/gating controls only. Not trading wins, profit, OOS or evidence of improved quality."
+  },
+  "research_tests": {
+    "command": "python -B -m unittest discover -s research/tests -p test_compare_vcp_breakout.py -v",
+    "passed": 19,
+    "failed": 0,
+    "skipped": 0,
+    "warning": "Existing urllib3[secure] deprecation while importing market-calendar dependencies."
+  },
+  "performance": {
+    "average_holding_period": null,
+    "closed_trades": null,
+    "maximum_drawdown": null,
+    "minimum_evidence": "Matched known-at-decision candidates, actual historical reviews, eligible quote/bars, frozen contracts and closed Native trade/fee ledger; independent chronological holdout.",
+    "net_expectancy_R": null,
+    "profit_factor": null,
+    "signal_to_entry_conversion": null,
+    "status": "DATA_INSUFFICIENT",
+    "why": "No complete historical AI/order/fill/fee/partial-exit ledger; no price-touch or intrabar path invented.",
+    "win_rate": null
+  },
+  "decision": {
+    "code_validation": "GO_FOR_ISOLATED_QA_ONLY",
+    "controlled_paper_activation": "NO_GO",
+    "net_performance": "DATA_INSUFFICIENT",
+    "why": "Current cached history cannot cover the strict253-session hypothesis; no eligible real breakout cohort or closed Native decision/execution ledger. Flag remainsOFF; no activation authorized."
+  },
+  "safety": {
+    "Production_calls": 0,
+    "DB_calls": 0,
+    "provider_fetches": 0,
+    "AI_calls": 0,
+    "Telegram_calls": 0,
+    "signals_orders_fills_created": 0,
+    "raw_cached_or_Production_source_data_committed": false
+  },
+  "next_evidence": "Exact as-of253+session source coverage for existing technically/risk-qualified breakout candidates, actual quote/timing and historical review/closed-exit/fees ledger or explicitly detector-only heldout comparisons. No arbitrary number of days, fabricated AI/fills or parameter sweep."
+}

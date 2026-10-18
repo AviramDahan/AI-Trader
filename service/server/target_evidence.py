@@ -74,6 +74,12 @@ def capture(candidate, action, price, quote_at, phase, policy, strategy, source,
                           json.dumps(inputs, sort_keys=True, allow_nan=False).encode()).hexdigest(),
                       minimum_rr=2.0 if policy in ('single_target_v2','single_breakout_v1') else cfg.get('min_risk_reward'),
                       signal_link={'scan_id':trace['scan_id'],'ticker':trace['ticker']})
+        if 'vcp_breakout' in candidate:
+            from vcp_breakout import enabled, public_evidence
+            if enabled():
+                projection = public_evidence(candidate['vcp_breakout'])
+                if projection is not None:
+                    record['vcp_breakout'] = projection
         reference = candidate.get('_reference_context')
         if reference:
             record['quote'].update({k:reference[k] for k in ('source','fresh','age_seconds','eligible_for_entry')})
