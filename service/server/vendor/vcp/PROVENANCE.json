@@ -1,0 +1,59 @@
+{
+  "repository": "https://github.com/tradermonty/claude-trading-skills",
+  "commit": "b29c6dfc2d4dc82bdfcfc13891e490863283405f",
+  "license": "MIT",
+  "copyright": "2026 TraderMonty",
+  "copied_files_unchanged": true,
+  "dependencies": [
+    "Python standard library typing.Optional"
+  ],
+  "excluded": [
+    "skill instructions",
+    "CLI",
+    "providers",
+    "orders",
+    "sizing",
+    "portfolio",
+    "exit rules",
+    "risk or target proposals",
+    "performance claims"
+  ],
+  "adapter_notes": [
+    "Calculators see only completed as-of slices, with the prior base separated from the trigger.",
+    "Prior-only volume denominators and raw unrounded source pivot are enforced by vcp_breakout.py.",
+    "Donor stop proposals, probability interpretations and ranking weights are not adopted.",
+    "No result is proof of historical or future profitability."
+  ],
+  "files": [
+    {
+      "file": "vcp_pattern_calculator.py",
+      "git_blob": "a2c8c56f018964b3e74b59672f9cd07e9d15f154",
+      "sha256": "2d5f3d5e019c51723cfc27a2fb9db89d1ff03deaefa3cf50c4e9b512511bc002",
+      "upstream_path": "skills/vcp-screener/scripts/calculators/vcp_pattern_calculator.py"
+    },
+    {
+      "file": "volume_pattern_calculator.py",
+      "git_blob": "1106ad9c1f226141dfc2ac3964e4f4c2878fa63a",
+      "sha256": "4cd93cb1a993b68d3e6dff2cbcfa4032465e6ad1579d89a53422d610cd1f0f06",
+      "upstream_path": "skills/vcp-screener/scripts/calculators/volume_pattern_calculator.py"
+    },
+    {
+      "file": "execution_state.py",
+      "git_blob": "e432450fc5e69e51eee6ddbab7721c5a1f2c475f",
+      "sha256": "111f4b4ee5820dda907c7d22966f85377e0d9fa5bf544734d5a3920c59dd8dad",
+      "upstream_path": "skills/vcp-screener/scripts/calculators/execution_state.py"
+    },
+    {
+      "file": "pivot_proximity_calculator.py",
+      "git_blob": "5c0e95a0b6a95b3a29721e1abb94b1f68c29bd4f",
+      "sha256": "6d0beba692fff18db9a862648a757f3c6eddec15da9353176d8abe3020e942cb",
+      "upstream_path": "skills/vcp-screener/scripts/calculators/pivot_proximity_calculator.py"
+    },
+    {
+      "file": "LICENSE",
+      "git_blob": "f04a7bced8bb1f03ce92fbdc6912594b0c37d3c0",
+      "sha256": "87c93cde8c3a000c19b0c790cd4f7a4e4cb8da5bc6b11e0939bf6df99e245d15",
+      "upstream_path": "LICENSE"
+    }
+  ]
+}

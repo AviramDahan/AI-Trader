@@ -514,7 +514,7 @@ def analyze_history(symbol: str, company: str, frame: pd.DataFrame, cfg: dict[st
             or atr_pct > cfg["max_atr_pct"] or score < cfg["min_technical_score"]):
         return None
     from scanner_targets import single_source_structure
-    return {"ticker": symbol, "company": company, "technical_direction": direction,
+    candidate = {"ticker": symbol, "company": company, "technical_direction": direction,
             "technical_score": score, "entry": entry, "atr": atr, "atr_pct": atr_pct,
             "average_dollar_volume": avg_dollar_volume, "realized_volatility_pct": realized_vol,
             "ema20": ema20, "ema50": ema50, "rsi14": rsi, "macd_histogram": macd_hist,
@@ -524,6 +524,14 @@ def analyze_history(symbol: str, company: str, frame: pd.DataFrame, cfg: dict[st
             "history_fetched_at": frame.attrs.get('history_fetched_at'),
             "single_target_source": single_source_structure(frame),
             "price_zones": swing_zones(frame, atr)}
+    from vcp_breakout import enabled as vcp_enabled
+    if direction == 'BUY' and vcp_enabled():
+        from vcp_breakout import evaluate
+        observed = datetime.now(timezone.utc)
+        candidate['vcp_breakout'] = evaluate(frame, decision_at=observed,
+            source_observed_at=frame.attrs.get('history_fetched_at'),
+            expected_session=latest_completed_session(observed).isoformat())
+    return candidate
 
 
 def _market_context(histories: dict[str, pd.DataFrame]) -> dict[str, Any]:
@@ -732,7 +740,8 @@ def ai_review(candidate: dict[str, Any], news: list[dict[str, Any]], market_cont
     time_context['entry_price_facts']=facts
     excluded = {'single_target_source', '_strategy_projection', '_reference_context',
                 '_intraday_evidence', 'review_evidence_context', 'price_as_of', 'history_fetched_at',
-                'entry','quote_at','daily_reference_close','daily_reference_as_of','validated_target_plan', *DAILY_FIELDS}
+                'entry','quote_at','daily_reference_close','daily_reference_as_of','validated_target_plan',
+                'vcp_breakout', *DAILY_FIELDS}
     if not sec_current:
         excluded.update({'sec_intelligence','sec_snapshot_id','sec_evidence_ids','sec_adjustment',
                          'enhanced_rank_score','baseline_rank_score','sec_coverage'})
@@ -881,8 +890,15 @@ def _candidate_target_plan(candidate, action, price, cfg, *, quote_at=None, phas
                     raise
                 policy = VERSION
                 source = dict(source, completed_high=candidate.get('recent_high_20d'), completed_high_sessions=20)
-                plan = breakout_build(price, source['atr'], source['zones'], source['data_as_of'],
-                                      at, candidate.get('recent_high_20d'))
+                breakout_plan = breakout_build(price, source['atr'], source['zones'], source['data_as_of'],
+                                               at, candidate.get('recent_high_20d'))
+                # This optional POC may only narrow an ALREADY valid breakout.
+                # Original structure failures retain their exact reason and no
+                # executable plan, order policy, stop, target or RR is changed.
+                from vcp_breakout import enabled as vcp_enabled, validate_trigger
+                if vcp_enabled():
+                    candidate['vcp_breakout'] = validate_trigger(candidate.get('vcp_breakout'), price, quote_at, at)
+                plan = breakout_plan
         else:
             plan = structure_plan(action, price, candidate['atr'], candidate.get('price_zones', []), cfg['min_risk_reward'])
         return plan

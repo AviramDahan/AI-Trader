@@ -31,6 +31,8 @@ jobs:
         run: python -m pytest service/server/tests --ignore=service/server/tests/test_stock_scanner.py -q
       - name: Stock scanner tests (providers mocked)
         run: python -m pytest service/server/tests/test_stock_scanner.py -q
+      - name: Offline VCP paired-comparison controls (no providers or trades)
+        run: python -m pytest research/tests/test_compare_vcp_breakout.py -q
 
   frontend:
     runs-on: ubuntu-latest
