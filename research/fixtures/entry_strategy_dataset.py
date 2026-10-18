@@ -110,7 +110,7 @@ def build_dataset():
         'source_observed_at': observed.isoformat(), 'bars': encode_bars(frame),
         'context': {'expected_session': '2026-10-05'}, 'intended_strategy': 'BASELINE'})
     return {'version': 1, 'synthetic': True, 'kind': 'SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY',
-            'fixture_source_sha256': {str(path.relative_to(REPO)): hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n')).hexdigest()
+            'fixture_source_sha256': {path.relative_to(REPO).as_posix(): hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n')).hexdigest()
                 for path in (Path(__file__), SERVER / 'tests' / 'test_entry_strategies.py')},
             'fixture_code_hash_newline_policy': 'LF',
             'snapshots': [{'snapshot_id': 'invented_six_path_controls',

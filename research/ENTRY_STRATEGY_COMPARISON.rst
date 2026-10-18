@@ -199,7 +199,7 @@ declared mock pending orders and0 declared mock entries; no engine order or
 position is created by this tool. Independent application/lifecycle tests, not
 these mock counts, are the place to prove the existing PAPER route.
 
-Research test command actually passed19 tests,0 failures/0 skips::
+Research test command actually passed20 tests,0 failures/0 skips::
 
   python -m pytest research/tests/test_compare_entry_strategies.py -q
 
@@ -211,7 +211,9 @@ Code hashes normalize CRLF to LF before SHA256 and declare
 ``code_hash_newline_policy=LF`` so Windows checkouts match Linux/Git code blobs.
 The regression test proves CRLF/LF code identity while immutable JSON/vendor
 artifact receipts still hash exact original bytes without newline normalization.
-These19 tests are a research suite, not a sum to add to overlapping app suites.
+Fixture code receipt keys use canonical POSIX paths on every platform, not
+Windows-specific path separators; their hashes still use the same LF policy.
+These20 tests are a research suite, not a sum to add to overlapping app suites.
 
 Reproduce without Production or downloads
 -----------------------------------------

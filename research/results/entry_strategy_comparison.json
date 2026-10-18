@@ -4,7 +4,7 @@
   "base_commit": "1d61cc182e27696cd182555c4640ed3c257e7cf8",
   "code_hash_newline_policy": "LF",
   "source_code_same_across_evidence_classes": true,
-  "note": "Sanitized aggregate metadata only. No raw vendor OHLCV, Production records, secrets, executable quotes or trade outcomes. Code hashes normalize CRLF to LF; immutable vendor artifact receipt hashes preserve original bytes.",
+  "note": "Sanitized aggregate metadata only. No raw vendor OHLCV, Production records, secrets, executable quotes or trade outcomes. Code hashes normalize CRLF to LF and code receipt keys use POSIX paths; immutable vendor artifact receipt hashes preserve original bytes.",
   "current_observed_vendor_snapshot": {
     "benchmark_receipt": {
       "artifact_sha256": "6f04d9aa868e77251b497f6209b2728b8551d7d1fa30add084737c0a24e4e6a5",
@@ -663,11 +663,11 @@
       "Source availability and bar completion respected in both arms; retrospective vendor revisions or universe selection are not PIT proof.",
       "No price-touch/intrabar fill, historical AI, WR/PF/expectancy/drawdown or independent OOS outcome invented."
     ],
-    "dataset_content_sha256": "ac967267c90042f3c46e1d670e7cddaea5b41aa2b1cc8b1e5c8cde8c1edcef46",
+    "dataset_content_sha256": "967a44353bcb367b3f2ae73146de49eeba65b0bc0806ef4b417c31f5ac9c4911",
     "evidence_class": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
     "fixture_source_sha256": {
-      "research\\fixtures\\entry_strategy_dataset.py": "8d90c9d82d1c042144798d210dccc9c3982e2456ca417e6276bd885d3b1991f5",
-      "service\\server\\tests\\test_entry_strategies.py": "cc1051aad8c3d4133c5e2149d886a39b7d26595db9755b2fa9c7b553444af10f"
+      "research/fixtures/entry_strategy_dataset.py": "849473562ae71ee5383226e63cb6b4f6e3e85ac008852ebbebc0cd66e452c593",
+      "service/server/tests/test_entry_strategies.py": "cc1051aad8c3d4133c5e2149d886a39b7d26595db9755b2fa9c7b553444af10f"
     },
     "implementation_sha256": {
       "entry_discovery.py": "e7813820bf3cfea56a1cb782515d45816af264ad1695298d1cf7fb8565ed16d4",
@@ -1369,11 +1369,12 @@
   "actual_test_commands": [
     {
       "command": "python -m pytest research/tests/test_compare_entry_strategies.py -q",
-      "passed": 19,
+      "passed": 20,
       "failed": 0,
       "skipped": 0
     }
   ],
   "performance_conclusion": "DATA_INSUFFICIENT: detector discoveries and declared synthetic mocks do not establish net performance or Paper conversion.",
-  "production_changes": 0
+  "production_changes": 0,
+  "code_hash_path_policy": "POSIX"
 }

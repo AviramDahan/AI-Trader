@@ -240,3 +240,11 @@ def test_code_fingerprint_normalizes_CRLF_but_artifact_receipts_keep_exact_bytes
     crlf_value, crlf_hash = compare.read_json(crlf_json)
     assert lf_value == crlf_value
     assert lf_hash != crlf_hash  # Immutable data receipts must NOT normalize.
+
+
+def test_fixture_code_receipt_paths_are_canonical_POSIX_on_every_platform():
+    dataset = fixtures.build_dataset()
+    assert set(dataset['fixture_source_sha256']) == {
+        'research/fixtures/entry_strategy_dataset.py',
+        'service/server/tests/test_entry_strategies.py'}
+    assert all('\\' not in name for name in dataset['fixture_source_sha256'])
