@@ -1,0 +1,1379 @@
+{
+  "version": 1,
+  "comparison": "12_ARMS_SAME_FROZEN_INPUTS_AND_SHARED_CAPS",
+  "base_commit": "1d61cc182e27696cd182555c4640ed3c257e7cf8",
+  "code_hash_newline_policy": "LF",
+  "source_code_same_across_evidence_classes": true,
+  "note": "Sanitized aggregate metadata only. No raw vendor OHLCV, Production records, secrets, executable quotes or trade outcomes. Code hashes normalize CRLF to LF; immutable vendor artifact receipt hashes preserve original bytes.",
+  "current_observed_vendor_snapshot": {
+    "benchmark_receipt": {
+      "artifact_sha256": "6f04d9aa868e77251b497f6209b2728b8551d7d1fa30add084737c0a24e4e6a5",
+      "recorded_decision_at": "2026-10-18T20:08:24.209243+00:00",
+      "source_observed_at": "2026-10-18T20:08:24.187491+00:00",
+      "symbol": "SPY"
+    },
+    "code_hash_newline_policy": "LF",
+    "comparator_sha256": "2a7e663c13480b3728dc7078eddd1be2a863ba446648d6f05b6d61f897d6e081",
+    "comparison_limits": [
+      "Discovery candidates/planned slots are not AI approvals, accepted signals, orders or legal entries.",
+      "No quote/session/news/confidence/risk/target/entry gate is declared passed by this comparison.",
+      "Actual strategy records and ranking helper reused; no bonus per additional label or multiplied AI cap.",
+      "Source availability and bar completion respected in both arms; retrospective vendor revisions or universe selection are not PIT proof.",
+      "No price-touch/intrabar fill, historical AI, WR/PF/expectancy/drawdown or independent OOS outcome invented."
+    ],
+    "dataset_content_sha256": "2a2b1b11033dac8f9c628f30a4f9d7170289836bd8b8b2874493630178ca6c73",
+    "evidence_class": "CURRENT_OBSERVED_RETROSPECTIVE_VENDOR_DATA",
+    "fixture_source_sha256": null,
+    "implementation_sha256": {
+      "entry_discovery.py": "e7813820bf3cfea56a1cb782515d45816af264ad1695298d1cf7fb8565ed16d4",
+      "entry_strategies.py": "26970d20211f71dd7f0d4d0b0ac57c01ab2b81fa761ba0e3cb15410c93217c41",
+      "scanner_targets.py": "bc86bc088a3628c9e558a8ce0d6817e1a5860f72e5f78046f0f6f0b034dbeb50",
+      "stock_scanner.py": "5a6f27eaef71a4980e27f6ca8dfa5cd0180fe3725940c65baa6b331777665ce3",
+      "vendor/entry_discovery/stockbee.py": "f0c55d087b009775ade81a5508d8376018e7504f87e2cec0b0fa51d68862fadb",
+      "vendor/entry_discovery/vcp_pattern_calculator.py": "2d5f3d5e019c51723cfc27a2fb9db89d1ff03deaefa3cf50c4e9b512511bc002"
+    },
+    "implementation_stable_during_comparison": true,
+    "input_limitations": [
+      "Downloaded18October2026; not historical system availability or a PIT universe.",
+      "Yahoo auto_adjust OHLC from raw*AdjClose/Close; volume untouched by helper.",
+      "No verified earnings facts, verified optional sector, AI, executable quotes or trade outcomes supplied.",
+      "SPY packet, if provided, was acquired later: use a new current decision after all actual sources; never insert it into the earlier18:18 decision."
+    ],
+    "input_observations": 20,
+    "input_receipt_sha256": "3538d9f42a58a784c61add1e25e4cc2d970b3ab75810a4bd1265715a69e15d25",
+    "matrix": [
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE",
+        "block_reasons": {
+          "common:common_data_liquidity_or_atr_block": 1
+        },
+        "candidate_directions": {
+          "BUY": 16,
+          "SELL": 1
+        },
+        "enabled_ids": [],
+        "include_baseline": true,
+        "opportunity_observations": 17,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 17
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 5,
+          "SELL": 1
+        },
+        "planned_max_shared_AI_slots": 6,
+        "planned_shortlist_observations": 17,
+        "states": {},
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 17
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 17
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "VCP_BASE_CONTRACTION_ONLY",
+        "block_reasons": {
+          "VCP_BASE_CONTRACTION:vcp_pattern_unconfirmed": 19,
+          "VCP_BASE_CONTRACTION:vcp_volume_not_dry": 1,
+          "common:common_data_liquidity_or_atr_block": 1
+        },
+        "candidate_directions": {},
+        "enabled_ids": [
+          "VCP_BASE_CONTRACTION"
+        ],
+        "include_baseline": false,
+        "opportunity_observations": 0,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 17,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {},
+        "planned_max_shared_AI_slots": 0,
+        "planned_shortlist_observations": 0,
+        "states": {
+          "VCP_BASE_CONTRACTION:REJECTED": 20
+        },
+        "strategy_attributions_nonexclusive": {},
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 0
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "STOCKBEE_MOMENTUM_BURST_ONLY",
+        "block_reasons": {
+          "STOCKBEE_MOMENTUM_BURST:momentum_base_unconfirmed": 1,
+          "STOCKBEE_MOMENTUM_BURST:momentum_volume_or_close_unconfirmed": 4,
+          "STOCKBEE_MOMENTUM_BURST:trigger_not_confirmed": 15,
+          "common:common_data_liquidity_or_atr_block": 1
+        },
+        "candidate_directions": {},
+        "enabled_ids": [
+          "STOCKBEE_MOMENTUM_BURST"
+        ],
+        "include_baseline": false,
+        "opportunity_observations": 0,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 17,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {},
+        "planned_max_shared_AI_slots": 0,
+        "planned_shortlist_observations": 0,
+        "states": {
+          "STOCKBEE_MOMENTUM_BURST:FORMING": 19,
+          "STOCKBEE_MOMENTUM_BURST:REJECTED": 1
+        },
+        "strategy_attributions_nonexclusive": {},
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 0
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "PEAD_ONLY",
+        "block_reasons": {
+          "PEAD:verified_earnings_timing_unavailable": 20,
+          "common:common_data_liquidity_or_atr_block": 1
+        },
+        "candidate_directions": {},
+        "enabled_ids": [
+          "PEAD"
+        ],
+        "include_baseline": false,
+        "opportunity_observations": 0,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 17,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {},
+        "planned_max_shared_AI_slots": 0,
+        "planned_shortlist_observations": 0,
+        "states": {
+          "PEAD:UNKNOWN": 20
+        },
+        "strategy_attributions_nonexclusive": {},
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 0
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "TREND_PULLBACK_RECLAIM_ONLY",
+        "block_reasons": {
+          "TREND_PULLBACK_RECLAIM:pullback_already_reclaimed": 1,
+          "TREND_PULLBACK_RECLAIM:pullback_setup_unconfirmed": 18,
+          "TREND_PULLBACK_RECLAIM:pullback_uptrend_unconfirmed": 1,
+          "common:common_data_liquidity_or_atr_block": 1
+        },
+        "candidate_directions": {},
+        "enabled_ids": [
+          "TREND_PULLBACK_RECLAIM"
+        ],
+        "include_baseline": false,
+        "opportunity_observations": 0,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 17,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {},
+        "planned_max_shared_AI_slots": 0,
+        "planned_shortlist_observations": 0,
+        "states": {
+          "TREND_PULLBACK_RECLAIM:REJECTED": 20
+        },
+        "strategy_attributions_nonexclusive": {},
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 0
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "RELATIVE_STRENGTH_LEADER_ONLY",
+        "block_reasons": {
+          "RELATIVE_STRENGTH_LEADER:leader_setup_unconfirmed": 3,
+          "RELATIVE_STRENGTH_LEADER:relative_strength_unconfirmed": 12,
+          "RELATIVE_STRENGTH_LEADER:trigger_not_confirmed": 5,
+          "common:common_data_liquidity_or_atr_block": 1
+        },
+        "candidate_directions": {},
+        "enabled_ids": [
+          "RELATIVE_STRENGTH_LEADER"
+        ],
+        "include_baseline": false,
+        "opportunity_observations": 0,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 17,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {},
+        "planned_max_shared_AI_slots": 0,
+        "planned_shortlist_observations": 0,
+        "states": {
+          "RELATIVE_STRENGTH_LEADER:FORMING": 5,
+          "RELATIVE_STRENGTH_LEADER:REJECTED": 15
+        },
+        "strategy_attributions_nonexclusive": {},
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 0
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_VCP_BASE_CONTRACTION",
+        "block_reasons": {
+          "VCP_BASE_CONTRACTION:vcp_pattern_unconfirmed": 19,
+          "VCP_BASE_CONTRACTION:vcp_volume_not_dry": 1,
+          "common:common_data_liquidity_or_atr_block": 1
+        },
+        "candidate_directions": {
+          "BUY": 16,
+          "SELL": 1
+        },
+        "enabled_ids": [
+          "VCP_BASE_CONTRACTION"
+        ],
+        "include_baseline": true,
+        "opportunity_observations": 17,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 17
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 5,
+          "SELL": 1
+        },
+        "planned_max_shared_AI_slots": 6,
+        "planned_shortlist_observations": 17,
+        "states": {
+          "VCP_BASE_CONTRACTION:REJECTED": 20
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 17
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 17
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_STOCKBEE_MOMENTUM_BURST",
+        "block_reasons": {
+          "STOCKBEE_MOMENTUM_BURST:momentum_base_unconfirmed": 1,
+          "STOCKBEE_MOMENTUM_BURST:momentum_volume_or_close_unconfirmed": 4,
+          "STOCKBEE_MOMENTUM_BURST:trigger_not_confirmed": 15,
+          "common:common_data_liquidity_or_atr_block": 1
+        },
+        "candidate_directions": {
+          "BUY": 16,
+          "SELL": 1
+        },
+        "enabled_ids": [
+          "STOCKBEE_MOMENTUM_BURST"
+        ],
+        "include_baseline": true,
+        "opportunity_observations": 17,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 17
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 5,
+          "SELL": 1
+        },
+        "planned_max_shared_AI_slots": 6,
+        "planned_shortlist_observations": 17,
+        "states": {
+          "STOCKBEE_MOMENTUM_BURST:FORMING": 19,
+          "STOCKBEE_MOMENTUM_BURST:REJECTED": 1
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 17
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 17
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_PEAD",
+        "block_reasons": {
+          "PEAD:verified_earnings_timing_unavailable": 20,
+          "common:common_data_liquidity_or_atr_block": 1
+        },
+        "candidate_directions": {
+          "BUY": 16,
+          "SELL": 1
+        },
+        "enabled_ids": [
+          "PEAD"
+        ],
+        "include_baseline": true,
+        "opportunity_observations": 17,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 17
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 5,
+          "SELL": 1
+        },
+        "planned_max_shared_AI_slots": 6,
+        "planned_shortlist_observations": 17,
+        "states": {
+          "PEAD:UNKNOWN": 20
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 17
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 17
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_TREND_PULLBACK_RECLAIM",
+        "block_reasons": {
+          "TREND_PULLBACK_RECLAIM:pullback_already_reclaimed": 1,
+          "TREND_PULLBACK_RECLAIM:pullback_setup_unconfirmed": 18,
+          "TREND_PULLBACK_RECLAIM:pullback_uptrend_unconfirmed": 1,
+          "common:common_data_liquidity_or_atr_block": 1
+        },
+        "candidate_directions": {
+          "BUY": 16,
+          "SELL": 1
+        },
+        "enabled_ids": [
+          "TREND_PULLBACK_RECLAIM"
+        ],
+        "include_baseline": true,
+        "opportunity_observations": 17,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 17
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 5,
+          "SELL": 1
+        },
+        "planned_max_shared_AI_slots": 6,
+        "planned_shortlist_observations": 17,
+        "states": {
+          "TREND_PULLBACK_RECLAIM:REJECTED": 20
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 17
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 17
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_RELATIVE_STRENGTH_LEADER",
+        "block_reasons": {
+          "RELATIVE_STRENGTH_LEADER:leader_setup_unconfirmed": 3,
+          "RELATIVE_STRENGTH_LEADER:relative_strength_unconfirmed": 12,
+          "RELATIVE_STRENGTH_LEADER:trigger_not_confirmed": 5,
+          "common:common_data_liquidity_or_atr_block": 1
+        },
+        "candidate_directions": {
+          "BUY": 16,
+          "SELL": 1
+        },
+        "enabled_ids": [
+          "RELATIVE_STRENGTH_LEADER"
+        ],
+        "include_baseline": true,
+        "opportunity_observations": 17,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 17
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 5,
+          "SELL": 1
+        },
+        "planned_max_shared_AI_slots": 6,
+        "planned_shortlist_observations": 17,
+        "states": {
+          "RELATIVE_STRENGTH_LEADER:FORMING": 5,
+          "RELATIVE_STRENGTH_LEADER:REJECTED": 15
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 17
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 17
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_ALL",
+        "block_reasons": {
+          "PEAD:verified_earnings_timing_unavailable": 20,
+          "RELATIVE_STRENGTH_LEADER:leader_setup_unconfirmed": 3,
+          "RELATIVE_STRENGTH_LEADER:relative_strength_unconfirmed": 12,
+          "RELATIVE_STRENGTH_LEADER:trigger_not_confirmed": 5,
+          "STOCKBEE_MOMENTUM_BURST:momentum_base_unconfirmed": 1,
+          "STOCKBEE_MOMENTUM_BURST:momentum_volume_or_close_unconfirmed": 4,
+          "STOCKBEE_MOMENTUM_BURST:trigger_not_confirmed": 15,
+          "TREND_PULLBACK_RECLAIM:pullback_already_reclaimed": 1,
+          "TREND_PULLBACK_RECLAIM:pullback_setup_unconfirmed": 18,
+          "TREND_PULLBACK_RECLAIM:pullback_uptrend_unconfirmed": 1,
+          "VCP_BASE_CONTRACTION:vcp_pattern_unconfirmed": 19,
+          "VCP_BASE_CONTRACTION:vcp_volume_not_dry": 1,
+          "common:common_data_liquidity_or_atr_block": 1
+        },
+        "candidate_directions": {
+          "BUY": 16,
+          "SELL": 1
+        },
+        "enabled_ids": [
+          "VCP_BASE_CONTRACTION",
+          "STOCKBEE_MOMENTUM_BURST",
+          "PEAD",
+          "TREND_PULLBACK_RECLAIM",
+          "RELATIVE_STRENGTH_LEADER"
+        ],
+        "include_baseline": true,
+        "opportunity_observations": 17,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 17
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 5,
+          "SELL": 1
+        },
+        "planned_max_shared_AI_slots": 6,
+        "planned_shortlist_observations": 17,
+        "states": {
+          "PEAD:UNKNOWN": 20,
+          "RELATIVE_STRENGTH_LEADER:FORMING": 5,
+          "RELATIVE_STRENGTH_LEADER:REJECTED": 15,
+          "STOCKBEE_MOMENTUM_BURST:FORMING": 19,
+          "STOCKBEE_MOMENTUM_BURST:REJECTED": 1,
+          "TREND_PULLBACK_RECLAIM:REJECTED": 20,
+          "VCP_BASE_CONTRACTION:REJECTED": 20
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 17
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 17
+      }
+    ],
+    "safety": {
+      "AI_calls": 0,
+      "Production_calls": 0,
+      "Telegram_calls": 0,
+      "application_DB_calls": 0,
+      "network_calls": 0,
+      "orders_fills_created": 0
+    },
+    "scope": "PAIRED_OFFLINE_DISCOVERY_ONLY_NOT_PAPER_BACKTEST",
+    "shared_caps_per_snapshot": {
+      "cursor": 0,
+      "max_AI": 6,
+      "shortlist": 25
+    },
+    "snapshot_count": 1,
+    "source_snapshot_clocks": [
+      {
+        "decision_at": "2026-10-18T20:18:29.637232+00:00",
+        "snapshot_id": "frozen_public20_current_observation",
+        "source_observed_at_max": "2026-10-18T18:18:46.517904+00:00",
+        "source_observed_at_min": "2026-10-18T18:18:25.430914+00:00"
+      }
+    ],
+    "synthetic": false,
+    "unique_input_symbols": 20,
+    "version": 1
+  },
+  "synthetic_controls_not_performance": {
+    "benchmark_receipt": null,
+    "code_hash_newline_policy": "LF",
+    "comparator_sha256": "2a7e663c13480b3728dc7078eddd1be2a863ba446648d6f05b6d61f897d6e081",
+    "comparison_limits": [
+      "Discovery candidates/planned slots are not AI approvals, accepted signals, orders or legal entries.",
+      "No quote/session/news/confidence/risk/target/entry gate is declared passed by this comparison.",
+      "Actual strategy records and ranking helper reused; no bonus per additional label or multiplied AI cap.",
+      "Source availability and bar completion respected in both arms; retrospective vendor revisions or universe selection are not PIT proof.",
+      "No price-touch/intrabar fill, historical AI, WR/PF/expectancy/drawdown or independent OOS outcome invented."
+    ],
+    "dataset_content_sha256": "ac967267c90042f3c46e1d670e7cddaea5b41aa2b1cc8b1e5c8cde8c1edcef46",
+    "evidence_class": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+    "fixture_source_sha256": {
+      "research\\fixtures\\entry_strategy_dataset.py": "8d90c9d82d1c042144798d210dccc9c3982e2456ca417e6276bd885d3b1991f5",
+      "service\\server\\tests\\test_entry_strategies.py": "cc1051aad8c3d4133c5e2149d886a39b7d26595db9755b2fa9c7b553444af10f"
+    },
+    "implementation_sha256": {
+      "entry_discovery.py": "e7813820bf3cfea56a1cb782515d45816af264ad1695298d1cf7fb8565ed16d4",
+      "entry_strategies.py": "26970d20211f71dd7f0d4d0b0ac57c01ab2b81fa761ba0e3cb15410c93217c41",
+      "scanner_targets.py": "bc86bc088a3628c9e558a8ce0d6817e1a5860f72e5f78046f0f6f0b034dbeb50",
+      "stock_scanner.py": "5a6f27eaef71a4980e27f6ca8dfa5cd0180fe3725940c65baa6b331777665ce3",
+      "vendor/entry_discovery/stockbee.py": "f0c55d087b009775ade81a5508d8376018e7504f87e2cec0b0fa51d68862fadb",
+      "vendor/entry_discovery/vcp_pattern_calculator.py": "2d5f3d5e019c51723cfc27a2fb9db89d1ff03deaefa3cf50c4e9b512511bc002"
+    },
+    "implementation_stable_during_comparison": true,
+    "input_limitations": [
+      "All prices, benchmark and earnings facts are invented controls.",
+      "Mock AI/signals/orders are declared inputs only; no actual AI or lifecycle was executed.",
+      "entry=False explicitly prevents equating a mock pending order with a position."
+    ],
+    "input_observations": 6,
+    "input_receipt_sha256": null,
+    "matrix": [
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE",
+        "block_reasons": {},
+        "candidate_directions": {
+          "BUY": 1
+        },
+        "enabled_ids": [],
+        "include_baseline": true,
+        "opportunity_observations": 1,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 1
+        },
+        "planned_max_shared_AI_slots": 1,
+        "planned_shortlist_observations": 1,
+        "states": {},
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1
+        },
+        "synthetic_mock_outcomes": {},
+        "unique_candidate_symbols": 1
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "VCP_BASE_CONTRACTION_ONLY",
+        "block_reasons": {
+          "VCP_BASE_CONTRACTION:vcp_pattern_unconfirmed": 5
+        },
+        "candidate_directions": {
+          "BUY": 1
+        },
+        "enabled_ids": [
+          "VCP_BASE_CONTRACTION"
+        ],
+        "include_baseline": false,
+        "opportunity_observations": 1,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 1,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 1
+        },
+        "planned_max_shared_AI_slots": 1,
+        "planned_shortlist_observations": 1,
+        "states": {
+          "VCP_BASE_CONTRACTION:DETECTED": 1,
+          "VCP_BASE_CONTRACTION:REJECTED": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "VCP_BASE_CONTRACTION": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 1
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "STOCKBEE_MOMENTUM_BURST_ONLY",
+        "block_reasons": {
+          "STOCKBEE_MOMENTUM_BURST:trigger_not_confirmed": 2
+        },
+        "candidate_directions": {
+          "BUY": 4
+        },
+        "enabled_ids": [
+          "STOCKBEE_MOMENTUM_BURST"
+        ],
+        "include_baseline": false,
+        "opportunity_observations": 4,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 4,
+          "baseline_not_in_this_arm": 1,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 4
+        },
+        "planned_max_shared_AI_slots": 4,
+        "planned_shortlist_observations": 4,
+        "states": {
+          "STOCKBEE_MOMENTUM_BURST:DETECTED": 4,
+          "STOCKBEE_MOMENTUM_BURST:FORMING": 2
+        },
+        "strategy_attributions_nonexclusive": {
+          "STOCKBEE_MOMENTUM_BURST": 4
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 4,
+          "ai_reviewed": 4,
+          "entry": 0,
+          "order": 4,
+          "signal": 4
+        },
+        "unique_candidate_symbols": 4
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "PEAD_ONLY",
+        "block_reasons": {
+          "PEAD:verified_earnings_timing_unavailable": 5
+        },
+        "candidate_directions": {
+          "BUY": 1
+        },
+        "enabled_ids": [
+          "PEAD"
+        ],
+        "include_baseline": false,
+        "opportunity_observations": 1,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 1,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 1
+        },
+        "planned_max_shared_AI_slots": 1,
+        "planned_shortlist_observations": 1,
+        "states": {
+          "PEAD:DETECTED": 1,
+          "PEAD:UNKNOWN": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "PEAD": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 1
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "TREND_PULLBACK_RECLAIM_ONLY",
+        "block_reasons": {
+          "TREND_PULLBACK_RECLAIM:pullback_setup_unconfirmed": 3,
+          "TREND_PULLBACK_RECLAIM:pullback_uptrend_unconfirmed": 2
+        },
+        "candidate_directions": {
+          "BUY": 1
+        },
+        "enabled_ids": [
+          "TREND_PULLBACK_RECLAIM"
+        ],
+        "include_baseline": false,
+        "opportunity_observations": 1,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 1,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 1
+        },
+        "planned_max_shared_AI_slots": 1,
+        "planned_shortlist_observations": 1,
+        "states": {
+          "TREND_PULLBACK_RECLAIM:DETECTED": 1,
+          "TREND_PULLBACK_RECLAIM:REJECTED": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "TREND_PULLBACK_RECLAIM": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 1
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "RELATIVE_STRENGTH_LEADER_ONLY",
+        "block_reasons": {
+          "RELATIVE_STRENGTH_LEADER:benchmark_unavailable": 5
+        },
+        "candidate_directions": {
+          "BUY": 1
+        },
+        "enabled_ids": [
+          "RELATIVE_STRENGTH_LEADER"
+        ],
+        "include_baseline": false,
+        "opportunity_observations": 1,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 1,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 1
+        },
+        "planned_max_shared_AI_slots": 1,
+        "planned_shortlist_observations": 1,
+        "states": {
+          "RELATIVE_STRENGTH_LEADER:DETECTED": 1,
+          "RELATIVE_STRENGTH_LEADER:UNKNOWN": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "RELATIVE_STRENGTH_LEADER": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 1
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_VCP_BASE_CONTRACTION",
+        "block_reasons": {
+          "VCP_BASE_CONTRACTION:vcp_pattern_unconfirmed": 5
+        },
+        "candidate_directions": {
+          "BUY": 2
+        },
+        "enabled_ids": [
+          "VCP_BASE_CONTRACTION"
+        ],
+        "include_baseline": true,
+        "opportunity_observations": 2,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 2
+        },
+        "planned_max_shared_AI_slots": 2,
+        "planned_shortlist_observations": 2,
+        "states": {
+          "VCP_BASE_CONTRACTION:DETECTED": 1,
+          "VCP_BASE_CONTRACTION:REJECTED": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1,
+          "VCP_BASE_CONTRACTION": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 2
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_STOCKBEE_MOMENTUM_BURST",
+        "block_reasons": {
+          "STOCKBEE_MOMENTUM_BURST:trigger_not_confirmed": 2
+        },
+        "candidate_directions": {
+          "BUY": 5
+        },
+        "enabled_ids": [
+          "STOCKBEE_MOMENTUM_BURST"
+        ],
+        "include_baseline": true,
+        "opportunity_observations": 5,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 4,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 5
+        },
+        "planned_max_shared_AI_slots": 5,
+        "planned_shortlist_observations": 5,
+        "states": {
+          "STOCKBEE_MOMENTUM_BURST:DETECTED": 4,
+          "STOCKBEE_MOMENTUM_BURST:FORMING": 2
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1,
+          "STOCKBEE_MOMENTUM_BURST": 4
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 4,
+          "ai_reviewed": 4,
+          "entry": 0,
+          "order": 4,
+          "signal": 4
+        },
+        "unique_candidate_symbols": 5
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_PEAD",
+        "block_reasons": {
+          "PEAD:verified_earnings_timing_unavailable": 5
+        },
+        "candidate_directions": {
+          "BUY": 2
+        },
+        "enabled_ids": [
+          "PEAD"
+        ],
+        "include_baseline": true,
+        "opportunity_observations": 2,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 2
+        },
+        "planned_max_shared_AI_slots": 2,
+        "planned_shortlist_observations": 2,
+        "states": {
+          "PEAD:DETECTED": 1,
+          "PEAD:UNKNOWN": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1,
+          "PEAD": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 2
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_TREND_PULLBACK_RECLAIM",
+        "block_reasons": {
+          "TREND_PULLBACK_RECLAIM:pullback_setup_unconfirmed": 3,
+          "TREND_PULLBACK_RECLAIM:pullback_uptrend_unconfirmed": 2
+        },
+        "candidate_directions": {
+          "BUY": 2
+        },
+        "enabled_ids": [
+          "TREND_PULLBACK_RECLAIM"
+        ],
+        "include_baseline": true,
+        "opportunity_observations": 2,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 2
+        },
+        "planned_max_shared_AI_slots": 2,
+        "planned_shortlist_observations": 2,
+        "states": {
+          "TREND_PULLBACK_RECLAIM:DETECTED": 1,
+          "TREND_PULLBACK_RECLAIM:REJECTED": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1,
+          "TREND_PULLBACK_RECLAIM": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 2
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_RELATIVE_STRENGTH_LEADER",
+        "block_reasons": {
+          "RELATIVE_STRENGTH_LEADER:benchmark_unavailable": 5
+        },
+        "candidate_directions": {
+          "BUY": 2
+        },
+        "enabled_ids": [
+          "RELATIVE_STRENGTH_LEADER"
+        ],
+        "include_baseline": true,
+        "opportunity_observations": 2,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 2
+        },
+        "planned_max_shared_AI_slots": 2,
+        "planned_shortlist_observations": 2,
+        "states": {
+          "RELATIVE_STRENGTH_LEADER:DETECTED": 1,
+          "RELATIVE_STRENGTH_LEADER:UNKNOWN": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1,
+          "RELATIVE_STRENGTH_LEADER": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 2
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_ALL",
+        "block_reasons": {
+          "PEAD:verified_earnings_timing_unavailable": 5,
+          "RELATIVE_STRENGTH_LEADER:benchmark_unavailable": 5,
+          "STOCKBEE_MOMENTUM_BURST:trigger_not_confirmed": 2,
+          "TREND_PULLBACK_RECLAIM:pullback_setup_unconfirmed": 3,
+          "TREND_PULLBACK_RECLAIM:pullback_uptrend_unconfirmed": 2,
+          "VCP_BASE_CONTRACTION:vcp_pattern_unconfirmed": 5
+        },
+        "candidate_directions": {
+          "BUY": 6
+        },
+        "enabled_ids": [
+          "VCP_BASE_CONTRACTION",
+          "STOCKBEE_MOMENTUM_BURST",
+          "PEAD",
+          "TREND_PULLBACK_RECLAIM",
+          "RELATIVE_STRENGTH_LEADER"
+        ],
+        "include_baseline": true,
+        "opportunity_observations": 6,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 5,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 6
+        },
+        "planned_max_shared_AI_slots": 6,
+        "planned_shortlist_observations": 6,
+        "states": {
+          "PEAD:DETECTED": 1,
+          "PEAD:UNKNOWN": 5,
+          "RELATIVE_STRENGTH_LEADER:DETECTED": 1,
+          "RELATIVE_STRENGTH_LEADER:UNKNOWN": 5,
+          "STOCKBEE_MOMENTUM_BURST:DETECTED": 4,
+          "STOCKBEE_MOMENTUM_BURST:FORMING": 2,
+          "TREND_PULLBACK_RECLAIM:DETECTED": 1,
+          "TREND_PULLBACK_RECLAIM:REJECTED": 5,
+          "VCP_BASE_CONTRACTION:DETECTED": 1,
+          "VCP_BASE_CONTRACTION:REJECTED": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1,
+          "PEAD": 1,
+          "RELATIVE_STRENGTH_LEADER": 1,
+          "STOCKBEE_MOMENTUM_BURST": 4,
+          "TREND_PULLBACK_RECLAIM": 1,
+          "VCP_BASE_CONTRACTION": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 5,
+          "ai_reviewed": 5,
+          "entry": 0,
+          "order": 5,
+          "signal": 5
+        },
+        "unique_candidate_symbols": 6
+      }
+    ],
+    "safety": {
+      "AI_calls": 0,
+      "Production_calls": 0,
+      "Telegram_calls": 0,
+      "application_DB_calls": 0,
+      "network_calls": 0,
+      "orders_fills_created": 0
+    },
+    "scope": "PAIRED_OFFLINE_DISCOVERY_ONLY_NOT_PAPER_BACKTEST",
+    "shared_caps_per_snapshot": {
+      "cursor": 0,
+      "max_AI": 6,
+      "shortlist": 25
+    },
+    "snapshot_count": 1,
+    "source_snapshot_clocks": [
+      {
+        "decision_at": "2026-10-06T14:00:37+00:00",
+        "snapshot_id": "invented_six_path_controls",
+        "source_observed_at_max": "2026-10-06T14:00:35+00:00",
+        "source_observed_at_min": "2026-10-06T14:00:35+00:00"
+      }
+    ],
+    "synthetic": true,
+    "unique_input_symbols": 6,
+    "version": 1
+  },
+  "actual_test_commands": [
+    {
+      "command": "python -m pytest research/tests/test_compare_entry_strategies.py -q",
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0
+    }
+  ],
+  "performance_conclusion": "DATA_INSUFFICIENT: detector discoveries and declared synthetic mocks do not establish net performance or Paper conversion.",
+  "production_changes": 0
+}

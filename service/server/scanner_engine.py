@@ -475,6 +475,16 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
     action = str(signal.get("action") or "").upper()
     if action not in {"BUY", "SELL", "HOLD", "SHORT"}:
         raise ValueError("Invalid signal action")
+    discovery = None
+    if candidate.get('entry_discovery') is not None:
+        from entry_discovery import validate_attribution, enabled_ids, BASELINE
+        discovery = validate_attribution(candidate['entry_discovery'])
+        if BASELINE not in discovery['strategy_ids']:
+            if not set(discovery['strategy_ids']).intersection(enabled_ids()):
+                raise ValueError('new_entry_discovery_disabled')
+            if action != 'BUY':
+                raise ValueError('entry_discovery_buy_only')
+        candidate = dict(candidate, entry_discovery=discovery)
     entry = float(signal["entry"])
     stop = float(signal["stop_loss"])
     if not all(math.isfinite(value) and value > 0 for value in (entry, stop)):
@@ -490,6 +500,12 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
         raise ValueError("Invalid target order")
     cfg = lifecycle_settings()
     created = now_z()
+    if discovery and parse_time(discovery['detected_at']) > parse_time(created):
+        raise ValueError('future_discovery_decision')
+    if discovery and BASELINE not in discovery['strategy_ids']:
+        from entry_discovery import validate_candidate_trigger
+        validate_candidate_trigger(candidate, entry, signal.get('quote_at'), created,
+                                   allowed_ids=enabled_ids())
     plan = signal.get("target_plan")
     short = action == 'SHORT'
     if short:
@@ -580,11 +596,12 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
         elif quantity > 0:
             key = f"signal:{signal_id}:entry"
             values = (signal_id, key, "entry", "sell" if short else "buy", cfg["entry_order_type"], entry, quantity, "pending", valid_until, created, created)
-            if v2 or short:
+            if v2 or short or discovery:
                 cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at,plan_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                             values + (_json({'target_plan': plan, 'execution_settings': cfg,
                                              **({'entry_execution': window} if window else {}),
-                                             **({'entry_price_retry': price_retry} if price_retry else {})}),))
+                                             **({'entry_price_retry': price_retry} if price_retry else {}),
+                                             **({'entry_discovery': discovery} if discovery else {})}),))
             else:
                 # Bridge must continue normal V1 admissions before migration 006.
                 cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", values)
@@ -595,8 +612,15 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
         trade = cur.fetchone()
         if trade:
             key = f"signal:{signal_id}:close:{trade['id']}"
-            cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                        (signal_id, key, "close_long", "sell", "limit", entry, float(trade["remaining_quantity"]), "pending", valid_until, created, created))
+            values = (signal_id, key, "close_long", "sell", "limit", entry,
+                      float(trade["remaining_quantity"]), "pending", valid_until, created, created)
+            if discovery:
+                # The closing signal has its own audit evidence. Do not replace
+                # the original entry attribution or its saved execution policy.
+                cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at,plan_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                            values + (_json({'entry_discovery': discovery}),))
+            else:
+                cur.execute("INSERT INTO scanner_orders(signal_id,client_order_key,purpose,side,order_type,limit_price,quantity,status,valid_until,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", values)
             status = "PENDING_CLOSE"
         else:
             status = "BEARISH_ONLY"
@@ -1002,6 +1026,10 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
     strategies = [('single', 0)] if v2 or short else [(active, 0), ("staged" if active == "single" else "single", 1)]
     for strategy, shadow in strategies:
         snapshot = dict(cfg, strategy=strategy, captured_at=bar_at, target_plan=target_plan)
+        discovery = contract.get('entry_discovery')
+        if discovery is not None:
+            from entry_discovery import validate_attribution
+            snapshot['entry_discovery'] = validate_attribution(discovery)
         if contract.get('entry_execution'):
             snapshot['entry_execution'] = contract['entry_execution']
         if contract.get('entry_price_retry'):

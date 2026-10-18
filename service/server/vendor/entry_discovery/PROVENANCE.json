@@ -1,0 +1,44 @@
+{
+  "repository": "https://github.com/tradermonty/claude-trading-skills",
+  "commit": "b29c6dfc2d4dc82bdfcfc13891e490863283405f",
+  "license": "MIT",
+  "copyright": "2026 TraderMonty",
+  "external_repository_count": 1,
+  "runtime_dependencies": ["Python standard library only"],
+  "files": [
+    {
+      "file": "vcp_pattern_calculator.py",
+      "upstream_path": "skills/vcp-screener/scripts/calculators/vcp_pattern_calculator.py",
+      "git_blob": "a2c8c56f018964b3e74b59672f9cd07e9d15f154",
+      "sha256": "2d5f3d5e019c51723cfc27a2fb9db89d1ff03deaefa3cf50c4e9b512511bc002",
+      "copied_unchanged": true
+    },
+    {
+      "file": "stockbee.py",
+      "upstream_path": "skills/stockbee-momentum-burst-screener/scripts/screen_momentum_burst.py",
+      "upstream_git_blob": "c57e2d744cc7799d55f2eaf913291b03320b944e",
+      "sha256": "f0c55d087b009775ade81a5508d8376018e7504f87e2cec0b0fa51d68862fadb",
+      "extraction": "Unmodified class/function bodies plus local descriptive header and standard-library imports only.",
+      "included_symbols": ["Bar", "BaseProfile", "TriggerProfile", "average", "pct_change", "close_location_pct", "detect_base_profile", "detect_triggers"]
+    },
+    {
+      "file": "LICENSE",
+      "upstream_path": "LICENSE",
+      "git_blob": "f04a7bced8bb1f03ce92fbdc6912594b0c37d3c0",
+      "sha256": "87c93cde8c3a000c19b0c790cd4f7a4e4cb8da5bc6b11e0939bf6df99e245d15",
+      "copied_unchanged": true
+    }
+  ],
+  "adapter_corrections_and_boundaries": [
+    "Independent discovery calls no legacy analyze_history, PR85, existing target rejection, external CLI, provider or order path.",
+    "Only completed as-of bars are consumed; latest trigger is excluded from VCP base, volume baselines and prior pivots.",
+    "VCP uses the raw source pivot at the donor contraction index, not the donor rounded display price. ZigZag evidence uses only its completed prior prefix, not future source values.",
+    "Stockbee uses donor trigger and consolidation primitives, but no risk-distance, sizing, stop, market score or 3-to-5-day exit template.",
+    "PEAD is explicitly a locally authored verified earnings-event gap plus daily consolidation follow-through hypothesis, not an unchanged copy of the donor weekly red-candle strategy, not EPS surprise, and not verified performance.",
+    "Trend Pullback/Reclaim and Relative Strength Leader are locally authored small setup/trigger adapters, not claimed external profitable implementations.",
+    "Default configurations are transparent untuned research hypotheses. Scores are evidence descriptions, not return probabilities or proven optimal weights.",
+    "All discovered candidates still require original shared Technical/data, News/AI, confidence, RR, budget/exposure, paper execution and TP/SL gates. No existing order or position is modified."
+  ],
+  "excluded": ["upstream instructions", "skills prompts", "network clients", "FMP credentials or subscriptions", "CLI", "file readers or writers", "broker integration", "orders", "sizing", "targets or stops", "exit policy", "performance claims"],
+  "license_obligation": "Preserve this MIT license and copyright notice with all copies or substantial portions."
+}

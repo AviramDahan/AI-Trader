@@ -43,7 +43,19 @@ def validate_snapshot(data):
                 raise ValueError('unsupported_preserved_policy')
     signals = {s['id']: s for s in tables['scanner_signals']}
     orders = {o['id']: o for o in tables['scanner_orders']}
+    for table, field in (('scanner_signals', 'technical_json'), ('scanner_orders', 'plan_json'),
+                         ('scanner_trades', 'settings_json')):
+        for row in tables[table]:
+            discovery = json.loads(row.get(field) or '{}').get('entry_discovery')
+            if discovery is not None:
+                from entry_discovery import validate_attribution
+                validate_attribution(discovery)
     for s in signals.values():
+        discovery = json.loads(s.get('technical_json') or '{}').get('entry_discovery')
+        if discovery is not None:
+            from entry_discovery import instant
+            if instant(discovery['detected_at']) > instant(s['created_at']):
+                raise ValueError('future_discovery_attribution')
         p = plan(s, 'technical_json')
         if is_single(p):
             validate(p, s['planned_entry'], s['original_stop'], s['action'])
@@ -52,6 +64,10 @@ def validate_snapshot(data):
             if [s['tp1_pct'],s['tp2_pct'],s['tp3_pct']] != [1,0,0]:
                 raise ValueError('single_signal_fractions_mismatch')
     for o in orders.values():
+        order_discovery = json.loads(o.get('plan_json') or '{}').get('entry_discovery')
+        signal_discovery = json.loads(signals[o['signal_id']].get('technical_json') or '{}').get('entry_discovery')
+        if order_discovery != signal_discovery:
+            raise ValueError('order_discovery_attribution_mismatch')
         from entry_price_retry import validate_order
         validate_order(o)
         from entry_window import eligible_from
@@ -69,6 +85,10 @@ def validate_snapshot(data):
             if json.loads(o['plan_json'])['execution_settings']['active_strategy'] != 'single':
                 raise ValueError('single_order_strategy_mismatch')
     for t in tables['scanner_trades']:
+        saved_discovery = json.loads(t.get('settings_json') or '{}').get('entry_discovery')
+        order_discovery = json.loads(orders[t['order_id']].get('plan_json') or '{}').get('entry_discovery')
+        if saved_discovery != order_discovery:
+            raise ValueError('trade_discovery_attribution_mismatch')
         p = plan(t, 'settings_json')
         op = plan(orders[t['order_id']], 'plan_json')
         saved_window = json.loads(t.get('settings_json') or '{}').get('entry_execution')

@@ -31,6 +31,8 @@ jobs:
         run: python -m pytest service/server/tests --ignore=service/server/tests/test_stock_scanner.py -q
       - name: Stock scanner tests (providers mocked)
         run: python -m pytest service/server/tests/test_stock_scanner.py -q
+      - name: Independent entry discovery paired comparison (offline only)
+        run: python -m pytest research/tests/test_compare_entry_strategies.py -q
 
   frontend:
     runs-on: ubuntu-latest

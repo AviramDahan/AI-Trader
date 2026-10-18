@@ -27,7 +27,8 @@ CONFIG_FIELDS = {'active_strategy','entry_order_type','signal_validity_hours','p
     'max_symbol_exposure','max_total_exposure','slippage_bps','commission_per_share',
     'minimum_commission','breakeven_threshold','tp1_pct','tp2_pct','tp3_pct',
     'staged_stop_after_tp2','news_interval_hours','news_overlap_hours','monitor_interval',
-    'quote_refresh_seconds','strategy','captured_at','target_plan','entry_execution','entry_price_retry'}
+    'quote_refresh_seconds','strategy','captured_at','target_plan','entry_execution','entry_price_retry',
+    'entry_discovery'}
 SECRET_PATTERN = re.compile(r'sk-or-v1-[a-zA-Z0-9]+|-----BEGIN .*PRIVATE KEY|postgres(?:ql)?://|\b\d{7,12}:[A-Za-z0-9_-]{30,}|\bgh[pousr]_[A-Za-z0-9_]{20,}')
 POLICY_DEFAULTS = {
     'STOCK_SCANNER_EXIT_STRATEGY':'single', 'STOCK_SCANNER_EXTENDED_EXITS_FROM':'',
@@ -56,10 +57,19 @@ def sanitize(data):
     data['tables']['scanner_target_revisions']=[]
     for row in data['tables']['scanner_signals']:
         plan = single_target_recovery.plan(row, 'technical_json')
+        original = json.loads(row.get('technical_json') or '{}')
+        provenance = original.get('entry_discovery')
+        if provenance is not None:
+            from entry_discovery import validate_attribution
+            provenance = validate_attribution(provenance)
         row.update(news_json='[]', technical_json='{}',market_context_json='{}',
                    reason='',reason_he='',confidence_basis='{}')
+        preserved = {}
         if is_single(plan) or is_short(plan):
-            row['technical_json'] = json.dumps({'target_plan': plan}, sort_keys=True)
+            preserved['target_plan'] = plan
+        if provenance:
+            preserved['entry_discovery'] = provenance
+        row['technical_json'] = json.dumps(preserved, sort_keys=True)
     for row in data['tables']['signals']:
         for field in ('content','title','tags'):
             if field in row: row[field]=None
@@ -91,12 +101,21 @@ def validate(data):
         raise ValueError('unnecessary_history_in_recovery')
     for row in data['tables']['scanner_signals']:
         technical = json.loads(row['technical_json'])
-        allowed = not technical or (set(technical) == {'target_plan'} and (is_single(technical['target_plan']) or is_short(technical['target_plan'])))
+        allowed = set(technical) <= {'target_plan', 'entry_discovery'}
+        if 'target_plan' in technical:
+            allowed = allowed and (is_single(technical['target_plan']) or is_short(technical['target_plan']))
+        if 'entry_discovery' in technical:
+            from entry_discovery import validate_attribution
+            validate_attribution(technical['entry_discovery'])
         if row['news_json']!='[]' or not allowed or row['market_context_json']!='{}':
             raise ValueError('news_history_forbidden')
     for row in data['tables']['scanner_trades']:
         if set(json.loads(row['settings_json']))-CONFIG_FIELDS:
             raise ValueError('unapproved_recovery_settings')
+        discovery = json.loads(row['settings_json']).get('entry_discovery')
+        if discovery is not None:
+            from entry_discovery import validate_attribution
+            validate_attribution(discovery)
     raw=json.dumps(data,ensure_ascii=True,allow_nan=False)
     if SECRET_PATTERN.search(raw): raise ValueError('secret_pattern_in_recovery')
     for name,value in os.environ.items():
