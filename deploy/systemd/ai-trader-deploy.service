@@ -1,0 +1,13 @@
+[Unit]
+Description=AI Trader protected outbound release gate
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ai-trader-pull
+UMask=0077
+TimeoutStartSec=5100
+TimeoutStopSec=1200
+KillMode=mixed

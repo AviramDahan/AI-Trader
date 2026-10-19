@@ -15,7 +15,8 @@ from test_recovery_holds import initialize_empty, add_holds, seed_legacy, state
 
 
 @pytest.mark.parametrize('push_fails', [False, True])
-def test_backup_archive_remote_confirmation_before_retention(pg, tmp_path, monkeypatch, push_fails):
+@pytest.mark.parametrize('managed', [False, True])
+def test_backup_archive_remote_confirmation_before_retention(pg, tmp_path, monkeypatch, push_fails, managed):
     seed(pg)
     initialize_empty()
     add_holds(['MSFT'])
@@ -62,12 +63,15 @@ def test_backup_archive_remote_confirmation_before_retention(pg, tmp_path, monke
         monkeypatch.setenv(name, str(value))
     # backup() sets this process-wide variable; prevent it leaking to other tests.
     monkeypatch.setenv('GIT_SSH_COMMAND', '')
+    if managed:
+        monkeypatch.setenv('BUILD_SHA', 'b' * 40)
+    options = dict(lock_wait_seconds=1, request_id='a' * 32) if managed else {}
     if push_fails:
         with pytest.raises(subprocess.CalledProcessError):
-            recovery_backup.backup()
+            recovery_backup.backup(managed, **options)
         assert rows(pg) == before and not (repo.parent / 'status.json').exists()
     else:
-        result = recovery_backup.backup()
+        result = recovery_backup.backup(managed, **options)
         archive = result['sec_history']
         assert archive['format'] == 1 and archive['counts']['si_decisions'] == 2
         assert original_command('git', 'ls-remote', str(remote), 'refs/heads/main').decode().split()[0] == archive['remote_commit']
@@ -83,5 +87,12 @@ def test_backup_archive_remote_confirmation_before_retention(pg, tmp_path, monke
             assert archive['retention']['deleted']['si_decisions'] == 1
             assert archive['retention']['checkpoints_preserved']
         assert json.loads((repo.parent / 'status.json').read_text()) == result
+        if managed:
+            proof = result['managed_request']
+            assert proof['version'] == 1 and proof['request_id'] == 'a' * 32
+            assert proof['build_sha'] == 'b' * 40 and proof['predeploy'] is True
+            assert proof['remote_commit'] == archive['remote_commit']
+            from datetime import datetime
+            assert datetime.fromisoformat(proof['started_at']) <= datetime.fromisoformat(proof['finished_at'])
     assert pushes == [True]  # failure injection must reach push, not fail earlier
     assert state() == portfolio  # neither archive nor retention debits/releases held cash

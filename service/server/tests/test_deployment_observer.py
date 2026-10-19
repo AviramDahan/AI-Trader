@@ -13,7 +13,7 @@ SHA = "a" * 40
 OLD_SHA = "b" * 40
 ENDPOINT = "https://2-28-100-77.sslip.io/health"
 OBSERVER_NAME = "Verify server pull-deployment and all-role readiness marker"
-WINDOW = 27 * 60
+WINDOW = 112 * 60
 MAX_BODY = 16 * 1024
 FAILURE = "Deployment not verified; inspect server deployment service. No success assumed."
 
@@ -307,15 +307,20 @@ throw new Error('CI not complete; no deployment');
 def test_workflow_time_budgets_have_bounded_external_backstops():
     job = workflow()["jobs"]["deploy"]
     ci, observer = job["steps"]
-    assert int(job["timeout-minutes"]) == 40
+    assert int(job["timeout-minutes"]) == 125
     assert int(ci["timeout-minutes"]) == 11
-    assert int(observer["timeout-minutes"]) == 28
-    assert 11 + 28 < 40
+    assert int(observer["timeout-minutes"]) == 113
+    assert 11 + 113 < 125
     result = execute(lambda clock, _call: Response(clock, payload(marker=OLD_SHA)))
     assert_failed_closed(result)
     assert result.clock.now == WINDOW
-    assert WINDOW == 5 * 60 + 20 * 60 + 2 * 60
+    assert WINDOW == 5 * 60 + 85 * 60 + 20 * 60 + 2 * 60
     assert WINDOW < int(observer["timeout-minutes"]) * 60
+    service = dict(line.split('=', 1) for line in
+        (ROOT / 'deploy/systemd/ai-trader-deploy.service').read_text().splitlines() if '=' in line)
+    assert int(service['TimeoutStartSec']) == 85 * 60
+    assert int(service['TimeoutStopSec']) == 20 * 60
+    assert service['KillMode'] == 'mixed'
 
 
 def test_execution_harness_denies_nonallowlisted_imports_and_file_io():

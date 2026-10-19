@@ -7,13 +7,38 @@ import argparse
 import fcntl
 import json
 import os
+import re
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
 import recovery_state
+
+
+MAX_LOCK_WAIT_SECONDS = 900
+
+
+class BackupBusy(BlockingIOError):
+    """A valid writer still owns the shared lock; no backup has failed."""
+
+
+def acquire_backup_lock(lock, wait_seconds=0):
+    """Bound our wait, never the lifetime of an already running backup."""
+    if type(wait_seconds) is not int or not 0 <= wait_seconds <= MAX_LOCK_WAIT_SECONDS:
+        raise ValueError('invalid_backup_lock_wait')
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BackupBusy('backup_lock_busy') from None
+            time.sleep(min(0.25, remaining))
 
 
 def command(*args, cwd=None):
@@ -34,15 +59,22 @@ def prune(repo):
             path.unlink()
 
 
-def backup(predeploy=False):
+def backup(predeploy=False, *, lock_wait_seconds=0, request_id=None):
+    if request_id is not None and not re.fullmatch('[0-9a-f]{32}', request_id):
+        raise ValueError('invalid_backup_request_id')
+    build_sha = os.getenv('BUILD_SHA', '')
+    if request_id is not None and not re.fullmatch('[0-9a-f]{40}', build_sha):
+        raise ValueError('managed_backup_build_sha_missing')
     repo=Path(os.getenv('RECOVERY_WORKDIR','/backup/repository'))
     slug=os.environ['RECOVERY_GITHUB_REPO']
-    # Never upload to a repo readable anonymously. API outages fail closed.
-    if requests.get('https://api.github.com/repos/'+slug,timeout=20).status_code!=404:
-        raise ValueError('private_repository_check_failed')
     repo.parent.mkdir(parents=True,exist_ok=True)
-    with (repo.parent/'backup.lock').open('w') as lock:
-        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    with (repo.parent/'backup.lock').open('a') as lock:
+        acquire_backup_lock(lock, lock_wait_seconds)
+        started_at = datetime.now(timezone.utc)
+        # A busy contender performs no provider call or status mutation. The
+        # actual writer still checks anonymity on every real backup attempt.
+        if requests.get('https://api.github.com/repos/'+slug,timeout=20).status_code!=404:
+            raise ValueError('private_repository_check_failed')
         os.environ['GIT_SSH_COMMAND']='ssh -i /run/secrets/recovery_deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/run/secrets/github_known_hosts'
         remote='git@github.com:'+slug+'.git'
         if not (repo/'.git').exists():
@@ -104,7 +136,20 @@ def backup(predeploy=False):
             status['sec_history'] = {'format': 1, 'captured_at': sec_archive['manifest']['captured_at'],
                 'manifest': sec_archive['manifest_path'], 'counts': sec_archive['manifest']['counts'],
                 'remote_commit': commit, 'retention': retention}
-        (repo.parent/'status.json').write_text(json.dumps(status))
+        if request_id is not None:
+            status['managed_request'] = {'version': 1, 'request_id': request_id,
+                'build_sha': build_sha, 'predeploy': bool(predeploy),
+                'started_at': started_at.isoformat(),
+                'finished_at': datetime.now(timezone.utc).isoformat(),
+                'remote_commit': commit}
+        # Readers never observe half a proof. This contains metadata only,
+        # never a plaintext recovery snapshot or a credential.
+        descriptor, temporary = tempfile.mkstemp(prefix='.status-', suffix='.next', dir=repo.parent)
+        with os.fdopen(descriptor, 'w') as stream:
+            json.dump(status, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, repo.parent/'status.json')
         Path('/tmp/backup-ok').touch()
         from scanner_engine import set_service_status
         set_service_status('backup','ok','Encrypted off-server recovery state verified',success=True)
@@ -116,10 +161,25 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--once',action='store_true')
     parser.add_argument('--predeploy',action='store_true')
+    parser.add_argument('--lock-wait-seconds',type=int,default=0)
+    parser.add_argument('--request-id')
     args=parser.parse_args()
+    if not 0 <= args.lock_wait_seconds <= MAX_LOCK_WAIT_SECONDS:
+        parser.error('lock wait must be between 0 and 900 seconds')
+    if args.request_id is not None and not re.fullmatch('[0-9a-f]{32}', args.request_id):
+        parser.error('request id must be 32 lowercase hexadecimal characters')
     while True:
         try:
-            backup(args.predeploy)
+            backup(args.predeploy, lock_wait_seconds=args.lock_wait_seconds,
+                   request_id=args.request_id)
+        except BackupBusy:
+            # Contention does not overwrite the last successful snapshot or
+            # publish a spurious backup error. The owning writer is untouched.
+            print(json.dumps({'backup':'busy','reason':'backup_lock_busy'}),flush=True)
+            if args.once:
+                raise SystemExit(75)
+            time.sleep(60)
+            continue
         except Exception as exc:
             try:
                 from scanner_engine import set_service_status
