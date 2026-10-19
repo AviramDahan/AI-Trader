@@ -145,7 +145,16 @@ def test_real_inherited_fd_cannot_bypass_identity_or_lock(tmp_path, monkeypatch,
 def test_real_hard_kill_keeps_attempt_and_refuses_blind_retry(tmp_path, monkeypatch):
     pull = load_pull(tmp_path)
     monkeypatch.delenv("AI_TRADER_DEPLOY_LOCK_FD", raising=False)
-    body = "\nwith m.deployment_lock():\n value=m.journal_begin(" + repr(SHA) + "," + repr(IMAGE) + ")\n print(json.dumps({'ready':value['attempt_id']}),flush=True)\n signal.pause()\n"
+    # Only Docker IO is synthetic. Canonical verify_container, durable journal,
+    # inherited lock/inode operations and real SIGKILL remain actual code.
+    proof = dict(version=1, kind='classic', runnable_ref=IMAGE, platform='linux/amd64',
+                 platform_manifest=None, config_digest=IMAGE, build_sha=SHA, user='10001:10001')
+    row = dict(Image=IMAGE, Config=dict(Env=['BUILD_SHA=' + SHA], User='10001:10001'),
+               State=dict(Running=True, Health=dict(Status='healthy'), OOMKilled=False))
+    body = ("\nm.image_identity=lambda *a,**k:" + repr(proof)
+            + "\nm.inspect=lambda *a,**k:" + repr(row)
+            + "\nwith m.deployment_lock():\n value=m.journal_begin(" + repr(SHA) + "," + repr(IMAGE)
+            + ")\n print(json.dumps({'ready':value['attempt_id']}),flush=True)\n signal.pause()\n")
     process = subprocess.Popen(child_command(tmp_path, body), env=child_env(), stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE)
     try:

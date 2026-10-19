@@ -52,6 +52,19 @@ def dispatch():
             elif '--check-rollback' in args:
                 if state.get('unsafe_old_image'):
                     return 67
+            elif '--resolve-running' in args:
+                print(state['images'].get(option('--role'), OLD))
+            elif '--verify-role' in args:
+                role = option('--role')
+                image = state['images'].get(role, OLD)
+                if image != option('--image'):
+                    return 1
+                if '--allow-stopped' not in args:
+                    if role == 'backup' and not state.get('backup_running', True):
+                        return 1
+                    if image == NEW and ((role == 'backup' and state.get('silent_starting')) or
+                            (role == 'api' and (state.get('stopped_healthy') or state.get('oom_healthy')))):
+                        return 1
             elif '--commit-release' in args:
                 assert all(state['images'].get(role, OLD) == NEW for role in ('api', 'monitor', 'scanner', 'telegram', 'backup'))
                 server = Path(os.environ['BACKUP_TEST_SERVER'])
@@ -236,6 +249,7 @@ class BackupReleaseReadinessTest(unittest.TestCase):
         result = self.run_release()
         self.assertEqual(result.returncode, 67, result.stdout + result.stderr)
         self.assertEqual((self.state['backups'], self.state['stops'], self.state['migrations']), (0, 0, 0))
+        self.assertEqual(self.state['phase'], 'FAILED', 'explicit exit67 must not bypass the durable failure handler')
 
     def test_api_failure_rolls_back_without_waiting_for_new_backup(self):
         self.state['fail_api'] = True
