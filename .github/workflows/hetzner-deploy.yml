@@ -14,7 +14,7 @@ jobs:
   deploy:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 125
     steps:
       - name: Require CI success for the exact same commit
         timeout-minutes: 11
@@ -31,7 +31,7 @@ jobs:
             }
             throw new Error('CI not complete; no deployment');
       - name: Verify server pull-deployment and all-role readiness marker
-        timeout-minutes: 28
+        timeout-minutes: 113
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
@@ -39,8 +39,9 @@ jobs:
           import os,json,time,urllib.request
           sha=os.environ['SHA']
           # Polling deadline, not a hard DNS/TLS whole-call deadline. The step
-          # timeout is the backstop. Cover 5m timer + 20m service + 2m margin.
-          deadline=time.monotonic()+27*60
+          # timeout is the backstop. Include 5m timer + 85m start budget,
+          # the 20m TERM/rollback backstop, and 2m observation margin.
+          deadline=time.monotonic()+112*60
           max_body_bytes=16*1024
           verified=False
           while True:

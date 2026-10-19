@@ -18,10 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main(image):
     health = yaml.safe_load((ROOT / 'deploy/compose.yml').read_text())['services']['backup']['healthcheck']
-    assert health['interval'] == '15s' and health['start_period'] == '600s' and health['retries'] == 2
-    cases = [('old_timeout', 4, '2s', '1s', 3, False),
-             ('slow_verified_completion', 4, '10s', '250ms', 10, True),
-             ('no_completion', 60, '10s', '250ms', 10, False)]
+    assert health['interval'] == '15s' and health['start_period'] == '1200s' and health['retries'] == 2
+    cases = [('old_timeout', 11, '10s', '250ms', 10, False),
+             ('slow_verified_completion', 11, '20s', '250ms', 20, True),
+             ('no_completion', 60, '20s', '250ms', 20, False)]
     with tempfile.TemporaryDirectory(prefix='backup-health-test-') as temp:
         for name, delay, grace, interval, timeout, expected in cases:
             project = 'backup-proof-' + str(os.getpid()) + '-' + name.replace('_', '-')
