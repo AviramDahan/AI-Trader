@@ -151,6 +151,8 @@ def test_real_hard_kill_keeps_attempt_and_refuses_blind_retry(tmp_path, monkeypa
                  platform_manifest=None, config_digest=IMAGE, build_sha=SHA, user='10001:10001')
     row = dict(Image=IMAGE, Config=dict(Env=['BUILD_SHA=' + SHA], User='10001:10001'),
                State=dict(Running=True, Health=dict(Status='healthy'), OOMKilled=False))
+    monkeypatch.setattr(pull, "image_identity", lambda *a, **k: proof)
+    monkeypatch.setattr(pull, "inspect", lambda *a, **k: row)
     body = ("\nm.image_identity=lambda *a,**k:" + repr(proof)
             + "\nm.inspect=lambda *a,**k:" + repr(row)
             + "\nwith m.deployment_lock():\n value=m.journal_begin(" + repr(SHA) + "," + repr(IMAGE)
