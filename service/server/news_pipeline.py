@@ -1171,6 +1171,14 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
         from news_events.runtime import pipeline
         from news_events.provider_config import collect
         summary['canonical_providers']=collect(pipeline(),current)
+    # Original-release parsing is a bounded feed-worker job, never a UI/scan
+    # request, LLM job, or transaction covering HTTP. OFF/bridge do no DB/network.
+    if provider_fetchers is None:
+        try:
+            from earnings_releases import produce
+            summary['earnings_releases'] = produce()
+        except Exception as exc:
+            summary['earnings_releases'] = {'status': 'degraded', 'reason': type(exc).__name__}
     return summary
 
 

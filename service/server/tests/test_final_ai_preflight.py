@@ -181,6 +181,9 @@ def test_telemetry_durable_unknown_usage_and_no_db_lock_during_http(db,monkeypat
 def pipeline(monkeypatch,tmp_path):
     # Existing V1/STAGED preflight regression; V2 is covered separately.
     monkeypatch.setattr(scanner_engine, 'lifecycle_settings', lambda: {'active_strategy':'staged'})
+    # This fixture mocks the durable runtime, not the entry-stop database.
+    monkeypatch.setattr(__import__('entry_emergency'), 'status',
+                        Mock(return_value={'valid': True, 'paused': False, 'reason': None}))
     monkeypatch.setenv("STOCK_SCANNER_TOKEN","test-only")
     monkeypatch.setenv("STOCK_SCANNER_AI_CANDIDATE_LIMIT","6")
     monkeypatch.setattr(scanner,'regular_session_open',lambda:True)

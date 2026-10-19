@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { API_ORIGIN } from './appShared'
 import { REASON_DETAILS, reasonTitle } from './activityReasons'
+import { StrategyPerformance } from './StrategyPerformance'
 
 type Row = Record<string, any>
 const value = (v: any, suffix = '') => v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(2)}${suffix}` : '—'
@@ -117,7 +118,8 @@ export function SignalResearch({ he, mode = 'research' }: { he: boolean, mode?: 
     const interval = window.setInterval(() => void refresh(), 60000)
     return () => { active = false; controller.abort(); window.clearInterval(interval) }
   }, [hours])
-  return <ResearchView he={he} mode={mode} data={data} error={error} hours={hours} setHours={setHours} side={side} setSide={setSide} ticker={ticker} setTicker={setTicker} />
+  return <>{mode === 'results' && <StrategyPerformance he={he} />}
+    <ResearchView he={he} mode={mode} data={data} error={error} hours={hours} setHours={setHours} side={side} setSide={setSide} ticker={ticker} setTicker={setTicker} /></>
 }
 
 export function ResearchView({ he, mode = 'research', data, error = '', hours = 48,
@@ -149,6 +151,7 @@ export function ResearchView({ he, mode = 'research', data, error = '', hours = 
         <p className="scanner-note">{t('בדיקות חוזרות אינן הזדמנויות חדשות. השלבים מוצגים לפי הראיות שנשמרו ואינם בהכרח משפך מלא או מקונן.', 'Repeated checks are not new opportunities. Stages reflect retained evidence and are not necessarily a complete or nested funnel.')}</p>
         <p>{t('חסר מחיר בשעות מסחר רגילות', 'Missing quote during regular session')}: {data.quote_context.regular_session || 0} · {t('מחוץ לשעות מסחר רגילות', 'Outside regular session')}: {data.quote_context.outside_regular_session || 0}</p>
         <p>{t('המתנה למסחר הרגיל — בנפרד מפסילות איכות', 'Waiting for regular session — separate from quality rejects')}: {Object.values(data.session_waits || {}).reduce((sum: number, n: any) => sum + Number(n), 0)}</p>
+        {data.operational_entry_blocks && <p>{t('עצירת כניסות תפעולית — לא פסילת איכות; ניטור ויציאות ממשיכים', 'Operational entry stop — not a quality rejection; monitoring and exits continue')}: {Object.values(data.operational_entry_blocks).reduce((sum: number, n: any) => sum + Number(n), 0)}</p>}
         <p>{t('חסימת הקצאה בסימולטור', 'Simulator allocation blocks')}: {data.execution.allocation_blocked} · {t('מילוי פקודות כניסה', 'Entry-order fill rate')}: {value(data.execution.fill_rate == null ? null : 100 * data.execution.fill_rate, '%')}</p>
         <p>{t('תשובות AI שעברו validation', 'AI responses validated')}: {counts.ai_validated ?? '—'} · {t('ניסיונות מתועדים, כולל שגיאות לפני בקשה', 'Recorded attempts, including pre-request failures')}: {counts.ai_attempt_records ?? '—'}</p>
       </>}

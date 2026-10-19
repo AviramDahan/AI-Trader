@@ -67,6 +67,19 @@ for(const code of ['SchemaFailure_fail_closed','BudgetUnavailable_fail_closed','
 }
 const unknown=item({rejection:'UNKNOWN_NEW_RULE'})
 ok(explainActivity(unknown,true).title.includes('אינה זמינה'));ok(!markup(unknown,true).includes('UNKNOWN_NEW_RULE'))
+for(const code of ['entry_emergency_paused','entry_emergency_control_invalid','entry_emergency_incomplete_bar','entry_emergency_paused_bar','entry_emergency_before_resume']){
+ for(const prefix of ['', 'pre_']){
+  const i=item({rejection:prefix+code,rejection_stage:'entry_pause'})
+  ok(['wait','processing'].includes(reasonDefinition(prefix+code).kind))
+  for(const he of [true,false]){
+   const e=explainActivity(i,he),html=markup(i,he)
+   ok(!e.title.includes(he?'אינה זמינה':'unavailable'))
+   ok(e.detail.includes(he?'יציאות':'exits'))
+   ok(e.detail.includes(he?'לא פסילה':'not a stock-quality'))
+   ok(!html.includes(he?'לא עברה את הבדיקה':'Check did not pass'))
+  }
+ }
+}
 for(const code of ['__proto__','constructor','toString']){
  eq(reasonDefinition(code).kind,'unknown');ok(markup(item({rejection:code}),true).includes('אינה זמינה'))
 }

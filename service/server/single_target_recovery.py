@@ -7,9 +7,54 @@ def plan(row, field):
     return json.loads(row.get(field) or '{}').get('target_plan')
 
 
-def version(tables):
+def validate_settings(settings):
+    """Bounded operational settings are part of the recovery contract, not prose.
+
+    In particular a persisted emergency history must never be downgraded to a
+    pre-control format or silently dropped by a sanitizer/older reader.
+    """
+    if not isinstance(settings, list) or len(settings) > 2:
+        raise ValueError('unsupported_recovery_settings')
+    seen = set()
+    for row in settings:
+        if (not isinstance(row, dict) or set(row) != {'key', 'value_json', 'updated_at'}
+                or row['key'] not in {'active_exit_strategy', 'paper_entry_emergency_v1'}
+                or row['key'] in seen):
+            raise ValueError('unsupported_recovery_settings')
+        seen.add(row['key'])
+        if row['key'] == 'paper_entry_emergency_v1':
+            from entry_emergency import validate, MAX_BYTES
+            def pairs(items):
+                result = {}
+                for key, item in items:
+                    if key in result:
+                        raise ValueError('duplicate_emergency_snapshot_key')
+                    result[key] = item
+                return result
+            raw = row['value_json']
+            if not isinstance(raw, str) or len(raw.encode()) > MAX_BYTES:
+                raise ValueError('invalid_emergency_snapshot_payload')
+            payload = validate(json.loads(raw, object_pairs_hook=pairs))
+            if (payload['revision'] == 0 or payload['updated_at'] is None or
+                    row['updated_at'] != payload['updated_at']):
+                raise ValueError('emergency_snapshot_clock_mismatch')
+    return 'paper_entry_emergency_v1' in seen
+
+
+def version(tables, settings=None):
+    if settings is not None and validate_settings(settings):
+        return 9
     from short_policy import in_snapshot
     from single_breakout_policy import is_breakout
+    fields = (('scanner_signals','technical_json'), ('scanner_orders','plan_json'),
+              ('scanner_trades','settings_json'))
+    if any('entry_strategy_execution' in json.loads(r.get(field) or '{}') or
+           'last_strategy_entry_block' in json.loads(r.get(field) or '{}')
+           for table, field in fields for r in tables[table]):
+        return 8
+    if any('entry_discovery' in json.loads(r.get(field) or '{}')
+           for table, field in fields for r in tables[table]):
+        return 7
     if any('entry_price_retry' in json.loads(r.get(field) or '{}') or
            'last_entry_price_block' in json.loads(r.get(field) or '{}')
            for table, field in (('scanner_orders','plan_json'), ('scanner_trades','settings_json'))
@@ -28,11 +73,21 @@ def version(tables):
 
 def validate_snapshot(data):
     tables = data['tables']
-    if version(tables) == 6 and data['version'] != 6:
+    required = version(tables, data.get('settings', []))
+    if required >= 7 or data['version'] >= 7:
+        if data['version'] != required:
+            raise ValueError('discovery_snapshot_format_content_mismatch')
+    if required == 9:
+        from datetime import datetime
+        control = next(row for row in data['settings'] if row['key'] == 'paper_entry_emergency_v1')
+        updated = json.loads(control['value_json'])['updated_at']
+        if updated is not None and datetime.fromisoformat(updated.replace('Z', '+00:00')) > datetime.fromisoformat(data['created_at'].replace('Z', '+00:00')):
+            raise ValueError('future_emergency_snapshot_control')
+    if version(tables) == 6 and data['version'] not in (6, 9):
         raise ValueError('entry_price_retry_requires_format6')
-    if version(tables) == 5 and data['version'] not in (5,6):
+    if version(tables) == 5 and data['version'] not in (5,6,9):
         raise ValueError('entry_policy_requires_format5')
-    if version(tables) == 3 and data['version'] not in (3,4,5,6):
+    if version(tables) == 3 and data['version'] not in (3,4,5,6,9):
         raise ValueError('single_policy_requires_format3')
     from short_policy import is_short
     for table, field in (('scanner_signals','technical_json'), ('scanner_orders','plan_json'),
@@ -43,7 +98,23 @@ def validate_snapshot(data):
                 raise ValueError('unsupported_preserved_policy')
     signals = {s['id']: s for s in tables['scanner_signals']}
     orders = {o['id']: o for o in tables['scanner_orders']}
+    for table, field in (('scanner_signals', 'technical_json'), ('scanner_orders', 'plan_json'),
+                         ('scanner_trades', 'settings_json')):
+        for row in tables[table]:
+            discovery = json.loads(row.get(field) or '{}').get('entry_discovery')
+            if discovery is not None:
+                from entry_discovery import validate_attribution
+                validate_attribution(discovery)
     for s in signals.values():
+        technical = json.loads(s.get('technical_json') or '{}')
+        discovery = technical.get('entry_discovery')
+        if 'entry_strategy_execution' in technical:
+            from entry_strategy_execution import validate_association
+            validate_association(discovery, technical['entry_strategy_execution'])
+        if discovery is not None:
+            from entry_discovery import instant
+            if instant(discovery['detected_at']) > instant(s['created_at']):
+                raise ValueError('future_discovery_attribution')
         p = plan(s, 'technical_json')
         if is_single(p):
             validate(p, s['planned_entry'], s['original_stop'], s['action'])
@@ -52,6 +123,12 @@ def validate_snapshot(data):
             if [s['tp1_pct'],s['tp2_pct'],s['tp3_pct']] != [1,0,0]:
                 raise ValueError('single_signal_fractions_mismatch')
     for o in orders.values():
+        import entry_strategy_execution
+        entry_strategy_execution.validate_order(o, signal=signals[o['signal_id']])
+        order_discovery = json.loads(o.get('plan_json') or '{}').get('entry_discovery')
+        signal_discovery = json.loads(signals[o['signal_id']].get('technical_json') or '{}').get('entry_discovery')
+        if order_discovery != signal_discovery:
+            raise ValueError('order_discovery_attribution_mismatch')
         from entry_price_retry import validate_order
         validate_order(o)
         from entry_window import eligible_from
@@ -69,6 +146,17 @@ def validate_snapshot(data):
             if json.loads(o['plan_json'])['execution_settings']['active_strategy'] != 'single':
                 raise ValueError('single_order_strategy_mismatch')
     for t in tables['scanner_trades']:
+        trade_execution = json.loads(t.get('settings_json') or '{}').get('entry_strategy_execution')
+        order_execution = json.loads(orders[t['order_id']].get('plan_json') or '{}').get('entry_strategy_execution')
+        if trade_execution != order_execution:
+            raise ValueError('trade_strategy_execution_mismatch')
+        if trade_execution is not None:
+            from entry_strategy_execution import validate_fill as validate_strategy_fill
+            validate_strategy_fill(trade_execution, t['entry_price'])
+        saved_discovery = json.loads(t.get('settings_json') or '{}').get('entry_discovery')
+        order_discovery = json.loads(orders[t['order_id']].get('plan_json') or '{}').get('entry_discovery')
+        if saved_discovery != order_discovery:
+            raise ValueError('trade_discovery_attribution_mismatch')
         p = plan(t, 'settings_json')
         op = plan(orders[t['order_id']], 'plan_json')
         saved_window = json.loads(t.get('settings_json') or '{}').get('entry_execution')

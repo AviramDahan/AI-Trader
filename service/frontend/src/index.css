@@ -3797,3 +3797,36 @@ html[dir='rtl'] .main-content {
 .research-level-chart figcaption { font-size: .8rem; opacity: .75; }
 .research-timeline { padding-inline-start: 1.5rem; }
 .research-timeline > li { margin-block: .8rem; }
+.strategy-performance { min-width: 0; overflow-wrap: anywhere; }
+.strategy-performance-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 18px; }
+.strategy-performance-header h2, .strategy-performance-header p { margin: 0 0 8px; }
+.strategy-performance-header label { display: grid; gap: 6px; font-size: 13px; }
+.strategy-performance-header select { min-height: 42px; border: 1px solid var(--border-color); border-radius: 10px; padding: 8px 12px; background: var(--bg-secondary); color: var(--text-primary); }
+.strategy-performance-time, .strategy-performance-explanation { font-size: 13px; line-height: 1.8; color: var(--text-secondary); }
+.strategy-performance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr)); gap: 16px; }
+.strategy-performance-card, .strategy-performance-overall, .strategy-performance-exact { border: 1px solid var(--border-color); border-radius: 15px; padding: 18px; min-width: 0; background: var(--bg-secondary); }
+.strategy-performance-overall { margin: 16px 0; }
+.strategy-performance-card header { display: grid; gap: 8px; margin-bottom: 16px; }
+.strategy-performance-card h3, .strategy-performance-overall h3 { font-size: 17px; line-height: 1.6; margin: 0; }
+.strategy-performance-badge { width: fit-content; padding: 4px 9px; font-size: 11px; line-height: 1.5; border-radius: 8px; background: var(--bg-primary); color: var(--text-secondary); }
+.strategy-performance-badge.configured { color: #34d399; background: rgba(16,185,129,.09); }
+.strategy-performance-counts { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin: 14px 0; }
+.strategy-performance-counts div { min-width: 0; }
+.strategy-performance-counts dt { color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
+.strategy-performance-counts dd { margin: 2px 0 0; font-size: 21px; line-height: 1.5; font-weight: 700; }
+.strategy-performance-card summary, .strategy-performance-method > summary { min-height: 44px; padding: 10px 0; cursor: pointer; line-height: 1.7; font-size: 13px; }
+.strategy-performance-warning { border-inline-start: 3px solid #d99d36; background: rgba(217,157,54,.07); border-radius: 8px; padding: 12px; font-size: 13px; line-height: 1.8; }
+.strategy-performance-metrics { font-size: 13px; line-height: 1.8; }
+.strategy-performance-metrics dl { display: grid; gap: 12px; }
+.strategy-performance-metrics dl div { display: grid; gap: 3px; }
+.strategy-performance-metrics dt { color: var(--text-secondary); }
+.strategy-performance-metrics dd { margin: 0; font-size: 16px; font-weight: 600; }
+.strategy-performance-method { margin-top: 20px; line-height: 1.8; }
+.strategy-performance-exact { margin: 12px 0; }
+@media (max-width: 600px) {
+  .strategy-performance-card, .strategy-performance-overall, .strategy-performance-exact { padding: 15px; }
+  .strategy-performance-header { display: grid; gap: 10px; }
+  .strategy-performance-header label { max-width: 190px; }
+  .strategy-performance-grid { grid-template-columns: minmax(0,1fr); }
+  .strategy-performance-counts { gap: 14px 12px; }
+}

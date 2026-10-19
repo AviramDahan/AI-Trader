@@ -253,3 +253,22 @@ def test_price_wait_readback_is_derived_same_chain_and_read_only(db):
         assert set(wait)=={'version','reason','price','bar_at','observed_at'}
         assert 'DO-NOT-EXPOSE' not in json.dumps(result) and 'plan_json' not in json.dumps(result)
         assert before==[dict(r) for r in c.execute('SELECT * FROM scanner_orders')]
+
+
+@pytest.mark.parametrize('code', ['entry_emergency_paused','entry_emergency_control_invalid',
+    'entry_emergency_incomplete_bar','entry_emergency_paused_bar','entry_emergency_before_resume'])
+def test_entry_pause_is_operational_not_a_technical_quality_rejection(code):
+    assert research.reason_stage(code)=='entry_pause'
+    assert research.reason_stage('pre_'+code)=='entry_pause'
+
+
+def test_operational_entry_stop_counts_are_separate_from_quality_rejections(db):
+    with database.get_db_connection() as conn:
+        conn.execute("UPDATE scanner_candidates SET reason='pre_entry_emergency_paused' WHERE stage='final'")
+        conn.commit()
+        conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY' if database.using_postgres()
+                     else 'PRAGMA query_only=ON')
+        result=research.report(conn,48,NOW)
+        assert result['operational_entry_blocks']=={'pre_entry_emergency_paused':3}
+        assert result['rejection_reasons']=={} and result['rejection_stages']=={}
+        assert all(row['rejection_stage']=='entry_pause' for row in result['records'])

@@ -7,6 +7,10 @@ WORKDIR /app
 COPY service/requirements.txt service/requirements-telegram-reader.txt /app/service/
 RUN pip install --no-cache-dir -r service/requirements.txt -r service/requirements-telegram-reader.txt
 COPY --chown=10001:10001 service/server /app/service/server
+ARG ENTRY_DISCOVERY_ROLE=candidate
+RUN ENTRY_DISCOVERY_ROLE="$ENTRY_DISCOVERY_ROLE" python -c "import os,pathlib; role=os.environ['ENTRY_DISCOVERY_ROLE']; assert role in ('candidate','bridge'); p=pathlib.Path('/app/service/server/entry_discovery_capabilities.py'); source=p.read_text(); assert source.count(\"BUILD_ROLE = 'candidate'\")==1; p.write_text(source.replace(\"BUILD_ROLE = 'candidate'\", 'BUILD_ROLE = '+repr(role))); p.chmod(0o444)" \
+    && chown root:root /app/service/server /app/service/server/entry_discovery_capabilities.py \
+    && chmod 755 /app/service/server
 COPY --chown=10001:10001 deploy /app/deploy
 RUN mkdir -p /backup /reader /app/.runtime /app/service/server/logs /app/service/server/data \
     && chown -R 10001:10001 /backup /reader /app/.runtime /app/service/server/logs /app/service/server/data

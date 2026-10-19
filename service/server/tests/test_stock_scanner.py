@@ -291,6 +291,7 @@ class StockScannerTests(unittest.TestCase):
                  patch('signal_projection.retry_pending'), \
                  patch("scanner_engine.initialize_runtime"), \
                  patch("scanner_engine.lifecycle_settings", return_value={'active_strategy':'staged'}), \
+                 patch("entry_emergency.status", return_value={'valid': True, 'paused': False, 'reason': None}), \
                  patch("final_ai.persist"), \
                  patch("scanner_engine.record_candidates"), \
                  patch("scanner_engine.record_scan_news"), \
