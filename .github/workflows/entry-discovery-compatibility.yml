@@ -46,6 +46,7 @@ jobs:
           for i in $(seq 1 30); do docker exec entry-discovery-pg pg_isready -U isolated && break; sleep 2; done
           docker exec entry-discovery-pg createdb -U isolated restored_entry
           docker exec entry-discovery-pg createdb -U isolated restored_audit
+          docker exec entry-discovery-pg createdb -U isolated restored_emergency
           probe() {
             fixtures="$PWD/service/server"
             if test "$1" = entry-old:test; then fixtures=/tmp/entry-old/service/server; fi
@@ -74,6 +75,10 @@ jobs:
           probe entry-old:test old_reader_refused
           probe entry-bridge:test bridge_restore_audit restored_audit
           probe entry-bridge:test bridge_restore restored_entry
+          probe entry-candidate:test candidate_emergency
+          probe entry-bridge:test bridge_emergency
+          probe entry-bridge:test bridge_restore_emergency restored_emergency
+          probe entry-old:test old_reader_refused_emergency
       - name: Retain the actual tested bridge only within the approved byte bound
         run: |
           set -euo pipefail

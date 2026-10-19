@@ -15,5 +15,6 @@ def creation_allowed():
 
 def capabilities():
     return dict(build_role=BUILD_ROLE, independent_creation=creation_allowed(),
-                snapshot_formats=list(range(1, 9)), audit_version='entry_discovery_v1',
-                execution_version='independent_entry_execution_v1')
+                snapshot_formats=list(range(1, 10)), audit_version='entry_discovery_v1',
+                execution_version='independent_entry_execution_v1',
+                emergency_entry_version='paper_entry_emergency_v1')

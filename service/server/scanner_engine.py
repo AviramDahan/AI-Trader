@@ -573,6 +573,12 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
     conn = get_db_connection()
     cur = conn.cursor()
     begin_write_transaction(cur)
+    if action in {'BUY', 'SHORT'}:
+        from entry_emergency import check as entry_emergency_check
+        permission = entry_emergency_check(cur, observed_at=now_z())
+        if not permission['allowed']:
+            conn.rollback(); conn.close()
+            raise ValueError(permission['reason'])
     agent_id = scanner_agent_id(cur)
     cur.execute("""INSERT INTO scanner_signals(
         external_signal_id,agent_id,scan_id,ticker,company,action,status,planned_entry,entry_type,valid_until,
@@ -960,6 +966,11 @@ def _retry_declines_touch(cur, order, bar):
 
 
 def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: str) -> None:
+    # The caller holds the existing shared write lock. This second entry-only
+    # check covers direct/internal invocation without changing retained plans.
+    from entry_emergency import allows_entry
+    if order.get('purpose') == 'entry' and not allows_entry(cur, bar_at=bar_at, observed_at=now_z()):
+        return
     cur.execute("SELECT * FROM scanner_signals WHERE id=?", (order["signal_id"],))
     signal = dict(cur.fetchone())
     cfg = lifecycle_settings()
@@ -1227,6 +1238,12 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
             # OHLC cannot locate a touch relative to an intrabar expiry.
             # Do not assume the favourable part occurred before expiration.
             continue
+        if order['purpose'] == 'entry':
+            from entry_emergency import allows_entry
+            if not allows_entry(cur, bar_at=bar_at, observed_at=now_z()):
+                # Keep expiry/cursors and all open-position/close-long processing
+                # alive. No levels, hold, contract or pending status is rewritten.
+                continue
         execution = _loads(order.get('plan_json'), {}).get('execution_settings') or lifecycle_settings()
         slip = execution["slippage_bps"] / 10000
         if order['purpose'] == 'entry' and order['side'] == 'sell' and bar['high'] >= float(order['limit_price']):
@@ -1311,6 +1328,13 @@ def _pending_recovery_check(ticker, bars, observed_at):
                 local = at.astimezone(ET)
                 regular = market_session_state(at)['is_trading_day'] and 570 <= local.hour*60+local.minute < 960
                 if regular and at > last:
+                    if order['purpose'] == 'entry':
+                        from entry_emergency import was_paused
+                        if was_paused(cur, at, observed_at=observed_at):
+                            # Only an explicit pause interval proves no entry
+                            # during a missing bar. A resume floor alone cannot.
+                            at += timedelta(minutes=5)
+                            continue
                     bar = available.get(at)
                     if bar is None:
                         uncertain = True
@@ -1318,6 +1342,13 @@ def _pending_recovery_check(ticker, bars, observed_at):
                     touched = (bar['low'] <= float(order['limit_price']) if order['side']=='buy'
                                else bar['high'] >= float(order['limit_price']))
                     if touched:
+                        if order['purpose'] == 'entry':
+                            from entry_emergency import allows_entry
+                            if not allows_entry(cur, bar_at=at, observed_at=observed_at):
+                                # An observed prohibited touch is not an earlier
+                                # fill and cannot hide a later unpaused data gap.
+                                at += timedelta(minutes=5)
+                                continue
                         if at >= created and at + timedelta(minutes=5) <= expires and _retry_declines_touch(cur, order, bar):
                             at += timedelta(minutes=5)
                             continue

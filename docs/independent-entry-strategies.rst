@@ -126,8 +126,12 @@ Use at most two donor repositories including tradermonty/claude-trading-skills.
 Keep source commits, licenses and attribution. Research already completed is
 reused; available code is not evidence of profitable trading performance.
 
-No Production access or changes, merge, deploy, live activation, real Telegram
-send, paid inference, position changes or automated PR85 merge is authorized.
+The original implementation stage authorized no Production changes. The later
+explicit PR86 release approval is conditional on independent QA, exact-head
+CI/Readiness, a verified encrypted backup, and an actual compatible target-host
+bridge. It permits PAPER only, four price routes ON, PEAD OFF. It is not standing
+authority for another release, paid inference, real-broker trades, test messages,
+rewriting existing positions, or an automated PR85 merge.
 
 Implementation map and operation (not an activation instruction)
 --------------------------------------------------------------
@@ -235,6 +239,103 @@ an active-state transfer, not a full application backup.
 Synthetic worker→fact→reader→actual PEAD→paper lifecycle is testable now. Public
 live publication coverage and a profitable PEAD edge are separate unverified
 claims; unavailable facts return UNKNOWN for PEAD only. All five flags stay OFF.
+
+Durable emergency entry control and format9
+-----------------------------------------
+
+``entry_emergency.py`` is a separate operational overlay on ALL entry routes,
+including Baseline and retained SHORT orders. It does not disable the scanner
+monitor, workers, exits or stored contracts. No control row is created by ordinary
+bootstrap; an absent legacy setting is unpaused. A malformed persisted control
+fails closed for entries while TP/SL and closing orders continue.
+
+An authorized scanner manager can GET or PUT
+``/api/scanner/settings/entry-emergency`` using the existing bearer-token role
+checks. PUT accepts only strict JSON ``{"paused":true,"expected_revision":N}``.
+Read current revision first. A stale revision returns409; never delete history
+or force a revision to bypass the conflict. The operator may resume explicitly
+with paused=false and the newly observed revision. The shared accounting writer
+lock serializes acknowledgement with admission, direct entry creation, pending
+fills and restore. A transaction that finished before acknowledgement is not
+retrospectively undone. No provider/AI work occurs inside that transaction.
+
+Pause/resume timestamps and bounded immutable intervals survive restart and
+recovery in the existing scanner_settings table. After resume, only a completed
+five-minute bar wholly after the saved resume boundary is entry-eligible. Old
+or straddling barred candles are never replayed as entries. Saved order expiry,
+limit/stop/target, original risk and existing uncertainty reservations do not
+move. A pre-pause missing bar remains uncertain; only a documented overlapping
+pause interval proves that a missing candle could not execute an entry.
+
+A persisted emergency setting requires snapshot/recovery format9, independently
+of whether discovery attribution exists. Old formats2..8 remain unchanged for
+their original content. Readers reject missing/mislabeled/duplicate settings,
+invalid or future clocks and changed metadata rather than downgrade to unpaused.
+An encrypted active-state restore preserves the exact validated control and
+held reservation. Ordinary pending orders remain outside active-state backup;
+format9 does not claim a full order/history backup. Schema stays7.
+
+The actual same-source bridge supports formats1..9 and this control while its
+root-owned image capability permanently disables NEW independent discovery.
+That capability alone does NOT pause Baseline or pending entries: pause via the
+durable control when stopping all new exposure. Existing position management
+continues on the same current database. Pre-feature binaries are not rollback
+targets after either new attribution/guards OR emergency history is persisted.
+
+Per-strategy retained PAPER performance
+--------------------------------------
+
+The existing research/results tab embeds StrategyPerformance. Its public,
+sanitized ``GET /api/scanner/strategy-performance?hours=24|48|168`` performs only
+bounded same-snapshot read-only queries, cached briefly, with no initialization,
+document downloads, model generation or messages. PostgreSQL enforces repeatable
+read/READ ONLY, verified with SHOW, and statement/lock/idle timeouts.
+
+Signals and actual entries are counted separately from current pending orders,
+currently open trades, partial exits and trades closed in the selected window.
+Source attribution is validated across the original entry signal/order/trade;
+a closing SELL never rewrites it. Baseline, all five routes and UNATTRIBUTED are
+visible even while flags are OFF. Native metrics exclude Legacy and Shadow;
+historical missing attribution is explicitly unknown, not silently Baseline.
+
+Closed net win rate, equal-weight mean closed net percentage and expectancy in
+original-risk R require reconciled actual entry/exit quantities, fees, direction
+and clocks. Profit Factor uses actual closed net wins/losses; no losing trades
+means undefined, not infinity. No verified closes means NULL, not zero success.
+Open partial realized results are distinct from closed outcomes. Returns are
+not added into a portfolio return; strategy cards overlap. Disjoint exact-set
+groups are additive in counts only. Bounded/ambiguous evidence suppresses the
+affected claims rather than manufacture precise results. Configuration badges
+are not proof of worker liveness or permission to enter during an emergency.
+
+Controlled release and rollback gates
+------------------------------------
+
+1. Keep all five flags OFF while exact-head backend, PostgreSQL, frontend,
+   independent QA and actual candidate/bridge image proofs run. No merge on a
+   skipped image job, missing archive, unsupported snapshot or unresolved test.
+2. Require a fresh verified encrypted backup and unchanged production baseline,
+   then use the existing main merge/CI/Readiness/protected pull deployment path.
+   Initial candidate deployment remains flags OFF and writes no emergency row.
+3. Verify the final-build bridge archive SHA256, loaded image ID, immutable role,
+   same source SHA and formats1..9 on the target. Exercise isolated restore,
+   restart, paused entries, continued exits and held reservations using disposable
+   databases, no Production data/credentials or provider access. Pin and retain
+   that actual image; a tag, source recipe or CI mock is insufficient.
+4. A reviewed operator can durably pause all entries, verify its encrypted
+   format9 backup, make an encrypted configuration backup, enable ONLY VCP,
+   Momentum Burst, Pullback Reclaim and RS alongside unchanged Baseline, and
+   verify effective API/scanner settings and health before explicitly resuming.
+   PEAD remains OFF. No risk, AI quota, threshold, provider or TP/SL changes.
+5. On failure keep entries paused/OFF with exits running on a verified compatible
+   candidate or pinned bridge. No automatic resume, DB rewind, audit deletion,
+   contract rewrite, or release of recovery holds. A binary rollback is a
+   separate controlled operation, not merely clearing feature flags.
+
+Natural signal/order/entry/exit evidence is distinct from these synthetic proofs.
+Until actual events occur, report WAITING_FOR_NATURAL_EVENT and no profitability
+claim. The existing monitor and operational alerts remain the continuous safety
+layer; a scheduled team report is only a dated observation.
 
 Expanded comparison boundaries
 -----------------------------

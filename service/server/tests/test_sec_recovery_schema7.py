@@ -17,7 +17,9 @@ class RecoverySchema7Tests(unittest.TestCase):
             missing=('si_filing_jobs', 'accession') if invalid else None)
         metadata = list(checks.execute.side_effect)
         conn.execute.side_effect = [
-            *([Mock()] if restoring else [Mock(), Mock()]),
+            # Restore now shares the global entry/pause writer lock before any
+            # destination reads. Export still starts read-only + timeouts.
+            Mock(), Mock(),
             Mock(fetchone=lambda: {'version': 7}),
             *metadata,
             Mock(fetchone=lambda: {'ok': False}, fetchall=lambda: []),
@@ -38,7 +40,9 @@ class RecoverySchema7Tests(unittest.TestCase):
         with patch('psycopg.connect', return_value=conn), patch.object(active_snapshot, 'validate'):
             with self.assertRaisesRegex(ValueError, 'workers_must_be_stopped'):
                 active_snapshot.import_data({'version': 3}, 'isolated-fixture')
-        self.assertEqual(conn.execute.call_count, 7)
+        self.assertEqual(conn.execute.call_count, 8)
+        self.assertIn('pg_advisory_xact_lock(719321,1)',
+                      str(conn.execute.call_args_list[1]))
 
     def test_export_and_restore_reject_incomplete_seven_before_writes(self):
         for restoring in (False, True):

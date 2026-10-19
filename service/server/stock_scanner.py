@@ -1249,6 +1249,14 @@ def run_scan() -> dict[str, Any]:
         quote = None
         try:
             news = candidate.get('news') or []
+            import short_policy
+            execution_action = short_policy.scanner_action(candidate['technical_direction'], ticker)
+            if execution_action in {'BUY', 'SHORT'}:
+                from entry_emergency import status as entry_emergency_status
+                emergency = entry_emergency_status(observed_at=datetime.now(timezone.utc))
+                if emergency['paused'] or not emergency['valid']:
+                    rejected.append({'ticker': ticker, 'reason': 'pre_' + emergency['reason']})
+                    continue
             if not in_session or not regular_session_open():
                 try:
                     reference = research_reference_quote(ticker)
@@ -1380,6 +1388,10 @@ def run_scan() -> dict[str, Any]:
                 break
         except requests.Timeout:
             rejected.append({"ticker": ticker, "reason": "timeout_fail_closed"})
+        except ValueError as exc:
+            from entry_emergency import BLOCK_REASONS
+            reason = str(exc) if str(exc) in BLOCK_REASONS else 'ValueError_fail_closed'
+            rejected.append({'ticker': ticker, 'reason': reason})
         except Exception as exc:
             rejected.append({"ticker": ticker, "reason": f"{type(exc).__name__}_fail_closed"})
         finally:

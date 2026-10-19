@@ -20,7 +20,7 @@ URL = os.environ.get('DATABASE_URL', '')
 parsed = urlparse(URL)
 if (parsed.scheme != 'postgresql' or parsed.hostname != 'entry-discovery-pg' or
         parsed.username != 'isolated' or parsed.path not in
-        ('/isolated_entry', '/restored_entry', '/restored_audit', '/unsafe_entry')):
+        ('/isolated_entry', '/restored_entry', '/restored_audit', '/restored_emergency', '/unsafe_entry')):
     raise SystemExit('isolated_entry_database_required')
 if PHASE == 'old_runtime_unsafe' and parsed.path != '/unsafe_entry':
     raise SystemExit('old_runtime_requires_disposable_clone')
@@ -68,6 +68,12 @@ def order(ticker):
 
 def stored(ticker):
     return json.loads(order(ticker)['plan_json'])
+
+
+def emergency_state():
+    import entry_emergency
+    with database.get_db_connection() as conn:
+        return entry_emergency.snapshot(conn.cursor())
 
 
 def bar(ticker, price, minute=5):
@@ -159,6 +165,14 @@ def backup(name, expected_format):
     for key, table in (('trades', 'scanner_trades'), ('fills', 'scanner_fills')):
         ids = {row['id'] for row in data['tables'][table]}
         active[key] = [row for row in active[key] if row['id'] in ids]
+    # Ordinary pending entries are intentionally outside active-state transfer.
+    # Compare the restored reservation with exported orders, never the live
+    # pending+held total. Do not weaken or erase the held reservation check.
+    restored_reservation = sum(row['limit_price']*row['quantity']
+        for row in data['tables']['scanner_orders']
+        if row['status'] in ('pending', 'recovery_uncertain') and row['purpose'] == 'entry')
+    assert restored_reservation == data['hold_coverage']['entry_reserved_notional']
+    active['reserved'] = [{'amount': restored_reservation}]
     (ROOT / (name + '-restored-core.json')).write_text(json.dumps(active, sort_keys=True))
     DETAILS.update(recovery_format=expected_format, encrypted_bytes=sizes['encrypted_bytes'],
                    hold_count=len(data['hold_coverage']['order_ids']), core_sha256=digest(state()))
@@ -324,6 +338,110 @@ elif PHASE == 'old_reader_refused':
         else:
             raise AssertionError('old_backup_reader_must_reject_new_format')
     DETAILS['backup_formats_rejected'] = [7, 8]
+elif PHASE == 'candidate_emergency':
+    identity('candidate')
+    import entry_emergency as emergency
+    assert emergency_state() == emergency.initial()  # OFF bootstrap wrote nothing.
+    create('PAUSED_RS')
+    with patch.object(engine, 'now_z', return_value=STAMP):
+        assert record('PAUSED_BASE')['status'] == 'PENDING_ENTRY'
+    # A real retained short entry uses its own unchanged target contract.
+    from test_automatic_short import plan as short_plan
+    os.environ['STOCK_SCANNER_SHORT_ENABLED'] = 'true'
+    p = short_plan()
+    signal = dict(ticker='PAUSED_SHORT', company='Synthetic', action='SHORT', entry=100,
+        stop_loss=p['stop'], target_plan=p, confidence=.91, time_horizon='days', reason='Synthetic')
+    with patch.object(engine, 'now_z', return_value=STAMP):
+        assert engine.record_signal(signal, {}, {}, {}, 'isolated-short')['status'] == 'PENDING_ENTRY'
+    saved = {ticker: order(ticker) for ticker in ('PAUSED_RS', 'PAUSED_BASE', 'PAUSED_SHORT')}
+    paused = emergency.set_paused(True, 0, now=datetime(2026, 10, 6, 14, 1, tzinfo=timezone.utc))
+    before = state()
+    for ticker, price in (('PAUSED_RS', 102), ('PAUSED_BASE', 100), ('PAUSED_SHORT', 100)):
+        bar(ticker, price)
+        assert order(ticker) == saved[ticker]
+    assert state() == before
+    new_signal, new_source = candidate('PAUSED_NEW', 'RELATIVE_STRENGTH_LEADER')
+    try:
+        with patch.object(engine, 'now_z', return_value='2026-10-06T14:12:00Z'):
+            engine.record_signal(new_signal, new_source, {}, {}, 'isolated-paused-create')
+    except ValueError as exc:
+        assert str(exc) == 'entry_emergency_paused', str(exc)
+    else:
+        raise AssertionError('paused_creation_must_be_rejected')
+    assert state() == before
+    # Existing open position exits while ALL new/pending entries remain stopped.
+    target = stored('PULL_ACTIVE')['target_plan']['active_target']
+    bar('PULL_ACTIVE', target, 10)
+    assert rows("SELECT status FROM scanner_trades WHERE ticker='PULL_ACTIVE'") == [{'status': 'closed'}]
+    assert state()['holds'] == before['holds']
+    assert emergency_state() == paused
+    (ROOT / 'emergency-state.json').write_text(json.dumps(paused, sort_keys=True))
+    (ROOT / 'emergency-before-bridge.json').write_text(json.dumps(state(), sort_keys=True))
+    DETAILS['all_entry_routes_stopped_and_existing_tp_exited'] = True
+elif PHASE == 'bridge_emergency':
+    identity('bridge')
+    flags(False)
+    import entry_emergency as emergency
+    before = state()
+    assert before == json.loads((ROOT / 'emergency-before-bridge.json').read_text())
+    engine.initialize_runtime()
+    assert state() == before
+    assert emergency_state() == json.loads((ROOT / 'emergency-state.json').read_text())
+    for ticker, price in (('PAUSED_RS', 102), ('PAUSED_BASE', 100), ('PAUSED_SHORT', 100)):
+        bar(ticker, price, 10)
+        assert order(ticker)['status'] == 'pending'
+    assert state() == before
+    backup('emergency9', 9)
+    resumed = emergency.set_paused(False, 1, now=datetime(2026, 10, 6, 14, 17, tzinfo=timezone.utc))
+    bar('PAUSED_RS', 102, 15)  # A bar straddling resume must not execute later.
+    assert order('PAUSED_RS')['status'] == 'pending'
+    engine.initialize_runtime()
+    bar('PAUSED_RS', 102, 20)
+    assert order('PAUSED_RS')['status'] == 'filled'
+    after = state()
+    engine.initialize_runtime()
+    bar('PAUSED_RS', 102, 20)
+    assert state() == after and emergency_state() == resumed
+    assert after['holds'] == before['holds']
+    assert engine.dashboard_payload()['lifecycle_verification']['accounting_ok']
+    DETAILS['restart_resume_no_retroactive_or_duplicate_fill'] = True
+elif PHASE == 'bridge_restore_emergency':
+    identity('bridge')
+    flags(False)
+    assert parsed.path == '/restored_emergency'
+    migrations.migrate()
+    data = recovery.decrypt(ROOT / 'emergency9.age', ROOT / 'synthetic-age-identity')
+    assert data['version'] == data['recovery_format'] == 9
+    recovery.restore(data, URL, 'synthetic-emergency-image-token-over-32-characters')
+    engine.initialize_runtime()
+    assert state() == json.loads((ROOT / 'emergency9-restored-core.json').read_text())
+    assert emergency_state() == json.loads((ROOT / 'emergency-state.json').read_text())
+    assert rows('SELECT count(*) n FROM scanner_telegram_outbox') == [{'n': 0}]
+    before = state()
+    # Saved snapshot omits ordinary pending orders by design; it retains holds
+    # and open trades. Restored entry permission is independently still paused.
+    import entry_emergency as emergency
+    with database.get_db_connection() as conn:
+        assert not emergency.check(conn.cursor())['allowed']
+    assert state()['holds'] == before['holds']
+    target = stored('RS_PENDING')['target_plan']['active_target']
+    bar('RS_PENDING', target, 20)
+    assert rows("SELECT status FROM scanner_trades WHERE ticker='RS_PENDING'") == [{'status': 'closed'}]
+    after = state()
+    assert after['holds'] == before['holds']
+    engine.initialize_runtime()
+    bar('RS_PENDING', target, 20)
+    assert state() == after
+    assert engine.dashboard_payload()['lifecycle_verification']['accounting_ok']
+    DETAILS['encrypted_restore_preserved_pause_holds_and_exits'] = True
+elif PHASE == 'old_reader_refused_emergency':
+    try:
+        recovery.decrypt(ROOT / 'emergency9.age', ROOT / 'synthetic-age-identity')
+    except ValueError as exc:
+        assert str(exc) == 'not_a_recovery_snapshot', str(exc)
+    else:
+        raise AssertionError('old_backup_reader_must_reject_emergency_format9')
+    DETAILS['backup_formats_rejected'] = [9]
 else:
     raise SystemExit('unsupported_test_phase')
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { API_ORIGIN } from './appShared'
 import { REASON_DETAILS, reasonTitle } from './activityReasons'
+import { StrategyPerformance } from './StrategyPerformance'
 
 type Row = Record<string, any>
 const value = (v: any, suffix = '') => v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(2)}${suffix}` : '—'
@@ -117,7 +118,8 @@ export function SignalResearch({ he, mode = 'research' }: { he: boolean, mode?: 
     const interval = window.setInterval(() => void refresh(), 60000)
     return () => { active = false; controller.abort(); window.clearInterval(interval) }
   }, [hours])
-  return <ResearchView he={he} mode={mode} data={data} error={error} hours={hours} setHours={setHours} side={side} setSide={setSide} ticker={ticker} setTicker={setTicker} />
+  return <>{mode === 'results' && <StrategyPerformance he={he} />}
+    <ResearchView he={he} mode={mode} data={data} error={error} hours={hours} setHours={setHours} side={side} setSide={setSide} ticker={ticker} setTicker={setTicker} /></>
 }
 
 export function ResearchView({ he, mode = 'research', data, error = '', hours = 48,

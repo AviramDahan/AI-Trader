@@ -1,6 +1,6 @@
 """Public dashboard and controlled settings routes for the paper stock scanner."""
 from fastapi import FastAPI, Header, HTTPException, Response, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, StrictBool, conint
 
 from database import get_db_connection
 from position_charts import position_chart_bytes, signal_chart_bytes
@@ -17,6 +17,13 @@ class ExitStrategyRequest(BaseModel):
 class NewsWatchlistRequest(BaseModel):
     ticker: str
     company: str | None = None
+
+
+class EntryEmergencyRequest(BaseModel):
+    paused: StrictBool
+    expected_revision: conint(strict=True, ge=0)
+
+    model_config = ConfigDict(extra='forbid')
 
 
 def _require_scanner_manager(authorization: str):
@@ -39,6 +46,50 @@ def _require_scanner_manager(authorization: str):
 
 
 def register_scanner_routes(app: FastAPI) -> None:
+    @app.get('/api/scanner/strategy-performance')
+    def strategy_performance(response: Response, hours: int = Query(48, ge=24, le=168)):
+        # The existing community statistics are public READ ONLY. No control,
+        # raw contract, private identifiers or currency account data is exposed.
+        response.headers['Cache-Control'] = 'no-store'
+        if hours not in (24, 48, 168):
+            raise HTTPException(422, 'Supported windows: 24, 48, 168 hours')
+        from strategy_performance import payload
+        try:
+            return payload(hours)
+        except Exception:
+            raise HTTPException(503, 'strategy_performance_unavailable') from None
+
+    @app.get('/api/scanner/settings/entry-emergency')
+    def entry_emergency_status(response: Response, authorization: str = Header(None)):
+        _require_scanner_manager(authorization)
+        response.headers['Cache-Control'] = 'no-store, private'
+        response.headers['Vary'] = 'Authorization'
+        from entry_emergency import status
+        with get_db_connection() as conn:
+            return status(conn.cursor())
+
+    @app.put('/api/scanner/settings/entry-emergency')
+    def entry_emergency_change(data: EntryEmergencyRequest, response: Response,
+                               authorization: str = Header(None)):
+        # Private logs membership grants observation only, never this write.
+        _require_scanner_manager(authorization)
+        response.headers['Cache-Control'] = 'no-store, private'
+        response.headers['Vary'] = 'Authorization'
+        from entry_emergency import set_paused
+        try:
+            result = set_paused(data.paused, data.expected_revision)
+        except ValueError as exc:
+            code = str(exc)
+            if code in {'entry_emergency_revision_conflict', 'entry_emergency_history_capacity'}:
+                raise HTTPException(409, code) from None
+            if code == 'entry_emergency_invalid_request':
+                raise HTTPException(400, code) from None
+            raise HTTPException(503, 'entry_emergency_control_invalid') from None
+        except Exception:
+            raise HTTPException(503, 'entry_emergency_control_unavailable') from None
+        return {'version': result['version'], 'paused': result['paused'],
+                'revision': result['revision'], 'exits_continue': True}
+
     @app.get('/api/admin/system-status')
     def admin_system_status(response: Response, authorization: str = Header(None),
                             x_telegram_init_data: str = Header(None)):

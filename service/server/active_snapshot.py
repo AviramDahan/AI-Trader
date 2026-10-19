@@ -76,8 +76,8 @@ def export_data(path):
                         ids(target, fk["to"], values)
             if count == sum(map(len, tables.values())):
                 break
-        settings = [dict(r) for r in conn.execute("SELECT * FROM scanner_settings WHERE key='active_exit_strategy'")]
-        data = {"version":single_target_recovery.version(tables), "created_at":datetime.now(timezone.utc).isoformat(),
+        settings = [dict(r) for r in conn.execute("SELECT * FROM scanner_settings WHERE key IN ('active_exit_strategy','paper_entry_emergency_v1') ORDER BY key")]
+        data = {"version":single_target_recovery.version(tables, settings), "created_at":datetime.now(timezone.utc).isoformat(),
                 "tables":tables, "settings":settings, "primary_agent_id":agent,
                 "hold_coverage":recovery_holds.coverage(holds)}
         validate(data)
@@ -88,7 +88,7 @@ def export_data(path):
 
 
 def validate(data):
-    if data.get("version") not in (1,2,3,4,5,6,7,8) or set(data["tables"]) != set(TABLES):
+    if data.get("version") not in (1,2,3,4,5,6,7,8,9) or set(data["tables"]) != set(TABLES):
         raise ValueError("unsupported_snapshot_schema")
     if "snapshot_id" in data and data["snapshot_id"] != digest({k:v for k,v in data.items() if k != "snapshot_id"}):
         raise ValueError("snapshot_checksum_mismatch")
@@ -145,14 +145,16 @@ def import_data(data, url, *, allow_defaults=False, scanner_token=None):
     from psycopg.rows import dict_row
     from cloud_runtime import ROLE_KEYS
     validate(data)
-    if data['version'] not in (2,3,4,5,6,7,8):
+    if data['version'] not in (2,3,4,5,6,7,8,9):
         raise ValueError('legacy_hold_coverage_unknown_restore_refused')
     with psycopg.connect(url, row_factory=dict_row) as conn:
         conn.execute("SET LOCAL lock_timeout='5s'")
+        # Same transaction lock as pause/entry processing; never race a writer.
+        conn.execute('SELECT pg_advisory_xact_lock(719321,1)')
         # Schema 7 SEC analytical tables remain outside active-state recovery;
         # portfolio validation and clean-destination guards remain unchanged.
         schema = conn.execute('SELECT max(version) version FROM schema_migrations').fetchone()['version']
-        if schema not in (2,3,4,5,6,7) or (data['version'] in (3,4,5,6,7,8) and schema < 6):
+        if schema not in (2,3,4,5,6,7) or (data['version'] in (3,4,5,6,7,8,9) and schema < 6):
             raise ValueError('unsupported_destination_schema')
         if schema == 7:
             from sec_schema7_compat import assert_sec_schema7
@@ -186,6 +188,9 @@ def import_data(data, url, *, allow_defaults=False, scanner_token=None):
         for setting in data["settings"]:
             conn.execute("INSERT INTO scanner_settings(key,value_json,updated_at) VALUES(%s,%s,%s)",
                          (setting["key"],setting["value_json"],setting["updated_at"]))
+        restored_settings = [dict(row) for row in conn.execute("SELECT * FROM scanner_settings WHERE key IN ('active_exit_strategy','paper_entry_emergency_v1') ORDER BY key")]
+        if sorted(map(digest, restored_settings)) != sorted(map(digest, data['settings'])):
+            raise ValueError('restored_operational_settings_mismatch')
         # Carry current cash unchanged. Record the omitted history as an explicit
         # opening audit balance, NOT fabricated fills or closed trade performance.
         main_ids = {t["id"] for t in data["tables"]["scanner_trades"] if not t["is_shadow"] and not t.get("legacy_position_id")}
