@@ -14,6 +14,7 @@ import os
 from collections import deque
 
 VERSION = 'entry_discovery_v1'
+COMPONENT_VERSION = 'entry_discovery_component_v1'
 BASELINE = 'BASELINE'
 FLAGS = {
     'VCP_BASE_CONTRACTION': 'STOCK_SCANNER_VCP_DISCOVERY_ENABLED',
@@ -38,6 +39,9 @@ def instant(value):
 
 
 def enabled_ids(cfg=None):
+    from entry_discovery_capabilities import creation_allowed
+    if not creation_allowed():
+        return ()
     if cfg is not None and 'entry_strategy_ids' in cfg:
         requested = cfg['entry_strategy_ids']
         if not isinstance(requested, (list, tuple)) or set(requested) - set(FLAGS):
@@ -62,7 +66,7 @@ def _baseline_evidence(candidate, decision, observed):
         entry_reference=candidate['entry'], reasons=[])
 
 
-def attribution(records, decision_at):
+def attribution(records, decision_at, *, calculation_at=None):
     """Freeze audit evidence; never alter target-plan or execution contracts."""
     records = list(records)
     if not records:
@@ -74,16 +78,21 @@ def attribution(records, decision_at):
         raise ValueError('discovery_invalid_attribution_ids')
     payload = dict(version=VERSION, primary_strategy_id=ids[0], strategy_ids=ids,
                    detected_at=instant(decision_at).isoformat(), detections=records)
-    return validate_attribution(payload)
+    if calculation_at is not None:
+        payload.update(version=COMPONENT_VERSION, calculation_at=instant(calculation_at).isoformat())
+    return validate_attribution(payload, allow_component=calculation_at is not None)
 
 
-def validate_attribution(value):
+def validate_attribution(value, *, allow_component=False):
     """Allowlisted source metadata. Stored state does not consult creation flags."""
     try:
-        if not isinstance(value, dict) or set(value) != {
-                'version', 'primary_strategy_id', 'strategy_ids', 'detected_at', 'detections'}:
+        component = isinstance(value, dict) and value.get('version') == COMPONENT_VERSION
+        keys = {'version', 'primary_strategy_id', 'strategy_ids', 'detected_at', 'detections'}
+        if component and allow_component:
+            keys.add('calculation_at')
+        if not isinstance(value, dict) or set(value) != keys:
             raise ValueError()
-        if value['version'] != VERSION:
+        if value['version'] != VERSION and not (component and allow_component):
             raise ValueError()
         ids, records = value['strategy_ids'], value['detections']
         if (not isinstance(ids, list) or not 1 <= len(ids) <= 6 or len(ids) != len(set(ids)) or
@@ -91,6 +100,8 @@ def validate_attribution(value):
                 not isinstance(records, list) or len(records) != len(ids)):
             raise ValueError()
         decision = instant(value['detected_at'])
+        if component and instant(value['calculation_at']) > decision:
+            raise ValueError()
         allowed = {'strategy_id', 'version', 'source_pin', 'state', 'score', 'direction', 'source_times',
                    'sourcehash', 'evidence_ids', 'features', 'trigger', 'entry_reference',
                    'reasons', 'config', 'coverage'}
@@ -141,12 +152,12 @@ def validate_attribution(value):
 def strategy_ids(candidate):
     value = candidate.get('entry_discovery')
     if value:
-        return validate_attribution(value)['strategy_ids']
+        return validate_attribution(value, allow_component=True)['strategy_ids']
     return candidate.get('strategy_ids') or [BASELINE]
 
 
 def discover_candidates(histories, universe, cfg, *, decision_at, context=None,
-                        baseline_detector=None, include_baseline=True):
+                        baseline_detector=None, include_baseline=True, calculation_at=None):
     """Compose detections before baseline-only rejection and shortlist selection.
 
     context.by_ticker may provide a separate long history_frame for detectors.
@@ -157,6 +168,9 @@ def discover_candidates(histories, universe, cfg, *, decision_at, context=None,
     import stock_scanner
     from entry_strategies import detect_all
     decision, context = instant(decision_at), context or {}
+    calculation = instant(calculation_at) if calculation_at is not None else decision
+    if calculation > decision:
+        raise ValueError('component_calculation_after_observation')
     ids = enabled_ids(cfg)
     output, observations = [], []
     for ticker in sorted(universe):
@@ -190,12 +204,12 @@ def discover_candidates(histories, universe, cfg, *, decision_at, context=None,
             observations.append(observation)
             continue
         if baseline_detector is None:
-            baseline = stock_scanner.analyze_history(ticker, company, frame, cfg, decision_at=decision)
+            baseline = stock_scanner.analyze_history(ticker, company, frame, cfg, decision_at=calculation)
         else:
             baseline = baseline_detector(ticker, company, frame, cfg)
         observation['baseline_detected'] = baseline is not None
         common = stock_scanner.analyze_history(ticker, company, frame, cfg,
-                                               baseline_filter=False, decision_at=decision)
+                                               baseline_filter=False, decision_at=calculation)
         if common is None:
             observation['common_reasons'].append('common_data_liquidity_or_atr_block')
             observations.append(observation)
@@ -216,6 +230,10 @@ def discover_candidates(histories, universe, cfg, *, decision_at, context=None,
             # A source-clock gap must not silently disable the otherwise valid
             # unchanged baseline route. It carries no fabricated provenance.
             if include_baseline and baseline:
+                if calculation_at is not None:
+                    observation['common_reasons'].append('component_source_clock_unavailable')
+                    observations.append(observation)
+                    continue
                 candidate = dict(baseline)
             else:
                 observations.append(observation)
@@ -225,7 +243,7 @@ def discover_candidates(histories, universe, cfg, *, decision_at, context=None,
             if not baseline or not include_baseline:
                 candidate['technical_direction'] = 'BUY'
                 candidate['technical_score'] = common['baseline_buy_score']
-            package = attribution(selected, decision)
+            package = attribution(selected, decision, calculation_at=calculation_at)
             candidate.update(entry_discovery=package, strategy_ids=package['strategy_ids'],
                              strategy_id=package['primary_strategy_id'],
                              discovery_score=max(record['score'] for record in selected))

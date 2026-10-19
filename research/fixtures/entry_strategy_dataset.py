@@ -11,6 +11,7 @@ import importlib.util
 import hashlib
 from pathlib import Path
 import sys
+from zoneinfo import ZoneInfo
 
 REPO = Path(__file__).resolve().parents[2]
 SERVER = REPO / 'service' / 'server'
@@ -29,6 +30,13 @@ def fixture_module():
 def encode_bars(frame):
     return [{'date': index.date().isoformat(), **{name: float(row[name]) for name in
              ('Open', 'High', 'Low', 'Close', 'Volume')}} for index, row in frame.iterrows()]
+
+
+def baseline_window(frame, decision):
+    import pandas as pd
+    start = (pd.Timestamp(decision.astimezone(ZoneInfo('America/New_York')).date()) -
+             pd.DateOffset(months=6)).date()
+    return frame.loc[[index.date() >= start for index in frame.index]].copy(deep=True)
 
 
 def encode_context(context):
@@ -97,7 +105,8 @@ def build_dataset():
             for event in context['earnings_events']:
                 event['symbol'] = ticker
         observations.append({'ticker': ticker, 'company': 'Invented discovery control',
-            'source_observed_at': observed.isoformat(), 'bars': encode_bars(frame),
+            'source_observed_at': observed.isoformat(), 'bars': encode_bars(baseline_window(frame, decision)),
+            'detector_bars': encode_bars(frame),
             'context': encode_context(context), 'intended_strategy': strategy_id,
             'mock_outcome': {'ai_reviewed': True, 'ai_approved': True,
                              'signal': True, 'order': True, 'entry': False}})
@@ -107,7 +116,8 @@ def build_dataset():
     frame['Volume'] = 3_000_000
     frame.attrs['history_fetched_at'] = observed.timestamp()
     observations.append({'ticker': 'BASE', 'company': 'Invented baseline control',
-        'source_observed_at': observed.isoformat(), 'bars': encode_bars(frame),
+        'source_observed_at': observed.isoformat(), 'bars': encode_bars(baseline_window(frame, decision)),
+        'detector_bars': encode_bars(frame),
         'context': {'expected_session': '2026-10-05'}, 'intended_strategy': 'BASELINE'})
     return {'version': 1, 'synthetic': True, 'kind': 'SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY',
             'fixture_source_sha256': {path.relative_to(REPO).as_posix(): hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n')).hexdigest()

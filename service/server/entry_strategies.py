@@ -308,8 +308,10 @@ def _pead(record, rows, context):
         return _finish(record, 'UNKNOWN', 'pre_event_price_context_unavailable')
     gap, prior = rows[gap_index], rows[gap_index-1]
     age = len(rows) - 1 - gap_index
-    record['sourcehash'] = _hash(dict(bars=record['sourcehash'], event={k: event[k] for k in
-        ('event_id', 'source_id', 'symbol', 'event_type', 'released_at', 'timing', 'source_observed_at', 'processed_at', 'effective_available_at')}))
+    evidence_keys = ('event_id', 'source_id', 'symbol', 'event_type', 'released_at', 'timing',
+        'source_observed_at', 'processed_at', 'effective_available_at',
+        'revision', 'document_hash', 'parser_version', 'issuer_cik', 'issuer_mapping_hash')
+    record['sourcehash'] = _hash(dict(bars=record['sourcehash'], event={k: event[k] for k in evidence_keys if k in event}))
     times['effective_available_at'] = max(_instant(times['effective_available_at']), effective).isoformat()
     gap_pct = (gap['open'] / prior['close'] - 1) * 100
     avg_gap_volume = _mean([r['volume'] for r in rows[max(0, gap_index-20):gap_index]])
@@ -319,6 +321,14 @@ def _pead(record, rows, context):
         timing=event['timing'], gap_session=gap['date'], gap_pct=gap_pct,
         gap_volume_ratio=gap_volume, event_age_sessions=age,
         inference='EARNINGS_GAP_FOLLOWTHROUGH_NOT_EPS_SURPRISE')
+    # Exact immutable original-page revision is traceable from a saved decision,
+    # not merely today's latest feed row. Older typed fixtures remain readable.
+    release_evidence = {key: event[key] for key in ('revision', 'document_hash', 'parser_version',
+        'issuer_cik', 'issuer_mapping_hash') if key in event}
+    if isinstance(event.get('source_url'), str) and len(event['source_url']) <= 768:
+        release_evidence['source_url'] = event['source_url']
+    if release_evidence:
+        record['features']['release_evidence'] = release_evidence
     if age > cfg['max_event_age_sessions']:
         return _finish(record, 'REJECTED', 'earnings_event_expired')
     if gap_pct < cfg['min_gap_pct'] or gap_volume < cfg['gap_volume_ratio_min'] or gap['close'] < gap['open']:

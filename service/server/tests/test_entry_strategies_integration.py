@@ -442,7 +442,7 @@ def test_close_long_attribution_matches_closing_signal_not_original_entry(db, cl
     assert entry_package != closing_package
     order = rows("SELECT * FROM scanner_orders WHERE purpose='close_long'")[0]
     assert json.loads(order['plan_json']) == {'entry_discovery': closing_package}
-    snapshot = {'version': 6, 'tables': {name: rows('SELECT * FROM '+name) for name in
+    snapshot = {'version': 8, 'tables': {name: rows('SELECT * FROM '+name) for name in
         ('scanner_signals', 'scanner_orders', 'scanner_trades')}}
     validate_snapshot(snapshot)
     assert json.loads(rows('SELECT settings_json FROM scanner_trades')[0]['settings_json'])['entry_discovery'] == entry_package
@@ -480,16 +480,28 @@ def test_creation_disabled_does_not_accept_retained_new_route_as_new_signal(db, 
     assert not rows('SELECT id FROM scanner_signals') and not rows('SELECT id FROM scanner_orders')
 
 
-def test_completed_setup_discovery_keeps_existing_passive_limit_gap_semantics(db, clock, monkeypatch):
-    """An already confirmed setup is not a newly invented continuous stop order.
+def retain_204_audit_only_fixture():
+    """Fixture conversion BEFORE execution, not a data migration or app policy."""
+    with database.get_db_connection() as conn:
+        for table, field in (('scanner_signals', 'technical_json'), ('scanner_orders', 'plan_json')):
+            row = rows(f'SELECT id,{field} FROM {table}')[0]
+            material = json.loads(row[field])
+            assert material.pop('entry_strategy_execution')['version'] == 'independent_entry_execution_v1'
+            conn.execute(f'UPDATE {table} SET {field}=? WHERE id=?', (json.dumps(material), row['id']))
+        conn.commit()
 
-    Entry admission was above pivot100.85 at102. A later legal LIMIT gap may
-    execute below that historical pivot if ALL original stored V2 guards pass.
-    Enforcing the pivot at fill would require a separately versioned policy.
+
+def test_completed_setup_discovery_keeps_existing_passive_limit_gap_semantics(db, clock, monkeypatch):
+    """Retained204 audit-only contracts must NOT acquire the new fill policy.
+
+    Explicitly remove the newly generated executable node from signal/order,
+    reproducing the historical204 audit-only shape before processing ANY bar.
+    No executable contract is removed from a live or previously filled order.
     """
     import single_target_policy
     prepare_route(monkeypatch, clock, 'RELATIVE_STRENGTH_LEADER')
     assert scanner.run_scan()['signals_published'] == 1
+    retain_204_audit_only_fixture()
     contract = json.loads(rows('SELECT plan_json FROM scanner_orders')[0]['plan_json'])
     frozen = copy.deepcopy(contract)
     pivot = contract['entry_discovery']['detections'][0]['trigger']['level']
@@ -579,15 +591,295 @@ def test_new_attribution_with_original_v1_exit_policy_sanitizes_without_policy_c
     assert rows('SELECT strategy FROM scanner_trades WHERE is_shadow=0') == [{'strategy': exit_strategy}]
     raw = active_snapshot.export_data(database._SQLITE_DB_PATH)
     sanitized = recovery.sanitize(raw)
-    assert sanitized['version'] == sanitized['recovery_format'] == 2
+    assert sanitized['version'] == sanitized['recovery_format'] == 8
     recovery.validate(json.loads(json.dumps(sanitized)))
-    assert all(json.loads(row['technical_json']) == {'entry_discovery': package}
+    assert all(set(json.loads(row['technical_json'])) == {
+                   'entry_discovery', 'target_plan', 'entry_strategy_execution'}
+               and json.loads(row['technical_json'])['entry_discovery'] == package
                for row in sanitized['tables']['scanner_signals'])
     assert all(json.loads(row['settings_json'])['entry_discovery'] == package
-               and 'target_plan' not in json.loads(row['settings_json'])
+               and json.loads(row['settings_json'])['target_plan'] == order['target_plan']
+               and json.loads(row['settings_json'])['entry_strategy_execution'] == order['entry_strategy_execution']
                for row in sanitized['tables']['scanner_trades'])
     assert json.loads(sanitized['tables']['scanner_orders'][0]['plan_json']) == order
     assert [(row['original_stop'], row['tp1'], row['tp2'], row['tp3'])
             for row in raw['tables']['scanner_trades']] == [
            (row['original_stop'], row['tp1'], row['tp2'], row['tp3'])
             for row in sanitized['tables']['scanner_trades']]
+
+
+@pytest.mark.parametrize('strategy_id', ('RELATIVE_STRENGTH_LEADER', 'TREND_PULLBACK_RECLAIM'))
+def test_new_frozen_support_declines_actual_gap_then_retries_without_level_moves(
+        db, clock, monkeypatch, strategy_id):
+    import single_target_policy
+    import entry_strategy_execution as execution
+    frame, _, quote, _, _, _ = prepare_route(monkeypatch, clock, strategy_id)
+    if strategy_id == 'TREND_PULLBACK_RECLAIM':
+        # The V2 fixture's gap crosses an old resistance and is correctly
+        # declined by the ORIGINAL guard first. Exercise the new EMA boundary
+        # independently under the supported original V1 policy, with real
+        # source pivots and its unchanged three targets/native+shadow paths.
+        frame.iloc[133, frame.columns.get_loc('High')] = 150
+        frame.iloc[137, frame.columns.get_loc('High')] = 160
+        monkeypatch.setenv('STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED', 'false')
+    assert scanner.run_scan()['signals_published'] == 1
+    order = rows('SELECT * FROM scanner_orders')[0]
+    contract = json.loads(order['plan_json'])
+    saved, plan = contract[execution.KEY], contract['target_plan']
+    assert saved == json.loads(rows('SELECT technical_json FROM scanner_signals')[0]['technical_json'])[execution.KEY]
+    support = saved['branches'][0]['support']
+    # Engine applies the saved adverse slippage BEFORE checking support.
+    gap = 100.8 if strategy_id == 'RELATIVE_STRENGTH_LEADER' else support - .2
+    assert gap < support < quote
+    if strategy_id == 'RELATIVE_STRENGTH_LEADER':
+        assert single_target_policy.validate_fill(plan, gap) >= 2  # NEW rule, not old RR, blocks it.
+    else:
+        assert plan['method'] == 'confirmed_daily_swing_zones_v1' and plan['stop'] < gap < plan['targets'][0]
+    account = rows('SELECT cash,fees_paid,realized_pnl FROM scanner_accounts')
+    for flag in discovery.FLAGS.values():
+        monkeypatch.setenv(flag, 'false')
+    bad = dict(at='2026-10-06T14:05:00Z', open=gap, high=gap+.1, low=gap-.1, close=gap)
+    clock.instant = datetime(2026, 10, 6, 14, 7, tzinfo=timezone.utc)
+    engine.process_bar('TEST', bad)
+    assert json.loads(rows('SELECT plan_json FROM scanner_orders')[0]['plan_json']) == contract
+    clock.instant = datetime(2026, 10, 6, 14, 10, tzinfo=timezone.utc)
+    engine.process_bar('TEST', bad)
+    blocked = rows('SELECT * FROM scanner_orders')[0]
+    observed = json.loads(blocked['plan_json'])
+    assert blocked['status'] == 'pending' and execution.public_wait(blocked)['reason'] == 'strategy_fill_below_support'
+    assert {k: v for k, v in observed.items() if k != execution.OBSERVATION_KEY} == contract
+    assert not rows('SELECT id FROM scanner_fills') and not rows('SELECT id FROM scanner_trades')
+    assert rows('SELECT cash,fees_paid,realized_pnl FROM scanner_accounts') == account
+    engine.initialize_runtime()
+    engine.process_bar('TEST', bad)
+    assert rows('SELECT * FROM scanner_orders')[0] == blocked
+    # A known rejected touch is NOT inferred as an uncertain fill on restart.
+    engine._pending_recovery_check('TEST', [bad], datetime(2026, 10, 6, 14, 10, tzinfo=timezone.utc))
+    assert rows('SELECT status FROM scanner_orders') == [{'status': 'pending'}]
+    legal = dict(at='2026-10-06T14:10:00Z', open=quote, high=quote+.1, low=quote-.1, close=quote)
+    clock.instant = datetime(2026, 10, 6, 14, 15, tzinfo=timezone.utc)
+    engine.process_bar('TEST', legal)
+    count = 2 if strategy_id == 'TREND_PULLBACK_RECLAIM' else 1
+    assert len(rows('SELECT id FROM scanner_fills')) == count
+    trade = rows('SELECT * FROM scanner_trades')[0]
+    assert trade['entry_price'] > support and trade['original_stop'] == plan['stop'] and trade['tp1'] == plan['targets'][0]
+    assert json.loads(trade['settings_json'])[execution.KEY] == saved
+    engine.initialize_runtime()
+    engine.process_bar('TEST', legal)
+    assert len(rows('SELECT id FROM scanner_fills')) == count
+
+
+@pytest.mark.parametrize('damage', ('version', 'support', 'signal_association', 'orphan_observation'))
+def test_new_malformed_execution_becomes_uncertain_without_cash_or_fill(db, clock, monkeypatch, damage):
+    import entry_strategy_execution as execution
+    prepare_route(monkeypatch, clock, 'RELATIVE_STRENGTH_LEADER')
+    assert scanner.run_scan()['signals_published'] == 1
+    order = rows('SELECT * FROM scanner_orders')[0]
+    contract = json.loads(order['plan_json'])
+    before = rows('SELECT cash,fees_paid,realized_pnl FROM scanner_accounts')
+    with database.get_db_connection() as conn:
+        if damage == 'version':
+            contract[execution.KEY]['version'] = 'future_unsupported'
+        elif damage == 'support':
+            contract[execution.KEY]['branches'][0]['support'] -= 10
+        elif damage == 'signal_association':
+            technical = json.loads(rows('SELECT technical_json FROM scanner_signals')[0]['technical_json'])
+            technical.pop(execution.KEY)
+            conn.execute('UPDATE scanner_signals SET technical_json=?', (json.dumps(technical),))
+        else:
+            contract.pop(execution.KEY)
+            contract[execution.OBSERVATION_KEY] = {}
+        conn.execute('UPDATE scanner_orders SET plan_json=?', (json.dumps(contract),))
+        conn.commit()
+    clock.instant = datetime(2026, 10, 6, 14, 10, tzinfo=timezone.utc)
+    engine.process_bar('TEST', dict(at='2026-10-06T14:05:00Z', open=102, high=102.1, low=101.9, close=102))
+    # Structural corruption is detected before entry. Signal association is
+    # checked at admission-to-trade and terminally rejects this known touch.
+    expected = 'invalid' if damage == 'signal_association' else 'recovery_uncertain'
+    assert rows('SELECT status FROM scanner_orders') == [{'status': expected}]
+    assert not rows('SELECT id FROM scanner_fills') and not rows('SELECT id FROM scanner_trades')
+    assert rows('SELECT cash,fees_paid,realized_pnl FROM scanner_accounts') == before
+
+
+def test_bridge_role_cannot_create_even_with_flags_enabled(db, clock, monkeypatch):
+    import entry_discovery_capabilities as capabilities
+    prepare_route(monkeypatch, clock, 'PEAD')
+    monkeypatch.setattr(capabilities, 'BUILD_ROLE', 'bridge')
+    monkeypatch.setenv('ENTRY_DISCOVERY_ROLE', 'candidate')
+    assert not capabilities.creation_allowed()
+    result = scanner.run_scan()
+    assert result['signals_published'] == 0
+    assert not rows('SELECT id FROM scanner_orders') and not rows('SELECT id FROM scanner_fills')
+
+
+RELEASE_URL = 'https://www.prnewswire.com/news-releases/synthetic-earnings-301000001.html'
+
+
+def original_release_html(published, body=None):
+    body = body or ('Synthetic Corporation (NASDAQ: TEST) today reported financial results '
+                    'for the quarter ended September 30, 2026.')
+    return (f'<html><head><meta property="article:published_time" content="{published}">'
+            f'<link rel="canonical" href="{RELEASE_URL}"></head><body><p>{body}</p></body></html>').encode()
+
+
+def parse_original_release(raw, *, previous=None):
+    import earnings_releases as releases
+    _, context, _, _ = route_case('PEAD')
+    release = context['earnings_events'][0]['released_at']
+    return releases.parse_release(raw, url=RELEASE_URL, provider='prnewswire',
+        catalog={'TEST': {'cik': '123'}}, first_seen_at=release,
+        observed_at=DECISION-timedelta(seconds=3), processed_at=OBSERVED, previous=previous)
+
+
+@pytest.mark.parametrize('body', (
+    'Synthetic Corporation (NASDAQ: TEST) announced that it will report financial results '
+    'for the quarter ended September 30, 2026 next week.',
+    'Synthetic Corporation (NASDAQ: TEST) announces a conference to discuss financial results '
+    'for the quarter ended September 30, 2026 next week.',
+    'Synthetic Corporation (NASDAQ: TEST) announced financial results for the quarter ended '
+    'September 30, 2026 will be released next week.',
+    'Synthetic Corporation (NASDAQ: TEST) has not reported financial results '
+    'for the quarter ended September 30, 2026.',
+))
+def test_original_release_parser_does_not_turn_preview_into_published_results(body):
+    _, context, _, _ = route_case('PEAD')
+    fact = parse_original_release(original_release_html(context['earnings_events'][0]['released_at'], body))
+    assert fact['verified'] is False, fact
+
+
+def test_original_release_parser_same_url_retraction_cannot_remain_verified():
+    _, context, _, _ = route_case('PEAD')
+    stamp = context['earnings_events'][0]['released_at']
+    prior = parse_original_release(original_release_html(stamp))
+    assert prior['verified'] is True
+    corrected = parse_original_release(original_release_html(stamp,
+        'THIS RELEASE HAS BEEN RETRACTED. Synthetic Corporation (NASDAQ: TEST) today reported '
+        'financial results for the quarter ended September 30, 2026.'), previous=prior)
+    assert corrected['verified'] is False or corrected['retracted'] is True, corrected
+
+
+def seed_original_release_source(raw, *, suffix='one', collected=None):
+    _, context, _, _ = route_case('PEAD')
+    collected = collected or context['earnings_events'][0]['released_at']
+    source = dict(url=RELEASE_URL, title='Synthetic Corporation quarterly financial results',
+        source_excerpt='Original quarterly earnings release', published_at='1999-01-01T00:00:00Z')
+    with database.get_db_connection() as conn:
+        conn.execute('INSERT INTO ne_events(event_id,body_json,evidence_version,status,reason,created_at,updated_at) '
+                     'VALUES(?,?,?,?,?,?,?)', ('release-'+suffix, '{}', suffix, 'observed', None, collected, collected))
+        conn.execute('INSERT INTO ne_sources(source_key,event_id,provider_id,content_hash,body_json,collected_at,source_id,active) '
+                     'VALUES(?,?,?,?,?,?,?,1)', ('source-'+suffix, 'release-'+suffix, 'prnewswire', suffix,
+                     json.dumps(source), collected, 'same-original-id'))
+        conn.commit()
+
+
+def test_original_release_producer_to_reader_to_actual_pead_and_restart(db, clock, monkeypatch):
+    import earnings_releases as releases
+    import entry_strategy_inputs as inputs
+    frame, context, _, _, _, _ = prepare_route(monkeypatch, clock, 'PEAD')
+    published = context['earnings_events'][0]['released_at']
+    raw = original_release_html(published)
+    seed_original_release_source(raw)
+    transport = Mock()
+    transport.request.return_value = raw
+    known = DECISION-timedelta(seconds=3)
+    result = releases.produce(catalog={'TEST': {'cik': '123'}}, transport=transport,
+        clock=lambda: known, enabled=True, approvals={'prnewswire'})
+    assert result['processed'] == result['verified'] == 1 and transport.request.call_count == 1
+    facts, coverage = inputs.load_verified_earnings(['TEST'], DECISION)
+    assert coverage['status'] == 'ready' and len(facts['TEST']) == 1
+    fact = facts['TEST'][0]
+    assert fact['released_at'] == published and fact['released_at'] != '1999-01-01T00:00:00Z'
+    assert fact['source_observed_at'] == fact['processed_at'] == fact['effective_available_at'] == known.isoformat()
+    assert releases.read_facts(['TEST'], known-timedelta(microseconds=1))[0] == {}
+    context['earnings_events'] = facts['TEST']
+    actual = strategies.detect_all(frame, decision_at=DECISION, source_observed_at=OBSERVED,
+        enabled_ids=['PEAD'], context=context)['PEAD']
+    assert actual['state'] == 'DETECTED', actual
+    expected = {key: fact[key] for key in ('revision', 'document_hash', 'parser_version',
+        'issuer_cik', 'issuer_mapping_hash', 'source_url')}
+    assert actual['features']['release_evidence'] == expected
+    assert scanner.run_scan()['signals_published'] == 1
+    saved = json.loads(rows('SELECT technical_json FROM scanner_signals')[0]['technical_json'])['entry_discovery']
+    assert saved['detections'][0]['sourcehash'] == actual['sourcehash']
+    assert saved['detections'][0]['features']['release_evidence'] == expected
+    frozen_decision = copy.deepcopy(saved)
+    revised_context = copy.deepcopy(context)
+    revised_context['earnings_events'][0]['document_hash'] = '0'*64
+    revised = strategies.detect_all(frame, decision_at=DECISION, source_observed_at=OBSERVED,
+        enabled_ids=['PEAD'], context=revised_context)['PEAD']
+    assert revised['state'] == 'DETECTED' and revised['sourcehash'] != actual['sourcehash']
+    retained = rows("SELECT scan_id,metrics_json FROM scanner_candidates WHERE stage='earnings_release'")
+    result2 = releases.produce(catalog={'TEST': {'cik': '123'}}, transport=transport,
+        clock=lambda: known+timedelta(seconds=1), enabled=True, approvals={'prnewswire'})
+    assert result2['processed'] == 0 and transport.request.call_count == 1
+    assert rows("SELECT scan_id,metrics_json FROM scanner_candidates WHERE stage='earnings_release'") == retained
+    # A newly discovered same-original URL is retained as an UNKNOWN revision,
+    # not a path to revive the old verified release after parsing fails.
+    later = known+timedelta(seconds=1)
+    seed_original_release_source(b'invalid', suffix='two', collected=later.isoformat())
+    transport.request.return_value = b'<html><p>Publication timestamp removed on correction</p></html>'
+    releases.produce(catalog={'TEST': {'cik': '123'}}, transport=transport,
+        clock=lambda: later, enabled=True, approvals={'prnewswire'})
+    current, _ = releases.read_facts(['TEST'], DECISION)
+    assert len(current['TEST']) == 1 and current['TEST'][0]['verified'] is False
+    assert json.loads(rows('SELECT technical_json FROM scanner_signals')[0]['technical_json'])['entry_discovery'] == frozen_decision
+    assert rows("SELECT scan_id,metrics_json FROM scanner_candidates WHERE stage='earnings_release' ORDER BY id")[:len(retained)] == retained
+    context['earnings_events'] = current['TEST']
+    assert strategies.detect_all(frame, decision_at=DECISION, source_observed_at=OBSERVED,
+        enabled_ids=['PEAD'], context=context)['PEAD']['state'] == 'UNKNOWN'
+
+
+@pytest.mark.parametrize('role,enabled', (('candidate', False), ('bridge', True)))
+def test_release_producer_off_or_bridge_never_touches_db_or_transport(monkeypatch, role, enabled):
+    import earnings_releases as releases
+    import entry_discovery_capabilities as capabilities
+    monkeypatch.setattr(capabilities, 'BUILD_ROLE', role)
+    db_connect = Mock(side_effect=AssertionError('OFF/bridge DB touched'))
+    transport = Mock()
+    assert releases.produce(connect=db_connect, transport=transport, enabled=enabled)['status'] == 'off'
+    db_connect.assert_not_called()
+    transport.request.assert_not_called()
+
+
+def test_retained_audit_exports7_and_old_mislabelled_audit6_snapshot_is_explicitly_unsupported(db, clock, monkeypatch):
+    import active_snapshot
+    import recovery_state as recovery
+    prepare_route(monkeypatch, clock, 'RELATIVE_STRENGTH_LEADER')
+    assert scanner.run_scan()['signals_published'] == 1
+    retain_204_audit_only_fixture()
+    clock.instant = datetime(2026, 10, 6, 14, 10, tzinfo=timezone.utc)
+    engine.process_bar('TEST', dict(at='2026-10-06T14:05:00Z', open=102, high=102.1, low=101.9, close=102))
+    data = recovery.sanitize(active_snapshot.export_data(database._SQLITE_DB_PATH))
+    assert data['version'] == data['recovery_format'] == 7
+    recovery.validate(data)
+    previous204 = copy.deepcopy(data)
+    previous204.update(version=6, recovery_format=6)
+    previous204.pop('snapshot_id')
+    previous204['snapshot_id'] = active_snapshot.digest(previous204)
+    with pytest.raises(ValueError, match='discovery_snapshot_format_content_mismatch'):
+        recovery.validate(previous204)
+
+
+@pytest.mark.parametrize('evidence', ('touch_straddles_expiry', 'missing_bar'))
+def test_new_frozen_window_expiry_or_gap_is_uncertain_not_fabricated_fill(db, clock, monkeypatch, evidence):
+    prepare_route(monkeypatch, clock, 'RELATIVE_STRENGTH_LEADER')
+    monkeypatch.setenv('STOCK_SCANNER_SIGNAL_VALIDITY_HOURS', '1')
+    assert scanner.run_scan()['signals_published'] == 1
+    before = rows('SELECT cash,fees_paid,realized_pnl FROM scanner_accounts')
+    bars = [dict(at=f'2026-10-06T14:{minute:02d}:00Z', open=103, high=103.1, low=102.9, close=103)
+            for minute in range(5, 60, 5)]
+    straddle = dict(at='2026-10-06T15:00:00Z', open=102, high=102.1, low=101.9, close=102)
+    clock.instant = datetime(2026, 10, 6, 15, 5, tzinfo=timezone.utc)
+    available = bars+[straddle] if evidence == 'touch_straddles_expiry' else []
+    # Exercise the ACTUAL monitor ordering: recovery classification precedes
+    # replay/cursor advancement and expiry. Directly calling process_bar first
+    # would incorrectly simulate an already-processed recovery cursor.
+    monkeypatch.setattr(engine, 'datetime', clock)
+    monkeypatch.setattr(engine, '_bar_dicts', lambda *args: available)
+    engine.monitor_prices()
+    assert rows('SELECT status FROM scanner_orders') == [{'status': 'recovery_uncertain'}]
+    assert not rows('SELECT id FROM scanner_fills') and not rows('SELECT id FROM scanner_trades')
+    assert rows('SELECT cash,fees_paid,realized_pnl FROM scanner_accounts') == before
+    engine.initialize_runtime()
+    engine._expire_recovered_orders('TEST', clock.instant+timedelta(days=3))
+    assert rows('SELECT status FROM scanner_orders') == [{'status': 'recovery_uncertain'}]

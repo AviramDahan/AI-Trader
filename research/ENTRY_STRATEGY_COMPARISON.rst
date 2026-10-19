@@ -1,6 +1,201 @@
 Independent entry discovery: comparison contract
 ================================================
 
+Expanded follow-up:19October2026
+--------------------------------
+
+The latest comparison expands to108 deterministically selected configured
+universe members, eight predeclared market cutoffs and one actual-current
+observation, on all12 arms. It supersedes the earlier20-stock same501-bar
+Baseline comparison below for baseline-window parity. No source repository,
+strategy threshold or result-driven cohort selection was changed.
+
+Membership was frozen before the expanded acquisition:73 S&P500-only,12
+Nasdaq100-only and23 overlapping members from the dated518-member configured
+union. Each sorted stratum uses evenly spaced ordinal selections, after a
+minimum12 allocation and proportional largest-remainder allocation. This is
+index representation, not sector stratification or a survivorship-free historic
+universe. Existing5 stock packets and SPY were reused without relabeling clocks;
+103 additional stock packets were acquired from the same free Yahoo source.
+All108 remain in the denominator; no failure/short history is replaced.
+
+Actual acquisition completed108/108,208 HTTP requests, no circuit stop. Most
+stocks have501 daily rows; CRWV391, HONA87 and SPCX88 retain their true shorter
+coverage. The helper derives OHLC from raw OHLC*(AdjClose/Close), Close=AdjClose,
+and leaves Volume unchanged; raw prices, actions, mapping metadata and exact
+response/packet hashes remain private. Retrospective provider adjustments are
+not independently certified point-in-time values. Jan9/2025 is an acknowledged
+exceptional market closure, not an imputed missing Yahoo bar.
+
+The target HTTP spacing was0.55s; QA measured a minimum UTC start interval of
+0.541196s, a small deviation from that target, still below2 requests/second.
+The immutable receipt is not rewritten and the acquisition is not repeated to
+hide this discrepancy. No reason for the timing discrepancy is asserted.
+
+Baseline/common metrics now receive a distinct SIX-CALENDAR-MONTH prefix;
+independent detectors receive the separately supplied up-to2y prefix. Baseline
+EMA/zone state is not reseeded with the longer detector history. Both paths use
+the same actual observation clocks and the original pure application helpers.
+The current snapshot uses the actual recorded comparison clock
+2026-10-19T04:53:45.048406+00:00. Earlier market cutoffs are:
+2025-11-28,2026-01-30,2026-03-31,2026-05-29,2026-07-31,2026-08-31,
+2026-09-30 and2026-10-16.
+
+Those eight older prefixes are NONEXECUTABLE RETROSPECTIVE COMPONENTS observed
+today, not historical eligible decisions. ``calculation_at`` is the separate
+16:10 New York feature-calculation clock; actual ``decision_at``, source
+observation and effective availability are never backdated. Prefixes are cut
+before calculation. Component attribution has a separate version rejected by
+AI/admission/execution validators; a read-only explicit branch projection does
+not enable execution. The final historical cutoff and current observation
+share the16October market session and must not be counted as independent trades.
+
+.. list-table:: Expanded real-data discovery observations, NOT trades
+   :header-rows: 1
+   :widths: 45 15 13 14 13
+
+   * - Arm
+     - Candidates across9 snapshots
+     - Unique tickers
+     - Planned AI slots
+     - Added to Baseline
+   * - Baseline
+     - 705
+     - 108
+     - 54
+     - 0
+   * - VCP alone
+     - 0
+     - 0
+     - 0
+     - 0
+   * - Momentum Burst alone
+     - 5
+     - 4
+     - 5
+     - 1
+   * - PEAD alone
+     - 0
+     - 0
+     - 0
+     - 0
+   * - Pullback Reclaim alone
+     - 2
+     - 2
+     - 2
+     - 0
+   * - RS Leader with trigger alone
+     - 1
+     - 1
+     - 1
+     - 0
+   * - Baseline OR VCP
+     - 705
+     - 108
+     - 54
+     - 0
+   * - Baseline OR Momentum Burst
+     - 706
+     - 108
+     - 54
+     - 1
+   * - Baseline OR PEAD
+     - 705
+     - 108
+     - 54
+     - 0
+   * - Baseline OR Pullback Reclaim
+     - 705
+     - 108
+     - 54
+     - 0
+   * - Baseline OR RS Leader
+     - 705
+     - 108
+     - 54
+     - 0
+   * - Baseline OR all five
+     - 706
+     - 108
+     - 54
+     - 1
+
+The9 snapshot totals are972 ticker observations, not972 independent source
+configurations or trades. The result reports distinct market/ticker/direction
+observations separately from exact hashes of the two consumed source frames.
+Baseline has623 distinct market/ticker/direction observations and703 consumed
+dual-frame configurations; All has624 and704 respectively. Different current
+versus final-cutoff6mo window starts can change a source configuration without
+adding a new market-session opportunity. Neither denominator is a trade count.
+Baseline has360 BUY and345 existing SELL-direction observations. New routes
+remain BUY-only; no new SHORT policy is inferred. Current-only Baseline and All
+both have82 candidates,55 BUY/27 existing SELL; Burst labels NI, already in the
+Baseline set. This is not82 accepted plans or imminent fills.
+
+Real-data component labels, computed only at the actual19October observation,
+are Burst KO30January-prefix, MTD/ODFL29May-prefix and NI16October-prefix
+(NI repeats in current observation); Pullback HST31March-prefix/DD29May-prefix;
+RS KO30January-prefix. These are not claimed historical system discoveries.
+Only MTD29May is absent from the corresponding Baseline candidate set. VCP has
+0 DETECTED,3 FORMING,949 REJECTED and20 UNKNOWN. PEAD is UNKNOWN on all972
+observations because actual verified earnings release facts were not supplied;
+this is missing input evidence, not negative performance. No facts are invented.
+
+All holds the same25-shortlist/6-shared-AI cap per snapshot,54 planned slots
+across9 snapshots. Six selected slot observations differ from Baseline; adding
+labels can reorder existing candidates as well as introduce one new candidate.
+This is raw discovery ranking competition, not a replay of the whole scanner's
+news/SEC enrichment, target-refill credits or actual AI selection/outcomes.
+The fixed cursor is paired across arms; live rotation history is not invented.
+
+Every independent detection's actual daily close is inside its necessary
+frozen strategy branch interval. Nevertheless the unchanged pure BUY/SINGLE
+structure builders reject all8 such observations at that SAME reference close:
+Burst4 nearest-resistance-below2R and1 entry-not-above-completed-high;
+Pullback1 inside-zone and1 invalid-rounded-levels; RS1 entry-not-above-completed-
+high. The one extra MTD candidate is among the2R failures. A daily close is not
+a current quote; these are component diagnostics, NOT proof that the real-time
+system would reject every possible future legal price. No hypothetical quote
+above High20, stop/target change, intrabar fill or relaxed gate was introduced.
+
+Actual AI reviews/approvals, orders, entries and outcomes remain NULL, not
+observed zero trades. WR, net expectancy, PF and drawdown remain
+DATA_INSUFFICIENT. This broader sample proves executable detection/competition
+and exposes remaining entry-fit constraints; it does not establish edge or
+justify Paper activation by itself. No parameter tuning was performed.
+
+The bounded research-only cache hashes complete causal frames/index/attrs,
+context/configuration and actual/calculation clocks, returns deep copies, and
+does not change application runtime caches. ``entry_strategy_ids`` is excluded
+only from the legacy analyzer's key because that exact analyzer does not read
+it; all independent detector results are computed by the actual helper and
+then selected by ID. Independent QA repeats an unmemoized subset.
+Custom configuration contexts bypass that bulk optimization and call the exact
+requested-ID helper: an invalid override on a disabled strategy must not change
+another arm. A failing regression reproduced that research-cache contamination
+before the small bypass; the application detector itself was unchanged.
+
+Reproduction on the same authorized private immutable packets, without any
+network, database, AI or order action::
+
+  python research/scripts/compare_entry_strategies.py --expanded-acquisition-result <private-expanded-acquisition-result.json> --comparison-decision-at 2026-10-19T04:53:45.048406+00:00 --memoize --reference-probes --summary-only
+
+The expanded sanitized aggregate is
+``research/results/entry_strategy_expanded_comparison.json``. Source packet and
+manifest hashes, actual clocks, all12 arm/date counts, reasons and NULL metrics
+are retained; raw OHLCV and private paths are not published. Research controls
+now include actual6mo Baseline versus2y positive controls, exact calendar-window
+slicing, source-clock preservation, missing-source denominators and cached/cold
+helper equivalence. This suite is separate from application/lifecycle suites.
+The command ``python -m pytest research/tests/test_compare_entry_strategies.py -q``
+actually passed27 tests,0 failures/0 skips in14.58s after the PEAD fact-trace
+update. Both real/synthetic calculation code hashes were identical and stable.
+The final signed replay pins the code actually evaluated, including the final
+frozen-rule execution projection and downgrade guard. The guard's independent
+lifecycle tests are code-correctness evidence, not a claim of improved
+conversion/performance. Earlier diagnostic receipts remain private and are not
+silently rewritten or relabeled as final-code executions.
+
 Scope
 -----
 
@@ -10,7 +205,7 @@ Trend Pullback Reclaim and Relative Strength Leader with an actual trigger.
 They are alternatives before the old baseline filter and shortlist, not five
 additional gates imposed on an already-approved Baseline candidate.
 
-The12 arms use the same frozen input frames, availability clocks, common data/
+The12 arms use the same frozen paired input frames, availability clocks, common data/
 liquidity/ATR requirements, ranking/round-robin implementation, shortlist cap,
 shared AI cap and execution contract: Baseline; each strategy alone; Baseline OR
 each strategy; Baseline OR all five. A ticker is counted once per observation,
@@ -73,8 +268,8 @@ fixtures, tool/tests, this method and sanitized aggregate result metadata belong
 in the repository. Feature enablement, merge and Production deployment are
 outside this comparison's authorization.
 
-Actual results:20 stocks plus the separately acquired SPY benchmark
-------------------------------------------------------------------
+Earlier results:20 stocks plus the separately acquired SPY benchmark
+--------------------------------------------------------------------
 
 The comparison actually ran on the frozen20-stock cohort, with501 completed
 daily candles per symbol,17October2024--16October2026. The later SPY packet

@@ -1,0 +1,107 @@
+name: Entry discovery application images (no deployment)
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  images:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'codex/independent-entry-strategies'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Build old, immutable bridge, and candidate from pinned sources
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          old=1d61cc182e27696cd182555c4640ed3c257e7cf8
+          git worktree add --detach /tmp/entry-old "$old"
+          docker build --build-arg BUILD_SHA="$old" -t entry-old:test /tmp/entry-old
+          docker build --build-arg BUILD_SHA="$sha" --build-arg ENTRY_DISCOVERY_ROLE=bridge -t entry-bridge:test .
+          docker build --build-arg BUILD_SHA="$sha" --build-arg ENTRY_DISCOVERY_ROLE=candidate -t entry-candidate:test .
+          mkdir -p /tmp/entry-proof /tmp/entry-artifacts
+          chmod 777 /tmp/entry-proof
+          docker image inspect entry-old:test entry-bridge:test entry-candidate:test > /tmp/entry-image-inspect.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          images=json.loads(Path('/tmp/entry-image-inspect.json').read_text())
+          result=[]
+          for role,image in zip(('old','bridge','candidate'),images):
+              result.append({'role':role,'image_id':image['Id'],'bytes':image['Size'],
+                  'build_sha':next(v.split('=',1)[1] for v in image['Config']['Env'] if v.startswith('BUILD_SHA='))})
+          assert result[1]['image_id'] != result[2]['image_id']
+          assert result[1]['build_sha'] == result[2]['build_sha']
+          Path('/tmp/entry-artifacts/images.json').write_text(json.dumps(result,indent=2))
+          PY
+      - name: Real binary current-DB rollback, restart, frozen guards and encrypted restore
+        run: |
+          set -euo pipefail
+          docker network create --internal entry-discovery-test
+          docker run -d --name entry-discovery-pg --network entry-discovery-test -e POSTGRES_USER=isolated -e POSTGRES_PASSWORD=disposable -e POSTGRES_DB=isolated_entry postgres:17-bookworm
+          for i in $(seq 1 30); do docker exec entry-discovery-pg pg_isready -U isolated && break; sleep 2; done
+          docker exec entry-discovery-pg createdb -U isolated restored_entry
+          docker exec entry-discovery-pg createdb -U isolated restored_audit
+          probe() {
+            fixtures="$PWD/service/server"
+            if test "$1" = entry-old:test; then fixtures=/tmp/entry-old/service/server; fi
+            docker run --rm --network entry-discovery-test \
+              -e DATABASE_URL="postgresql://isolated:disposable@entry-discovery-pg:5432/${3:-isolated_entry}" \
+              -e STOCK_SCANNER_EXIT_STRATEGY=single -e STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED=true \
+              -e STOCK_SCANNER_MAX_TOTAL_EXPOSURE=10000 \
+              -e STOCK_SCANNER_SINGLE_BREAKOUT_ENABLED=true -e STOCK_SCANNER_FULL_BAR_ENTRY_ENABLED=true \
+              -e STOCK_SCANNER_ENTRY_PRICE_RETRY_ENABLED=true \
+              -v "$fixtures/tests:/fixtures/tests:ro" -v "$fixtures/tests_pg:/fixtures/tests_pg:ro" \
+              -v "$PWD/scripts/entry_discovery_compatibility_probe.py:/probe.py:ro" -v /tmp/entry-proof:/proof \
+              --entrypoint python "$1" /probe.py "$2" | tee -a /tmp/entry-artifacts/results.jsonl
+          }
+          probe entry-bridge:test identity_bridge
+          probe entry-candidate:test identity_candidate
+          probe entry-old:test old_seed
+          probe entry-candidate:test candidate_audit
+          probe entry-bridge:test bridge_audit
+          probe entry-candidate:test candidate_execution
+          # All clients have exited: clone ONLY for an unsupported old-runtime demonstration.
+          docker exec entry-discovery-pg createdb -U isolated -T isolated_entry unsafe_entry
+          probe entry-old:test old_runtime_unsafe unsafe_entry
+          # Supported bridge uses the SAME current DB, with no rewind or release.
+          probe entry-bridge:test bridge_execution
+          probe entry-bridge:test bridge_restart
+          probe entry-old:test old_reader_refused
+          probe entry-bridge:test bridge_restore_audit restored_audit
+          probe entry-bridge:test bridge_restore restored_entry
+      - name: Retain the actual tested bridge only within the approved byte bound
+        run: |
+          set -euo pipefail
+          docker save entry-bridge:test | gzip -1 > /tmp/entry-bridge-tested.tar.gz
+          python - <<'PY'
+          import hashlib,json,os,shutil
+          from pathlib import Path
+          archive=Path('/tmp/entry-bridge-tested.tar.gz')
+          size=archive.stat().st_size
+          digest=hashlib.file_digest(archive.open('rb'),'sha256').hexdigest()
+          retained=size<=250*1024*1024
+          manifest={'archive_bytes':size,'archive_sha256':digest,'bound_bytes':250*1024*1024,
+              'status':'TESTED_BRIDGE_ARCHIVE_RETAINED_ONE_DAY' if retained else 'ROLLBACK_ARTIFACT_NOT_RETAINED',
+              'activation_gate':'Requires downloaded archive hash/load image ID verification and candidate-host pin before enable' if retained else 'Requires actual candidate-host bridge build and image-ID pin before enable',
+              'rebuild_recipe':'git checkout <images.json bridge.build_sha>; docker build --build-arg BUILD_SHA=<same-sha> --build-arg ENTRY_DISCOVERY_ROLE=bridge -t entry-bridge:test .',
+              'rebuild_is_exact_binary_reproduction':False,
+              'rebuild_limit':'Unpinned base/dependency resolution can change image IDs; rebuilt bridge must be tested and pinned again before enable.',
+              'retained_claim_requires_successful_workflow_upload':True,
+              'image_identity_file':'images.json','source_commit':json.loads(Path('/tmp/entry-artifacts/images.json').read_text())[1]['build_sha'],
+              'no_production_activation':True}
+          Path('/tmp/entry-artifacts/rollback-artifact.json').write_text(json.dumps(manifest,indent=2))
+          if retained:
+              shutil.move(str(archive),'/tmp/entry-artifacts/entry-bridge-tested.tar.gz')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: entry-discovery-sanitized-image-proof-and-bounded-bridge
+          path: /tmp/entry-artifacts/
+          if-no-files-found: error
+          retention-days: 1

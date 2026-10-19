@@ -50,26 +50,39 @@ not a requirement to pass the old baseline: all five baseline-NONE positive
 controls are tested independently. Opposing direction is reported separately
 from lack of setup, data failure, AI rejection or target incompatibility.
 
-Entry compatibility: completed setup, then existing passive LIMIT
----------------------------------------------------------------
+Versioned entry compatibility for NEW independent contracts
+----------------------------------------------------------
 
 Each route confirms its completed daily trigger before discovering a candidate.
 The current quote must still exceed at least one enabled frozen trigger and not
 exceed that route's chase bound, both before AI/planning and at record_signal.
-No missing/FORMING route becomes a valid trigger. This does not create a BUY STOP
-order, a live intraday volume detector, or a requirement that every later fill
-remain above the original independent pivot. The existing passive LIMIT and
-frozen SINGLE/V2 or legacy target contract remain the execution authority.
+No missing/FORMING route becomes a valid trigger. Orders remain LIMIT, not STOP.
+For NEW independent BUY entries without a BASELINE contributor, persist
+independent_entry_execution_v1 in signal, order and trade. Freeze only branches
+valid at the original quote, their source/audit digest, support and chase ceiling.
+Branches are OR, not all required simultaneously:
+
+* VCP, Stockbee, PEAD and RS: actual slippage-adjusted fill must be strictly above
+  the frozen confirmed pivot and no greater than the frozen chase ceiling.
+* Pullback Reclaim: after confirmed reclaim at admission, a later improved fill
+  below that pivot is permitted only strictly above frozen EMA20 support and
+  no greater than the frozen chase ceiling. EMA is never recomputed at fill.
+
+All structural stop, resistance, RR, expiry and execution checks still apply.
+New independent V1/STAGED orders also freeze the completed eligible-bar window;
+that does not change V1 targets or create a new exit strategy.
 
 Independent QA reproduced an important distinction: an RS pivot100.85 and
 LIMIT102 can legally fill at100.8 under the original V2 plan (stop97.46,
 ATR1.90714), despite the earlier setup/admission having cleared the pivot. This
-is existing improved-price/pullback LIMIT behavior, not proof that the fill
-reconfirmed a breakout. It is not silently changed or presented as a strict
-above-pivot execution strategy. A policy that requires actual fill above the
-independent pivot needs a separate versioned executable contract and compatible
-rollback/restore readers, with explicit failure/retry semantics. That additional
-execution policy is a compatibility gap/proposal, not implemented here.
+remains the exact behavior for retained audit-only contracts. With the NEW RS
+contract,100.8 is below100.85: the order remains pending, no debit/fill/position
+is created, and last_strategy_entry_block records the actual checked price/bar.
+A later eligible complete bar may fill only after all unchanged controls pass.
+Neither levels nor expiry move. Missing intervening bars remain uncertain with
+reservation; restart/replay cannot infer a rejected touch as an earlier fill.
+An unknown/malformed execution contract fails closed. Existing orders and
+BASELINE-contributor entries retain their saved prior behavior, not auto-upgraded.
 
 The existing structural planner is called unchanged for every discovered route:
 nearest resistance and structural stop/ATR/minimum RR still apply; only the
@@ -121,7 +134,7 @@ Implementation map and operation (not an activation instruction)
 
 * entry_strategies.py: five bounded, causal daily detectors and trigger checks.
 * entry_strategy_inputs.py: separate2-year discovery cache, plus SPY for RS; a bounded
-  typed verified-release reader for PEAD. It never overwrites baseline6-month
+  immutable verified-release reader for PEAD. It never overwrites baseline6-month
   frames/EMA/ATR/zones. No extra calls or DB reads with every new flag OFF.
   All enabled routes get the same discovery prefix independently of the other
   flags; switching VCP must not change another route's EMA seed/history. A
@@ -138,6 +151,10 @@ Implementation map and operation (not an activation instruction)
   are not public signals, orders, positions, or rejection outcomes.
 * recovery_state.py/single_target_recovery.py: validate and preserve provenance,
   including recovery_uncertain closes and their original attribution.
+* entry_strategy_execution.py: new-only frozen OR fill guards; price failure
+  observations, full-bar retry/recovery and public reason projection.
+* earnings_releases.py/news_pipeline.run_feed_cycle: original-page PEAD producer
+  on the existing feed worker, outside HTTP scan/UI and transactions over HTTP.
 
 Five default-OFF flags are listed in .env.example. They are independent; there
 is no VCP GO dependency or mandatory AND across routes. Disable all five to
@@ -145,23 +162,93 @@ stop new independent discoveries, returning to original baseline selection.
 Stored orders/positions, their TP/SL and uncertainty reservations continue under
 their saved original execution contracts. No existing row is converted/deleted.
 
-No database migration is added: existing schema7 JSON columns and candidate
-journal are reused. Snapshot/recovery format remains determined by existing
-execution contracts (2..6). Provenance is audit metadata, not a new fill rule.
-Current readers preserve it; pre-feature recovery readers are NOT certified:
-old sanitizers can drop signal/trade attribution or reject additional settings.
-Use this feature-capable binary for restore/rollback if attribution must survive.
-Disabling discovery flags is not proof of older-binary recovery compatibility.
+No database migration is added: existing schema7 JSON columns and journals are
+reused. Snapshot format7 is required by entry_discovery attribution, including
+retained earlier audit-only data. Format8 is required by the new execution guard
+or its observation. Readers reject a mislabeled older format rather than erase
+metadata. Pre-feature main1d61 is UNSAFE_NOT_SUPPORTED for rollback: an old
+runtime can ignore the new auxiliary guard even if its backup reader rejects7/8.
+No DB rewind, audit deletion or automatic release of holds is permitted.
+
+Build a supported compatibility bridge from the SAME exact candidate source SHA:
+
+::
+
+  docker build --build-arg BUILD_SHA=<exact_sha> --build-arg ENTRY_DISCOVERY_ROLE=bridge -t ai-trader:entry-discovery-bridge-<sha> .
+  docker build --build-arg BUILD_SHA=<exact_sha> --build-arg ENTRY_DISCOVERY_ROLE=candidate -t ai-trader:entry-discovery-candidate-<sha> .
+
+The build stamps a root-owned read-only capability before dropping privileges;
+bridge creation is OFF even if runtime discovery flags are accidentally true.
+It retains new readers, pending/recovery management, exits and formats7/8.
+Disabling flags stops creation only; it is NOT a binary rollback. Future release
+must build/verify/pin the actual host bridge image ID and SHA BEFORE enabling any
+route, retain it, and return only to that bridge on the CURRENT database.
+The test-only entry-discovery-compatibility workflow exercises actual images on
+isolated Linux/PostgreSQL with real age, old-runtime unsafe probe on a CLONE,
+bridge current-DB management/restart and encrypted restore into an empty DB.
+An image manifest/rebuild recipe is not a retained rollback image. If the tested
+archive exceeds250MiB it is not uploaded; report ROLLBACK_ARTIFACT_NOT_RETAINED
+and keep activation gated until a real host rollback image has been retained.
 Existing active-state backups still cover open positions/recovery_uncertain
 holds, not every ordinary pending order or the research observation journal.
 
-PEAD live-input readiness is explicitly limited: the current collectors do not
-produce the required verified official_earnings_release/verified_earnings_release
-typed earnings_events facts. The detector, point-in-time adapter and complete
-mocked-provider lifecycle are implemented, but a scheduled earnings calendar,
-headline or SEC acceptance timestamp cannot substitute for that missing source.
-Thus PEAD returns UNKNOWN until verified publication/identity/processing facts
-exist. This blocks PEAD data validation only, never the other four routes.
+PEAD producer and honest coverage
+-------------------------------
+
+When PEAD is ON, the existing feed worker consumes canonical ne_sources from
+already-enabled/approved PRnewswire and GlobeNewswire original releases. It does
+not enable a provider, infer a license, crawl issuer sites, depend on a watchlist,
+or guarantee whole-universe earnings coverage. Unsupported sources/mappings,
+intraday releases and separately linked correction URLs remain explicit gaps.
+Cached current-universe membership and the official SEC issuer mapping verify
+the original reporting paragraph's exchange/ticker. No reporting-owner/path CIK,
+fuzzy identity or LLM guess is used.
+
+Original-page article:published_time/datePublished must be a nonconflicting
+timezone-aware datetime. A date-only field, headline, scheduled calendar, SEC
+acceptance, first-seen, or download time cannot replace it. An original-body
+actual financial-results statement with its fiscal period is required; a
+conference preview or future announcement is not a verified release. This
+producer verifies timing/identity, NOT EPS surprise or analyst consensus.
+
+Preserve original released/published, first-seen, actual page-observed, processed
+and effective availability clocks, content hash, parser version, issuer-map hash
+and stable event/source IDs. Same-URL corrections append immutable revisions.
+A pending/unverified correction or source withdrawal blocks the old fact instead
+of reviving it. A changed original publication timestamp is UNKNOWN. Clean daily
+revalidation does not refresh the event's original availability or age. Backfill
+is context, never an old trade or newly published alert.
+
+Reuse scanner_settings for an atomic producer lease, source-key checkpoint,
+recoverable jobs, fair completed-page rotation, backoff/provider circuit breaker
+and coverage. Each cycle scans at most200 sources and fetches at most2 approved
+pages (12s/2MiB per request); HTTP runs outside DB transactions. HTTPS exact
+host/path allowlists, pinned public DNS, redirects disabled, parser text/node/
+metadata limits and no executable document instructions remain enforced.
+Immutable facts use scanner_candidates stage=earnings_release. The scanner only
+reads bounded facts as-of; it never fetches a release in a UI/scan request.
+Coverage metadata: scanner_settings key pead_release_coverage_v1 and the returned
+load_context.earnings_coverage. OFF and bridge perform zero producer DB/network.
+This analytical journal is not part of the active-position backup, which remains
+an active-state transfer, not a full application backup.
+
+Synthetic worker→fact→reader→actual PEAD→paper lifecycle is testable now. Public
+live publication coverage and a profitable PEAD edge are separate unverified
+claims; unavailable facts return UNKNOWN for PEAD only. All five flags stay OFF.
+
+Expanded comparison boundaries
+-----------------------------
+
+The twelve arms use a fixed cohort and multiple predeclared market cutoffs.
+Baseline receives its six-calendar-month prefix; new detectors receive a separate
+long prefix. Actual download/observation clocks are preserved. Historical
+calculations use entry_discovery_component_v1, which live validation, AI review,
+record_signal and execution refuse; calculation_at is not a fabricated historical
+availability time. Research-only exact pure-helper memoization is independently
+compared with unmemoized calls. Planned AI-slot competition is not historical AI
+approval; daily reference-price structural probes are not executions. Missing
+PIT releases, historical model decisions or actual fills keep outcome metrics
+NULL/DATA_INSUFFICIENT, never invented zero trades or profit.
 
 Donor attribution
 -----------------

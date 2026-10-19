@@ -1,0 +1,4301 @@
+{
+  "base_commit": "204ad61cf15c5f187e7f7923edd6a08b022e15d3",
+  "code_hash_newline_policy": "LF",
+  "code_hash_path_policy": "POSIX",
+  "comparison": "TWELVE_ARMS_BASELINE_6_CALENDAR_MONTHS_VS_INDEPENDENT_2Y_PREFIX",
+  "expanded_current_and_retrospective_components": {
+    "acquisition_status_counts": {
+      "ACQUIRED_VALIDATED": 103,
+      "REUSED_VALIDATED": 5
+    },
+    "benchmark_receipt": {
+      "artifact_sha256": "6f04d9aa868e77251b497f6209b2728b8551d7d1fa30add084737c0a24e4e6a5",
+      "source_observed_at": "2026-10-18T20:08:24.187491+00:00",
+      "symbol": "SPY"
+    },
+    "code_hash_newline_policy": "LF",
+    "comparator_sha256": "9f0a9a9ff34d5721a52115c53e728775c7b4bbc7f125cbc54d7a7cd2c622a347",
+    "comparison_limits": [
+      "Discovery candidates/planned slots are not AI approvals, accepted signals, orders or legal entries.",
+      "No quote/session/news/confidence/risk/target/entry gate is declared passed by this comparison.",
+      "Actual strategy records and ranking helper reused; no bonus per additional label or multiplied AI cap.",
+      "Source availability and bar completion respected in both arms; retrospective vendor revisions or universe selection are not PIT proof.",
+      "No price-touch/intrabar fill, historical AI, WR/PF/expectancy/drawdown or independent OOS outcome invented."
+    ],
+    "component_reference_probe_scope": "DAILY_CLOSE_STRUCTURAL_AND_NECESSARY_INTERVAL_ONLY_NOT_ADMISSION",
+    "dataset_content_sha256": "b9118331acfd53db3c35cba06e8718e255cdfe649fef26ab78e91c2177d9e21b",
+    "evidence_class": "CURRENT_OBSERVED_AND_NONEXECUTABLE_RETROSPECTIVE_COMPONENTS",
+    "fixture_source_sha256": null,
+    "implementation_sha256": {
+      "entry_discovery.py": "6fb6d7a8d66b6d46ebc7ce75b6ae9547b20b5e3f341471fe798f3540bc9d4635",
+      "entry_strategies.py": "3ceea255a5cde4de39e26e831b50640ac976dceb4a755d6baa126f0106f93b36",
+      "entry_strategy_execution.py": "3e4a5db9c6f2252deaebf8952256ffe1038d77498839d9aa32545de9a64574a9",
+      "scanner_targets.py": "bc86bc088a3628c9e558a8ce0d6817e1a5860f72e5f78046f0f6f0b034dbeb50",
+      "single_breakout_policy.py": "4bb2bb56b9c3a44db457f327dbab8ba5dd75931e0cbe4e94eae9d8d7f915c586",
+      "single_target_policy.py": "e57f2ff19a427b4f7877f7cbf2229c017afa0e4a761249ca7b3e0529de3f5cc6",
+      "stock_scanner.py": "5a6f27eaef71a4980e27f6ca8dfa5cd0180fe3725940c65baa6b331777665ce3",
+      "vendor/entry_discovery/stockbee.py": "f0c55d087b009775ade81a5508d8376018e7504f87e2cec0b0fa51d68862fadb",
+      "vendor/entry_discovery/vcp_pattern_calculator.py": "2d5f3d5e019c51723cfc27a2fb9db89d1ff03deaefa3cf50c4e9b512511bc002"
+    },
+    "implementation_stable_during_comparison": true,
+    "input_limitations": [
+      "Cutoff dates and expanded cohort are frozen before new acquisition/evaluation, but this is not externally preregistered or OOS: earlier20-symbol work was already observed.",
+      "Dated current configured index membership is not historical point-in-time membership or sector stratification.",
+      "No verified earnings release events are fabricated; PEAD may remain UNKNOWN despite a complete executable implementation.",
+      "No current quote, AI review, trade, fill, net performance or historical availability is invented.",
+      "Keep all108 names in coverage denominator, including mapping failures, short IPO history, provider errors and circuit-stopped requests. No fuzzy alias substitution.",
+      "Jan9/2025 was an exceptional official US market closure, not a missing Yahoo bar; no candles imputed.",
+      "Eight prefix snapshots are retrospective component calculations observed today, not historical eligible decisions/PIT/OOS.",
+      "The latest historical cutoff and current snapshot share a market session; they are not independent trading opportunities.",
+      "Baseline6mo window is distinct from2y detector prefix; no reseeding baseline with long history.",
+      "Missing actual earnings release facts remain UNKNOWN; no historical AI, quote, entry, fill or outcome generated."
+    ],
+    "input_observations": 972,
+    "input_receipt_sha256": "a2f7d12c30a93e7e471441bd8758b00f6b071be6e86e66458ef195f96bd348b7",
+    "manifest_sha256": "b608d5469d31a0dd61c7de29711623ee03fb1df71e010ba9d4e6f6478ce07219",
+    "safety": {
+      "AI_calls": 0,
+      "Production_calls": 0,
+      "Telegram_calls": 0,
+      "application_DB_calls": 0,
+      "network_calls": 0,
+      "orders_fills_created": 0
+    },
+    "scope": "PAIRED_OFFLINE_DISCOVERY_ONLY_NOT_PAPER_BACKTEST",
+    "shared_caps_per_snapshot": {
+      "cursor": 0,
+      "max_AI": 6,
+      "shortlist": 25
+    },
+    "snapshot_count": 9,
+    "source_snapshot_clocks": [
+      {
+        "calculation_at": "2025-11-28T21:10:00+00:00",
+        "decision_at": "2026-10-19T04:53:45.048406+00:00",
+        "market_cutoff": "2025-11-28",
+        "snapshot_id": "component_2025-11-28",
+        "source_observed_at_max": "2026-10-19T04:50:22.050161+00:00",
+        "source_observed_at_min": "2026-10-18T18:18:25.430914+00:00"
+      },
+      {
+        "calculation_at": "2026-01-30T21:10:00+00:00",
+        "decision_at": "2026-10-19T04:53:45.048406+00:00",
+        "market_cutoff": "2026-01-30",
+        "snapshot_id": "component_2026-01-30",
+        "source_observed_at_max": "2026-10-19T04:50:22.050161+00:00",
+        "source_observed_at_min": "2026-10-18T18:18:25.430914+00:00"
+      },
+      {
+        "calculation_at": "2026-03-31T20:10:00+00:00",
+        "decision_at": "2026-10-19T04:53:45.048406+00:00",
+        "market_cutoff": "2026-03-31",
+        "snapshot_id": "component_2026-03-31",
+        "source_observed_at_max": "2026-10-19T04:50:22.050161+00:00",
+        "source_observed_at_min": "2026-10-18T18:18:25.430914+00:00"
+      },
+      {
+        "calculation_at": "2026-05-29T20:10:00+00:00",
+        "decision_at": "2026-10-19T04:53:45.048406+00:00",
+        "market_cutoff": "2026-05-29",
+        "snapshot_id": "component_2026-05-29",
+        "source_observed_at_max": "2026-10-19T04:50:22.050161+00:00",
+        "source_observed_at_min": "2026-10-18T18:18:25.430914+00:00"
+      },
+      {
+        "calculation_at": "2026-07-31T20:10:00+00:00",
+        "decision_at": "2026-10-19T04:53:45.048406+00:00",
+        "market_cutoff": "2026-07-31",
+        "snapshot_id": "component_2026-07-31",
+        "source_observed_at_max": "2026-10-19T04:50:22.050161+00:00",
+        "source_observed_at_min": "2026-10-18T18:18:25.430914+00:00"
+      },
+      {
+        "calculation_at": "2026-08-31T20:10:00+00:00",
+        "decision_at": "2026-10-19T04:53:45.048406+00:00",
+        "market_cutoff": "2026-08-31",
+        "snapshot_id": "component_2026-08-31",
+        "source_observed_at_max": "2026-10-19T04:50:22.050161+00:00",
+        "source_observed_at_min": "2026-10-18T18:18:25.430914+00:00"
+      },
+      {
+        "calculation_at": "2026-09-30T20:10:00+00:00",
+        "decision_at": "2026-10-19T04:53:45.048406+00:00",
+        "market_cutoff": "2026-09-30",
+        "snapshot_id": "component_2026-09-30",
+        "source_observed_at_max": "2026-10-19T04:50:22.050161+00:00",
+        "source_observed_at_min": "2026-10-18T18:18:25.430914+00:00"
+      },
+      {
+        "calculation_at": "2026-10-16T20:10:00+00:00",
+        "decision_at": "2026-10-19T04:53:45.048406+00:00",
+        "market_cutoff": "2026-10-16",
+        "snapshot_id": "component_2026-10-16",
+        "source_observed_at_max": "2026-10-19T04:50:22.050161+00:00",
+        "source_observed_at_min": "2026-10-18T18:18:25.430914+00:00"
+      },
+      {
+        "calculation_at": null,
+        "decision_at": "2026-10-19T04:53:45.048406+00:00",
+        "market_cutoff": "2026-10-16",
+        "snapshot_id": "actual_current_2026-10-16",
+        "source_observed_at_max": "2026-10-19T04:50:22.050161+00:00",
+        "source_observed_at_min": "2026-10-18T18:18:25.430914+00:00"
+      }
+    ],
+    "synthetic": false,
+    "unique_input_symbols": 108,
+    "version": 1,
+    "matrix": [
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE",
+        "block_reasons": {
+          "common:common_data_liquidity_or_atr_block": 41
+        },
+        "candidate_directions": {
+          "BUY": 360,
+          "SELL": 345
+        },
+        "enabled_ids": [],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 360,
+          "NOT_PROBED_BASELINE_SELL": 345
+        },
+        "nonexecutable_reference_structural_components": {
+          "NOT_PROBED_BASELINE_SELL": 345,
+          "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 83,
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 43,
+          "REFERENCE_BLOCK:invalid_rounded_levels": 61,
+          "REFERENCE_BLOCK:nearest_resistance_below_2r": 173
+        },
+        "opportunity_observations": 705,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 705
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 0,
+          "different_selected_slots": 0,
+          "retained_baseline_slots": 54
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 28,
+          "SELL": 26
+        },
+        "planned_max_shared_AI_slots": 54,
+        "planned_shortlist_observations": 225,
+        "snapshot_results": [
+          {
+            "calculation_at": "2025-11-28T21:10:00+00:00",
+            "candidate_count": 61,
+            "candidate_directions": {
+              "BUY": 47,
+              "SELL": 14
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2025-11-28",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 47,
+              "NOT_PROBED_BASELINE_SELL": 14
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 14,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 10,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 10,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 18
+            },
+            "snapshot_id": "component_2025-11-28"
+          },
+          {
+            "calculation_at": "2026-01-30T21:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 56,
+              "SELL": 32
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-01-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 56,
+              "NOT_PROBED_BASELINE_SELL": 32
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 32,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 8,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 29
+            },
+            "snapshot_id": "component_2026-01-30"
+          },
+          {
+            "calculation_at": "2026-03-31T20:10:00+00:00",
+            "candidate_count": 69,
+            "candidate_directions": {
+              "BUY": 19,
+              "SELL": 50
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-03-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 19,
+              "NOT_PROBED_BASELINE_SELL": 50
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 50,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 6,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 2,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 10
+            },
+            "snapshot_id": "component_2026-03-31"
+          },
+          {
+            "calculation_at": "2026-05-29T20:10:00+00:00",
+            "candidate_count": 76,
+            "candidate_directions": {
+              "BUY": 38,
+              "SELL": 38
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-05-29",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 38,
+              "NOT_PROBED_BASELINE_SELL": 38
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 38,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 5,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 18
+            },
+            "snapshot_id": "component_2026-05-29"
+          },
+          {
+            "calculation_at": "2026-07-31T20:10:00+00:00",
+            "candidate_count": 76,
+            "candidate_directions": {
+              "BUY": 37,
+              "SELL": 39
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-07-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 37,
+              "NOT_PROBED_BASELINE_SELL": 39
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 39,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 16
+            },
+            "snapshot_id": "component_2026-07-31"
+          },
+          {
+            "calculation_at": "2026-08-31T20:10:00+00:00",
+            "candidate_count": 83,
+            "candidate_directions": {
+              "BUY": 30,
+              "SELL": 53
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-08-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 30,
+              "NOT_PROBED_BASELINE_SELL": 53
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 53,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 5,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 17
+            },
+            "snapshot_id": "component_2026-08-31"
+          },
+          {
+            "calculation_at": "2026-09-30T20:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 23,
+              "SELL": 65
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-09-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 23,
+              "NOT_PROBED_BASELINE_SELL": 65
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 65,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 4,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 11
+            },
+            "snapshot_id": "component_2026-09-30"
+          },
+          {
+            "calculation_at": "2026-10-16T20:10:00+00:00",
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "component_2026-10-16"
+          },
+          {
+            "calculation_at": null,
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "CURRENT_OBSERVED_DISCOVERY",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "actual_current_2026-10-16"
+          }
+        ],
+        "states": {},
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 705
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 108,
+        "unique_market_source_configurations": 703,
+        "unique_market_symbol_direction_observations": 623
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "VCP_BASE_CONTRACTION_ONLY",
+        "block_reasons": {
+          "VCP_BASE_CONTRACTION:history_unavailable": 8,
+          "VCP_BASE_CONTRACTION:insufficient_history": 12,
+          "VCP_BASE_CONTRACTION:trigger_not_confirmed": 1,
+          "VCP_BASE_CONTRACTION:trigger_overextended": 1,
+          "VCP_BASE_CONTRACTION:vcp_pattern_unconfirmed": 937,
+          "VCP_BASE_CONTRACTION:vcp_trend_not_confirmed": 3,
+          "VCP_BASE_CONTRACTION:vcp_trigger_volume_unconfirmed": 2,
+          "VCP_BASE_CONTRACTION:vcp_volume_not_dry": 8,
+          "common:common_data_liquidity_or_atr_block": 41
+        },
+        "candidate_directions": {},
+        "enabled_ids": [
+          "VCP_BASE_CONTRACTION"
+        ],
+        "include_baseline": false,
+        "nonexecutable_reference_branch_intervals": {},
+        "nonexecutable_reference_structural_components": {},
+        "opportunity_observations": 0,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 705,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 54,
+          "different_selected_slots": 0,
+          "retained_baseline_slots": 0
+        },
+        "planned_AI_slot_directions": {},
+        "planned_max_shared_AI_slots": 0,
+        "planned_shortlist_observations": 0,
+        "snapshot_results": [
+          {
+            "calculation_at": "2025-11-28T21:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2025-11-28",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2025-11-28"
+          },
+          {
+            "calculation_at": "2026-01-30T21:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-01-30",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-01-30"
+          },
+          {
+            "calculation_at": "2026-03-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-03-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-03-31"
+          },
+          {
+            "calculation_at": "2026-05-29T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-05-29",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-05-29"
+          },
+          {
+            "calculation_at": "2026-07-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-07-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-07-31"
+          },
+          {
+            "calculation_at": "2026-08-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-08-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-08-31"
+          },
+          {
+            "calculation_at": "2026-09-30T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-09-30",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-09-30"
+          },
+          {
+            "calculation_at": "2026-10-16T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-10-16"
+          },
+          {
+            "calculation_at": null,
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "CURRENT_OBSERVED_DISCOVERY",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "actual_current_2026-10-16"
+          }
+        ],
+        "states": {
+          "VCP_BASE_CONTRACTION:FORMING": 3,
+          "VCP_BASE_CONTRACTION:REJECTED": 949,
+          "VCP_BASE_CONTRACTION:UNKNOWN": 20
+        },
+        "strategy_attributions_nonexclusive": {},
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 0,
+        "unique_market_source_configurations": 0,
+        "unique_market_symbol_direction_observations": 0
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "STOCKBEE_MOMENTUM_BURST_ONLY",
+        "block_reasons": {
+          "STOCKBEE_MOMENTUM_BURST:history_unavailable": 8,
+          "STOCKBEE_MOMENTUM_BURST:insufficient_history": 4,
+          "STOCKBEE_MOMENTUM_BURST:momentum_base_unconfirmed": 87,
+          "STOCKBEE_MOMENTUM_BURST:momentum_burst_trigger_unconfirmed": 17,
+          "STOCKBEE_MOMENTUM_BURST:momentum_volume_or_close_unconfirmed": 30,
+          "STOCKBEE_MOMENTUM_BURST:trigger_not_confirmed": 817,
+          "STOCKBEE_MOMENTUM_BURST:trigger_overextended": 4,
+          "common:common_data_liquidity_or_atr_block": 41
+        },
+        "candidate_directions": {
+          "BUY": 5
+        },
+        "enabled_ids": [
+          "STOCKBEE_MOMENTUM_BURST"
+        ],
+        "include_baseline": false,
+        "nonexecutable_reference_branch_intervals": {
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 5
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+          "REFERENCE_BLOCK:nearest_resistance_below_2r": 4
+        },
+        "opportunity_observations": 5,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 701,
+          "shared_opportunity_observations": 4
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 53,
+          "different_selected_slots": 4,
+          "retained_baseline_slots": 1
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 5
+        },
+        "planned_max_shared_AI_slots": 5,
+        "planned_shortlist_observations": 5,
+        "snapshot_results": [
+          {
+            "calculation_at": "2025-11-28T21:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2025-11-28",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2025-11-28"
+          },
+          {
+            "calculation_at": "2026-01-30T21:10:00+00:00",
+            "candidate_count": 1,
+            "candidate_directions": {
+              "BUY": 1
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-01-30",
+            "planned_shared_AI_slot_count": 1,
+            "planned_shortlist_count": 1,
+            "reference_branch_intervals": {
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1
+            },
+            "snapshot_id": "component_2026-01-30"
+          },
+          {
+            "calculation_at": "2026-03-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-03-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-03-31"
+          },
+          {
+            "calculation_at": "2026-05-29T20:10:00+00:00",
+            "candidate_count": 2,
+            "candidate_directions": {
+              "BUY": 2
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-05-29",
+            "planned_shared_AI_slot_count": 2,
+            "planned_shortlist_count": 2,
+            "reference_branch_intervals": {
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 2
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 2
+            },
+            "snapshot_id": "component_2026-05-29"
+          },
+          {
+            "calculation_at": "2026-07-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-07-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-07-31"
+          },
+          {
+            "calculation_at": "2026-08-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-08-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-08-31"
+          },
+          {
+            "calculation_at": "2026-09-30T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-09-30",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-09-30"
+          },
+          {
+            "calculation_at": "2026-10-16T20:10:00+00:00",
+            "candidate_count": 1,
+            "candidate_directions": {
+              "BUY": 1
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 1,
+            "planned_shortlist_count": 1,
+            "reference_branch_intervals": {
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 1
+            },
+            "snapshot_id": "component_2026-10-16"
+          },
+          {
+            "calculation_at": null,
+            "candidate_count": 1,
+            "candidate_directions": {
+              "BUY": 1
+            },
+            "evidence_scope": "CURRENT_OBSERVED_DISCOVERY",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 1,
+            "planned_shortlist_count": 1,
+            "reference_branch_intervals": {
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 1
+            },
+            "snapshot_id": "actual_current_2026-10-16"
+          }
+        ],
+        "states": {
+          "STOCKBEE_MOMENTUM_BURST:DETECTED": 5,
+          "STOCKBEE_MOMENTUM_BURST:FORMING": 864,
+          "STOCKBEE_MOMENTUM_BURST:REJECTED": 91,
+          "STOCKBEE_MOMENTUM_BURST:UNKNOWN": 12
+        },
+        "strategy_attributions_nonexclusive": {
+          "STOCKBEE_MOMENTUM_BURST": 5
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 4,
+        "unique_market_source_configurations": 5,
+        "unique_market_symbol_direction_observations": 4
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "PEAD_ONLY",
+        "block_reasons": {
+          "PEAD:history_unavailable": 8,
+          "PEAD:insufficient_history": 4,
+          "PEAD:verified_earnings_timing_unavailable": 960,
+          "common:common_data_liquidity_or_atr_block": 41
+        },
+        "candidate_directions": {},
+        "enabled_ids": [
+          "PEAD"
+        ],
+        "include_baseline": false,
+        "nonexecutable_reference_branch_intervals": {},
+        "nonexecutable_reference_structural_components": {},
+        "opportunity_observations": 0,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 705,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 54,
+          "different_selected_slots": 0,
+          "retained_baseline_slots": 0
+        },
+        "planned_AI_slot_directions": {},
+        "planned_max_shared_AI_slots": 0,
+        "planned_shortlist_observations": 0,
+        "snapshot_results": [
+          {
+            "calculation_at": "2025-11-28T21:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2025-11-28",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2025-11-28"
+          },
+          {
+            "calculation_at": "2026-01-30T21:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-01-30",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-01-30"
+          },
+          {
+            "calculation_at": "2026-03-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-03-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-03-31"
+          },
+          {
+            "calculation_at": "2026-05-29T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-05-29",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-05-29"
+          },
+          {
+            "calculation_at": "2026-07-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-07-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-07-31"
+          },
+          {
+            "calculation_at": "2026-08-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-08-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-08-31"
+          },
+          {
+            "calculation_at": "2026-09-30T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-09-30",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-09-30"
+          },
+          {
+            "calculation_at": "2026-10-16T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-10-16"
+          },
+          {
+            "calculation_at": null,
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "CURRENT_OBSERVED_DISCOVERY",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "actual_current_2026-10-16"
+          }
+        ],
+        "states": {
+          "PEAD:UNKNOWN": 972
+        },
+        "strategy_attributions_nonexclusive": {},
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 0,
+        "unique_market_source_configurations": 0,
+        "unique_market_symbol_direction_observations": 0
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "TREND_PULLBACK_RECLAIM_ONLY",
+        "block_reasons": {
+          "TREND_PULLBACK_RECLAIM:history_unavailable": 8,
+          "TREND_PULLBACK_RECLAIM:insufficient_history": 4,
+          "TREND_PULLBACK_RECLAIM:pullback_already_reclaimed": 159,
+          "TREND_PULLBACK_RECLAIM:pullback_reclaim_quality_unconfirmed": 6,
+          "TREND_PULLBACK_RECLAIM:pullback_setup_unconfirmed": 257,
+          "TREND_PULLBACK_RECLAIM:pullback_uptrend_unconfirmed": 511,
+          "TREND_PULLBACK_RECLAIM:trigger_not_confirmed": 25,
+          "common:common_data_liquidity_or_atr_block": 41
+        },
+        "candidate_directions": {
+          "BUY": 2
+        },
+        "enabled_ids": [
+          "TREND_PULLBACK_RECLAIM"
+        ],
+        "include_baseline": false,
+        "nonexecutable_reference_branch_intervals": {
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 2
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 1,
+          "REFERENCE_BLOCK:invalid_rounded_levels": 1
+        },
+        "opportunity_observations": 2,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 703,
+          "shared_opportunity_observations": 2
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 54,
+          "different_selected_slots": 2,
+          "retained_baseline_slots": 0
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 2
+        },
+        "planned_max_shared_AI_slots": 2,
+        "planned_shortlist_observations": 2,
+        "snapshot_results": [
+          {
+            "calculation_at": "2025-11-28T21:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2025-11-28",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2025-11-28"
+          },
+          {
+            "calculation_at": "2026-01-30T21:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-01-30",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-01-30"
+          },
+          {
+            "calculation_at": "2026-03-31T20:10:00+00:00",
+            "candidate_count": 1,
+            "candidate_directions": {
+              "BUY": 1
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-03-31",
+            "planned_shared_AI_slot_count": 1,
+            "planned_shortlist_count": 1,
+            "reference_branch_intervals": {
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 1
+            },
+            "snapshot_id": "component_2026-03-31"
+          },
+          {
+            "calculation_at": "2026-05-29T20:10:00+00:00",
+            "candidate_count": 1,
+            "candidate_directions": {
+              "BUY": 1
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-05-29",
+            "planned_shared_AI_slot_count": 1,
+            "planned_shortlist_count": 1,
+            "reference_branch_intervals": {
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:invalid_rounded_levels": 1
+            },
+            "snapshot_id": "component_2026-05-29"
+          },
+          {
+            "calculation_at": "2026-07-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-07-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-07-31"
+          },
+          {
+            "calculation_at": "2026-08-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-08-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-08-31"
+          },
+          {
+            "calculation_at": "2026-09-30T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-09-30",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-09-30"
+          },
+          {
+            "calculation_at": "2026-10-16T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-10-16"
+          },
+          {
+            "calculation_at": null,
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "CURRENT_OBSERVED_DISCOVERY",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "actual_current_2026-10-16"
+          }
+        ],
+        "states": {
+          "TREND_PULLBACK_RECLAIM:DETECTED": 2,
+          "TREND_PULLBACK_RECLAIM:FORMING": 31,
+          "TREND_PULLBACK_RECLAIM:REJECTED": 927,
+          "TREND_PULLBACK_RECLAIM:UNKNOWN": 12
+        },
+        "strategy_attributions_nonexclusive": {
+          "TREND_PULLBACK_RECLAIM": 2
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 2,
+        "unique_market_source_configurations": 2,
+        "unique_market_symbol_direction_observations": 2
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "RELATIVE_STRENGTH_LEADER_ONLY",
+        "block_reasons": {
+          "RELATIVE_STRENGTH_LEADER:history_unavailable": 8,
+          "RELATIVE_STRENGTH_LEADER:insufficient_history": 10,
+          "RELATIVE_STRENGTH_LEADER:leader_setup_unconfirmed": 166,
+          "RELATIVE_STRENGTH_LEADER:leader_trigger_quality_unconfirmed": 2,
+          "RELATIVE_STRENGTH_LEADER:relative_strength_unconfirmed": 694,
+          "RELATIVE_STRENGTH_LEADER:trigger_not_confirmed": 91,
+          "common:common_data_liquidity_or_atr_block": 41
+        },
+        "candidate_directions": {
+          "BUY": 1
+        },
+        "enabled_ids": [
+          "RELATIVE_STRENGTH_LEADER"
+        ],
+        "include_baseline": false,
+        "nonexecutable_reference_branch_intervals": {
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 1
+        },
+        "opportunity_observations": 1,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 704,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 53,
+          "different_selected_slots": 0,
+          "retained_baseline_slots": 1
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 1
+        },
+        "planned_max_shared_AI_slots": 1,
+        "planned_shortlist_observations": 1,
+        "snapshot_results": [
+          {
+            "calculation_at": "2025-11-28T21:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2025-11-28",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2025-11-28"
+          },
+          {
+            "calculation_at": "2026-01-30T21:10:00+00:00",
+            "candidate_count": 1,
+            "candidate_directions": {
+              "BUY": 1
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-01-30",
+            "planned_shared_AI_slot_count": 1,
+            "planned_shortlist_count": 1,
+            "reference_branch_intervals": {
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1
+            },
+            "snapshot_id": "component_2026-01-30"
+          },
+          {
+            "calculation_at": "2026-03-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-03-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-03-31"
+          },
+          {
+            "calculation_at": "2026-05-29T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-05-29",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-05-29"
+          },
+          {
+            "calculation_at": "2026-07-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-07-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-07-31"
+          },
+          {
+            "calculation_at": "2026-08-31T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-08-31",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-08-31"
+          },
+          {
+            "calculation_at": "2026-09-30T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-09-30",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-09-30"
+          },
+          {
+            "calculation_at": "2026-10-16T20:10:00+00:00",
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "component_2026-10-16"
+          },
+          {
+            "calculation_at": null,
+            "candidate_count": 0,
+            "candidate_directions": {},
+            "evidence_scope": "CURRENT_OBSERVED_DISCOVERY",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 0,
+            "planned_shortlist_count": 0,
+            "reference_branch_intervals": {},
+            "reference_structural_components": {},
+            "snapshot_id": "actual_current_2026-10-16"
+          }
+        ],
+        "states": {
+          "RELATIVE_STRENGTH_LEADER:DETECTED": 1,
+          "RELATIVE_STRENGTH_LEADER:FORMING": 93,
+          "RELATIVE_STRENGTH_LEADER:REJECTED": 860,
+          "RELATIVE_STRENGTH_LEADER:UNKNOWN": 18
+        },
+        "strategy_attributions_nonexclusive": {
+          "RELATIVE_STRENGTH_LEADER": 1
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 1,
+        "unique_market_source_configurations": 1,
+        "unique_market_symbol_direction_observations": 1
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_VCP_BASE_CONTRACTION",
+        "block_reasons": {
+          "VCP_BASE_CONTRACTION:history_unavailable": 8,
+          "VCP_BASE_CONTRACTION:insufficient_history": 12,
+          "VCP_BASE_CONTRACTION:trigger_not_confirmed": 1,
+          "VCP_BASE_CONTRACTION:trigger_overextended": 1,
+          "VCP_BASE_CONTRACTION:vcp_pattern_unconfirmed": 937,
+          "VCP_BASE_CONTRACTION:vcp_trend_not_confirmed": 3,
+          "VCP_BASE_CONTRACTION:vcp_trigger_volume_unconfirmed": 2,
+          "VCP_BASE_CONTRACTION:vcp_volume_not_dry": 8,
+          "common:common_data_liquidity_or_atr_block": 41
+        },
+        "candidate_directions": {
+          "BUY": 360,
+          "SELL": 345
+        },
+        "enabled_ids": [
+          "VCP_BASE_CONTRACTION"
+        ],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 360,
+          "NOT_PROBED_BASELINE_SELL": 345
+        },
+        "nonexecutable_reference_structural_components": {
+          "NOT_PROBED_BASELINE_SELL": 345,
+          "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 83,
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 43,
+          "REFERENCE_BLOCK:invalid_rounded_levels": 61,
+          "REFERENCE_BLOCK:nearest_resistance_below_2r": 173
+        },
+        "opportunity_observations": 705,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 705
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 0,
+          "different_selected_slots": 0,
+          "retained_baseline_slots": 54
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 28,
+          "SELL": 26
+        },
+        "planned_max_shared_AI_slots": 54,
+        "planned_shortlist_observations": 225,
+        "snapshot_results": [
+          {
+            "calculation_at": "2025-11-28T21:10:00+00:00",
+            "candidate_count": 61,
+            "candidate_directions": {
+              "BUY": 47,
+              "SELL": 14
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2025-11-28",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 47,
+              "NOT_PROBED_BASELINE_SELL": 14
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 14,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 10,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 10,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 18
+            },
+            "snapshot_id": "component_2025-11-28"
+          },
+          {
+            "calculation_at": "2026-01-30T21:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 56,
+              "SELL": 32
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-01-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 56,
+              "NOT_PROBED_BASELINE_SELL": 32
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 32,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 8,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 29
+            },
+            "snapshot_id": "component_2026-01-30"
+          },
+          {
+            "calculation_at": "2026-03-31T20:10:00+00:00",
+            "candidate_count": 69,
+            "candidate_directions": {
+              "BUY": 19,
+              "SELL": 50
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-03-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 19,
+              "NOT_PROBED_BASELINE_SELL": 50
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 50,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 6,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 2,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 10
+            },
+            "snapshot_id": "component_2026-03-31"
+          },
+          {
+            "calculation_at": "2026-05-29T20:10:00+00:00",
+            "candidate_count": 76,
+            "candidate_directions": {
+              "BUY": 38,
+              "SELL": 38
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-05-29",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 38,
+              "NOT_PROBED_BASELINE_SELL": 38
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 38,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 5,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 18
+            },
+            "snapshot_id": "component_2026-05-29"
+          },
+          {
+            "calculation_at": "2026-07-31T20:10:00+00:00",
+            "candidate_count": 76,
+            "candidate_directions": {
+              "BUY": 37,
+              "SELL": 39
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-07-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 37,
+              "NOT_PROBED_BASELINE_SELL": 39
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 39,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 16
+            },
+            "snapshot_id": "component_2026-07-31"
+          },
+          {
+            "calculation_at": "2026-08-31T20:10:00+00:00",
+            "candidate_count": 83,
+            "candidate_directions": {
+              "BUY": 30,
+              "SELL": 53
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-08-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 30,
+              "NOT_PROBED_BASELINE_SELL": 53
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 53,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 5,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 17
+            },
+            "snapshot_id": "component_2026-08-31"
+          },
+          {
+            "calculation_at": "2026-09-30T20:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 23,
+              "SELL": 65
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-09-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 23,
+              "NOT_PROBED_BASELINE_SELL": 65
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 65,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 4,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 11
+            },
+            "snapshot_id": "component_2026-09-30"
+          },
+          {
+            "calculation_at": "2026-10-16T20:10:00+00:00",
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "component_2026-10-16"
+          },
+          {
+            "calculation_at": null,
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "CURRENT_OBSERVED_DISCOVERY",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "actual_current_2026-10-16"
+          }
+        ],
+        "states": {
+          "VCP_BASE_CONTRACTION:FORMING": 3,
+          "VCP_BASE_CONTRACTION:REJECTED": 949,
+          "VCP_BASE_CONTRACTION:UNKNOWN": 20
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 705
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 108,
+        "unique_market_source_configurations": 703,
+        "unique_market_symbol_direction_observations": 623
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_STOCKBEE_MOMENTUM_BURST",
+        "block_reasons": {
+          "STOCKBEE_MOMENTUM_BURST:history_unavailable": 8,
+          "STOCKBEE_MOMENTUM_BURST:insufficient_history": 4,
+          "STOCKBEE_MOMENTUM_BURST:momentum_base_unconfirmed": 87,
+          "STOCKBEE_MOMENTUM_BURST:momentum_burst_trigger_unconfirmed": 17,
+          "STOCKBEE_MOMENTUM_BURST:momentum_volume_or_close_unconfirmed": 30,
+          "STOCKBEE_MOMENTUM_BURST:trigger_not_confirmed": 817,
+          "STOCKBEE_MOMENTUM_BURST:trigger_overextended": 4,
+          "common:common_data_liquidity_or_atr_block": 41
+        },
+        "candidate_directions": {
+          "BUY": 361,
+          "SELL": 345
+        },
+        "enabled_ids": [
+          "STOCKBEE_MOMENTUM_BURST"
+        ],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 360,
+          "NOT_PROBED_BASELINE_SELL": 345,
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+        },
+        "nonexecutable_reference_structural_components": {
+          "NOT_PROBED_BASELINE_SELL": 345,
+          "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 83,
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 43,
+          "REFERENCE_BLOCK:invalid_rounded_levels": 61,
+          "REFERENCE_BLOCK:nearest_resistance_below_2r": 174
+        },
+        "opportunity_observations": 706,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 705
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 4,
+          "different_selected_slots": 4,
+          "retained_baseline_slots": 50
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 29,
+          "SELL": 25
+        },
+        "planned_max_shared_AI_slots": 54,
+        "planned_shortlist_observations": 225,
+        "snapshot_results": [
+          {
+            "calculation_at": "2025-11-28T21:10:00+00:00",
+            "candidate_count": 61,
+            "candidate_directions": {
+              "BUY": 47,
+              "SELL": 14
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2025-11-28",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 47,
+              "NOT_PROBED_BASELINE_SELL": 14
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 14,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 10,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 10,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 18
+            },
+            "snapshot_id": "component_2025-11-28"
+          },
+          {
+            "calculation_at": "2026-01-30T21:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 56,
+              "SELL": 32
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-01-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 56,
+              "NOT_PROBED_BASELINE_SELL": 32
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 32,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 8,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 29
+            },
+            "snapshot_id": "component_2026-01-30"
+          },
+          {
+            "calculation_at": "2026-03-31T20:10:00+00:00",
+            "candidate_count": 69,
+            "candidate_directions": {
+              "BUY": 19,
+              "SELL": 50
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-03-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 19,
+              "NOT_PROBED_BASELINE_SELL": 50
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 50,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 6,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 2,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 10
+            },
+            "snapshot_id": "component_2026-03-31"
+          },
+          {
+            "calculation_at": "2026-05-29T20:10:00+00:00",
+            "candidate_count": 77,
+            "candidate_directions": {
+              "BUY": 39,
+              "SELL": 38
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-05-29",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 38,
+              "NOT_PROBED_BASELINE_SELL": 38,
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 38,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 5,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 19
+            },
+            "snapshot_id": "component_2026-05-29"
+          },
+          {
+            "calculation_at": "2026-07-31T20:10:00+00:00",
+            "candidate_count": 76,
+            "candidate_directions": {
+              "BUY": 37,
+              "SELL": 39
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-07-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 37,
+              "NOT_PROBED_BASELINE_SELL": 39
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 39,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 16
+            },
+            "snapshot_id": "component_2026-07-31"
+          },
+          {
+            "calculation_at": "2026-08-31T20:10:00+00:00",
+            "candidate_count": 83,
+            "candidate_directions": {
+              "BUY": 30,
+              "SELL": 53
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-08-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 30,
+              "NOT_PROBED_BASELINE_SELL": 53
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 53,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 5,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 17
+            },
+            "snapshot_id": "component_2026-08-31"
+          },
+          {
+            "calculation_at": "2026-09-30T20:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 23,
+              "SELL": 65
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-09-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 23,
+              "NOT_PROBED_BASELINE_SELL": 65
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 65,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 4,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 11
+            },
+            "snapshot_id": "component_2026-09-30"
+          },
+          {
+            "calculation_at": "2026-10-16T20:10:00+00:00",
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "component_2026-10-16"
+          },
+          {
+            "calculation_at": null,
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "CURRENT_OBSERVED_DISCOVERY",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "actual_current_2026-10-16"
+          }
+        ],
+        "states": {
+          "STOCKBEE_MOMENTUM_BURST:DETECTED": 5,
+          "STOCKBEE_MOMENTUM_BURST:FORMING": 864,
+          "STOCKBEE_MOMENTUM_BURST:REJECTED": 91,
+          "STOCKBEE_MOMENTUM_BURST:UNKNOWN": 12
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 705,
+          "STOCKBEE_MOMENTUM_BURST": 5
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 108,
+        "unique_market_source_configurations": 704,
+        "unique_market_symbol_direction_observations": 624
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_PEAD",
+        "block_reasons": {
+          "PEAD:history_unavailable": 8,
+          "PEAD:insufficient_history": 4,
+          "PEAD:verified_earnings_timing_unavailable": 960,
+          "common:common_data_liquidity_or_atr_block": 41
+        },
+        "candidate_directions": {
+          "BUY": 360,
+          "SELL": 345
+        },
+        "enabled_ids": [
+          "PEAD"
+        ],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 360,
+          "NOT_PROBED_BASELINE_SELL": 345
+        },
+        "nonexecutable_reference_structural_components": {
+          "NOT_PROBED_BASELINE_SELL": 345,
+          "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 83,
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 43,
+          "REFERENCE_BLOCK:invalid_rounded_levels": 61,
+          "REFERENCE_BLOCK:nearest_resistance_below_2r": 173
+        },
+        "opportunity_observations": 705,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 705
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 0,
+          "different_selected_slots": 0,
+          "retained_baseline_slots": 54
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 28,
+          "SELL": 26
+        },
+        "planned_max_shared_AI_slots": 54,
+        "planned_shortlist_observations": 225,
+        "snapshot_results": [
+          {
+            "calculation_at": "2025-11-28T21:10:00+00:00",
+            "candidate_count": 61,
+            "candidate_directions": {
+              "BUY": 47,
+              "SELL": 14
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2025-11-28",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 47,
+              "NOT_PROBED_BASELINE_SELL": 14
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 14,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 10,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 10,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 18
+            },
+            "snapshot_id": "component_2025-11-28"
+          },
+          {
+            "calculation_at": "2026-01-30T21:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 56,
+              "SELL": 32
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-01-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 56,
+              "NOT_PROBED_BASELINE_SELL": 32
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 32,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 8,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 29
+            },
+            "snapshot_id": "component_2026-01-30"
+          },
+          {
+            "calculation_at": "2026-03-31T20:10:00+00:00",
+            "candidate_count": 69,
+            "candidate_directions": {
+              "BUY": 19,
+              "SELL": 50
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-03-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 19,
+              "NOT_PROBED_BASELINE_SELL": 50
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 50,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 6,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 2,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 10
+            },
+            "snapshot_id": "component_2026-03-31"
+          },
+          {
+            "calculation_at": "2026-05-29T20:10:00+00:00",
+            "candidate_count": 76,
+            "candidate_directions": {
+              "BUY": 38,
+              "SELL": 38
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-05-29",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 38,
+              "NOT_PROBED_BASELINE_SELL": 38
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 38,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 5,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 18
+            },
+            "snapshot_id": "component_2026-05-29"
+          },
+          {
+            "calculation_at": "2026-07-31T20:10:00+00:00",
+            "candidate_count": 76,
+            "candidate_directions": {
+              "BUY": 37,
+              "SELL": 39
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-07-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 37,
+              "NOT_PROBED_BASELINE_SELL": 39
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 39,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 16
+            },
+            "snapshot_id": "component_2026-07-31"
+          },
+          {
+            "calculation_at": "2026-08-31T20:10:00+00:00",
+            "candidate_count": 83,
+            "candidate_directions": {
+              "BUY": 30,
+              "SELL": 53
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-08-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 30,
+              "NOT_PROBED_BASELINE_SELL": 53
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 53,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 5,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 17
+            },
+            "snapshot_id": "component_2026-08-31"
+          },
+          {
+            "calculation_at": "2026-09-30T20:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 23,
+              "SELL": 65
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-09-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 23,
+              "NOT_PROBED_BASELINE_SELL": 65
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 65,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 4,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 11
+            },
+            "snapshot_id": "component_2026-09-30"
+          },
+          {
+            "calculation_at": "2026-10-16T20:10:00+00:00",
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "component_2026-10-16"
+          },
+          {
+            "calculation_at": null,
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "CURRENT_OBSERVED_DISCOVERY",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "actual_current_2026-10-16"
+          }
+        ],
+        "states": {
+          "PEAD:UNKNOWN": 972
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 705
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 108,
+        "unique_market_source_configurations": 703,
+        "unique_market_symbol_direction_observations": 623
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_TREND_PULLBACK_RECLAIM",
+        "block_reasons": {
+          "TREND_PULLBACK_RECLAIM:history_unavailable": 8,
+          "TREND_PULLBACK_RECLAIM:insufficient_history": 4,
+          "TREND_PULLBACK_RECLAIM:pullback_already_reclaimed": 159,
+          "TREND_PULLBACK_RECLAIM:pullback_reclaim_quality_unconfirmed": 6,
+          "TREND_PULLBACK_RECLAIM:pullback_setup_unconfirmed": 257,
+          "TREND_PULLBACK_RECLAIM:pullback_uptrend_unconfirmed": 511,
+          "TREND_PULLBACK_RECLAIM:trigger_not_confirmed": 25,
+          "common:common_data_liquidity_or_atr_block": 41
+        },
+        "candidate_directions": {
+          "BUY": 360,
+          "SELL": 345
+        },
+        "enabled_ids": [
+          "TREND_PULLBACK_RECLAIM"
+        ],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 360,
+          "NOT_PROBED_BASELINE_SELL": 345
+        },
+        "nonexecutable_reference_structural_components": {
+          "NOT_PROBED_BASELINE_SELL": 345,
+          "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 83,
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 43,
+          "REFERENCE_BLOCK:invalid_rounded_levels": 61,
+          "REFERENCE_BLOCK:nearest_resistance_below_2r": 173
+        },
+        "opportunity_observations": 705,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 705
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 2,
+          "different_selected_slots": 2,
+          "retained_baseline_slots": 52
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 29,
+          "SELL": 25
+        },
+        "planned_max_shared_AI_slots": 54,
+        "planned_shortlist_observations": 225,
+        "snapshot_results": [
+          {
+            "calculation_at": "2025-11-28T21:10:00+00:00",
+            "candidate_count": 61,
+            "candidate_directions": {
+              "BUY": 47,
+              "SELL": 14
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2025-11-28",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 47,
+              "NOT_PROBED_BASELINE_SELL": 14
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 14,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 10,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 10,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 18
+            },
+            "snapshot_id": "component_2025-11-28"
+          },
+          {
+            "calculation_at": "2026-01-30T21:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 56,
+              "SELL": 32
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-01-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 56,
+              "NOT_PROBED_BASELINE_SELL": 32
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 32,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 8,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 29
+            },
+            "snapshot_id": "component_2026-01-30"
+          },
+          {
+            "calculation_at": "2026-03-31T20:10:00+00:00",
+            "candidate_count": 69,
+            "candidate_directions": {
+              "BUY": 19,
+              "SELL": 50
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-03-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 19,
+              "NOT_PROBED_BASELINE_SELL": 50
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 50,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 6,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 2,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 10
+            },
+            "snapshot_id": "component_2026-03-31"
+          },
+          {
+            "calculation_at": "2026-05-29T20:10:00+00:00",
+            "candidate_count": 76,
+            "candidate_directions": {
+              "BUY": 38,
+              "SELL": 38
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-05-29",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 38,
+              "NOT_PROBED_BASELINE_SELL": 38
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 38,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 5,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 18
+            },
+            "snapshot_id": "component_2026-05-29"
+          },
+          {
+            "calculation_at": "2026-07-31T20:10:00+00:00",
+            "candidate_count": 76,
+            "candidate_directions": {
+              "BUY": 37,
+              "SELL": 39
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-07-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 37,
+              "NOT_PROBED_BASELINE_SELL": 39
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 39,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 16
+            },
+            "snapshot_id": "component_2026-07-31"
+          },
+          {
+            "calculation_at": "2026-08-31T20:10:00+00:00",
+            "candidate_count": 83,
+            "candidate_directions": {
+              "BUY": 30,
+              "SELL": 53
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-08-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 30,
+              "NOT_PROBED_BASELINE_SELL": 53
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 53,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 5,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 17
+            },
+            "snapshot_id": "component_2026-08-31"
+          },
+          {
+            "calculation_at": "2026-09-30T20:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 23,
+              "SELL": 65
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-09-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 23,
+              "NOT_PROBED_BASELINE_SELL": 65
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 65,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 4,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 11
+            },
+            "snapshot_id": "component_2026-09-30"
+          },
+          {
+            "calculation_at": "2026-10-16T20:10:00+00:00",
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "component_2026-10-16"
+          },
+          {
+            "calculation_at": null,
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "CURRENT_OBSERVED_DISCOVERY",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "actual_current_2026-10-16"
+          }
+        ],
+        "states": {
+          "TREND_PULLBACK_RECLAIM:DETECTED": 2,
+          "TREND_PULLBACK_RECLAIM:FORMING": 31,
+          "TREND_PULLBACK_RECLAIM:REJECTED": 927,
+          "TREND_PULLBACK_RECLAIM:UNKNOWN": 12
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 705,
+          "TREND_PULLBACK_RECLAIM": 2
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 108,
+        "unique_market_source_configurations": 703,
+        "unique_market_symbol_direction_observations": 623
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_RELATIVE_STRENGTH_LEADER",
+        "block_reasons": {
+          "RELATIVE_STRENGTH_LEADER:history_unavailable": 8,
+          "RELATIVE_STRENGTH_LEADER:insufficient_history": 10,
+          "RELATIVE_STRENGTH_LEADER:leader_setup_unconfirmed": 166,
+          "RELATIVE_STRENGTH_LEADER:leader_trigger_quality_unconfirmed": 2,
+          "RELATIVE_STRENGTH_LEADER:relative_strength_unconfirmed": 694,
+          "RELATIVE_STRENGTH_LEADER:trigger_not_confirmed": 91,
+          "common:common_data_liquidity_or_atr_block": 41
+        },
+        "candidate_directions": {
+          "BUY": 360,
+          "SELL": 345
+        },
+        "enabled_ids": [
+          "RELATIVE_STRENGTH_LEADER"
+        ],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 360,
+          "NOT_PROBED_BASELINE_SELL": 345
+        },
+        "nonexecutable_reference_structural_components": {
+          "NOT_PROBED_BASELINE_SELL": 345,
+          "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 83,
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 43,
+          "REFERENCE_BLOCK:invalid_rounded_levels": 61,
+          "REFERENCE_BLOCK:nearest_resistance_below_2r": 173
+        },
+        "opportunity_observations": 705,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 705
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 0,
+          "different_selected_slots": 0,
+          "retained_baseline_slots": 54
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 28,
+          "SELL": 26
+        },
+        "planned_max_shared_AI_slots": 54,
+        "planned_shortlist_observations": 225,
+        "snapshot_results": [
+          {
+            "calculation_at": "2025-11-28T21:10:00+00:00",
+            "candidate_count": 61,
+            "candidate_directions": {
+              "BUY": 47,
+              "SELL": 14
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2025-11-28",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 47,
+              "NOT_PROBED_BASELINE_SELL": 14
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 14,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 10,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 10,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 18
+            },
+            "snapshot_id": "component_2025-11-28"
+          },
+          {
+            "calculation_at": "2026-01-30T21:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 56,
+              "SELL": 32
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-01-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 56,
+              "NOT_PROBED_BASELINE_SELL": 32
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 32,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 8,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 29
+            },
+            "snapshot_id": "component_2026-01-30"
+          },
+          {
+            "calculation_at": "2026-03-31T20:10:00+00:00",
+            "candidate_count": 69,
+            "candidate_directions": {
+              "BUY": 19,
+              "SELL": 50
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-03-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 19,
+              "NOT_PROBED_BASELINE_SELL": 50
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 50,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 6,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 2,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 10
+            },
+            "snapshot_id": "component_2026-03-31"
+          },
+          {
+            "calculation_at": "2026-05-29T20:10:00+00:00",
+            "candidate_count": 76,
+            "candidate_directions": {
+              "BUY": 38,
+              "SELL": 38
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-05-29",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 38,
+              "NOT_PROBED_BASELINE_SELL": 38
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 38,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 5,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 18
+            },
+            "snapshot_id": "component_2026-05-29"
+          },
+          {
+            "calculation_at": "2026-07-31T20:10:00+00:00",
+            "candidate_count": 76,
+            "candidate_directions": {
+              "BUY": 37,
+              "SELL": 39
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-07-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 37,
+              "NOT_PROBED_BASELINE_SELL": 39
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 39,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 16
+            },
+            "snapshot_id": "component_2026-07-31"
+          },
+          {
+            "calculation_at": "2026-08-31T20:10:00+00:00",
+            "candidate_count": 83,
+            "candidate_directions": {
+              "BUY": 30,
+              "SELL": 53
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-08-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 30,
+              "NOT_PROBED_BASELINE_SELL": 53
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 53,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 5,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 17
+            },
+            "snapshot_id": "component_2026-08-31"
+          },
+          {
+            "calculation_at": "2026-09-30T20:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 23,
+              "SELL": 65
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-09-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 23,
+              "NOT_PROBED_BASELINE_SELL": 65
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 65,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 4,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 11
+            },
+            "snapshot_id": "component_2026-09-30"
+          },
+          {
+            "calculation_at": "2026-10-16T20:10:00+00:00",
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "component_2026-10-16"
+          },
+          {
+            "calculation_at": null,
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "CURRENT_OBSERVED_DISCOVERY",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "actual_current_2026-10-16"
+          }
+        ],
+        "states": {
+          "RELATIVE_STRENGTH_LEADER:DETECTED": 1,
+          "RELATIVE_STRENGTH_LEADER:FORMING": 93,
+          "RELATIVE_STRENGTH_LEADER:REJECTED": 860,
+          "RELATIVE_STRENGTH_LEADER:UNKNOWN": 18
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 705,
+          "RELATIVE_STRENGTH_LEADER": 1
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 108,
+        "unique_market_source_configurations": 703,
+        "unique_market_symbol_direction_observations": 623
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_ALL",
+        "block_reasons": {
+          "PEAD:history_unavailable": 8,
+          "PEAD:insufficient_history": 4,
+          "PEAD:verified_earnings_timing_unavailable": 960,
+          "RELATIVE_STRENGTH_LEADER:history_unavailable": 8,
+          "RELATIVE_STRENGTH_LEADER:insufficient_history": 10,
+          "RELATIVE_STRENGTH_LEADER:leader_setup_unconfirmed": 166,
+          "RELATIVE_STRENGTH_LEADER:leader_trigger_quality_unconfirmed": 2,
+          "RELATIVE_STRENGTH_LEADER:relative_strength_unconfirmed": 694,
+          "RELATIVE_STRENGTH_LEADER:trigger_not_confirmed": 91,
+          "STOCKBEE_MOMENTUM_BURST:history_unavailable": 8,
+          "STOCKBEE_MOMENTUM_BURST:insufficient_history": 4,
+          "STOCKBEE_MOMENTUM_BURST:momentum_base_unconfirmed": 87,
+          "STOCKBEE_MOMENTUM_BURST:momentum_burst_trigger_unconfirmed": 17,
+          "STOCKBEE_MOMENTUM_BURST:momentum_volume_or_close_unconfirmed": 30,
+          "STOCKBEE_MOMENTUM_BURST:trigger_not_confirmed": 817,
+          "STOCKBEE_MOMENTUM_BURST:trigger_overextended": 4,
+          "TREND_PULLBACK_RECLAIM:history_unavailable": 8,
+          "TREND_PULLBACK_RECLAIM:insufficient_history": 4,
+          "TREND_PULLBACK_RECLAIM:pullback_already_reclaimed": 159,
+          "TREND_PULLBACK_RECLAIM:pullback_reclaim_quality_unconfirmed": 6,
+          "TREND_PULLBACK_RECLAIM:pullback_setup_unconfirmed": 257,
+          "TREND_PULLBACK_RECLAIM:pullback_uptrend_unconfirmed": 511,
+          "TREND_PULLBACK_RECLAIM:trigger_not_confirmed": 25,
+          "VCP_BASE_CONTRACTION:history_unavailable": 8,
+          "VCP_BASE_CONTRACTION:insufficient_history": 12,
+          "VCP_BASE_CONTRACTION:trigger_not_confirmed": 1,
+          "VCP_BASE_CONTRACTION:trigger_overextended": 1,
+          "VCP_BASE_CONTRACTION:vcp_pattern_unconfirmed": 937,
+          "VCP_BASE_CONTRACTION:vcp_trend_not_confirmed": 3,
+          "VCP_BASE_CONTRACTION:vcp_trigger_volume_unconfirmed": 2,
+          "VCP_BASE_CONTRACTION:vcp_volume_not_dry": 8,
+          "common:common_data_liquidity_or_atr_block": 41
+        },
+        "candidate_directions": {
+          "BUY": 361,
+          "SELL": 345
+        },
+        "enabled_ids": [
+          "VCP_BASE_CONTRACTION",
+          "STOCKBEE_MOMENTUM_BURST",
+          "PEAD",
+          "TREND_PULLBACK_RECLAIM",
+          "RELATIVE_STRENGTH_LEADER"
+        ],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 360,
+          "NOT_PROBED_BASELINE_SELL": 345,
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+        },
+        "nonexecutable_reference_structural_components": {
+          "NOT_PROBED_BASELINE_SELL": 345,
+          "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 83,
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 43,
+          "REFERENCE_BLOCK:invalid_rounded_levels": 61,
+          "REFERENCE_BLOCK:nearest_resistance_below_2r": 174
+        },
+        "opportunity_observations": 706,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 705
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 6,
+          "different_selected_slots": 6,
+          "retained_baseline_slots": 48
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 30,
+          "SELL": 24
+        },
+        "planned_max_shared_AI_slots": 54,
+        "planned_shortlist_observations": 225,
+        "snapshot_results": [
+          {
+            "calculation_at": "2025-11-28T21:10:00+00:00",
+            "candidate_count": 61,
+            "candidate_directions": {
+              "BUY": 47,
+              "SELL": 14
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2025-11-28",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 47,
+              "NOT_PROBED_BASELINE_SELL": 14
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 14,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 10,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 10,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 18
+            },
+            "snapshot_id": "component_2025-11-28"
+          },
+          {
+            "calculation_at": "2026-01-30T21:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 56,
+              "SELL": 32
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-01-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 56,
+              "NOT_PROBED_BASELINE_SELL": 32
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 32,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 8,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 29
+            },
+            "snapshot_id": "component_2026-01-30"
+          },
+          {
+            "calculation_at": "2026-03-31T20:10:00+00:00",
+            "candidate_count": 69,
+            "candidate_directions": {
+              "BUY": 19,
+              "SELL": 50
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-03-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 19,
+              "NOT_PROBED_BASELINE_SELL": 50
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 50,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 6,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 2,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 10
+            },
+            "snapshot_id": "component_2026-03-31"
+          },
+          {
+            "calculation_at": "2026-05-29T20:10:00+00:00",
+            "candidate_count": 77,
+            "candidate_directions": {
+              "BUY": 39,
+              "SELL": 38
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-05-29",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 38,
+              "NOT_PROBED_BASELINE_SELL": 38,
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 38,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 10,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 5,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 19
+            },
+            "snapshot_id": "component_2026-05-29"
+          },
+          {
+            "calculation_at": "2026-07-31T20:10:00+00:00",
+            "candidate_count": 76,
+            "candidate_directions": {
+              "BUY": 37,
+              "SELL": 39
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-07-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 37,
+              "NOT_PROBED_BASELINE_SELL": 39
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 39,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 9,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 9,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 16
+            },
+            "snapshot_id": "component_2026-07-31"
+          },
+          {
+            "calculation_at": "2026-08-31T20:10:00+00:00",
+            "candidate_count": 83,
+            "candidate_directions": {
+              "BUY": 30,
+              "SELL": 53
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-08-31",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 30,
+              "NOT_PROBED_BASELINE_SELL": 53
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 53,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 5,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 17
+            },
+            "snapshot_id": "component_2026-08-31"
+          },
+          {
+            "calculation_at": "2026-09-30T20:10:00+00:00",
+            "candidate_count": 88,
+            "candidate_directions": {
+              "BUY": 23,
+              "SELL": 65
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-09-30",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 23,
+              "NOT_PROBED_BASELINE_SELL": 65
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 65,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 4,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 3,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 5,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 11
+            },
+            "snapshot_id": "component_2026-09-30"
+          },
+          {
+            "calculation_at": "2026-10-16T20:10:00+00:00",
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "RETROSPECTIVE_NONEXECUTABLE_COMPONENT",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "component_2026-10-16"
+          },
+          {
+            "calculation_at": null,
+            "candidate_count": 82,
+            "candidate_directions": {
+              "BUY": 55,
+              "SELL": 27
+            },
+            "evidence_scope": "CURRENT_OBSERVED_DISCOVERY",
+            "market_cutoff": "2026-10-16",
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 25,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 55,
+              "NOT_PROBED_BASELINE_SELL": 27
+            },
+            "reference_structural_components": {
+              "NOT_PROBED_BASELINE_SELL": 27,
+              "REFERENCE_BLOCK:entry_inside_unresolved_price_zone": 15,
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 6,
+              "REFERENCE_BLOCK:invalid_rounded_levels": 7,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 27
+            },
+            "snapshot_id": "actual_current_2026-10-16"
+          }
+        ],
+        "states": {
+          "PEAD:UNKNOWN": 972,
+          "RELATIVE_STRENGTH_LEADER:DETECTED": 1,
+          "RELATIVE_STRENGTH_LEADER:FORMING": 93,
+          "RELATIVE_STRENGTH_LEADER:REJECTED": 860,
+          "RELATIVE_STRENGTH_LEADER:UNKNOWN": 18,
+          "STOCKBEE_MOMENTUM_BURST:DETECTED": 5,
+          "STOCKBEE_MOMENTUM_BURST:FORMING": 864,
+          "STOCKBEE_MOMENTUM_BURST:REJECTED": 91,
+          "STOCKBEE_MOMENTUM_BURST:UNKNOWN": 12,
+          "TREND_PULLBACK_RECLAIM:DETECTED": 2,
+          "TREND_PULLBACK_RECLAIM:FORMING": 31,
+          "TREND_PULLBACK_RECLAIM:REJECTED": 927,
+          "TREND_PULLBACK_RECLAIM:UNKNOWN": 12,
+          "VCP_BASE_CONTRACTION:FORMING": 3,
+          "VCP_BASE_CONTRACTION:REJECTED": 949,
+          "VCP_BASE_CONTRACTION:UNKNOWN": 20
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 705,
+          "RELATIVE_STRENGTH_LEADER": 1,
+          "STOCKBEE_MOMENTUM_BURST": 5,
+          "TREND_PULLBACK_RECLAIM": 2
+        },
+        "synthetic_mock_outcomes": null,
+        "unique_candidate_symbols": 108,
+        "unique_market_source_configurations": 704,
+        "unique_market_symbol_direction_observations": 624
+      }
+    ]
+  },
+  "note": "Sanitized aggregate only. No raw vendor OHLCV/private paths/Production records/executable quotes/AI outcomes/trade returns. Historical cutoffs are nonexecutable retrospective components observed today, not PIT/OOS. Current snapshot and last cutoff share a market session. Calculation hashes identify the final frozen source actually evaluated, including the lifecycle downgrade guard; no performance effect is inferred from that guard.",
+  "private_generated_artifact_sha256": {
+    "acquisition-result.json": "a2f7d12c30a93e7e471441bd8758b00f6b071be6e86e66458ef195f96bd348b7",
+    "comparison-signed.json": "43e894c5a0dbec18a00554d81b6d809d53e5ad18c514b8ff4085b2ece071cc84",
+    "manifest.json": "b608d5469d31a0dd61c7de29711623ee03fb1df71e010ba9d4e6f6478ce07219",
+    "synthetic-signed.json": "538f084700a6b332ed8c3aa9c195185e4c3a8422c446449dd1592c3f77658c45"
+  },
+  "source_code_same_across_evidence_classes": true,
+  "synthetic_causal_controls": {
+    "acquisition_status_counts": null,
+    "benchmark_receipt": null,
+    "code_hash_newline_policy": "LF",
+    "comparator_sha256": "9f0a9a9ff34d5721a52115c53e728775c7b4bbc7f125cbc54d7a7cd2c622a347",
+    "comparison_limits": [
+      "Discovery candidates/planned slots are not AI approvals, accepted signals, orders or legal entries.",
+      "No quote/session/news/confidence/risk/target/entry gate is declared passed by this comparison.",
+      "Actual strategy records and ranking helper reused; no bonus per additional label or multiplied AI cap.",
+      "Source availability and bar completion respected in both arms; retrospective vendor revisions or universe selection are not PIT proof.",
+      "No price-touch/intrabar fill, historical AI, WR/PF/expectancy/drawdown or independent OOS outcome invented."
+    ],
+    "component_reference_probe_scope": "DAILY_CLOSE_STRUCTURAL_AND_NECESSARY_INTERVAL_ONLY_NOT_ADMISSION",
+    "dataset_content_sha256": "41c065854c5fe1821e56c717cb8057354fd9b8cb520ba43241de67fd357984ba",
+    "evidence_class": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+    "fixture_source_sha256": {
+      "research/fixtures/entry_strategy_dataset.py": "0c6d561eebb519d1b233769262ad6161987c14ca5adc77d20c1520729417d4c7",
+      "service/server/tests/test_entry_strategies.py": "cc1051aad8c3d4133c5e2149d886a39b7d26595db9755b2fa9c7b553444af10f"
+    },
+    "implementation_sha256": {
+      "entry_discovery.py": "6fb6d7a8d66b6d46ebc7ce75b6ae9547b20b5e3f341471fe798f3540bc9d4635",
+      "entry_strategies.py": "3ceea255a5cde4de39e26e831b50640ac976dceb4a755d6baa126f0106f93b36",
+      "entry_strategy_execution.py": "3e4a5db9c6f2252deaebf8952256ffe1038d77498839d9aa32545de9a64574a9",
+      "scanner_targets.py": "bc86bc088a3628c9e558a8ce0d6817e1a5860f72e5f78046f0f6f0b034dbeb50",
+      "single_breakout_policy.py": "4bb2bb56b9c3a44db457f327dbab8ba5dd75931e0cbe4e94eae9d8d7f915c586",
+      "single_target_policy.py": "e57f2ff19a427b4f7877f7cbf2229c017afa0e4a761249ca7b3e0529de3f5cc6",
+      "stock_scanner.py": "5a6f27eaef71a4980e27f6ca8dfa5cd0180fe3725940c65baa6b331777665ce3",
+      "vendor/entry_discovery/stockbee.py": "f0c55d087b009775ade81a5508d8376018e7504f87e2cec0b0fa51d68862fadb",
+      "vendor/entry_discovery/vcp_pattern_calculator.py": "2d5f3d5e019c51723cfc27a2fb9db89d1ff03deaefa3cf50c4e9b512511bc002"
+    },
+    "implementation_stable_during_comparison": true,
+    "input_limitations": [
+      "All prices, benchmark and earnings facts are invented controls.",
+      "Mock AI/signals/orders are declared inputs only; no actual AI or lifecycle was executed.",
+      "entry=False explicitly prevents equating a mock pending order with a position."
+    ],
+    "input_observations": 6,
+    "input_receipt_sha256": null,
+    "manifest_sha256": null,
+    "safety": {
+      "AI_calls": 0,
+      "Production_calls": 0,
+      "Telegram_calls": 0,
+      "application_DB_calls": 0,
+      "network_calls": 0,
+      "orders_fills_created": 0
+    },
+    "scope": "PAIRED_OFFLINE_DISCOVERY_ONLY_NOT_PAPER_BACKTEST",
+    "shared_caps_per_snapshot": {
+      "cursor": 0,
+      "max_AI": 6,
+      "shortlist": 25
+    },
+    "snapshot_count": 1,
+    "source_snapshot_clocks": [
+      {
+        "calculation_at": null,
+        "decision_at": "2026-10-06T14:00:37+00:00",
+        "market_cutoff": null,
+        "snapshot_id": "invented_six_path_controls",
+        "source_observed_at_max": "2026-10-06T14:00:35+00:00",
+        "source_observed_at_min": "2026-10-06T14:00:35+00:00"
+      }
+    ],
+    "synthetic": true,
+    "unique_input_symbols": 6,
+    "version": 1,
+    "matrix": [
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE",
+        "block_reasons": {},
+        "candidate_directions": {
+          "BUY": 1
+        },
+        "enabled_ids": [],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 1
+        },
+        "opportunity_observations": 1,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 0,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 0,
+          "different_selected_slots": 0,
+          "retained_baseline_slots": 1
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 1
+        },
+        "planned_max_shared_AI_slots": 1,
+        "planned_shortlist_observations": 1,
+        "snapshot_results": [
+          {
+            "calculation_at": null,
+            "candidate_count": 1,
+            "candidate_directions": {
+              "BUY": 1
+            },
+            "evidence_scope": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+            "market_cutoff": null,
+            "planned_shared_AI_slot_count": 1,
+            "planned_shortlist_count": 1,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1
+            },
+            "snapshot_id": "invented_six_path_controls"
+          }
+        ],
+        "states": {},
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1
+        },
+        "synthetic_mock_outcomes": {},
+        "unique_candidate_symbols": 1,
+        "unique_market_source_configurations": 1,
+        "unique_market_symbol_direction_observations": 1
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "VCP_BASE_CONTRACTION_ONLY",
+        "block_reasons": {
+          "VCP_BASE_CONTRACTION:vcp_pattern_unconfirmed": 5
+        },
+        "candidate_directions": {
+          "BUY": 1
+        },
+        "enabled_ids": [
+          "VCP_BASE_CONTRACTION"
+        ],
+        "include_baseline": false,
+        "nonexecutable_reference_branch_intervals": {
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 1
+        },
+        "opportunity_observations": 1,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 1,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 1,
+          "different_selected_slots": 1,
+          "retained_baseline_slots": 0
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 1
+        },
+        "planned_max_shared_AI_slots": 1,
+        "planned_shortlist_observations": 1,
+        "snapshot_results": [
+          {
+            "calculation_at": null,
+            "candidate_count": 1,
+            "candidate_directions": {
+              "BUY": 1
+            },
+            "evidence_scope": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+            "market_cutoff": null,
+            "planned_shared_AI_slot_count": 1,
+            "planned_shortlist_count": 1,
+            "reference_branch_intervals": {
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1
+            },
+            "snapshot_id": "invented_six_path_controls"
+          }
+        ],
+        "states": {
+          "VCP_BASE_CONTRACTION:DETECTED": 1,
+          "VCP_BASE_CONTRACTION:REJECTED": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "VCP_BASE_CONTRACTION": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 1,
+        "unique_market_source_configurations": 1,
+        "unique_market_symbol_direction_observations": 1
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "STOCKBEE_MOMENTUM_BURST_ONLY",
+        "block_reasons": {
+          "STOCKBEE_MOMENTUM_BURST:trigger_not_confirmed": 2
+        },
+        "candidate_directions": {
+          "BUY": 4
+        },
+        "enabled_ids": [
+          "STOCKBEE_MOMENTUM_BURST"
+        ],
+        "include_baseline": false,
+        "nonexecutable_reference_branch_intervals": {
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 4
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+          "REFERENCE_COMPONENT_single_target_v2": 3
+        },
+        "opportunity_observations": 4,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 4,
+          "baseline_not_in_this_arm": 1,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 1,
+          "different_selected_slots": 4,
+          "retained_baseline_slots": 0
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 4
+        },
+        "planned_max_shared_AI_slots": 4,
+        "planned_shortlist_observations": 4,
+        "snapshot_results": [
+          {
+            "calculation_at": null,
+            "candidate_count": 4,
+            "candidate_directions": {
+              "BUY": 4
+            },
+            "evidence_scope": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+            "market_cutoff": null,
+            "planned_shared_AI_slot_count": 4,
+            "planned_shortlist_count": 4,
+            "reference_branch_intervals": {
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 4
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_COMPONENT_single_target_v2": 3
+            },
+            "snapshot_id": "invented_six_path_controls"
+          }
+        ],
+        "states": {
+          "STOCKBEE_MOMENTUM_BURST:DETECTED": 4,
+          "STOCKBEE_MOMENTUM_BURST:FORMING": 2
+        },
+        "strategy_attributions_nonexclusive": {
+          "STOCKBEE_MOMENTUM_BURST": 4
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 4,
+          "ai_reviewed": 4,
+          "entry": 0,
+          "order": 4,
+          "signal": 4
+        },
+        "unique_candidate_symbols": 4,
+        "unique_market_source_configurations": 4,
+        "unique_market_symbol_direction_observations": 4
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "PEAD_ONLY",
+        "block_reasons": {
+          "PEAD:verified_earnings_timing_unavailable": 5
+        },
+        "candidate_directions": {
+          "BUY": 1
+        },
+        "enabled_ids": [
+          "PEAD"
+        ],
+        "include_baseline": false,
+        "nonexecutable_reference_branch_intervals": {
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_COMPONENT_single_target_v2": 1
+        },
+        "opportunity_observations": 1,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 1,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 1,
+          "different_selected_slots": 1,
+          "retained_baseline_slots": 0
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 1
+        },
+        "planned_max_shared_AI_slots": 1,
+        "planned_shortlist_observations": 1,
+        "snapshot_results": [
+          {
+            "calculation_at": null,
+            "candidate_count": 1,
+            "candidate_directions": {
+              "BUY": 1
+            },
+            "evidence_scope": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+            "market_cutoff": null,
+            "planned_shared_AI_slot_count": 1,
+            "planned_shortlist_count": 1,
+            "reference_branch_intervals": {
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_COMPONENT_single_target_v2": 1
+            },
+            "snapshot_id": "invented_six_path_controls"
+          }
+        ],
+        "states": {
+          "PEAD:DETECTED": 1,
+          "PEAD:UNKNOWN": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "PEAD": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 1,
+        "unique_market_source_configurations": 1,
+        "unique_market_symbol_direction_observations": 1
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "TREND_PULLBACK_RECLAIM_ONLY",
+        "block_reasons": {
+          "TREND_PULLBACK_RECLAIM:pullback_setup_unconfirmed": 3,
+          "TREND_PULLBACK_RECLAIM:pullback_uptrend_unconfirmed": 2
+        },
+        "candidate_directions": {
+          "BUY": 1
+        },
+        "enabled_ids": [
+          "TREND_PULLBACK_RECLAIM"
+        ],
+        "include_baseline": false,
+        "nonexecutable_reference_branch_intervals": {
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:nearest_resistance_below_2r": 1
+        },
+        "opportunity_observations": 1,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 1,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 1,
+          "different_selected_slots": 1,
+          "retained_baseline_slots": 0
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 1
+        },
+        "planned_max_shared_AI_slots": 1,
+        "planned_shortlist_observations": 1,
+        "snapshot_results": [
+          {
+            "calculation_at": null,
+            "candidate_count": 1,
+            "candidate_directions": {
+              "BUY": 1
+            },
+            "evidence_scope": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+            "market_cutoff": null,
+            "planned_shared_AI_slot_count": 1,
+            "planned_shortlist_count": 1,
+            "reference_branch_intervals": {
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 1
+            },
+            "snapshot_id": "invented_six_path_controls"
+          }
+        ],
+        "states": {
+          "TREND_PULLBACK_RECLAIM:DETECTED": 1,
+          "TREND_PULLBACK_RECLAIM:REJECTED": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "TREND_PULLBACK_RECLAIM": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 1,
+        "unique_market_source_configurations": 1,
+        "unique_market_symbol_direction_observations": 1
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "RELATIVE_STRENGTH_LEADER_ONLY",
+        "block_reasons": {
+          "RELATIVE_STRENGTH_LEADER:benchmark_unavailable": 5
+        },
+        "candidate_directions": {
+          "BUY": 1
+        },
+        "enabled_ids": [
+          "RELATIVE_STRENGTH_LEADER"
+        ],
+        "include_baseline": false,
+        "nonexecutable_reference_branch_intervals": {
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_COMPONENT_single_target_v2": 1
+        },
+        "opportunity_observations": 1,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 1,
+          "shared_opportunity_observations": 0
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 1,
+          "different_selected_slots": 1,
+          "retained_baseline_slots": 0
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 1
+        },
+        "planned_max_shared_AI_slots": 1,
+        "planned_shortlist_observations": 1,
+        "snapshot_results": [
+          {
+            "calculation_at": null,
+            "candidate_count": 1,
+            "candidate_directions": {
+              "BUY": 1
+            },
+            "evidence_scope": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+            "market_cutoff": null,
+            "planned_shared_AI_slot_count": 1,
+            "planned_shortlist_count": 1,
+            "reference_branch_intervals": {
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_COMPONENT_single_target_v2": 1
+            },
+            "snapshot_id": "invented_six_path_controls"
+          }
+        ],
+        "states": {
+          "RELATIVE_STRENGTH_LEADER:DETECTED": 1,
+          "RELATIVE_STRENGTH_LEADER:UNKNOWN": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "RELATIVE_STRENGTH_LEADER": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 1,
+        "unique_market_source_configurations": 1,
+        "unique_market_symbol_direction_observations": 1
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_VCP_BASE_CONTRACTION",
+        "block_reasons": {
+          "VCP_BASE_CONTRACTION:vcp_pattern_unconfirmed": 5
+        },
+        "candidate_directions": {
+          "BUY": 2
+        },
+        "enabled_ids": [
+          "VCP_BASE_CONTRACTION"
+        ],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1,
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 2
+        },
+        "opportunity_observations": 2,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 0,
+          "different_selected_slots": 1,
+          "retained_baseline_slots": 1
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 2
+        },
+        "planned_max_shared_AI_slots": 2,
+        "planned_shortlist_observations": 2,
+        "snapshot_results": [
+          {
+            "calculation_at": null,
+            "candidate_count": 2,
+            "candidate_directions": {
+              "BUY": 2
+            },
+            "evidence_scope": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+            "market_cutoff": null,
+            "planned_shared_AI_slot_count": 2,
+            "planned_shortlist_count": 2,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1,
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 2
+            },
+            "snapshot_id": "invented_six_path_controls"
+          }
+        ],
+        "states": {
+          "VCP_BASE_CONTRACTION:DETECTED": 1,
+          "VCP_BASE_CONTRACTION:REJECTED": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1,
+          "VCP_BASE_CONTRACTION": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 2,
+        "unique_market_source_configurations": 2,
+        "unique_market_symbol_direction_observations": 2
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_STOCKBEE_MOMENTUM_BURST",
+        "block_reasons": {
+          "STOCKBEE_MOMENTUM_BURST:trigger_not_confirmed": 2
+        },
+        "candidate_directions": {
+          "BUY": 5
+        },
+        "enabled_ids": [
+          "STOCKBEE_MOMENTUM_BURST"
+        ],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1,
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 4
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 2,
+          "REFERENCE_COMPONENT_single_target_v2": 3
+        },
+        "opportunity_observations": 5,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 4,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 0,
+          "different_selected_slots": 4,
+          "retained_baseline_slots": 1
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 5
+        },
+        "planned_max_shared_AI_slots": 5,
+        "planned_shortlist_observations": 5,
+        "snapshot_results": [
+          {
+            "calculation_at": null,
+            "candidate_count": 5,
+            "candidate_directions": {
+              "BUY": 5
+            },
+            "evidence_scope": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+            "market_cutoff": null,
+            "planned_shared_AI_slot_count": 5,
+            "planned_shortlist_count": 5,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1,
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 4
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 2,
+              "REFERENCE_COMPONENT_single_target_v2": 3
+            },
+            "snapshot_id": "invented_six_path_controls"
+          }
+        ],
+        "states": {
+          "STOCKBEE_MOMENTUM_BURST:DETECTED": 4,
+          "STOCKBEE_MOMENTUM_BURST:FORMING": 2
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1,
+          "STOCKBEE_MOMENTUM_BURST": 4
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 4,
+          "ai_reviewed": 4,
+          "entry": 0,
+          "order": 4,
+          "signal": 4
+        },
+        "unique_candidate_symbols": 5,
+        "unique_market_source_configurations": 5,
+        "unique_market_symbol_direction_observations": 5
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_PEAD",
+        "block_reasons": {
+          "PEAD:verified_earnings_timing_unavailable": 5
+        },
+        "candidate_directions": {
+          "BUY": 2
+        },
+        "enabled_ids": [
+          "PEAD"
+        ],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1,
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+          "REFERENCE_COMPONENT_single_target_v2": 1
+        },
+        "opportunity_observations": 2,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 0,
+          "different_selected_slots": 1,
+          "retained_baseline_slots": 1
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 2
+        },
+        "planned_max_shared_AI_slots": 2,
+        "planned_shortlist_observations": 2,
+        "snapshot_results": [
+          {
+            "calculation_at": null,
+            "candidate_count": 2,
+            "candidate_directions": {
+              "BUY": 2
+            },
+            "evidence_scope": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+            "market_cutoff": null,
+            "planned_shared_AI_slot_count": 2,
+            "planned_shortlist_count": 2,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1,
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_COMPONENT_single_target_v2": 1
+            },
+            "snapshot_id": "invented_six_path_controls"
+          }
+        ],
+        "states": {
+          "PEAD:DETECTED": 1,
+          "PEAD:UNKNOWN": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1,
+          "PEAD": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 2,
+        "unique_market_source_configurations": 2,
+        "unique_market_symbol_direction_observations": 2
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_TREND_PULLBACK_RECLAIM",
+        "block_reasons": {
+          "TREND_PULLBACK_RECLAIM:pullback_setup_unconfirmed": 3,
+          "TREND_PULLBACK_RECLAIM:pullback_uptrend_unconfirmed": 2
+        },
+        "candidate_directions": {
+          "BUY": 2
+        },
+        "enabled_ids": [
+          "TREND_PULLBACK_RECLAIM"
+        ],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1,
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+          "REFERENCE_BLOCK:nearest_resistance_below_2r": 1
+        },
+        "opportunity_observations": 2,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 0,
+          "different_selected_slots": 1,
+          "retained_baseline_slots": 1
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 2
+        },
+        "planned_max_shared_AI_slots": 2,
+        "planned_shortlist_observations": 2,
+        "snapshot_results": [
+          {
+            "calculation_at": null,
+            "candidate_count": 2,
+            "candidate_directions": {
+              "BUY": 2
+            },
+            "evidence_scope": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+            "market_cutoff": null,
+            "planned_shared_AI_slot_count": 2,
+            "planned_shortlist_count": 2,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1,
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 1
+            },
+            "snapshot_id": "invented_six_path_controls"
+          }
+        ],
+        "states": {
+          "TREND_PULLBACK_RECLAIM:DETECTED": 1,
+          "TREND_PULLBACK_RECLAIM:REJECTED": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1,
+          "TREND_PULLBACK_RECLAIM": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 2,
+        "unique_market_source_configurations": 2,
+        "unique_market_symbol_direction_observations": 2
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_RELATIVE_STRENGTH_LEADER",
+        "block_reasons": {
+          "RELATIVE_STRENGTH_LEADER:benchmark_unavailable": 5
+        },
+        "candidate_directions": {
+          "BUY": 2
+        },
+        "enabled_ids": [
+          "RELATIVE_STRENGTH_LEADER"
+        ],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1,
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+          "REFERENCE_COMPONENT_single_target_v2": 1
+        },
+        "opportunity_observations": 2,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 1,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 0,
+          "different_selected_slots": 1,
+          "retained_baseline_slots": 1
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 2
+        },
+        "planned_max_shared_AI_slots": 2,
+        "planned_shortlist_observations": 2,
+        "snapshot_results": [
+          {
+            "calculation_at": null,
+            "candidate_count": 2,
+            "candidate_directions": {
+              "BUY": 2
+            },
+            "evidence_scope": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+            "market_cutoff": null,
+            "planned_shared_AI_slot_count": 2,
+            "planned_shortlist_count": 2,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1,
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 1
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 1,
+              "REFERENCE_COMPONENT_single_target_v2": 1
+            },
+            "snapshot_id": "invented_six_path_controls"
+          }
+        ],
+        "states": {
+          "RELATIVE_STRENGTH_LEADER:DETECTED": 1,
+          "RELATIVE_STRENGTH_LEADER:UNKNOWN": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1,
+          "RELATIVE_STRENGTH_LEADER": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 1,
+          "ai_reviewed": 1,
+          "entry": 0,
+          "order": 1,
+          "signal": 1
+        },
+        "unique_candidate_symbols": 2,
+        "unique_market_source_configurations": 2,
+        "unique_market_symbol_direction_observations": 2
+      },
+      {
+        "actual_AI_approvals": null,
+        "actual_AI_reviews": null,
+        "actual_entries": null,
+        "actual_orders": null,
+        "actual_outcome_status": "NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES",
+        "actual_signals": null,
+        "arm": "BASELINE_PLUS_ALL",
+        "block_reasons": {
+          "PEAD:verified_earnings_timing_unavailable": 5,
+          "RELATIVE_STRENGTH_LEADER:benchmark_unavailable": 5,
+          "STOCKBEE_MOMENTUM_BURST:trigger_not_confirmed": 2,
+          "TREND_PULLBACK_RECLAIM:pullback_setup_unconfirmed": 3,
+          "TREND_PULLBACK_RECLAIM:pullback_uptrend_unconfirmed": 2,
+          "VCP_BASE_CONTRACTION:vcp_pattern_unconfirmed": 5
+        },
+        "candidate_directions": {
+          "BUY": 6
+        },
+        "enabled_ids": [
+          "VCP_BASE_CONTRACTION",
+          "STOCKBEE_MOMENTUM_BURST",
+          "PEAD",
+          "TREND_PULLBACK_RECLAIM",
+          "RELATIVE_STRENGTH_LEADER"
+        ],
+        "include_baseline": true,
+        "nonexecutable_reference_branch_intervals": {
+          "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1,
+          "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 5
+        },
+        "nonexecutable_reference_structural_components": {
+          "REFERENCE_BLOCK:entry_not_above_completed_high": 2,
+          "REFERENCE_BLOCK:nearest_resistance_below_2r": 1,
+          "REFERENCE_COMPONENT_single_target_v2": 3
+        },
+        "opportunity_observations": 6,
+        "overlap_vs_baseline": {
+          "additional_to_baseline": 5,
+          "baseline_not_in_this_arm": 0,
+          "shared_opportunity_observations": 1
+        },
+        "performance": {
+          "maximum_drawdown": null,
+          "net_expectancy_R": null,
+          "profit_factor": null,
+          "status": "DATA_INSUFFICIENT",
+          "why": "No immutable matched actual AI/order/legal-entry/partial-exit/fee ledger or independent holdout. Discovery labels and mock outcomes are not performance.",
+          "win_rate": null
+        },
+        "planned_AI_competition_vs_baseline": {
+          "baseline_slots_displaced": 0,
+          "different_selected_slots": 5,
+          "retained_baseline_slots": 1
+        },
+        "planned_AI_slot_directions": {
+          "BUY": 6
+        },
+        "planned_max_shared_AI_slots": 6,
+        "planned_shortlist_observations": 6,
+        "snapshot_results": [
+          {
+            "calculation_at": null,
+            "candidate_count": 6,
+            "candidate_directions": {
+              "BUY": 6
+            },
+            "evidence_scope": "SYNTHETIC_CAUSAL_CONTROLS_NOT_MARKET_HISTORY",
+            "market_cutoff": null,
+            "planned_shared_AI_slot_count": 6,
+            "planned_shortlist_count": 6,
+            "reference_branch_intervals": {
+              "BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH": 1,
+              "REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY": 5
+            },
+            "reference_structural_components": {
+              "REFERENCE_BLOCK:entry_not_above_completed_high": 2,
+              "REFERENCE_BLOCK:nearest_resistance_below_2r": 1,
+              "REFERENCE_COMPONENT_single_target_v2": 3
+            },
+            "snapshot_id": "invented_six_path_controls"
+          }
+        ],
+        "states": {
+          "PEAD:DETECTED": 1,
+          "PEAD:UNKNOWN": 5,
+          "RELATIVE_STRENGTH_LEADER:DETECTED": 1,
+          "RELATIVE_STRENGTH_LEADER:UNKNOWN": 5,
+          "STOCKBEE_MOMENTUM_BURST:DETECTED": 4,
+          "STOCKBEE_MOMENTUM_BURST:FORMING": 2,
+          "TREND_PULLBACK_RECLAIM:DETECTED": 1,
+          "TREND_PULLBACK_RECLAIM:REJECTED": 5,
+          "VCP_BASE_CONTRACTION:DETECTED": 1,
+          "VCP_BASE_CONTRACTION:REJECTED": 5
+        },
+        "strategy_attributions_nonexclusive": {
+          "BASELINE": 1,
+          "PEAD": 1,
+          "RELATIVE_STRENGTH_LEADER": 1,
+          "STOCKBEE_MOMENTUM_BURST": 4,
+          "TREND_PULLBACK_RECLAIM": 1,
+          "VCP_BASE_CONTRACTION": 1
+        },
+        "synthetic_mock_outcomes": {
+          "ai_approved": 5,
+          "ai_reviewed": 5,
+          "entry": 0,
+          "order": 5,
+          "signal": 5
+        },
+        "unique_candidate_symbols": 6,
+        "unique_market_source_configurations": 6,
+        "unique_market_symbol_direction_observations": 6
+      }
+    ]
+  },
+  "version": 2
+}

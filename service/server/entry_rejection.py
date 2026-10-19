@@ -8,6 +8,9 @@ CODES = frozenset({
     'order_plan_mismatch', 'order_levels_mismatch', 'single_policy_contract_mismatch',
     'breakout_policy_contract_mismatch', 'unsupported_single_policy', 'unsupported_breakout_policy',
     'entry_price_retry_contract_invalid', 'unsupported_entry_price_retry',
+    'strategy_fill_below_support', 'strategy_fill_above_chase',
+    'strategy_fill_outside_all_frozen_branches',
+    'entry_strategy_execution_contract_invalid', 'unsupported_entry_strategy_execution',
 })
 
 

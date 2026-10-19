@@ -10,6 +10,15 @@ def plan(row, field):
 def version(tables):
     from short_policy import in_snapshot
     from single_breakout_policy import is_breakout
+    fields = (('scanner_signals','technical_json'), ('scanner_orders','plan_json'),
+              ('scanner_trades','settings_json'))
+    if any('entry_strategy_execution' in json.loads(r.get(field) or '{}') or
+           'last_strategy_entry_block' in json.loads(r.get(field) or '{}')
+           for table, field in fields for r in tables[table]):
+        return 8
+    if any('entry_discovery' in json.loads(r.get(field) or '{}')
+           for table, field in fields for r in tables[table]):
+        return 7
     if any('entry_price_retry' in json.loads(r.get(field) or '{}') or
            'last_entry_price_block' in json.loads(r.get(field) or '{}')
            for table, field in (('scanner_orders','plan_json'), ('scanner_trades','settings_json'))
@@ -28,6 +37,10 @@ def version(tables):
 
 def validate_snapshot(data):
     tables = data['tables']
+    required = version(tables)
+    if required >= 7 or data['version'] >= 7:
+        if data['version'] != required:
+            raise ValueError('discovery_snapshot_format_content_mismatch')
     if version(tables) == 6 and data['version'] != 6:
         raise ValueError('entry_price_retry_requires_format6')
     if version(tables) == 5 and data['version'] not in (5,6):
@@ -51,7 +64,11 @@ def validate_snapshot(data):
                 from entry_discovery import validate_attribution
                 validate_attribution(discovery)
     for s in signals.values():
-        discovery = json.loads(s.get('technical_json') or '{}').get('entry_discovery')
+        technical = json.loads(s.get('technical_json') or '{}')
+        discovery = technical.get('entry_discovery')
+        if 'entry_strategy_execution' in technical:
+            from entry_strategy_execution import validate_association
+            validate_association(discovery, technical['entry_strategy_execution'])
         if discovery is not None:
             from entry_discovery import instant
             if instant(discovery['detected_at']) > instant(s['created_at']):
@@ -64,6 +81,8 @@ def validate_snapshot(data):
             if [s['tp1_pct'],s['tp2_pct'],s['tp3_pct']] != [1,0,0]:
                 raise ValueError('single_signal_fractions_mismatch')
     for o in orders.values():
+        import entry_strategy_execution
+        entry_strategy_execution.validate_order(o, signal=signals[o['signal_id']])
         order_discovery = json.loads(o.get('plan_json') or '{}').get('entry_discovery')
         signal_discovery = json.loads(signals[o['signal_id']].get('technical_json') or '{}').get('entry_discovery')
         if order_discovery != signal_discovery:
@@ -85,6 +104,13 @@ def validate_snapshot(data):
             if json.loads(o['plan_json'])['execution_settings']['active_strategy'] != 'single':
                 raise ValueError('single_order_strategy_mismatch')
     for t in tables['scanner_trades']:
+        trade_execution = json.loads(t.get('settings_json') or '{}').get('entry_strategy_execution')
+        order_execution = json.loads(orders[t['order_id']].get('plan_json') or '{}').get('entry_strategy_execution')
+        if trade_execution != order_execution:
+            raise ValueError('trade_strategy_execution_mismatch')
+        if trade_execution is not None:
+            from entry_strategy_execution import validate_fill as validate_strategy_fill
+            validate_strategy_fill(trade_execution, t['entry_price'])
         saved_discovery = json.loads(t.get('settings_json') or '{}').get('entry_discovery')
         order_discovery = json.loads(orders[t['order_id']].get('plan_json') or '{}').get('entry_discovery')
         if saved_discovery != order_discovery:

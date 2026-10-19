@@ -95,22 +95,14 @@ def verified_earnings_from_rows(rows, symbols, decision_at):
 
 
 def load_verified_earnings(symbols, decision_at):
-    """One bounded read from the existing news store, never collect or infer."""
-    from database import get_db_connection
-    at = instant(decision_at)
-    since = (at - timedelta(days=60)).isoformat()
+    """Read immutable producer facts only, never collect or infer in a scan.
+
+    The old typed-row parser remains a compatibility utility, not an implicit
+    fallback that could resurrect a corrected/retracted producer fact.
+    """
+    from earnings_releases import read_facts
     try:
-        with get_db_connection() as conn:
-            rows = conn.execute('''SELECT ticker,source_kind,headline_only,source_facts_json,
-                verified_tickers_json,collected_at,analyzed_at FROM scanner_news
-                WHERE source_kind IN ('official_earnings_release','verified_earnings_release')
-                  AND published_at>=? AND published_at<=?
-                ORDER BY published_at DESC LIMIT 2000''', (since, at.isoformat())).fetchall()
-            rows = [dict(row) for row in rows]
-        events = verified_earnings_from_rows(rows, symbols, at)
-        return events, dict(status='ready' if events else 'unknown',
-            reason=None if events else 'verified_release_timing_not_available',
-            source_rows=len(rows), clipped=len(rows) == 2000)
+        return read_facts(symbols, decision_at)
     except Exception as exc:
         LOG.warning('entry_strategy_earnings_degraded:%s', type(exc).__name__)
         return {}, dict(status='unknown', reason='verified_release_store_unavailable')

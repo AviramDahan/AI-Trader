@@ -21,3 +21,13 @@ def test_each_known_reason_is_projected_without_raw_execution_settings():
             assert order_reason(dict(order,**{key:value})) is None
     for text in ('{broken','[]','null'):
         assert order_reason(dict(purpose='entry',status='invalid',plan_json=text)) is None
+
+
+def test_new_strategy_wait_reasons_have_specific_hebrew_and_do_not_claim_fill():
+    from entry_strategy_execution import PRICE_REASONS
+    from paper_execution_presentation import order_update_lines
+    for code in PRICE_REASONS:
+        lines = order_update_lines('pending', 'BUY', price_wait={'reason': code})
+        assert any('סיבת דחיית המחיר' in line for line in lines)
+        assert 'לא נפתחה פוזיציה חדשה מהפקודה הזאת.' in lines
+        assert any('הסטופ, היעד והתוקף לא השתנו' in line for line in lines)

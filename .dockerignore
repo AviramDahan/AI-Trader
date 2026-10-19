@@ -9,6 +9,11 @@
 !service/server/news_events/
 !service/server/news_events/*.py
 !service/server/news_events/*.sql
+!service/server/vendor/
+!service/server/vendor/entry_discovery/
+!service/server/vendor/entry_discovery/*.py
+!service/server/vendor/entry_discovery/LICENSE
+!service/server/vendor/entry_discovery/PROVENANCE.json
 !deploy/
 !deploy/*.sh
 !deploy/Caddyfile

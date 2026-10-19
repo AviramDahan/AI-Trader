@@ -109,7 +109,7 @@ def offline_only():
             setattr(obj, name, original)
 
 
-def frame_from_observation(observation, decision):
+def frame_from_observation(observation, decision, *, market_cutoff=None):
     import pandas as pd
     observed = instant(observation['source_observed_at'])
     bars = observation.get('bars')
@@ -122,7 +122,7 @@ def frame_from_observation(observation, decision):
         available = datetime.combine(day, time(16, 5), ET).astimezone(UTC)
         if row.get('available_at'):
             available = max(available, instant(row['available_at']))
-        if available > min(observed, decision):
+        if available > min(observed, decision) or (market_cutoff is not None and day > market_cutoff):
             excluded += 1
             continue
         item = {'date': day.isoformat()}
@@ -163,21 +163,175 @@ def prepare_snapshot(snapshot):
             raise ValueError('invalid_symbol')
         if ticker in histories:
             raise ValueError('duplicate_symbol_in_snapshot')
-        frame, info = frame_from_observation(observation, decision)
+        cutoff = instant(snapshot['calculation_at']).astimezone(ET).date() if snapshot.get('calculation_at') else None
+        if observation.get('source_unavailable_reason'):
+            frame = None
+            info = {'source_observed_at': observation.get('source_observed_at'),
+                    'source_unavailable_reason': observation['source_unavailable_reason'], 'completed_bars': 0}
+        else:
+            frame, info = frame_from_observation(observation, decision, market_cutoff=cutoff)
         histories[ticker] = frame
         universe[ticker] = {'symbol': ticker, 'company': observation.get('company') or ticker}
         context = deepcopy(observation.get('context') or {})
+        if observation.get('detector_bars') is not None and frame is not None:
+            detector, detector_info = frame_from_observation(dict(observation, bars=observation['detector_bars']),
+                                                            decision, market_cutoff=cutoff)
+            context['history_frame'] = detector
+            info['independent_frame'] = detector_info
+            info['baseline_window'] = 'EXPLICIT_SEPARATE_6_CALENDAR_MONTH_FRAME'
         for prefix in ('benchmark', 'sector'):
             bars = context.pop(prefix + '_bars', None)
             if bars is not None:
                 source = context.get(prefix + '_observed_at')
-                linked, _ = frame_from_observation({'bars': bars, 'source_observed_at': source}, decision)
+                linked, _ = frame_from_observation({'bars': bars, 'source_observed_at': source}, decision,
+                                                    market_cutoff=cutoff)
                 context[prefix + '_frame'] = linked
         contexts[ticker] = context
         clocks[ticker] = info
     context = deepcopy(snapshot.get('context') or {})
     context['by_ticker'] = contexts
     return histories, universe, context, clocks
+
+
+def expanded_acquisition_dataset(path, *, comparison_decision_at=None):
+    """Frozen108 cohort: real observation clocks, eight NONEXECUTABLE prefixes.
+
+    The separate calculation clock never substitutes for first_seen/availability.
+    Baseline/common metrics receive six calendar months; detectors receive the
+    longer prefix. Failed/unavailable symbols remain in every denominator.
+    """
+    import pandas as pd
+    acquisition, digest = read_json(path)
+    manifest, _ = read_json(Path(path).parent / 'manifest.json', acquisition['manifest_sha256'])
+    benchmark, benchmark_hash = read_json(manifest['benchmark_artifact'], manifest['benchmark_artifact_sha256'])
+    packets, statuses, receipts = {}, {}, []
+    for row in acquisition['rows']:
+        ticker = row['symbol']
+        statuses[ticker] = row['status']
+        if row['status'] not in {'ACQUIRED_VALIDATED', 'REUSED_VALIDATED'}:
+            continue
+        packet, packet_hash = read_json(row['artifact_path'], row['artifact_sha256'])
+        if packet['symbol'] != ticker or packet['metadata'].get('symbol') != ticker:
+            raise ValueError('expanded_exact_mapping_mismatch')
+        packets[ticker] = packet
+        receipts.append({'symbol': ticker, 'artifact_sha256': packet_hash,
+                         'source_observed_at': packet['source_observed_at']})
+    if [r['symbol'] for r in acquisition['rows']] != manifest['symbols']:
+        raise ValueError('expanded_frozen_cohort_order_mismatch')
+    decision = instant(comparison_decision_at) if comparison_decision_at else datetime.now(UTC)
+    source_max = max([instant(benchmark['source_observed_at'])] +
+                     [instant(p['source_observed_at']) for p in packets.values()])
+    if decision < source_max:
+        raise ValueError('comparison_before_actual_sources')
+    sessions = [(day, True) for day in manifest['cutoff_sessions']]
+    sessions.append((max(r['date'] for r in benchmark['adjusted_rows']), False))
+    snapshots = []
+    for day, component in sessions:
+        calculation = datetime.combine(datetime.fromisoformat(day).date(), time(16, 10), ET).astimezone(UTC)
+        if not component:
+            calculation = decision
+        window_start = (pd.Timestamp(calculation.astimezone(ET).date()) - pd.DateOffset(months=6)).date().isoformat()
+        observations = []
+        for ticker in manifest['symbols']:
+            packet = packets.get(ticker)
+            if packet is None:
+                observations.append({'ticker': ticker, 'source_unavailable_reason': statuses[ticker],
+                                     'bars': [], 'context': {'expected_session': day}})
+                continue
+            prefix = [row for row in packet['adjusted_rows'] if row['date'] <= day]
+            observations.append({'ticker': ticker, 'bars': [row for row in prefix if row['date'] >= window_start],
+                'detector_bars': prefix, 'source_observed_at': packet['source_observed_at'],
+                'context': {'expected_session': day,
+                    'benchmark_bars': [row for row in benchmark['adjusted_rows'] if row['date'] <= day],
+                    'benchmark_observed_at': benchmark['source_observed_at']}})
+        snapshot = {'snapshot_id': ('component_' if component else 'actual_current_') + day,
+                    'decision_at': decision.isoformat(), 'market_cutoff': day,
+                    'evidence_scope': 'RETROSPECTIVE_NONEXECUTABLE_COMPONENT' if component else 'CURRENT_OBSERVED_DISCOVERY',
+                    'observations': observations}
+        if component:
+            snapshot['calculation_at'] = calculation.isoformat()
+        snapshots.append(snapshot)
+    return {'version': 1, 'synthetic': False,
+        'kind': 'CURRENT_OBSERVED_AND_NONEXECUTABLE_RETROSPECTIVE_COMPONENTS',
+        'input_receipt_sha256': digest, 'manifest_sha256': acquisition['manifest_sha256'],
+        'source_receipts': receipts, 'acquisition_status_counts': acquisition['status_counts'],
+        'benchmark_receipt': {'symbol': 'SPY', 'artifact_sha256': benchmark_hash,
+                              'source_observed_at': benchmark['source_observed_at']},
+        'cfg': DEFAULT_CFG, 'snapshots': snapshots, 'limitations': manifest['limits_of_inference'] + [
+            'Eight prefix snapshots are retrospective component calculations observed today, not historical eligible decisions/PIT/OOS.',
+            'The latest historical cutoff and current snapshot share a market session; they are not independent trading opportunities.',
+            'Baseline6mo window is distinct from2y detector prefix; no reseeding baseline with long history.',
+            'Missing actual earnings release facts remain UNKNOWN; no historical AI, quote, entry, fill or outcome generated.']}
+
+
+def causal_value(value):
+    """Complete causal research-cache key, including frame values/index/attrs."""
+    if hasattr(value, 'to_dict') and hasattr(value, 'index') and hasattr(value, 'attrs'):
+        return {'frame_index': [str(x) for x in value.index], 'columns': list(value.columns),
+                'values': causal_value(value.to_dict(orient='records')), 'attrs': causal_value(value.attrs)}
+    if isinstance(value, dict):
+        return {str(k): causal_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [causal_value(v) for v in value]
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if hasattr(value, 'item'):
+        return value.item()
+    raise ValueError('unsupported_causal_cache_type:' + type(value).__name__)
+
+
+@contextmanager
+def research_memoization(enabled):
+    """Research-process-only, bounded/deep-copy cache of exact application calls.
+
+    All5 independent detectors are evaluated together once, then selected without
+    changing their formulas. No application runtime/cache/DB state is modified.
+    QA independently repeats an unmemoized subset.
+    """
+    if not enabled:
+        yield
+        return
+    import stock_scanner
+    import entry_strategies
+    original_analyze, original_detect = stock_scanner.analyze_history, entry_strategies.detect_all
+    cache = {}
+    def cached(kind, material, calculate):
+        key = (kind, sha(causal_value(material)))
+        if key not in cache:
+            if len(cache) >= 6000:
+                raise ValueError('research_memoization_bound')
+            cache[key] = deepcopy(calculate())
+        return deepcopy(cache[key])
+    def analyze(*args, **kwargs):
+        material_args = list(args)
+        # The actual analyzer does not read entry_strategy_ids; that key only
+        # selects independent OR routes in the caller. Preserve every other
+        # supplied config value, the filter switch, data, attrs and both clocks.
+        if len(material_args) >= 4 and isinstance(material_args[3], dict):
+            material_args[3] = {key: value for key, value in material_args[3].items()
+                                if key != 'entry_strategy_ids'}
+        return cached('analyze', [material_args, kwargs], lambda: original_analyze(*args, **kwargs))
+    def detect(frame, *, decision_at, source_observed_at, enabled_ids=None, context=None):
+        requested = tuple(entry_strategies.STRATEGY_IDS if enabled_ids is None else enabled_ids)
+        # A disabled strategy's malformed override must not contaminate another
+        # arm. Custom configurations use the exact requested-ID helper without
+        # this default-config bulk optimization. Preserve empty/invalid-ID API
+        # validation semantics as well.
+        if (not requested or len(requested) != len(set(requested)) or
+                set(requested) - set(entry_strategies.STRATEGY_IDS) or (context or {}).get('configs')):
+            return original_detect(frame, decision_at=decision_at, source_observed_at=source_observed_at,
+                                   enabled_ids=requested, context=context)
+        material = [frame, decision_at, source_observed_at, context, entry_strategies.DEFAULT_CONFIGS]
+        all_results = cached('detect', material, lambda: original_detect(frame, decision_at=decision_at,
+            source_observed_at=source_observed_at, context=context))
+        return {key: deepcopy(all_results[key]) for key in requested}
+    stock_scanner.analyze_history, entry_strategies.detect_all = analyze, detect
+    try:
+        yield
+    finally:
+        stock_scanner.analyze_history, entry_strategies.detect_all = original_analyze, original_detect
 
 
 def acquisition_dataset(path, benchmark_artifact=None, *, comparison_decision_at=None):
@@ -259,12 +413,69 @@ def code_fingerprint(path):
 
 def implementation_hashes():
     files = ('entry_discovery.py', 'entry_strategies.py', 'stock_scanner.py', 'scanner_targets.py',
+             'entry_strategy_execution.py', 'single_target_policy.py', 'single_breakout_policy.py',
              'vendor/entry_discovery/vcp_pattern_calculator.py', 'vendor/entry_discovery/stockbee.py')
     return {name: code_fingerprint(SERVER / name)
             for name in files if (SERVER / name).is_file()}
 
 
-def compare(dataset, *, discover=None, rank=None, include_details=True):
+def component_reference_probe(candidate, decision):
+    """Diagnostic at actual recorded daily close, never an executable quote.
+
+    The original pure BUY/SINGLE builder is called without capture/AI/HTTP. A
+    successful calculation is only a structural component result; it does not
+    pass session/quote/news/confidence/budget/exposure or generate an order.
+    """
+    if candidate['technical_direction'] != 'BUY':
+        return {'structural': 'NOT_PROBED_BASELINE_SELL', 'branch': 'NOT_PROBED_BASELINE_SELL'}
+    from single_target_policy import build
+    from single_breakout_policy import build as breakout_build
+    from entry_strategy_execution import branches_from_discovery
+    price = candidate['entry']
+    source = candidate.get('single_target_source') or {
+        'atr': candidate['atr'], 'zones': candidate.get('price_zones', []),
+        'data_as_of': candidate.get('price_as_of', '')}
+    try:
+        try:
+            plan = build(price, source['atr'], source['zones'], source['data_as_of'], decision.isoformat())
+        except ValueError as exc:
+            if str(exc) != 'no_forward_zone':
+                raise
+            plan = breakout_build(price, source['atr'], source['zones'], source['data_as_of'],
+                                  decision.isoformat(), candidate.get('recent_high_20d'))
+        structural = 'REFERENCE_COMPONENT_' + plan['policy_version']
+    except ValueError as exc:
+        structural = 'REFERENCE_BLOCK:' + str(exc)
+    package = candidate.get('entry_discovery')
+    if not package:
+        branch = 'BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH'
+    else:
+        try:
+            branches = branches_from_discovery(package, allow_component=True)
+            if not branches:
+                branch = 'BASELINE_ORIGINAL_GATES_NO_NEW_BRANCH'
+            elif any(row['support'] < price <= row['ceiling'] for row in branches):
+                branch = 'REFERENCE_INSIDE_NECESSARY_BRANCH_INTERVAL_NOT_ENTRY'
+            elif all(price <= row['support'] for row in branches):
+                branch = 'REFERENCE_BELOW_SUPPORT'
+            elif all(price > row['ceiling'] for row in branches):
+                branch = 'REFERENCE_ABOVE_CHASE'
+            else:
+                branch = 'REFERENCE_OUTSIDE_ALL_NECESSARY_BRANCH_INTERVALS'
+        except ValueError as exc:
+            branch = 'REFERENCE_PROJECTION_BLOCK:' + str(exc)
+    return {'structural': structural, 'branch': branch,
+            'reference_kind': 'COMPLETED_DAILY_CLOSE_NOT_EXECUTABLE',
+            'price': price, 'reference_at': candidate.get('price_as_of')}
+
+
+def compare(dataset, *, discover=None, rank=None, include_details=True, memoize=False, reference_probes=False):
+    with research_memoization(memoize):
+        return _compare(dataset, discover=discover, rank=rank, include_details=include_details,
+                        reference_probes=reference_probes)
+
+
+def _compare(dataset, *, discover=None, rank=None, include_details=True, reference_probes=False):
     source_before = implementation_hashes()
     if dataset.get('version') != 1 or not isinstance(dataset.get('synthetic'), bool):
         raise ValueError('dataset_version_or_evidence_class_required')
@@ -281,19 +492,23 @@ def compare(dataset, *, discover=None, rank=None, include_details=True):
         from entry_discovery import discover_candidates, rank_candidates
         discover = discover or discover_candidates
         rank = rank or rank_candidates
-    matrix, details, opportunity_sets = [], {}, {}
+    matrix, details, opportunity_sets, ai_sets = [], {}, {}, {}
+    all_probes = {}
     prepared = [(snapshot, prepare_snapshot(snapshot)) for snapshot in snapshots]
     for arm_name, baseline, ids in ARMS:
-        opportunities, shortlist_keys, planned_ai = set(), set(), set()
+        opportunities, shortlist_keys, planned_ai, source_configurations, market_directions = set(), set(), set(), set(), set()
         reasons, states = Counter(), Counter()
         strategy_counts = Counter()
-        arm_details = []
+        arm_details, snapshot_rows = [], []
+        structural, branches = Counter(), Counter()
         mock_counts = Counter()
         for snapshot, (histories, universe, context, clocks) in prepared:
             arm_cfg = dict(cfg, entry_strategy_ids=list(ids))
-            candidates, observations = discover(deepcopy(histories), deepcopy(universe), arm_cfg,
-                                                decision_at=instant(snapshot['decision_at']),
-                                                context=deepcopy(context), include_baseline=baseline)
+            arguments = dict(decision_at=instant(snapshot['decision_at']),
+                             context=deepcopy(context), include_baseline=baseline)
+            if snapshot.get('calculation_at'):
+                arguments['calculation_at'] = instant(snapshot['calculation_at'])
+            candidates, observations = discover(deepcopy(histories), deepcopy(universe), arm_cfg, **arguments)
             if len({c['ticker'] for c in candidates}) != len(candidates):
                 raise AssertionError('application_returned_duplicate_ticker_candidates')
             ordered = rank(candidates, cursor=cursor)
@@ -305,6 +520,22 @@ def compare(dataset, *, discover=None, rank=None, include_details=True):
             opportunities.update(key(c) for c in candidates)
             shortlist_keys.update(key(c) for c in shortlist)
             planned_ai.update(key(c) for c in planned)
+            market_directions.update((snapshot.get('market_cutoff', snapshot['snapshot_id']),
+                c['ticker'], c['technical_direction']) for c in candidates)
+            source_configurations.update((c['ticker'], c['technical_direction'],
+                clocks[c['ticker']].get('consumed_source_sha256'),
+                clocks[c['ticker']].get('independent_frame', {}).get('consumed_source_sha256')) for c in candidates)
+            snapshot_structural, snapshot_branches = Counter(), Counter()
+            if reference_probes:
+                for candidate in candidates:
+                    probe_key = sha([candidate, snapshot['decision_at']])
+                    if probe_key not in all_probes:
+                        all_probes[probe_key] = component_reference_probe(candidate, instant(snapshot['decision_at']))
+                    probe = all_probes[probe_key]
+                    snapshot_structural[probe['structural']] += 1
+                    snapshot_branches[probe['branch']] += 1
+                structural.update(snapshot_structural)
+                branches.update(snapshot_branches)
             for candidate in candidates:
                 for strategy_id in set(candidate['strategy_ids']):
                     strategy_counts[strategy_id] += 1
@@ -325,18 +556,32 @@ def compare(dataset, *, discover=None, rank=None, include_details=True):
                 if outcome:
                     for field in ('ai_reviewed', 'ai_approved', 'signal', 'order', 'entry'):
                         mock_counts[field] += int(outcome.get(field) is True)
+            snapshot_rows.append({'snapshot_id': snapshot['snapshot_id'],
+                'evidence_scope': snapshot.get('evidence_scope', dataset.get('kind')),
+                'market_cutoff': snapshot.get('market_cutoff'), 'calculation_at': snapshot.get('calculation_at'),
+                'candidate_count': len(candidates), 'planned_shortlist_count': len(shortlist),
+                'planned_shared_AI_slot_count': len(planned),
+                'candidate_directions': dict(Counter(c['technical_direction'] for c in candidates)),
+                'candidate_tickers': sorted(c['ticker'] for c in candidates),
+                'planned_AI_slot_tickers': [c['ticker'] for c in planned],
+                'reference_structural_components': dict(snapshot_structural),
+                'reference_branch_intervals': dict(snapshot_branches)})
             if include_details:
                 arm_details.append({'snapshot_id': snapshot['snapshot_id'],
                                     'decision_at': snapshot['decision_at'], 'source_clocks': clocks,
+                                    'calculation_at': snapshot.get('calculation_at'),
                                     'candidate_tickers': [c['ticker'] for c in candidates],
                                     'ordered_tickers': [c['ticker'] for c in ordered],
                                     'planned_shortlist_tickers': [c['ticker'] for c in shortlist],
                                     'planned_AI_slot_tickers': [c['ticker'] for c in planned],
                                     'observations': observations})
         opportunity_sets[arm_name] = opportunities
+        ai_sets[arm_name] = planned_ai
         matrix.append({'arm': arm_name, 'include_baseline': baseline, 'enabled_ids': list(ids),
                        'opportunity_observations': len(opportunities),
                        'unique_candidate_symbols': len({key[1] for key in opportunities}),
+                       'unique_market_source_configurations': len(source_configurations),
+                       'unique_market_symbol_direction_observations': len(market_directions),
                        'candidate_directions': dict(Counter(key[2] for key in opportunities)),
                        'strategy_attributions_nonexclusive': dict(strategy_counts),
                        'planned_shortlist_observations': len(shortlist_keys),
@@ -347,6 +592,9 @@ def compare(dataset, *, discover=None, rank=None, include_details=True):
                        'actual_outcome_status': 'NOT_VERIFIED_NO_IMMUTABLE_MATCHED_OUTCOMES',
                        'synthetic_mock_outcomes': dict(mock_counts) if dataset['synthetic'] else None,
                        'states': dict(states), 'block_reasons': dict(reasons),
+                       'snapshot_results': snapshot_rows,
+                       'nonexecutable_reference_structural_components': dict(structural),
+                       'nonexecutable_reference_branch_intervals': dict(branches),
                        'performance': performance_unavailable()})
         if include_details:
             details[arm_name] = arm_details
@@ -356,14 +604,22 @@ def compare(dataset, *, discover=None, rank=None, include_details=True):
         row['overlap_vs_baseline'] = {'shared_opportunity_observations': len(arm_set & baseline_set),
                                       'additional_to_baseline': len(arm_set - baseline_set),
                                       'baseline_not_in_this_arm': len(baseline_set - arm_set)}
+        row['planned_AI_competition_vs_baseline'] = {
+            'retained_baseline_slots': len(ai_sets[row['arm']] & ai_sets['BASELINE']),
+            'different_selected_slots': len(ai_sets[row['arm']] - ai_sets['BASELINE']),
+            'baseline_slots_displaced': len(ai_sets['BASELINE'] - ai_sets[row['arm']])}
     result = {'version': 1, 'scope': 'PAIRED_OFFLINE_DISCOVERY_ONLY_NOT_PAPER_BACKTEST',
               'evidence_class': dataset.get('kind'), 'synthetic': dataset['synthetic'],
               'dataset_content_sha256': sha(dataset), 'snapshot_count': len(snapshots),
               'source_snapshot_clocks': [{'snapshot_id': s['snapshot_id'], 'decision_at': s['decision_at'],
-                  'source_observed_at_min': min(o['source_observed_at'] for o in s['observations']),
-                  'source_observed_at_max': max(o['source_observed_at'] for o in s['observations'])} for s in snapshots],
+                  'calculation_at': s.get('calculation_at'), 'market_cutoff': s.get('market_cutoff'),
+                  'source_observed_at_min': min((o['source_observed_at'] for o in s['observations'] if o.get('source_observed_at')), default=None),
+                  'source_observed_at_max': max((o['source_observed_at'] for o in s['observations'] if o.get('source_observed_at')), default=None)} for s in snapshots],
               'input_receipt_sha256': dataset.get('input_receipt_sha256'),
               'benchmark_receipt': dataset.get('benchmark_receipt'),
+              'manifest_sha256': dataset.get('manifest_sha256'),
+              'source_receipts': dataset.get('source_receipts'),
+              'acquisition_status_counts': dataset.get('acquisition_status_counts'),
               'implementation_sha256': source_before,
               'implementation_stable_during_comparison': source_before == implementation_hashes(),
               'code_hash_newline_policy': 'LF',
@@ -378,6 +634,7 @@ def compare(dataset, *, discover=None, rank=None, include_details=True):
                   'Actual strategy records and ranking helper reused; no bonus per additional label or multiplied AI cap.',
                   'Source availability and bar completion respected in both arms; retrospective vendor revisions or universe selection are not PIT proof.',
                   'No price-touch/intrabar fill, historical AI, WR/PF/expectancy/drawdown or independent OOS outcome invented.'],
+              'component_reference_probe_scope': 'DAILY_CLOSE_STRUCTURAL_AND_NECESSARY_INTERVAL_ONLY_NOT_ADMISSION' if reference_probes else 'NOT_RUN',
               'input_limitations': dataset.get('limitations', []),
               'safety': {'network_calls': 0, 'application_DB_calls': 0, 'AI_calls': 0,
                          'Telegram_calls': 0, 'orders_fills_created': 0, 'Production_calls': 0}}
@@ -399,22 +656,29 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--dataset')
     group.add_argument('--acquisition-result')
+    group.add_argument('--expanded-acquisition-result')
     group.add_argument('--synthetic-fixture', action='store_true')
     parser.add_argument('--benchmark-artifact')
     parser.add_argument('--comparison-decision-at', help='Replay an explicitly recorded actual comparison clock, never before source observations.')
     parser.add_argument('--summary-only', action='store_true')
+    parser.add_argument('--memoize', action='store_true', help='Bounded research-only exact causal helper cache; QA must replay an unmemoized subset.')
+    parser.add_argument('--reference-probes', action='store_true', help='Nonexecutable actual daily-close structural/interval components only.')
     args = parser.parse_args()
-    if (args.benchmark_artifact or args.comparison_decision_at) and not args.acquisition_result:
+    if (args.benchmark_artifact or args.comparison_decision_at) and not (args.acquisition_result or args.expanded_acquisition_result):
         parser.error('benchmark/recorded comparison clock require --acquisition-result')
     with offline_only():
-        if args.acquisition_result:
+        if args.expanded_acquisition_result:
+            dataset = expanded_acquisition_dataset(args.expanded_acquisition_result,
+                comparison_decision_at=args.comparison_decision_at)
+        elif args.acquisition_result:
             dataset = acquisition_dataset(args.acquisition_result, args.benchmark_artifact,
                                            comparison_decision_at=args.comparison_decision_at)
         elif args.dataset:
             dataset, _ = read_json(args.dataset)
         else:
             dataset = fixture_dataset()
-        result = compare(dataset, include_details=not args.summary_only)
+        result = compare(dataset, include_details=not args.summary_only, memoize=args.memoize,
+                         reference_probes=args.reference_probes)
     print(json.dumps(result, sort_keys=True, allow_nan=False, indent=2))
 
 

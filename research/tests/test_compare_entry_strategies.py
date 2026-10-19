@@ -38,9 +38,10 @@ def test_each_actual_strategy_has_common_eligible_baseline_missed_control(strate
         result = entry_strategies.detect_all(frame, decision_at=decision, source_observed_at=observed,
             enabled_ids=[strategy_id], context=context)[strategy_id]
         assert result['state'] == 'DETECTED', result
-        assert stock_scanner.analyze_history('SYNTH', 'Synthetic', frame, compare.DEFAULT_CFG,
+        baseline_frame = fixtures.baseline_window(frame, decision)
+        assert stock_scanner.analyze_history('SYNTH', 'Synthetic', baseline_frame, compare.DEFAULT_CFG,
                                             decision_at=decision) is None
-        common = stock_scanner.analyze_history('SYNTH', 'Synthetic', frame, compare.DEFAULT_CFG,
+        common = stock_scanner.analyze_history('SYNTH', 'Synthetic', baseline_frame, compare.DEFAULT_CFG,
                                                baseline_filter=False, decision_at=decision)
         assert common is not None
         assert common['baseline_buy_score'] < compare.DEFAULT_CFG['min_technical_score']
@@ -248,3 +249,116 @@ def test_fixture_code_receipt_paths_are_canonical_POSIX_on_every_platform():
         'research/fixtures/entry_strategy_dataset.py',
         'service/server/tests/test_entry_strategies.py'}
     assert all('\\' not in name for name in dataset['fixture_source_sha256'])
+
+
+def test_two_frames_do_not_reseed_baseline_from_long_detector_prefix():
+    dataset = fixtures.build_dataset()
+    snapshot = dataset['snapshots'][0]
+    observation = snapshot['observations'][0]
+    original_long = copy.deepcopy(observation['detector_bars'])
+    observation['detector_bars'] = original_long
+    # Explicit input contract: baseline short frame remains distinct. This is a
+    # plumbing control, not a historically observed price/strategy result.
+    observation['bars'] = original_long[-100:]
+    histories, _, context, clocks = compare.prepare_snapshot(snapshot)
+    ticker = observation['ticker']
+    assert len(histories[ticker]) == 100
+    assert len(context['by_ticker'][ticker]['history_frame']) == len(original_long)
+    assert clocks[ticker]['baseline_window'] == 'EXPLICIT_SEPARATE_6_CALENDAR_MONTH_FRAME'
+    assert histories[ticker].attrs == context['by_ticker'][ticker]['history_frame'].attrs
+
+
+def test_component_cutoff_is_not_a_fabricated_historical_source_observation():
+    dataset = fixtures.build_dataset()
+    snapshot = dataset['snapshots'][0]
+    snapshot['calculation_at'] = '2026-09-01T20:10:00+00:00'
+    original_clocks = {o['ticker']: compare.instant(o['source_observed_at']).isoformat()
+                       for o in snapshot['observations']}
+    histories, _, _, clocks = compare.prepare_snapshot(snapshot)
+    for ticker, frame in histories.items():
+        assert frame.index[-1].date().isoformat() <= '2026-09-01'
+        assert clocks[ticker]['source_observed_at'] == original_clocks[ticker]
+        assert clocks[ticker]['source_observed_at'] > snapshot['calculation_at']
+
+
+def test_unavailable_acquisition_stays_in_denominator_without_fake_source_clock():
+    snapshot = {'snapshot_id': 'missing', 'decision_at': '2026-10-06T14:00:00+00:00',
+                'observations': [{'ticker': 'NONE', 'bars': [],
+                                  'source_unavailable_reason': 'PROVIDER_ERROR'}]}
+    histories, universe, _, clocks = compare.prepare_snapshot(snapshot)
+    assert set(universe) == {'NONE'}
+    assert histories['NONE'] is None
+    assert clocks['NONE']['source_observed_at'] is None
+
+
+def test_research_memoization_matches_actual_unmemoized_helpers_exactly():
+    dataset = fixtures.build_dataset()
+    with compare.offline_only():
+        first = compare.compare(dataset, memoize=False)
+        cached = compare.compare(dataset, memoize=True)
+    assert first == cached
+
+
+def test_research_memoization_is_complete_causal_and_returns_deepcopies(monkeypatch):
+    import stock_scanner
+    frame, _, decision, _ = fixtures.positive_baseline_miss(compare.STRATEGIES[0])
+    calls = []
+    def fake(*args, **kwargs):
+        calls.append(1)
+        return {'nested': {'count': len(calls)}}
+    monkeypatch.setattr(stock_scanner, 'analyze_history', fake)
+    with compare.research_memoization(True):
+        arguments = ('X', 'X', frame, compare.DEFAULT_CFG)
+        first = stock_scanner.analyze_history(*arguments, decision_at=decision)
+        first['nested']['count'] = -999
+        assert stock_scanner.analyze_history(*arguments, decision_at=decision)['nested']['count'] == 1
+        changed = copy.deepcopy(frame)
+        changed.attrs['history_fetched_at'] += 1
+        stock_scanner.analyze_history('X', 'X', changed, compare.DEFAULT_CFG, decision_at=decision)
+        altered_cfg = dict(compare.DEFAULT_CFG, min_technical_score=6)
+        stock_scanner.analyze_history('X', 'X', frame, altered_cfg, decision_at=decision)
+    assert len(calls) == 3
+
+
+def test_expanded_loader_uses_calendar6months_and_actual_observation_clock(monkeypatch):
+    dataset = fixtures.build_dataset()
+    original = dataset['snapshots'][0]['observations'][0]
+    rows = original['detector_bars']
+    packet = {'symbol': 'X', 'metadata': {'symbol': 'X'}, 'adjusted_rows': rows,
+              'source_observed_at': original['source_observed_at']}
+    benchmark = dict(packet, symbol='SPY')
+    acquisition = {'manifest_sha256': 'manifest-hash', 'status_counts': {'ACQUIRED_VALIDATED': 1},
+        'rows': [{'symbol': 'X', 'status': 'ACQUIRED_VALIDATED', 'artifact_path': 'X.json',
+                  'artifact_sha256': 'packet-hash'}]}
+    manifest = {'benchmark_artifact': 'SPY.json', 'benchmark_artifact_sha256': 'spy-hash',
+                'symbols': ['X'], 'cutoff_sessions': ['2026-09-01'], 'limits_of_inference': []}
+    def read(path, expected_hash=None):
+        return {'acquisition.json': (acquisition, 'receipt-hash'),
+                'manifest.json': (manifest, 'manifest-hash'), 'X.json': (packet, 'packet-hash'),
+                'SPY.json': (benchmark, 'spy-hash')}[Path(path).name]
+    monkeypatch.setattr(compare, 'read_json', read)
+    actual = dataset['snapshots'][0]['decision_at']
+    expanded = compare.expanded_acquisition_dataset('acquisition.json', comparison_decision_at=actual)
+    prefix, current = expanded['snapshots']
+    assert prefix['decision_at'] == compare.instant(actual).isoformat()
+    assert prefix['calculation_at'] == '2026-09-01T20:10:00+00:00'
+    assert prefix['observations'][0]['source_observed_at'] == original['source_observed_at']
+    assert all('2026-03-01' <= row['date'] <= '2026-09-01' for row in prefix['observations'][0]['bars'])
+    assert len(prefix['observations'][0]['detector_bars']) > len(prefix['observations'][0]['bars'])
+    assert 'calculation_at' not in current
+    assert min(row['date'] for row in current['observations'][0]['bars']) >= '2026-04-06'
+    with pytest.raises(ValueError, match='comparison_before_actual_sources'):
+        compare.expanded_acquisition_dataset('acquisition.json', comparison_decision_at='2026-10-01T00:00:00Z')
+
+
+def test_memoization_does_not_evaluate_invalid_config_of_disabled_strategy():
+    import entry_strategies
+    frame, context, decision, observed = fixtures.positive_baseline_miss('VCP_BASE_CONTRACTION')
+    context['configs'] = {'PEAD': {'not_a_supported_config_key': 1}}
+    with compare.offline_only():
+        original = entry_strategies.detect_all(frame, decision_at=decision, source_observed_at=observed,
+            enabled_ids=['VCP_BASE_CONTRACTION'], context=context)
+        with compare.research_memoization(True):
+            cached = entry_strategies.detect_all(frame, decision_at=decision, source_observed_at=observed,
+                enabled_ids=['VCP_BASE_CONTRACTION'], context=context)
+    assert cached == original

@@ -6,6 +6,11 @@ from entry_rejection import reason_code
 
 ISRAEL = ZoneInfo('Asia/Jerusalem')
 ENTRY_REASONS_HE = {
+    'strategy_fill_below_support': 'מחיר הביצוע ירד מתחת לטריגר או לתמיכת הכניסה שנשמרו לאסטרטגיה.',
+    'strategy_fill_above_chase': 'מחיר הביצוע חורג ממרווח הכניסה המרבי שנשמר לאסטרטגיה.',
+    'strategy_fill_outside_all_frozen_branches': 'מחיר הביצוע אינו עומד באף אחד ממסלולי הכניסה השמורים.',
+    'entry_strategy_execution_contract_invalid': 'חוזה הכניסה הגרסאי של האסטרטגיה אינו תקין.',
+    'unsupported_entry_strategy_execution': 'גרסת חוזה הכניסה של האסטרטגיה אינה נתמכת.',
     'fill_rr_below_2': 'יחס הסיכוי־סיכון במחיר הביצוע נמוך מ־2R.',
     'fill_outside_plan': 'מחיר הביצוע מחוץ לטווח הסטופ והיעד השמורים.',
     'fill_stop_distance_invalid': 'מרחק הסטופ במחיר הביצוע אינו עומד בהגנות התוכנית.',
