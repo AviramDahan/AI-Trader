@@ -206,6 +206,7 @@ def test_pg_different_order_audit_cannot_be_sanitized_into_valid_snapshot(entry_
 
 def test_pg_future_audit_after_signal_creation_cannot_restore(entry_pg, clock, monkeypatch):
     from datetime import timedelta
+    import entry_strategy_execution as execution
     import recovery_state as recovery
     from test_entry_strategies import DECISION
     _, _, quote, _, _, _ = prepare_route(monkeypatch, clock, 'PEAD')
@@ -220,11 +221,13 @@ def test_pg_future_audit_after_signal_creation_cannot_restore(entry_pg, clock, m
                          ('scanner_trades', 'settings_json')):
         for row in broken['tables'][table]:
             material = json.loads(row[field])
+            assert execution.KEY in material
+            assert material[execution.KEY]['version'] == execution.VERSION
             material['entry_discovery']['detected_at'] = future
             for record in material['entry_discovery']['detections']:
                 record['source_times']['decision_at'] = future
             row[field] = json.dumps(material)
-    with pytest.raises(ValueError, match='future_discovery_attribution'):
+    with pytest.raises(ValueError, match='^entry_strategy_execution_contract_invalid$'):
         recovery.sanitize(broken)
 
 
