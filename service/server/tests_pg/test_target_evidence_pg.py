@@ -52,6 +52,25 @@ def test_pg_partial_evidence_failure_uses_savepoint_only(pg,monkeypatch):
         assert c.execute('SELECT count(*) n FROM scanner_candidates').fetchone()['n']==2
 
 
+def test_pg_additive_target_metadata_survives_idempotent_persist_without_trades(pg,monkeypatch):
+    t=trace(monkeypatch)
+    evidence=t['target_checks']['pre_ai']
+    evidence['geometry']={'risk_breakdown':{'version':'single_target_risk_v1',
+        'selected_distance':1.5,'binding_constraints':['atr_floor'],'raw_reward_shortfall':1.2}}
+    evidence['discovery_context']=dict(status='RECORDED',version='entry_discovery_v1',
+        primary_strategy_id='BASELINE',strategy_ids=['BASELINE','VCP_BASE_CONTRACTION'],
+        detected_at='2026-09-28T13:59:00Z')
+    final_ai.persist(t)
+    final_ai.persist(copy.deepcopy(t))
+    with database.get_db_connection() as c:
+        c.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
+        rows=c.execute("SELECT metrics_json FROM scanner_candidates WHERE stage='target_check'").fetchall()
+        assert len(rows)==1 and json.loads(rows[0]['metrics_json'])==evidence
+        assert c.execute('SELECT max(version) n FROM schema_migrations').fetchone()['n']==7
+        for table in ('scanner_signals','scanner_orders','scanner_fills','scanner_telegram_outbox'):
+            assert c.execute('SELECT count(*) n FROM '+table).fetchone()['n']==0
+
+
 def test_pg_existing_candidate_counts_and_schema_unchanged(pg,monkeypatch):
     scanner_engine.record_candidates('original',[dict(ticker='ORIGINAL',company='Synthetic')],
                                      [dict(ticker='ORIGINAL',reason='pre_no_forward_zone')])

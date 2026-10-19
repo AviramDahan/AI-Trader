@@ -172,6 +172,28 @@ def test_clipping_is_explicit_and_bad_json_never_fabricates_evidence(db,monkeypa
         assert r['counts']['exact_reference_configurations']==0
 
 
+@pytest.mark.parametrize('strategy_ids',[['BASELINE','VCP_BASE_CONTRACTION'],['BASELINE','UNKNOWN'],['BASELINE','BASELINE']])
+def test_target_route_context_readback_is_allowlisted_not_an_approval(db,strategy_ids):
+    context=dict(status='RECORDED',version='entry_discovery_v1',strategy_ids=strategy_ids,
+        primary_strategy_id='BASELINE',detected_at='2026-10-07T14:00:00Z',private_prompt='DO-NOT-EXPOSE')
+    with database.get_db_connection() as c:
+        data=json.loads(c.execute("SELECT metrics_json FROM scanner_candidates WHERE stage='target_check' LIMIT 1").fetchone()['metrics_json'])
+        data['discovery_context']=context
+        data['decided_at']='2026-10-07T14:00:00Z'
+        c.execute("UPDATE scanner_candidates SET metrics_json=? WHERE stage='target_check'",(json.dumps(data),))
+        c.commit()
+        c.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY' if database.using_postgres() else 'PRAGMA query_only=ON')
+        result=research.report(c,48,NOW)
+        saved=result['records'][0]['target_checks'][0]['discovery_context']
+        assert 'DO-NOT-EXPOSE' not in json.dumps(result)
+        if strategy_ids==['BASELINE','VCP_BASE_CONTRACTION']:
+            assert saved=={k:v for k,v in context.items() if k!='private_prompt'}
+        else:
+            assert saved=={'status':'NOT_VERIFIED'}
+        assert result['counts']['target_pass']==0 and result['counts']['signals_qualified']==0
+        assert all(not row['signals'] and not row['orders'] for row in result['records'])
+
+
 def test_api_window_validation_and_reads_only(db):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient

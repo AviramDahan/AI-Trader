@@ -145,7 +145,7 @@ export const REASONS: Record<string, [string, string]> = {
   pre_no_forward_zone: ['אין אזור התנגדות קדמי', 'No forward resistance zone'],
   pre_no_structural_stop_anchor: ['אין עוגן סטופ מבני', 'No structural stop anchor'],
   pre_structural_stop_too_distant: ['הסטופ המבני רחוק מדי', 'Structural stop too distant'],
-  pre_invalid_rounded_levels: ['רמות אינן תקינות לאחר עיגול', 'Invalid rounded levels'],
+  pre_invalid_rounded_levels: ['רמות הכניסה, הסטופ או היעד אינן תקינות', 'Invalid entry, stop or target levels'],
   insufficient_current_news: ['אין ראיות חדשות עדכניות מספיקות', 'Insufficient current evidence'],
   news_provider_unavailable_fail_closed: ['מקור החדשות אינו זמין', 'News provider unavailable'],
   ai_hold: ['החלטת AI: המתנה', 'AI decision: HOLD'],

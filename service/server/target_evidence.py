@@ -35,7 +35,9 @@ def _geometry(entry, source):
            'stop_anchor': max(behind, key=lambda z: z['high']) if behind else None}
     if not ahead or not behind:
         return out
-    risk = max(entry - (out['stop_anchor']['low'] - .25 * atr), 1.5 * atr, .01 * entry)
+    components = dict(structural_distance=entry-(out['stop_anchor']['low']-.25*atr),
+                      atr_floor_distance=1.5*atr, price_floor_distance=.01*entry)
+    risk = max(components.values())
     raw_stop, raw_target = entry - risk, ahead[0]['low'] - .15 * atr
     stop, target = round(raw_stop, 2), round(raw_target, 2)
     conditions = []
@@ -48,7 +50,58 @@ def _geometry(entry, source):
                target_rounded=target, rr_unrounded=(raw_target-entry)/risk,
                rr_rounded=(target-entry)/(entry-stop) if entry > stop else None,
                invalid_level_conditions=conditions)
+    # Frozen diagnostic values, not new gates or a proposed replacement target.
+    # Keep ties: no single cause is invented when two floors bind together.
+    out['risk_breakdown'] = dict(version='single_target_risk_v1', **components,
+        selected_distance=risk, binding_constraints=[key for key, field in (
+            ('structural','structural_distance'), ('atr_floor','atr_floor_distance'),
+            ('price_floor','price_floor_distance')) if components[field] == risk],
+        raw_reward_distance=raw_target-entry, required_reward_distance=2*risk,
+        raw_reward_shortfall=max(0,2*risk-(raw_target-entry)))
     return out
+
+
+def _discovery_context(candidate, decided_at):
+    """Small validated identity at this check; never infer a missing baseline."""
+    value = candidate.get('entry_discovery')
+    if value is None:
+        return {'status':'NOT_RECORDED'}
+    from entry_discovery import validate_attribution, instant
+    try:
+        saved = validate_attribution(value)
+        if instant(saved['detected_at']) > instant(decided_at):
+            raise ValueError()
+    except ValueError:
+        return {'status':'NOT_VERIFIED'}
+    return {'status':'RECORDED', **{key:saved[key] for key in
+        ('version','strategy_ids','primary_strategy_id','detected_at')}}
+
+
+def public_discovery_context(value, *, decided_at=None):
+    """Journal JSON is untrusted. Expose identity only, not extra nested data."""
+    if value is None:
+        return {'status':'NOT_RECORDED'}
+    if not isinstance(value,dict):
+        return {'status':'NOT_VERIFIED'}
+    status=value.get('status')
+    if status in ('NOT_RECORDED','NOT_VERIFIED'):
+        return {'status':status}
+    from entry_discovery import BASELINE, FLAGS, VERSION, instant
+    try:
+        ids=value['strategy_ids']
+        if (status!='RECORDED' or value['version']!=VERSION or not isinstance(ids,list) or
+                not 1<=len(ids)<=6 or any(not isinstance(key,str) for key in ids) or
+                len(set(ids))!=len(ids) or set(ids)-({BASELINE}|set(FLAGS)) or
+                value['primary_strategy_id']!=ids[0]):
+            raise ValueError()
+        if not isinstance(value['detected_at'],str) or not isinstance(decided_at,str):
+            raise ValueError()
+        if instant(value['detected_at']) > instant(decided_at):
+            raise ValueError()
+        return {key:json.loads(json.dumps(value[key],allow_nan=False)) for key in
+                ('status','version','strategy_ids','primary_strategy_id','detected_at')}
+    except (ValueError,TypeError,KeyError,OverflowError):
+        return {'status':'NOT_VERIFIED'}
 
 
 def capture(candidate, action, price, quote_at, phase, policy, strategy, source, cfg,
@@ -78,6 +131,7 @@ def capture(candidate, action, price, quote_at, phase, policy, strategy, source,
         if reference:
             record['quote'].update({k:reference[k] for k in ('source','fresh','age_seconds','eligible_for_entry')})
         record['source_observed_at'] = candidate.get('history_fetched_at')
+        record['discovery_context'] = _discovery_context(candidate, decided_at)
         if policy == 'single_target_v2' and evaluated:
             record['geometry'] = _geometry(price, inputs)
             if rejection == 'invalid_rounded_levels':

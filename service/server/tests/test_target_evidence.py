@@ -114,6 +114,60 @@ def test_no_raw_news_secrets_or_ai_payload_changes(context):
     assert 'target_checks' not in c
 
 
+@pytest.mark.parametrize('entry,atr,anchor,binding',[
+    (100,1,98,'structural'), (100,1,99,'atr_floor'), (100,.25,99.8,'price_floor')])
+def test_risk_breakdown_identifies_binding_constraint_without_changing_policy(context,entry,atr,anchor,binding):
+    c=candidate([zone(anchor),zone(110)])
+    c['single_target_source']['atr']=atr
+    expected=single_target_policy.build(entry,atr,c['single_target_source']['zones'],'2026-09-25',Clock.now().isoformat())
+    assert stock_scanner._candidate_target_plan(c,'BUY',entry,{'min_risk_reward':2})==expected
+    risk=context['target_checks']['pre_ai']['geometry']['risk_breakdown']
+    assert risk['version']=='single_target_risk_v1'
+    assert binding in risk['binding_constraints']
+    assert risk['selected_distance']==max(risk['structural_distance'],risk['atr_floor_distance'],risk['price_floor_distance'])
+    assert risk['required_reward_distance']==2*risk['selected_distance']
+    assert risk['raw_reward_distance']==pytest.approx(110-.15*atr-entry)
+    assert risk['raw_reward_shortfall']==0
+
+
+def test_target_context_keeps_validated_route_identity_not_arbitrary_payload(context):
+    import entry_discovery
+    c=candidate()
+    c['entry_discovery']=entry_discovery.attribution([dict(strategy_id='BASELINE',
+        version='existing_trend_momentum_v1',state='DETECTED',direction='BUY',score=.9,
+        source_times=dict(decision_at=Clock.now().isoformat(),source_observed_at='2026-09-28T13:59:00Z'),
+        sourcehash='a'*64,trigger={'kind':'existing_trend_momentum'})],Clock.now().isoformat())
+    stock_scanner._candidate_target_plan(c,'BUY',100,{'min_risk_reward':2})
+    saved=context['target_checks']['pre_ai']['discovery_context']
+    assert saved==dict(status='RECORDED',version='entry_discovery_v1',strategy_ids=['BASELINE'],
+        primary_strategy_id='BASELINE',detected_at=Clock.now().isoformat())
+    c['entry_discovery']['strategy_ids'].append('DO-NOT-SAVE')
+    assert saved['strategy_ids']==['BASELINE']
+
+
+def test_missing_discovery_is_unknown_not_fabricated_baseline(context):
+    stock_scanner._candidate_target_plan(candidate(),'BUY',100,{'min_risk_reward':2})
+    assert context['target_checks']['pre_ai']['discovery_context']=={'status':'NOT_RECORDED'}
+
+
+@pytest.mark.parametrize('value,decided_at',[({},'2026-09-28T14:00:00Z'),
+    (dict(status='RECORDED',version='entry_discovery_v1',strategy_ids=['BASELINE'],
+      primary_strategy_id='BASELINE',detected_at='2026-09-28T15:00:00Z'),'2026-09-28T14:00:00Z'),
+    (dict(status='RECORDED',version='entry_discovery_v1',strategy_ids=['BASELINE'],
+      primary_strategy_id='BASELINE',detected_at='2026-09-28T13:00:00Z'),None)])
+def test_unverified_or_future_public_route_context_is_not_a_valid_attribution(value,decided_at):
+    assert target_evidence.public_discovery_context(value,decided_at=decided_at)=={'status':'NOT_VERIFIED'}
+
+
+def test_equal_stop_floors_keep_both_causes_and_shortfall_is_raw_only():
+    # Structural risk and ATR floor are both 1.5. Neither is falsely selected alone.
+    g=target_evidence._geometry(100,dict(atr=1,zones=[zone(98.75),zone(102)]))
+    risk=g['risk_breakdown']
+    assert risk['binding_constraints']==['structural','atr_floor']
+    assert risk['raw_reward_distance']==pytest.approx(1.85)
+    assert risk['raw_reward_shortfall']==pytest.approx(1.15)
+
+
 def test_sqlite_repeat_persist_restart_link_and_dashboard_counts(db,context):
     stock_scanner._candidate_target_plan(candidate(),'BUY',100,{'min_risk_reward':2})
     final_ai.persist(context);final_ai.persist(copy.deepcopy(context))

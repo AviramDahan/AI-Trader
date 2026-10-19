@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { API_ORIGIN } from './appShared'
-import { REASON_DETAILS, reasonTitle } from './activityReasons'
+import { reasonTitle } from './activityReasons'
 import { StrategyPerformance } from './StrategyPerformance'
+import { targetFacts, targetReasonCode } from './targetDiagnostics'
 
 type Row = Record<string, any>
 const value = (v: any, suffix = '') => v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(2)}${suffix}` : '—'
@@ -9,9 +10,8 @@ const reasonText = (reason: string, he: boolean) => reasonTitle(reason,he)
 const candidateReason = (row: Row, he: boolean) => {
   // Use only a detail belonging to the same persisted rejection; no historical rewrite.
   const check = [...(row.target_checks || [])].reverse().find((c: Row) =>
-    `pre_${String(c.rejection_reason || '').replace(/^pre_/, '')}` === row.rejection)
-  const detail = (Array.isArray(check?.rejection_detail)?check.rejection_detail:[]).find((code: string) => Object.prototype.hasOwnProperty.call(REASON_DETAILS,code))
-  return reasonText(detail || row.rejection, he)
+    c.phase==='pre_ai' && `pre_${String(c.rejection_reason || '').replace(/^pre_/, '')}` === row.rejection)
+  return reasonText(check?targetReasonCode(check):row.rejection, he)
 }
 const stageNames: Record<string, string> = { quote: 'נתוני מחיר', news: 'חדשות', targets: 'מבנה / יעד / RR', ai_filter: 'סינון AI', cooldown: 'המתנה', other: 'אחר / חסרה ראיה' }
 
@@ -63,12 +63,11 @@ function Candidate({ row, he }: { row: Row, he: boolean }) {
       <li>{he ? 'סינון טכני' : 'Technical'}: {row.technical_recorded ? (he ? 'מועמד מתועד' : 'Candidate recorded') : (he ? 'לא זמין' : 'Unavailable')}</li>
       {row.target_checks.map((check: Row, i: number) => <li key={i}>
         <bdi>{check.phase} · {check.outcome} · {check.policy_version}</bdi> · {stamp(check.decided_at || check.observed_at)}
-        {check.rejection_reason && <p>{reasonText(check.rejection_detail?.[0] || `pre_${check.rejection_reason.replace(/^pre_/, '')}`, he)} <bdi>({check.rejection_reason})</bdi></p>}
+        {check.rejection_reason && <p>{reasonText(targetReasonCode(check), he)} <bdi>({check.rejection_reason})</bdi></p>}
         <dl className="research-levels">
-          <div><dt>{he ? 'מחיר ייחוס' : 'Reference price'}</dt><dd><bdi>{value(check.quote?.price)}</bdi></dd></div>
+          {targetFacts(check,he).map(f=><div key={f.label}><dt>{f.label}</dt><dd><bdi>{f.value}</bdi></dd></div>)}
           <div><dt>{he ? 'זמן המחיר' : 'Quote timestamp'}</dt><dd>{stamp(check.quote?.as_of)}</dd></div>
           <div><dt>{he ? 'מועד נתוני המבנה' : 'Structure data as of'}</dt><dd><bdi>{check.source_inputs?.data_as_of || '—'}</bdi></dd></div>
-          <div><dt>RR {he ? 'ברוטו אחרי עיגול' : 'gross after rounding'}</dt><dd><bdi>{value(check.accepted_levels?.rr?.[0] ?? check.geometry?.rr_rounded, 'R')}</bdi></dd></div>
         </dl>
         {check.quote?.eligible_for_entry === false && <p className="scanner-note">{he ? 'מחיר לתצוגת מחקר בלבד; אינו מאשר כניסה.' : 'Research-only reference; does not authorize entry.'} {check.quote.fresh === false && (he ? 'זהו מחיר אחרון ידוע, לא מחיר טרי.' : 'Last-known quote, not fresh.')}</p>}
         <Levels check={check} he={he} />

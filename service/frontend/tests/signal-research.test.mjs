@@ -59,7 +59,7 @@ assert.ok(/<small>[^<]*מרווח ההתנגדות משאיר את היעד בכ
 assert.ok(!invalidSummary.includes('רמות לא תקינות אחרי עיגול'))
 const unknownDetail = render({ data: { ...referenceData, records: [{ ...referenceData.records[0],
   rejection: 'pre_invalid_rounded_levels', target_checks: [{ ...referenceData.records[0].target_checks[0], rejection_detail: ['unknown_future_code'] }] }] } })
-assert.ok(unknownDetail.includes('רמות אינן תקינות לאחר עיגול'))
+assert.ok(unknownDetail.includes('רמות הכניסה, הסטופ או היעד אינן תקינות'))
 for (const reason of ['pre_insufficient_confirmed_price_zones','pre_price_structure_fails_risk_reward']) {
   const labels = render({ data: { ...data, records: [{ ...data.records[0], rejection: reason }] } })
   assert.ok(!new RegExp(`<small>[^<]*${reason}`).test(labels))
