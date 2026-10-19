@@ -8,6 +8,7 @@ import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,26 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import ModuleType
 import urllib.request
+
+# One reviewed module works beside repository and root-installed helpers.
+_identity_path = Path(__file__).resolve().with_name('docker_image_identity.py')
+_identity_fd = os.open(_identity_path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+with os.fdopen(_identity_fd, 'rb') as _identity_stream:
+    _info = os.fstat(_identity_stream.fileno())
+    if not stat.S_ISREG(_info.st_mode) or _info.st_size > 256 * 1024:
+        raise ValueError('image_identity_module_shape_invalid')
+    if _identity_path.parent == Path('/usr/local/sbin') and (_info.st_uid != 0 or _info.st_mode & 0o022):
+        raise ValueError('installed_image_identity_module_unprotected')
+    _identity_raw = _identity_stream.read(256 * 1024 + 1)
+    _after = os.fstat(_identity_stream.fileno())
+    if len(_identity_raw) != _info.st_size or (_info.st_mtime_ns, _info.st_ctime_ns) != (_after.st_mtime_ns, _after.st_ctime_ns):
+        raise ValueError('image_identity_module_changed_during_read')
+# Compile the exact single read. Timestamp/size-matched stale pyc is never run.
+identity = ModuleType('_release_image_identity')
+identity.__file__ = str(_identity_path)
+exec(compile(_identity_raw, str(_identity_path), 'exec'), identity.__dict__)
 
 REPO = 'AviramDahan/AI-Trader'
 ROOT = Path('/opt/ai-trader-staging/deploy')
@@ -56,6 +76,22 @@ def exact_sha(value):
 def exact_image(value):
     if not isinstance(value, str) or not re.fullmatch('sha256:[0-9a-f]{64}', value):
         raise ValueError('invalid_image_id')
+    return value
+
+
+def image_identity(image, sha=None):
+    return identity.resolve_image(exact_image(image), expected_build=sha, cache_dir=ROOT / 'image-identities')
+
+
+def runtime_identity(row):
+    return identity.resolve_running(row, cache_dir=ROOT / 'image-identities')
+
+
+def verify_role(role, image, sha=None, healthy=True):
+    if role not in ('api', 'scanner', 'monitor', 'telegram', 'backup'):
+        raise ValueError('invalid_release_role')
+    value = image_identity(image, sha)
+    identity.verify_container(inspect('container', 'ai-trader-cloud-' + role + '-1'), value, require_healthy=healthy)
     return value
 
 
@@ -163,7 +199,12 @@ def validate_backup_container(row, spec, standing):
     if row.get('Name') != '/' + spec['name']:
         raise ValueError('managed_backup_name_mismatch')
     labels = row['Config'].get('Labels') or {}
-    if row['Image'] != spec['image_id'] or labels.get(LABEL) != spec['request_id']:
+    value = spec.get('image_identity') or image_identity(spec['image_id'], spec['build_sha'])
+    identity.validate_identity(value)
+    if value['runnable_ref'] != spec['image_id'] or value['build_sha'] != spec['build_sha']:
+        raise ValueError('managed_backup_frozen_identity_conflict')
+    identity.verify_container(row, value)
+    if labels.get(LABEL) != spec['request_id']:
         raise ValueError('managed_backup_identity_mismatch')
     for key in ('build_sha', 'phase'):
         if labels.get(LABEL + '.' + key) != spec[key]:
@@ -192,10 +233,7 @@ def managed_backup(sha, image, request_id, wait_seconds):
     directory = ROOT / 'backup-requests'
     private_dir(directory)
     # Validate all nonmutating launch preconditions before reserving a request.
-    image_row = inspect('image', image)
-    env = dict(v.split('=', 1) for v in (image_row or {}).get('Config', {}).get('Env', []) if '=' in v)
-    if not image_row or image_row['Id'] != image or env.get('BUILD_SHA') != sha:
-        raise ValueError('managed_backup_source_image_mismatch')
+    spec['image_identity'] = image_identity(image, sha)
     standing = inspect('container', 'ai-trader-cloud-backup-1')
     if not standing:
         raise ValueError('standing_backup_definition_missing')
@@ -215,7 +253,12 @@ def managed_backup(sha, image, request_id, wait_seconds):
     existing_request = record_path.exists()
     if existing_request:
         record = json.loads(record_path.read_text())
-        if record.get('spec') != spec:
+        saved = dict(record.get('spec') or {})
+        # Older classic requests had no expanded identity. They remain strict;
+        # no OCI request may be retroactively adopted without its frozen proof.
+        if 'image_identity' not in saved and spec['image_identity']['kind'] == 'classic':
+            saved['image_identity'] = spec['image_identity']
+        if saved != spec:
             raise ValueError('managed_backup_request_conflict')
     else:
         if inspect('container', spec['name']) is not None:
@@ -238,7 +281,7 @@ def managed_backup(sha, image, request_id, wait_seconds):
             '--name', spec['name'], '--label', LABEL + '=' + request_id,
             '--label', LABEL + '.build_sha=' + sha, '--label', LABEL + '.phase=predeploy',
             '--entrypoint', 'python', 'backup', *spec['command']]
-        run(command, 60, env=dict(os.environ, APP_IMAGE=image,
+        run(command, 60, env=dict(os.environ, APP_IMAGE=image, DOCKER_DEFAULT_PLATFORM=identity.PLATFORM,
             PUBLIC_API_HOST=os.getenv('PUBLIC_API_HOST', '2-28-100-77.sslip.io')))
         row = inspect('container', spec['name'])
     validate_backup_container(row, spec, standing)
@@ -315,6 +358,7 @@ def stop_backup_idle(wait_seconds):
     row = inspect('container', name)
     if not row:
         raise ValueError('standing_backup_missing')
+    frozen_identity = runtime_identity(row)
     labels = row['Config'].get('Labels') or {}
     if labels.get('com.docker.compose.project') != 'ai-trader-cloud' or labels.get('com.docker.compose.service') != 'backup':
         raise ValueError('standing_backup_owner_mismatch')
@@ -345,6 +389,7 @@ def stop_backup_idle(wait_seconds):
         current = inspect('container', name)
         if not current or current['Id'] != row['Id']:
             raise ValueError('standing_backup_changed_while_waiting')
+        identity.verify_container(current, frozen_identity)
         if current['State']['Running']:
             run(['docker', 'stop', '--time', '30', name], 60)
         emit('BACKUP_STOPPED_WHILE_IDLE', container=name)
@@ -359,16 +404,16 @@ def check_rollback(sha, old, new):
     code = ('import json,os,entry_discovery_capabilities as c; '
         'print(json.dumps({"build_sha":os.environ["BUILD_SHA"],"capabilities":c.capabilities()}))')
     for image in (exact_image(old), exact_image(new)):
-        row = inspect('image', image)
-        env = dict(v.split('=', 1) for v in (row or {}).get('Config', {}).get('Env', []) if '=' in v)
-        if not row or row['Id'] != image or not re.fullmatch('[0-9a-f]{40}', env.get('BUILD_SHA', '')):
-            raise ValueError('rollback_source_image_identity_invalid')
-        output = run(['docker', 'run', '--pull=never', '--rm', '--network', 'none', '--read-only',
+        image_proof = image_identity(image)
+        if image == old:
+            for role in ('api', 'scanner', 'monitor', 'telegram', 'backup'):
+                verify_role(role, old)
+        output = run(['docker', 'run', '--platform', identity.PLATFORM, '--pull=never', '--rm', '--network', 'none', '--read-only',
             '--cpus', '0.25', '--memory', '128m', '--memory-swap', '128m', '--pids-limit', '64',
             '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
             '--entrypoint', 'python', image, '-c', code], 60)
         value = json.loads(output)
-        if value.get('build_sha') != env['BUILD_SHA']:
+        if value.get('build_sha') != image_proof['build_sha']:
             raise ValueError('rollback_embedded_source_mismatch')
         caps = value['capabilities']
         formats = caps.get('snapshot_formats')
@@ -389,6 +434,9 @@ def check_rollback(sha, old, new):
 def journal_begin(sha, old):
     exact_sha(sha)
     exact_image(old)
+    old_identity = image_identity(old)
+    for role in ('api', 'scanner', 'monitor', 'telegram', 'backup'):
+        identity.verify_container(inspect('container', 'ai-trader-cloud-' + role + '-1'), old_identity, require_healthy=True)
     path = ROOT / 'deployment-attempt.json'
     if path.exists():
         previous = json.loads(path.read_text())
@@ -397,9 +445,7 @@ def journal_begin(sha, old):
                 if previous.get('old_image') != old:
                     raise ValueError('pending_release_old_runtime_changed')
                 for role in ('api', 'scanner', 'monitor', 'telegram', 'backup'):
-                    row = inspect('container', 'ai-trader-cloud-' + role + '-1')
-                    if not row or row['Image'] != old or not row['State']['Running'] or row['State'].get('Health', {}).get('Status') != 'healthy':
-                        raise ValueError('pending_release_old_runtime_not_verified')
+                    verify_role(role, old)
                 if not Path(previous['work']).is_dir():
                     raise ValueError('pending_release_work_missing')
                 return previous
@@ -407,6 +453,7 @@ def journal_begin(sha, old):
     work = tempfile.mkdtemp(prefix='ai-trader-release.', dir=WORK_PARENT)
     value = dict(version=1, attempt_id=os.urandom(16).hex(), sha=sha, old_image=old,
         new_image='', phase='STARTED', work=work, started_at=utc(), updated_at=utc())
+    value['old_identity'] = old_identity
     atomic_json(path, value)
     return value
 
@@ -428,12 +475,82 @@ def journal_update(sha, attempt_id, phase, image):
 
 
 def healthy_roles(sha, image):
+    value = image_identity(image, sha)
     for role in ('api', 'scanner', 'monitor', 'telegram', 'backup'):
         row = inspect('container', 'ai-trader-cloud-' + role + '-1')
-        env = dict(v.split('=', 1) for v in (row or {}).get('Config', {}).get('Env', []) if '=' in v)
-        if not row or row['Image'] != image or env.get('BUILD_SHA') != sha or not row['State']['Running'] or row['State'].get('OOMKilled') or row['State'].get('Health', {}).get('Status') != 'healthy':
+        try:
+            identity.verify_container(row, value, require_healthy=True)
+        except ValueError:
             return False
     return True
+
+
+def protected_review_archive(path):
+    file = path.lstat()
+    if not stat.S_ISREG(file.st_mode) or file.st_uid != 0 or file.st_mode & 0o077 or file.st_size > 16384:
+        raise ValueError('review_original_archive_unprotected')
+    return path.read_bytes()
+
+
+def review_close_prewriter(sha, attempt_id, old):
+    """EXPLICIT operator review only; preserve original journal and all latches."""
+    exact_sha(sha)
+    if not re.fullmatch('[0-9a-f]{32}', attempt_id or ''):
+        raise ValueError('invalid_review_attempt')
+    path = ROOT / 'deployment-attempt.json'
+    if path.is_symlink() or path.stat().st_size > 16384:
+        raise ValueError('review_current_journal_invalid')
+    raw = path.read_bytes()
+    value = json.loads(raw)
+    original = value
+    archives = ROOT / 'reviewed-attempts'
+    archive = archives / (attempt_id + '.json')
+    rejoined = value.get('phase') == 'FAILED'
+    if rejoined:
+        review = value.get('review') or {}
+        if not archive.exists() or archive.is_symlink():
+            raise ValueError('review_original_archive_missing')
+        raw = protected_review_archive(archive)
+        original = json.loads(raw)
+        if review.get('version') != 1 or review.get('reason') != 'VERIFIED_PREWRITER_ABORT' or review.get('archive') != archive.name or review.get('archive_sha256') != hashlib.sha256(raw).hexdigest():
+            raise ValueError('review_original_archive_proof_invalid')
+    if type(original.get('version')) is not int or original['version'] != 1 or value.get('sha') != sha or value.get('attempt_id') != attempt_id or original.get('sha') != sha or original.get('attempt_id') != attempt_id or original.get('phase') not in ('STARTED', 'BUILDING', 'PREDEPLOY_PENDING') or (not rejoined and value.get('phase') not in ('STARTED', 'BUILDING', 'PREDEPLOY_PENDING')):
+        raise ValueError('review_requires_exact_prewriter_attempt')
+    work = Path(original['work'])
+    work_info = work.lstat()
+    if work.parent != WORK_PARENT or not re.fullmatch(r'ai-trader-release\.[A-Za-z0-9_-]+', work.name) or not stat.S_ISDIR(work_info.st_mode) or work_info.st_uid != 0 or stat.S_IMODE(work_info.st_mode) != 0o700 or (work / 'previous-compose.yml').exists():
+        raise ValueError('review_cannot_prove_writers_untouched')
+    directory = ROOT / 'backup-requests'
+    if (directory / (attempt_id + '.json')).exists() or inspect('container', 'ai-trader-managed-backup-' + attempt_id) is not None:
+        raise ValueError('review_managed_backup_exists')
+    if (directory / 'active.json').exists():
+        active = json.loads((directory / 'active.json').read_bytes())
+        if type(active.get('version')) is not int or active['version'] != 1 or not re.fullmatch('[0-9a-f]{32}', active.get('request_id', '')) or active.get('state') != 'VERIFIED_COMPLETE':
+            raise ValueError('review_other_backup_not_complete')
+        previous = inspect('container', 'ai-trader-managed-backup-' + active.get('request_id', ''))
+        if previous is None or previous.get('State', {}).get('Running'):
+            raise ValueError('review_previous_backup_unknown')
+    proof = image_identity(old)
+    if rejoined and value['review'].get('old_identity') != proof:
+        raise ValueError('review_rejoin_identity_changed')
+    legacy = original.get('old_image')
+    for role in ('api', 'scanner', 'monitor', 'telegram', 'backup'):
+        row = inspect('container', 'ai-trader-cloud-' + role + '-1')
+        identity.verify_container(row, proof, require_healthy=True)
+        if legacy != old and row.get('Image') != legacy:
+            raise ValueError('review_observed_old_runtime_changed')
+    private_dir(archives)
+    if archive.exists():
+        if protected_review_archive(archive) != raw: raise ValueError('review_original_archive_conflict')
+    else:
+        atomic(archive, raw)
+    if not rejoined:
+        value.update(phase='FAILED', updated_at=utc(), review=dict(version=1,
+            reason='VERIFIED_PREWRITER_ABORT', archive=archive.name,
+            archive_sha256=hashlib.sha256(raw).hexdigest(), old_identity=proof))
+        atomic_json(path, value)
+    emit('REVIEWED_PREWRITER_FAILED', build_sha=sha, attempt_id=attempt_id,
+        archive=archive.name, archive_sha256=hashlib.sha256(raw).hexdigest(), old_identity=proof)
 
 
 def completed(sha):
@@ -545,6 +662,9 @@ def main(argv=None):
     modes.add_argument('--journal-update', action='store_true')
     modes.add_argument('--commit-release', action='store_true')
     modes.add_argument('--check-rollback', action='store_true')
+    modes.add_argument('--resolve-running', action='store_true')
+    modes.add_argument('--verify-role', action='store_true')
+    modes.add_argument('--review-close-prewriter', action='store_true')
     parser.add_argument('--sha')
     parser.add_argument('--image')
     parser.add_argument('--old-image')
@@ -552,6 +672,9 @@ def main(argv=None):
     parser.add_argument('--request-id')
     parser.add_argument('--wait-seconds', type=int, default=BACKUP_WAIT_MAX)
     parser.add_argument('--phase')
+    parser.add_argument('--role', choices=('api', 'scanner', 'monitor', 'telegram', 'backup'))
+    parser.add_argument('--print-ref', action='store_true')
+    parser.add_argument('--allow-stopped', action='store_true')
     args = parser.parse_args([] if argv is None else argv)
     old_handlers = {s: signal.signal(s, cancelled) for s in (signal.SIGTERM, signal.SIGINT)}
     try:
@@ -569,6 +692,15 @@ def main(argv=None):
                 commit_release(args.sha, args.image, args.old_image, args.request_id)
             elif args.check_rollback:
                 check_rollback(args.sha, args.image, args.new_image)
+            elif args.resolve_running:
+                value = runtime_identity(inspect('container', 'ai-trader-cloud-' + (args.role or 'api') + '-1'))
+                if args.print_ref: print(value['runnable_ref'])
+                else: emit('RUNTIME_IDENTITY_VERIFIED', identity=value)
+            elif args.verify_role:
+                value = verify_role(args.role, args.image, args.sha, not args.allow_stopped)
+                emit('ROLE_IDENTITY_VERIFIED', role=args.role, identity=value)
+            elif args.review_close_prewriter:
+                review_close_prewriter(args.sha, args.request_id, args.image)
             else:
                 poll(descriptor)
     except Busy as exc:

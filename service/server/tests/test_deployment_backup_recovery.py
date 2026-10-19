@@ -144,6 +144,8 @@ def test_actual_old_binary_not_schema_or_last_release_marker_controls_rollback(m
         execution_version='independent_entry_execution_v1', emergency_entry_version='paper_entry_emergency_v1')
     monkeypatch.setattr(release, 'inspect', lambda kind, image:
         {'Id': image, 'Config': {'Env': ['BUILD_SHA=' + (SHA if image == new else 'b' * 40)]}})
+    monkeypatch.setattr(release, 'image_identity', lambda image, sha=None: dict(build_sha=SHA if image == new else 'b' * 40))
+    monkeypatch.setattr(release, 'verify_role', lambda *a, **k: True)
     commands = []
     def synthetic(command, *a, **k):
         commands.append(command)

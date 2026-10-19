@@ -47,7 +47,8 @@ concurrent releases. Production remains provisional until live-market validation
 
 ## Versioned deployment and backup coordination
 
-Install the reviewed `hetzner-pull.py`, `hetzner-deploy.sh` and
+Install the reviewed `hetzner-pull.py`, `hetzner-deploy.sh`,
+`docker_image_identity.py` (beside both helpers in `/usr/local/sbin`) and
 `systemd/ai-trader-deploy.service` together through the protected operator path.
 The timer remains five minutes (`systemd/ai-trader-deploy.timer`). A repository
 merge does not install root-owned helpers or units. During a controlled repair,
@@ -135,3 +136,67 @@ Docker volume and holds its real `backup.lock` across the stop. Thus it stops
 only an idle service, without the check/release/stop race. It never kills a
 valid running backup to speed deployment or rollback. Existing trades, holds,
 entry contracts, TP/SL and trading/AI settings are outside this repair.
+
+### OCI and legacy runtime image identity
+
+Docker's image index, selected platform manifest and config digest are distinct.
+On19October the running containers retained an uninspectable legacy handle,
+while their authoritative `ImageManifestDescriptor` still exactly matched the
+available, hash-verified733 linux/amd64 image. Equal source labels or a mutable
+tag alone do not establish that relationship.
+
+The shared identity module freezes a version1 record with `kind`, immutable
+`runnable_ref`, `platform`, `platform_manifest`, `config_digest`, `build_sha`
+and `user`. For OCI images it checks the exact raw-byte hash graph
+index→selected platform→config, including descriptor sizes and platform/source/
+nonroot user. A bounded export is read without extracting image files, with a
+120-second export-client watchdog, at most256 members/2GiB declared content and
+512KiB per retained metadata blob. Only the export client may be terminated;
+no backup job is involved. Protected root700/root600 proof caching avoids
+re-exporting layers on every health poll. Subsequent immutable platform
+inspection and runtime descriptor/source/user must still match exactly.
+
+Only when a raw legacy handle is unavailable may `ai-trader:<actual BUILD_SHA>`
+discover an immutable ref; its proved platform manifest must exactly match the
+running container. Thereafter operations use the pinned immutable ref, never
+follow the alias. Missing/unknown/ambiguous platform metadata fails closed.
+Classic Docker images without OCI descriptors retain strict raw image/config
+digest equality. Rollback probes, owned backup jobs, all-role readiness and
+final release commit all use this one model. No index/config digest is renamed
+or equated to another digest.
+
+OCI operation requires
+[`image inspect --platform` (API1.49+)](https://docs.docker.com/reference/cli/docker/image/inspect/).
+The bounded [`image save`](https://docs.docker.com/reference/cli/docker/image/save/)
+stream deliberately retains the complete immutable graph: a platform-filtered
+export may rewrite its outer index and cannot prove the original index digest.
+Selection still checks exact linux/amd64 membership, not a different platform.
+Unsupported engines fail closed rather than using an alias fallback.
+The installed controller opens the protected module without following symlinks,
+validates its file descriptor, and compiles that single bounded raw-byte read.
+It never executes timestamp/size-matched cached bytecode instead of reviewed
+source.
+
+The shell now records a genuine rollback-capability failure as `FAILED` before
+returning67; a direct `exit67` previously bypassed the ERR trap and could leave
+`PREDEPLOY_PENDING`. Existing incomplete attempts are **not** automatically
+closed. After operator review only, under the same deployment lock:
+
+```sh
+/usr/local/sbin/ai-trader-pull --review-close-prewriter \
+  --sha <exact-failed-source> --request-id <exact-attempt32hex> \
+  --image <proved-immutable-old-runtime-ref>
+```
+
+This refuses any non-prewriter phase, previous-compose mutation evidence,
+managed request/job or unresolved active backup, or changed/unhealthy runtime.
+The work directory must be a root-owned, non-symlink, exact0700
+`/opt/ai-trader-release.*` immediate child. Existing original archives must be
+root-private regular files on both first close and rejoin, even if their bytes
+already match the current journal.
+It preserves the exact original journal in root-private `reviewed-attempts`,
+records its hash and explicit review reason, then marks only that attempt
+`FAILED`. A repeated exact call can acknowledge the same reviewed result after
+revalidating archive/hash/runtime/job guards. Arbitrary failed attempts cannot
+be adopted. Historical per-SHA/legacy failure latches are never cleared or
+rewritten, and no deployed/last-release success marker is manufactured.

@@ -14,6 +14,7 @@ else
 fi
 flock -n 9 || exit 75
 export AI_TRADER_DEPLOY_LOCK_FD=9
+export DOCKER_DEFAULT_PLATFORM=linux/amd64
 root=/opt/ai-trader-staging
 controller=/usr/local/sbin/ai-trader-pull
 repo=https://github.com/AviramDahan/AI-Trader
@@ -56,16 +57,12 @@ drain_backup() {
   "$controller" --stop-backup-idle --wait-seconds "$wait"
 }
 start_healthy() {
-  local cap=$1 limit role state actual running oom
+  local cap=$1 limit role
   shift
   limit=$(remaining "$cap") || return 75
   bounded "$limit" "${dc[@]}" up -d --no-deps --no-build --wait --wait-timeout "$limit" "$@" || return $?
   for role in "$@"; do
-    state=$(bounded 20 docker inspect --format '{{.State.Health.Status}}' "ai-trader-cloud-$role-1") || return $?
-    actual=$(bounded 20 docker inspect --format '{{.Image}}' "ai-trader-cloud-$role-1") || return $?
-    running=$(bounded 20 docker inspect --format '{{.State.Running}}' "ai-trader-cloud-$role-1") || return $?
-    oom=$(bounded 20 docker inspect --format '{{.State.OOMKilled}}' "ai-trader-cloud-$role-1") || return $?
-    [[ "$state" == healthy && "$actual" == "$APP_IMAGE" && "$running" == true && "$oom" == false ]] || { echo "Readiness failed: $role is not healthy/running on expected image"; return 1; }
+    bounded 150 "$controller" --verify-role --role "$role" --image "$APP_IMAGE" >/dev/null || { echo "Readiness failed: $role is not healthy/running on expected image"; return 1; }
   done
 }
 failed() {
@@ -91,15 +88,13 @@ failed() {
   if [[ "$writers_stopped" == 0 ]]; then
     # Drain may have stopped the idle hourly service just before an interrupt.
     # Do not touch financial workers. Never restart an already running backup.
-    actual=$(bounded 20 docker inspect --format '{{.Image}}' ai-trader-cloud-backup-1) || exit 70
-    [[ "$actual" == "$old" ]] || { set_phase ROLLBACK_DEFERRED || true; exit 70; }
+    bounded 150 "$controller" --verify-role --role backup --image "$old" --allow-stopped >/dev/null || { set_phase ROLLBACK_DEFERRED || true; exit 70; }
     running=$(bounded 20 docker inspect --format '{{.State.Running}}' ai-trader-cloud-backup-1) || exit 70
     if [[ "$running" != true ]]; then
       bounded 30 docker start ai-trader-cloud-backup-1 || { set_phase ROLLBACK_DEFERRED || true; exit 70; }
     fi
     while true; do
-      state=$(bounded 20 docker inspect --format '{{.State.Health.Status}}' ai-trader-cloud-backup-1) || exit 70
-      [[ "$state" != healthy ]] || break
+      if bounded 150 "$controller" --verify-role --role backup --image "$old" >/dev/null; then break; fi
       remaining 1 >/dev/null || { set_phase ROLLBACK_DEFERRED || true; exit 70; }
       sleep 2
     done
@@ -129,7 +124,7 @@ trap 'failed 143 1' TERM
 trap 'failed 130 1' INT
 head=$(bounded 30 git ls-remote "$repo.git" refs/heads/main | cut -f1)
 [[ "$head" == "$sha" ]] || { echo 'Refusing stale/non-main commit'; exit 65; }
-old=$(bounded 20 docker inspect --format '{{.Image}}' ai-trader-cloud-api-1)
+old=$(bounded 180 "$controller" --resolve-running --role api --print-ref)
 begin=$("$controller" --journal-begin --sha "$sha" --image "$old")
 IFS=$'\t' read -r attempt work old new phase <<< "$begin"
 [[ "$attempt" =~ ^[0-9a-f]{32}$ && -d "$work" && "$old" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 76
@@ -145,7 +140,10 @@ if [[ "$new" == '-' ]]; then
   new=$(bounded 20 docker image inspect --format '{{.Id}}' "ai-trader:$sha")
   set_phase PREDEPLOY_PENDING
 fi
-"$controller" --check-rollback --sha "$sha" --image "$old" --new-image "$new" || exit 67
+if ! bounded 360 "$controller" --check-rollback --sha "$sha" --image "$old" --new-image "$new"; then
+  # Explicit exit bypasses ERR traps; persist the genuine pre-writer failure.
+  failed 67 0
+fi
 set_phase PREDEPLOY_PENDING
 wait=$(remaining 1800)
 if "$controller" --backup-only --sha "$sha" --image "$new" --request-id "$attempt" --wait-seconds "$wait"; then
