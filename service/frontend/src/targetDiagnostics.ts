@@ -44,8 +44,8 @@ export function targetFacts(check:Row,he:boolean):{label:string;value:string}[] 
   fact(t('התנגדות קרובה שנשמרה','Retained nearest resistance'),g.nearest_resistance?.low)
   const risk=g.risk_breakdown
   if(check.policy_version==='single_target_v2'&&risk?.version==='single_target_risk_v1'){
-    fact(t('מרחק סטופ שנבדק, למניה','Checked stop distance per share'),risk.selected_distance)
-    fact(t('מרווח יעד ברוטו שנבדק, למניה','Checked gross reward distance per share'),risk.raw_reward_distance)
+    fact(t('מרחק סטופ לפני עיגול, למניה','Raw stop distance per share'),risk.selected_distance)
+    fact(t('מרווח יעד לפני עיגול, למניה','Raw reward distance per share'),risk.raw_reward_distance)
     fact(t('מרווח יעד חסר לפני עיגול, למניה','Raw reward distance shortfall per share'),risk.raw_reward_shortfall)
     const names:Record<string,string>={structural:t('עוגן המבנה','Structural anchor'),
       atr_floor:t('מרחק הגנה לפי ATR','ATR risk floor'),price_floor:t('מרחק הגנה יחסי למחיר','Price-relative risk floor')}
