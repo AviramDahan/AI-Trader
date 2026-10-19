@@ -525,6 +525,7 @@ def test_completed_setup_discovery_keeps_existing_passive_limit_gap_semantics(db
 
 def test_recovery_rejects_future_audit_even_when_all_three_nodes_match(db, clock, monkeypatch):
     import active_snapshot
+    import entry_strategy_execution as execution
     import single_target_recovery
     _, _, quote, _, _, _ = prepare_route(monkeypatch, clock, 'PEAD')
     scanner.run_scan()
@@ -537,12 +538,16 @@ def test_recovery_rejects_future_audit_even_when_all_three_nodes_match(db, clock
                          ('scanner_trades', 'settings_json')):
         for row in data['tables'][table]:
             material = json.loads(row[field])
+            assert execution.KEY in material
+            assert material[execution.KEY]['version'] == execution.VERSION
             package = material['entry_discovery']
             package['detected_at'] = future
             for record in package['detections']:
                 record['source_times']['decision_at'] = future
             row[field] = json.dumps(material)
-    with pytest.raises(ValueError, match='future|attribution'):
+    # The new frozen audit digest/creation association rejects this mutation
+    # before the later standalone future-attribution check is reached.
+    with pytest.raises(ValueError, match='^entry_strategy_execution_contract_invalid$'):
         single_target_recovery.validate_snapshot(data)
 
 
