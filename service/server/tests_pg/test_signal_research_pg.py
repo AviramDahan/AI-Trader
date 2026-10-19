@@ -1,8 +1,18 @@
 """Read-only PostgreSQL report over a consistent snapshot, no workers/network."""
 from datetime import datetime, timezone
 import json
+import pytest
 import database
 import signal_research
+
+
+@pytest.mark.parametrize('strategy_ids',[['BASELINE','VCP_BASE_CONTRACTION'],['BASELINE','UNKNOWN']])
+def test_pg_target_context_public_projection_has_no_private_fields(pg,strategy_ids):
+    from test_recovery_holds import initialize_empty
+    from test_signal_research import seed_journal,test_target_route_context_readback_is_allowlisted_not_an_approval
+    initialize_empty()
+    with database.get_db_connection() as c:seed_journal(c)
+    test_target_route_context_readback_is_allowlisted_not_an_approval(None,strategy_ids)
 
 
 def test_pg_exact_execution_rejection_public_readback_is_linked_and_allowlisted(pg):

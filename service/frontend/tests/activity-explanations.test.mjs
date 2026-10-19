@@ -43,6 +43,23 @@ eq(explainActivity(mismatched,true).facts,[])
 const rounded=item({rejection:'pre_invalid_rounded_levels',target_checks:[{...check,rejection_reason:'invalid_rounded_levels',rejection_detail:['target_buffer_reaches_entry','non_positive_stop']}]})
 eq(itemReasonCodes(rounded),['pre_invalid_rounded_levels','target_buffer_reaches_entry','non_positive_stop'])
 ok(markup(rounded,true).includes('מחיר הסטופ אינו חיובי'))
+// A pre-round buffer failure is not a rounding defect. Same retained check only.
+const bufferOnly=item({rejection:'pre_invalid_rounded_levels',rejection_stage:'targets',target_checks:[{
+ ...check,rejection_reason:'invalid_rounded_levels',rejection_detail:['target_buffer_reaches_entry'],
+ geometry:{stop_rounded:97,target_unrounded:99.95,target_rounded:99.95,rr_unrounded:-.0166667,rr_rounded:-.0166667},
+}]})
+for(const he of [true,false]){
+ const e=explainActivity(bufferOnly,he),html=markup(bufferOnly,he)
+ ok(e.title.includes(he?'מרווח ההתנגדות':'Resistance buffer'))
+ ok(!html.includes(he?'אחרי עיגול המחירים נשברה':'Rounding invalidated'))
+ ok(html.includes('99.95')&&html.includes('97.00'))
+}
+const wrongPhase=item({rejection:'pre_invalid_rounded_levels',rejection_stage:'targets',target_checks:[{
+ ...check,phase:'post_ai',rejection_reason:'invalid_rounded_levels',rejection_detail:['target_buffer_reaches_entry'],
+ geometry:{rr_rounded:99},
+}]})
+ok(!explainActivity(wrongPhase,true).title.includes('מרווח ההתנגדות'))
+eq(explainActivity(wrongPhase,true).facts,[])
 const ai=item({rejection:'ai_hold',rejection_stage:'ai_filter',ai_decision:{action:'HOLD',confidence:.77,confidence_threshold:.8,
  news_relevance:.42,relevance_threshold:.6,filter_failures:['ai_hold','ai_confidence_below_threshold','ai_news_relevance_below_threshold'],reason:'<script>synthetic</script> Original retained reason.'}})
 eq(itemReasonCodes(ai).length,3)

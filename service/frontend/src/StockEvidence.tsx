@@ -4,6 +4,7 @@ import { finite, LABELS, recordTime, STATIONS, timestamp, type ActivityItem, typ
 import { reasonDefinition, reasonTitle } from './activityReasons'
 import { ActivityExplanation } from './BlockerExplanation'
 import { linkedItemOrders } from './activityExplanation'
+import { targetFacts, targetReasonCode } from './targetDiagnostics'
 import './stockEvidence.css'
 
 type Levels = { plan?: Row; entry: unknown; stop: unknown; activeTarget: unknown; rr: unknown }
@@ -101,12 +102,12 @@ export function StockEvidence({item:i,levels,he,records,onClose,stale=false}: {i
         {available.technical && section('technical',t('מועמדת תועדה בסריקה','Candidate retained in scan'),<><p>{t('תיעוד מועמדת, לא אישור שכל הבקרות עברו.','Candidate retained, not proof all controls passed.')}</p><dl className="evidence-grid">{field(t('כיוון טכני','Technical direction'),named(actionNames,r?.direction,he))}{field(t('זמן הסריקה','Scan time'),at(r?.at))}</dl></>)}
         {available.targets && section('targets',named(outcomeNames,checks.at(-1)?.outcome,he),checks.map((c,n)=><article className="evidence-check" key={n}>
           <strong>{named(phaseNames,c.phase,he)} · {named(outcomeNames,c.outcome,he)}</strong><p>{t('זמן הבדיקה','Check time')}: {at(c.decided_at||c.observed_at)}</p>
-          {c.rejection_reason && <div className="evidence-warning"><strong>{evidenceReason(c.rejection_reason,he)}</strong><p>{text(reasonDefinition(c.rejection_reason).detail,he)}</p></div>}
+          {c.rejection_reason && <div className="evidence-warning"><strong>{evidenceReason(targetReasonCode(c),he)}</strong><p>{text(reasonDefinition(targetReasonCode(c)).detail,he)}</p></div>}
           {(Array.isArray(c.rejection_detail)?c.rejection_detail:[]).map((code:string,k:number)=><p key={k}>{evidenceReason(code,he)}</p>)}
-          <dl className="evidence-grid">{field(t('מחיר ייחוס בבדיקה','Checked reference price'),num(c.quote?.price))}{field(t('זמן המחיר','Quote time'),at(c.quote?.as_of))}{field(t('RR שנבדק לאחר עיגול','Checked RR after rounding'),num(c.accepted_levels?.rr?.[0]??c.geometry?.rr_rounded,'R'))}{field(t('התנגדות קרובה','Nearest resistance'),num(c.geometry?.nearest_resistance?.low))}
-            {finite(c.minimum_rr)!=null&&field(t('RR מינימלי שנשמר','Retained minimum RR'),num(c.minimum_rr,'R'))}
+          <dl className="evidence-grid">{targetFacts(c,he).map(f=>field(f.label,<bdi>{f.value}</bdi>))}{field(t('זמן המחיר','Quote time'),at(c.quote?.as_of))}
             {finite(c.source_inputs?.completed_high)!=null&&field(t('שיא סשנים שהושלמו שנשמר','Retained completed-session high'),num(c.source_inputs.completed_high))}
           </dl>
+          <p className="evidence-note">{t('רמות ו־RR ברוטו מהבדיקה השמורה בלבד. אלה אינם מחירי ביצוע, יעד חלופי או אישור AI.','Gross levels and RR from this retained check only: not fills, a replacement target or AI approval.')}</p>
           {c.quote?.eligible_for_entry===false && <p className="evidence-warning">{t('מחיר למחקר בלבד — אינו מאשר כניסה','Research-only quote — does not authorize entry')}{c.quote?.fresh===false && t('. המחיר האחרון אינו טרי.','. Last-known price is not fresh.')}</p>}
           {c.evidence_gap && <p className="evidence-warning">{t('חסרות ראיות מבנה — אין להסיק שהבדיקה הושלמה.','Structure evidence is incomplete; do not infer a completed check.')}</p>}
         </article>))}

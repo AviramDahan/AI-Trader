@@ -2,6 +2,7 @@
 import { finite, type ActivityItem, type Row, type Station } from './systemActivityModel'
 import { reasonDefinition, reasonKey, reasonTitle, type Pair } from './activityReasons'
 import { entryRejectionCode, entryPriceWait } from './signalPresentation'
+import { targetFacts, targetReasonCode } from './targetDiagnostics'
 const text=(pair:Pair,he:boolean)=>pair[he?0:1]
 const rows=(value:unknown):Row[]=>Array.isArray(value)?value.filter(v=>v&&typeof v==='object'):[]
 export const STATION_GUIDES: Record<Station, { what:Pair; next:Pair }> = {
@@ -21,7 +22,8 @@ export function linkedItemOrders(item:ActivityItem):Row[] {
 }
 export function matchingTargetCheck(item:ActivityItem):Row|undefined {
   if(!item.reason)return undefined
-  return [...rows(item.record?.target_checks)].reverse().find(c=>c.rejection_reason && reasonKey(c.rejection_reason)===reasonKey(item.reason))
+  return [...rows(item.record?.target_checks)].reverse().find(c=>c.rejection_reason &&
+    (!item.reason!.startsWith('pre_')||c.phase==='pre_ai') && reasonKey(c.rejection_reason)===reasonKey(item.reason))
 }
 export function itemReasonCodes(item:ActivityItem):string[] {
   const codes:string[]=[]
@@ -54,7 +56,8 @@ export type Explanation = {title:string; detail:string; next:string; reasons:{co
 export function explainActivity(item:ActivityItem,he:boolean):Explanation {
   const t=(a:string,b:string)=>he?a:b
   const codes=itemReasonCodes(item), check=matchingTargetCheck(item), ai=item.record?.ai_decision
-  const reasons=codes.map(code=>({code,title:reasonTitle(code,he),detail:text(reasonDefinition(code).detail,he)}))
+  const displayCodes=[...new Set(codes.map(code=>check&&reasonKey(code)===reasonKey(check.rejection_reason)?targetReasonCode(check):code))]
+  const reasons=displayCodes.map(code=>({code,title:reasonTitle(code,he),detail:text(reasonDefinition(code).detail,he)}))
   let title=reasons[0]?.title||activityStatusLabel(item,he)
   let detail=reasons[0]?.detail||t('נשמרה רשומה בשלב הזה, אך לא נשמרה תוצאה סופית. אין להסיק שהשלב הבא עבר.','This stage has a retained record but no final result. Passing the next stage is not inferred.')
   let next=t('התוצאה שייכת לבדיקה הזאת. החלטה אחרת דורשת בדיקה חדשה עם נתונים תקפים.','This result belongs to this check. A different decision requires a new check with valid data.')
@@ -86,10 +89,7 @@ export function explainActivity(item:ActivityItem,he:boolean):Explanation {
     fact(t('סף רלוונטיות שנשמר','Retained relevance threshold'),ai?.relevance_threshold)
   }
   if(check){
-    fact(t('מחיר ייחוס בבדיקה','Reference price at check'),check.quote?.price)
-    fact(t('RR שנבדק לאחר עיגול','Checked RR after rounding'),check.accepted_levels?.rr?.[0]??check.geometry?.rr_rounded,'R')
-    fact(t('RR מינימלי שנשמר','Retained minimum RR'),check.minimum_rr,'R')
-    fact(t('התנגדות קרובה שנשמרה','Retained nearest resistance'),check.geometry?.nearest_resistance?.low)
+    facts.push(...targetFacts(check,he))
     if(reasonKey(item.reason)==='no_fresh_quote')fact(t('גיל המחיר שנשמר בשניות','Retained quote age in seconds'),check.quote?.age_seconds)
     if(codes.some(c=>['entry_not_above_completed_high','completed_high_unavailable'].includes(reasonKey(c))))
       fact(t('שיא סשנים שהושלמו שנשמר','Retained completed-session high'),check.source_inputs?.completed_high)
