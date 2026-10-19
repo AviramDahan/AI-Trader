@@ -48,6 +48,9 @@ def time(value):
 
 def reason_stage(reason):
     reason = (reason or '').removeprefix('pre_')
+    from entry_emergency import BLOCK_REASONS
+    if reason in BLOCK_REASONS:
+        return 'entry_pause'
     if reason in {'entry_not_above_completed_high', 'completed_high_unavailable',
                   'breakout_requires_no_forward_zone', 'unsupported_breakout_policy',
                   'breakout_policy_contract_mismatch', 'fill_no_longer_above_completed_high'}:
@@ -260,13 +263,15 @@ def report(conn, hours=48, now=None):
                 {'entry_rejection_reason':entry['entry_rejection_reason'] if entry and s['status']=='ENTRY_POLICY_REJECTED' else None,
                  'entry_price_wait':entry['entry_price_wait'] if entry else None})
             c['orders'].extend({k:o[k] for k in ('id','signal_id','status','purpose','entry_rejection_reason','entry_price_wait')} for o in linked_orders)
-    reasons, stages, quote_context, waits = Counter(), Counter(), Counter(), Counter()
+    reasons, stages, quote_context, waits, operational_blocks = Counter(), Counter(), Counter(), Counter(), Counter()
     shapes = set()
     for c in cases.values():
         c['target_checks'].sort(key=lambda r: r.get('observed_at') or '')
         c['rejection_stage'] = reason_stage(c['rejection']) if c['rejection'] else None
         if c['rejection_stage'] == 'session_wait':
             waits[c['rejection']] += 1
+        elif c['rejection_stage'] == 'entry_pause':
+            operational_blocks[c['rejection']] += 1
         elif c['rejection']:
             reasons[c['rejection']] += 1
             stages[c['rejection_stage']] += 1
@@ -309,6 +314,7 @@ def report(conn, hours=48, now=None):
             signals_qualified=len(accepted), entries=sum(s['actual_entry'] is not None for s in accepted)),
         rejection_reasons=dict(reasons), rejection_stages=dict(stages), quote_context=dict(quote_context),
         session_waits=dict(waits),
+        operational_entry_blocks=dict(operational_blocks),
         execution=dict(entry_orders=len(entry_orders), statuses=dict(Counter(o['status'] for o in entry_orders)),
             allocation_blocked=sum(s['status']=='RISK_BLOCKED' for s in accepted),
             fill_rate=sum(o['status']=='filled' for o in entry_orders)/len(entry_orders) if entry_orders else None),
