@@ -215,6 +215,12 @@ def persist_decision(conn, trace):
         allowed = {k:decision[k] for k in ('action','confidence','news_sentiment','news_relevance',
             'filter_failures','confidence_threshold','relevance_threshold','quote',
             'daily_reference_close','daily_reference_as_of','entry_rationale') if k in decision}
+        if decision.get('news_context'):
+            from price_news_policy import public_context
+            allowed['news_context'] = public_context(decision['news_context'])
+            if allowed['news_context']['availability'] == 'NO_ELIGIBLE_STORIES':
+                allowed['news_sentiment'] = None
+                allowed['news_relevance'] = None
         from decision_explanation import public_reason
         allowed['reason'] = public_reason(decision.get('reason'))
         allowed['observation_id'] = observation_id

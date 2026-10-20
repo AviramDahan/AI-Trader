@@ -59,8 +59,15 @@ def reason_stage(reason):
         return 'session_wait'
     if 'quote' in reason:
         return 'quote'
-    if reason in {'insufficient_current_news', 'news_provider_unavailable_fail_closed'}:
+    if reason in {'insufficient_current_news', 'news_provider_unavailable_fail_closed',
+                  'news_evidence_unavailable_fail_closed', 'price_news_policy_invalid_context',
+                  'price_news_policy_invalid_routes', 'price_news_policy_evidence_mismatch',
+                  'price_news_policy_retained_attribution_mismatch'}:
         return 'news'
+    if reason == 'price_news_policy_no_valid_price_trigger':
+        return 'targets'
+    if reason == 'price_news_policy_invented_news_scores':
+        return 'ai_filter'
     if 'cooldown' in reason:
         return 'cooldown'
     if reason in {'ai_or_confidence_filter', 'news_sentiment_conflict', 'ai_hold',
@@ -215,6 +222,12 @@ def report(conn, hours=48, now=None):
             c['ai_decision'] = {k:data.get(k) for k in ('action','confidence','news_sentiment','news_relevance',
                 'filter_failures','confidence_threshold','relevance_threshold','quote','daily_reference_close','daily_reference_as_of')}
             c['ai_decision']['reason'] = public_reason(data.get('reason'))
+            if data.get('news_context'):
+                from price_news_policy import public_context
+                try:
+                    c['ai_decision']['news_context'] = public_context(data['news_context'])
+                except (ValueError, TypeError):
+                    pass  # Malformed optional metadata must not rewrite history.
         elif row['stage'] == 'target_check':
             # Allowlist only: no prompts, news content, source-input hashes or model output.
             check = {k: data.get(k) for k in ('phase', 'policy_version', 'strategy', 'action',
