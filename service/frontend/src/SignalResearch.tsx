@@ -79,7 +79,7 @@ function Candidate({ row, he }: { row: Row, he: boolean }) {
         {check.evidence_gap && <p className="scanner-warning">{he ? 'ראיות המבנה אינן מלאות' : 'Incomplete structure evidence'}: <bdi>{check.evidence_gap}</bdi></p>}
       </li>)}
       {row.reviews.map((review: Row, i: number) => <li key={`ai${i}`}>AI · <bdi>{review.result}</bdi> · {review.attempts} {he ? 'ניסיונות' : 'attempts'}{review.rejection && <> · {reasonText(review.rejection, he)}</>}</li>)}
-      {row.ai_decision && <li>{he ? 'החלטת AI שנשמרה' : 'Retained AI decision'}: <bdi>{row.ai_decision.action}</bdi> · {he ? 'ציון לא מכויל' : 'Uncalibrated score'}: <bdi>{value(row.ai_decision.confidence)}</bdi> · {he ? 'רלוונטיות' : 'Relevance'}: <bdi>{value(row.ai_decision.news_relevance)}</bdi>
+      {row.ai_decision && <li>{he ? 'החלטת AI שנשמרה' : 'Retained AI decision'}: <bdi>{row.ai_decision.action}</bdi> · {he ? 'ציון לא מכויל' : 'Uncalibrated score'}: <bdi>{value(row.ai_decision.confidence)}</bdi> · {he ? 'רלוונטיות' : 'Relevance'}: <bdi>{row.ai_decision.news_context?.availability==='NO_ELIGIBLE_STORIES'?(he?'לא נמדדה; לא נמצאו כתבות בתוקף':'Not measured; no eligible stories'):value(row.ai_decision.news_relevance)}</bdi>
         <p>{he ? 'הסבר המודל, לא עובדה מאומתת' : 'Model explanation, not a verified fact'}:</p>
         {row.ai_decision.reason ? <blockquote dir="auto">{row.ai_decision.reason}</blockquote>
           : <p>{he ? 'לא זמין: לא נשמר הסבר מתאים להצגה.' : 'Unavailable: no displayable explanation retained.'}</p>}

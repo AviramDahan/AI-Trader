@@ -181,6 +181,7 @@ def settings() -> dict[str, Any]:
         "min_risk_reward": _float_env("STOCK_SCANNER_MIN_RISK_REWARD", 2.0, 1, 10),
         "cooldown_hours": _float_env("STOCK_SCANNER_DUPLICATE_COOLDOWN_HOURS", 24, 1, 720),
         "news_max_age_hours": _float_env("STOCK_SCANNER_NEWS_MAX_AGE_HOURS", 72, 1, 168),
+        "price_news_context_enabled": os.getenv("STOCK_SCANNER_PRICE_NEWS_CONTEXT_ENABLED", "false").lower() == "true",
         "paper_notional": _float_env("STOCK_SCANNER_PAPER_NOTIONAL", 100, 10, 1000),
         "max_symbol_exposure": _float_env("STOCK_SCANNER_MAX_SYMBOL_EXPOSURE", 250, 25, 5000),
         "max_total_exposure": _float_env("STOCK_SCANNER_MAX_TOTAL_EXPOSURE", 1000, 100, 25000),
@@ -562,15 +563,22 @@ def _market_context(histories: dict[str, pd.DataFrame]) -> dict[str, Any]:
     return result
 
 
-def fetch_recent_news(ticker: str, company: str, max_age_hours: float) -> list[dict[str, Any]]:
+def fetch_recent_news(ticker: str, company: str, max_age_hours: float, *, require_successful_empty=False) -> list[dict[str, Any]]:
     session = requests.Session()
     session.trust_env = False
     response = session.get(YAHOO_SEARCH_URL, params={"q": ticker, "quotesCount": 1, "newsCount": 10},
                            headers={"User-Agent": USER_AGENT}, timeout=20)
     response.raise_for_status()
+    body = response.json()
+    if require_successful_empty:
+        finance = body.get('finance') if isinstance(body, dict) else None
+        if (not isinstance(body, dict) or not isinstance(body.get('news'), list) or
+                body.get('error') is not None or
+                (isinstance(finance, dict) and finance.get('error') is not None)):
+            raise ValueError('news_search_success_not_verified')
     now = time.time()
     items = []
-    for row in response.json().get("news") or []:
+    for row in body.get("news") or []:
         try:
             published = int(row["providerPublishTime"])
         except (KeyError, TypeError, ValueError):
@@ -647,14 +655,27 @@ def enrich_and_rank_candidates(candidates: list[dict[str, Any]], market_context:
     cache = _read_news_cache()
     now = time.time()
     from signal_news import existing_news, merge
+    from price_news_policy import route_ids as price_news_routes, attach as attach_news_context
+    canonical_ok = True
     try:
         canonical = existing_news(candidates[:cfg['shortlist_limit']], cfg['news_max_age_hours'])
+        if not isinstance(canonical, dict):
+            raise ValueError('invalid_canonical_news_result')
     except Exception as exc:
         LOG.warning('signal_canonical_news_unavailable:%s', type(exc).__name__)
         canonical = {}
+        canonical_ok = False
     enriched, rejected = [], []
     for candidate in candidates[:cfg["shortlist_limit"]]:
         ticker = candidate["ticker"]
+        price_routes = price_news_routes(candidate, cfg)
+        yahoo_ok = True
+        canonical_rows = canonical.get(ticker, [])
+        candidate_canonical_ok = canonical_ok
+        if price_routes:
+            candidate_canonical_ok = canonical_ok and ticker in canonical and isinstance(canonical_rows, list)
+            if not isinstance(canonical_rows, list):
+                canonical_rows = []
         sec_rows = []
         if cfg.get("sec_intelligence_mode") == "paper" and not cfg.get("sec_intelligence_killed"):
             from sec_intelligence import current_evidence
@@ -662,14 +683,22 @@ def enrich_and_rank_candidates(candidates: list[dict[str, Any]], market_context:
                                         cfg["news_max_age_hours"])
         cached = cache.get(ticker) if isinstance(cache.get(ticker), dict) else {}
         try:
-            if now - float(cached.get("fetched_at", 0)) <= cfg["news_cache_ttl"]:
-                news = cached.get("items") or []
+            cache_age = now - float(cached.get("fetched_at", 0))
+            cache_verified = cached.get('successful_empty_verified') is True and isinstance(cached.get('items'), list)
+            if cache_age <= cfg["news_cache_ttl"] and (not price_routes or (cache_age >= 0 and cache_verified)):
+                news = cached['items'] if price_routes else cached.get("items") or []
             else:
-                news = fetch_recent_news(ticker, candidate["company"], cfg["news_max_age_hours"])
+                news = fetch_recent_news(ticker, candidate["company"], cfg["news_max_age_hours"],
+                    **({'require_successful_empty': True} if price_routes else {}))
                 cache[ticker] = {"fetched_at": now, "items": news}
+                if price_routes:
+                    cache[ticker]['successful_empty_verified'] = True
+            if not isinstance(news, list):
+                raise ValueError('invalid_news_result')
         except Exception:
             news = []
-            if not canonical.get(ticker) and not sec_rows:
+            yahoo_ok = False
+            if not canonical_rows and not sec_rows:
                 rejected.append({"ticker": ticker, "reason": "news_provider_unavailable_fail_closed"})
                 continue
         from news_events.model import timestamp
@@ -681,21 +710,32 @@ def enrich_and_rank_candidates(candidates: list[dict[str, Any]], market_context:
                     fresh.append(item)
             except (ValueError, TypeError, KeyError):
                 continue
-        news = merge(fresh, canonical.get(ticker, []) + sec_rows)
-        if not news:
+        news = merge(fresh, canonical_rows + sec_rows)
+        if not news and not price_routes:
             rejected.append({"ticker": ticker, "reason": "insufficient_current_news"})
             continue
+        news_context = None
+        if price_routes:
+            try:
+                news_context = attach_news_context(candidate, price_routes, news,
+                    yahoo_ok=yahoo_ok, canonical_ok=candidate_canonical_ok)
+            except ValueError as exc:
+                rejected.append({'ticker': ticker, 'reason': str(exc)})
+                continue
         weights = [max(.05, float(row.get("relevance") or 0)) for row in news]
-        sentiment = sum(_headline_sentiment(row["title"]) * weight for row, weight in zip(news, weights)) / sum(weights)
-        relevance = sum(float(row.get("relevance") or 0) for row in news) / len(news)
+        sentiment = (sum(_headline_sentiment(row["title"]) * weight for row, weight in zip(news, weights)) / sum(weights)
+                     if news else None)
+        relevance = sum(float(row.get("relevance") or 0) for row in news) / len(news) if news else None
         alignment = _market_alignment(candidate["technical_direction"], market_context)
-        sentiment_alignment = (1 + sentiment) / 2 if candidate["technical_direction"] == "BUY" else (1 - sentiment) / 2
-        combined = (.50 * candidate["technical_score"] / 7 + .20 * relevance
+        sentiment_alignment = ((1 + sentiment) / 2 if candidate["technical_direction"] == "BUY" else (1 - sentiment) / 2) if news else 0
+        combined = (.50 * candidate["technical_score"] / 7 + .20 * (relevance or 0)
                     + .15 * sentiment_alignment + .15 * alignment)
         row = dict(candidate)
-        row.update(news=news, deterministic_news_sentiment=round(sentiment, 3),
-                   deterministic_news_relevance=round(relevance, 3), market_alignment=round(alignment, 3),
+        row.update(news=news, deterministic_news_sentiment=round(sentiment, 3) if news else None,
+                   deterministic_news_relevance=round(relevance, 3) if news else None, market_alignment=round(alignment, 3),
                    combined_rank_score=round(combined, 4))
+        if news_context:
+            row['news_context'] = news_context
         if cfg.get("sec_intelligence_mode") == "paper" and not cfg.get("sec_intelligence_killed"):
             accessions = {str(item.get('accession') or '') for item in
                           (row.get('sec_intelligence') or {}).get('facts', [])}
@@ -740,6 +780,11 @@ def ai_review(candidate: dict[str, Any], news: list[dict[str, Any]], market_cont
     sec_current = bool(candidate.get('sec_intelligence') and any(r.get('sec_evidence_route') for r in news))
     from review_evidence import DAILY_FIELDS, context as review_context
     observed = datetime.now(timezone.utc)
+    from price_news_policy import validate as validate_price_news
+    price_context = validate_price_news(candidate, settings(), candidate.get('entry'),
+                                       candidate.get('quote_at'), observed)
+    if price_context and news != candidate.get('news'):
+        raise ValueError('price_news_policy_evidence_mismatch')
     time_context = dict(candidate.get('review_evidence_context') or review_context(
         candidate, observed, latest_completed_session(observed).isoformat()))
     from review_rationale import Validator,price_facts
@@ -769,8 +814,16 @@ def ai_review(candidate: dict[str, Any], news: list[dict[str, Any]], market_cont
             "news_sentiment: -1..1, news_relevance: 0..1, time_horizon: one of "
             "'1-5 trading days'|'1-4 weeks'|'1-3 months', reason: string, "
             "entry_price_relation: equal|above|below|unknown, entry_price_concern: "
-            "none|quote_above_planned_entry|quote_below_planned_entry|comparison_unavailable}. "
-            "Use HOLD unless technical evidence, relevant recent news, and market context jointly support the candidate. "
+            "none|quote_above_planned_entry|quote_below_planned_entry|comparison_unavailable}. " +
+            ("For this verified price-route review, a positive news catalyst or article is NOT required. "
+             "Use technical evidence and market context to assess the setup. News, when supplied, is risk context: "
+             "do not ignore adverse facts or invent a catalyst. NO_ELIGIBLE_STORIES means successful lookups found "
+             "no eligible article, not bullish news, proof of safety or a provider outage. With no recent_news, "
+             "return news_sentiment=0 and news_relevance=0 ONLY as required numeric wire placeholders; both are "
+             "NOT_MEASURED, not a measured neutral sentiment or assessed irrelevance. HOLD remains valid for "
+             "insufficient technical/context evidence, but absence of an article alone is not a HOLD rule. "
+             if price_context else
+             "Use HOLD unless technical evidence, relevant recent news, and market context jointly support the candidate. ") +
             "Respect the time bases in review_evidence_context. completed_daily metrics, including volume_ratio, "
             "describe the named completed session, NOT current-session breakout volume. A prior daily date is normal "
             "when coverage is LATEST_COMPLETED_SESSION; the entry quote has its own timestamp. "
@@ -795,8 +848,12 @@ def ai_review(candidate: dict[str, Any], news: list[dict[str, Any]], market_cont
                    "invented confirmation or a mandatory BUY. HOLD and all common safeguards remain valid.")
     messages = [{"role": "system", "content": system},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(',', ':'), allow_nan=False)}]
-    return final_ai.review(messages, Validator(facts,
-        lambda value: validate_ai_decision(value, candidate["technical_direction"])))
+    def validate_decision(value):
+        value = validate_ai_decision(value, candidate['technical_direction'])
+        if price_context and not news and (value['news_sentiment'] != 0 or value['news_relevance'] != 0):
+            raise ValueError('price_news_policy_invented_news_scores')
+        return value
+    return final_ai.review(messages, Validator(facts, validate_decision))
 
 
 def current_intraday_quote(ticker: str) -> tuple[float, str] | None:
@@ -871,14 +928,15 @@ def format_signal(candidate: dict[str, Any], decision: dict[str, Any], news: lis
     headlines = " | ".join(
         f"{item['title']} ({item['publisher']}, {item['published_at']}) {item.get('url', '')}" for item in news[:3]
     )
+    no_news_context = bool(candidate.get('news_context')) and not news
     return "\n".join([
         "US STOCK SCANNER | PAPER TRADING ONLY",
         f"Ticker: {candidate['ticker']}", f"Company: {candidate['company']}", f"Action: {decision['action']}",
         f"Entry: ${entry:.2f}", f"Take Profit: ${take_profit:.2f}", f"Stop Loss: ${stop_loss:.2f}",
         f"Risk/Reward: {risk_reward:.2f}", f"Confidence: {decision['confidence']:.0%}",
         f"Time Horizon: {decision['time_horizon']}", f"Reason: {decision['reason']}",
-        f"News Sentiment: {decision['news_sentiment']:.2f}",
-        f"News Relevance: {decision['news_relevance']:.0%}",
+        "News Sentiment: NOT_MEASURED (no eligible stories)" if no_news_context else f"News Sentiment: {decision['news_sentiment']:.2f}",
+        "News Relevance: NOT_MEASURED (price-route context policy)" if no_news_context else f"News Relevance: {decision['news_relevance']:.0%}",
         f"ATR Volatility: {candidate['atr_pct']:.2f}%", f"20d Dollar Volume: ${candidate['average_dollar_volume']:,.0f}",
         f"Relevant News: {headlines}", f"Timestamp: {timestamp}",
     ])
@@ -896,6 +954,8 @@ def _candidate_target_plan(candidate, action, price, cfg, *, quote_at=None, phas
     plan, rejection = None, None
     policy = 'single_target_v2' if v2 else 'confirmed_daily_swing_zones_v1'
     try:
+        from price_news_policy import validate as validate_price_news
+        validate_price_news(candidate, cfg, price, quote_at, at)
         if candidate.get('entry_discovery'):
             from entry_discovery import validate_candidate_trigger, enabled_ids
             validate_candidate_trigger(candidate, price, quote_at, at, allowed_ids=enabled_ids())
@@ -962,6 +1022,7 @@ def _paper_order(candidate: dict[str, Any], decision: dict[str, Any], news: list
             "risk_reward": risk_reward, "target_plan": plan, "confidence": decision["confidence"],
             "time_horizon": decision["time_horizon"], "reason": decision["reason"],
             "relevant_news": news[:3], "timestamp": timestamp, "quote_at": quote_at,
+            **({'news_context': candidate['news_context']} if candidate.get('news_context') else {}),
             "signal_id": None, 'strategy_projection': projection, "paper_quantity": 0,
             "paper_execution": "pending_entry" if execution_action in {'BUY','SHORT'} else "signal_or_pending_close",
             "message_type": "strategy"}
@@ -977,6 +1038,8 @@ def _localize_telegram_signal(signal: dict[str, Any]) -> dict[str, Any]:
         "האות עבר את מסנני המגמה, המומנטום, החדשות והקשר השוק "
         "בהתאם לרמת הביטחון המוצגת."
     )
+    if signal.get('news_context'):
+        fallback_reason = "האות נבדק לפי מסלול מחיר, הקשר השוק ובקרות הסיכון. כתבה חיובית אינה תנאי במסלול זה."
     fallback_news = (["נמצאו חדשות רלוונטיות, אך התרגום לעברית אינו זמין כרגע."]
                      if headlines else [])
     if os.getenv("AI_TRADER_CLOUD") == "true" or os.getenv("AI_PROVIDER") == "openrouter":
@@ -1083,7 +1146,7 @@ def _telegram_message(signal: dict[str, Any], event: str = "NEW STRONG SIGNAL") 
                     f"יחס סיכון/סיכוי: {float(signal['risk_reward']):.2f}"]),
         "\n".join([f"רמת ביטחון: {float(signal['confidence']):.0%}", f"טווח זמן: {horizon_he}"]),
         f"סיבה:\n{reason}",
-        f"חדשות רלוונטיות:\n{news or 'אין'}",
+        f"חדשות רלוונטיות:\n{news or ('לא נמצאו כתבות בתוקף; האות מבוסס על מסלול מחיר, לא על חדשות חיוביות.' if signal.get('news_context') else 'אין')}",
     ]
     return "\n\n".join(blocks)[:4000]
 
@@ -1301,6 +1364,14 @@ def run_scan() -> dict[str, Any]:
                 if not selection.may_start_io():
                     rejected.append({'ticker':ticker, 'reason':'pre_refill_deferred'})
                     continue
+            # Refill rows acquired their news context after the target precheck.
+            # Validate its independent branch before spending an AI quota slot.
+            from price_news_policy import validate as validate_price_news
+            try:
+                validate_price_news(candidate, cfg, quote[0], quote[1], datetime.now(timezone.utc))
+            except ValueError as exc:
+                rejected.append({'ticker': ticker, 'reason': 'pre_' + str(exc)})
+                continue
             # Persist eligibility before calling a provider; the connection closes here.
             review_candidate = dict(candidate, daily_reference_close=candidate.get('entry'),
                 daily_reference_as_of=candidate.get('price_as_of'), entry=quote[0],
@@ -1323,26 +1394,26 @@ def run_scan() -> dict[str, Any]:
             except Exception as exc:
                 set_service_status("ollama", "error", f"{ticker}:{type(exc).__name__}")
                 raise
+            from price_news_policy import validate as validate_price_news, decision_failures
+            price_context = validate_price_news(candidate, cfg, quote[0], quote[1], datetime.now(timezone.utc))
+            unmeasured_news = price_context and not news
             reviews.append({"ticker": ticker, "action": decision["action"], "confidence": decision["confidence"],
-                            "news_sentiment": decision["news_sentiment"], "news_relevance": decision["news_relevance"],
+                            "news_sentiment": None if unmeasured_news else decision["news_sentiment"],
+                            "news_relevance": None if unmeasured_news else decision["news_relevance"],
+                            **({'news_context': candidate['news_context']} if price_context else {}),
                             "combined_rank_score": candidate["combined_rank_score"]})
-            failures = []
-            if decision['action']=='HOLD': failures.append('ai_hold')
-            if decision['confidence'] < cfg['min_confidence']: failures.append('ai_confidence_below_threshold')
             sec_evidence_current = cfg['sec_intelligence_mode'] == 'paper' and any(r.get('sec_evidence_route') for r in news)
-            if (sec_evidence_current and decision['action'] == 'BUY' and
-                    (candidate.get('sec_intelligence') or {}).get('material_conflict')):
-                failures.append('sec_material_conflict_hold')
-            if decision['news_relevance'] < .6 and not sec_evidence_current: failures.append('ai_news_relevance_below_threshold')
+            failures = decision_failures(decision, cfg, sec_current=sec_evidence_current,
+                price_context=price_context, material_conflict=(candidate.get('sec_intelligence') or {}).get('material_conflict'))
             trace['decision'] = {k:decision[k] for k in ('action','confidence','news_sentiment','news_relevance','reason')}
             if decision.get('entry_rationale'):
                 trace['decision']['entry_rationale']=decision['entry_rationale']
             trace['decision'].update(filter_failures=failures, confidence_threshold=cfg['min_confidence'],
-                relevance_threshold=.6, quote={'price':quote[0],'as_of':quote[1]},
+                relevance_threshold=None if price_context else .6, quote={'price':quote[0],'as_of':quote[1]},
                 daily_reference_close=candidate.get('entry'), daily_reference_as_of=candidate.get('price_as_of'))
-            if (decision["action"] == "HOLD" or decision["confidence"] < cfg["min_confidence"] or
-                    (decision["news_relevance"] < .6 and not sec_evidence_current) or
-                    'sec_material_conflict_hold' in failures):
+            if price_context:
+                trace['decision']['news_context'] = candidate['news_context']
+            if failures:
                 rejected.append({"ticker": ticker, "reason": failures[0]})
                 continue
             if (decision["action"] == "BUY" and decision["news_sentiment"] < -.1) or (decision["action"] == "SELL" and decision["news_sentiment"] > .1):
@@ -1390,7 +1461,8 @@ def run_scan() -> dict[str, Any]:
             rejected.append({"ticker": ticker, "reason": "timeout_fail_closed"})
         except ValueError as exc:
             from entry_emergency import BLOCK_REASONS
-            reason = str(exc) if str(exc) in BLOCK_REASONS else 'ValueError_fail_closed'
+            from price_news_policy import BLOCK_REASONS as PRICE_NEWS_BLOCKS
+            reason = str(exc) if str(exc) in BLOCK_REASONS | PRICE_NEWS_BLOCKS else 'ValueError_fail_closed'
             rejected.append({'ticker': ticker, 'reason': reason})
         except Exception as exc:
             rejected.append({"ticker": ticker, "reason": f"{type(exc).__name__}_fail_closed"})

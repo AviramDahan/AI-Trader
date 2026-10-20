@@ -228,4 +228,14 @@ const luminance=hex=>hex.match(/../g).map(v=>parseInt(v,16)/255).map(v=>v<=.0404
 for(const hex of ['50677a','aa253b','755006','086549']){
  ok(css.includes('color:#'+hex));ok(1.05/(luminance(hex)+.05)>=4.5)
 }
+const optionalNews=item({rejection:'ai_hold',rejection_stage:'ai_filter',ai_decision:{
+ action:'HOLD',confidence:.85,news_relevance:null,news_sentiment:null,
+ news_context:{mode:'price_context',availability:'NO_ELIGIBLE_STORIES'}}})
+for(const he of [true,false]){
+ const html=evidenceMarkup(optionalNews,he)
+ ok(html.includes(he?'סנטימנט ורלוונטיות לא נמדדו':'Sentiment and relevance were not measured'))
+ ok(!html.includes('NaN'))
+ const unavailable=markup(item({rejection:'news_evidence_unavailable_fail_closed',rejection_stage:'news'}),he)
+ ok(unavailable.includes(he?'לא ניתן לאמת את איסוף החדשות':'News collection could not be verified'))
+}
 console.log(`Activity explanations: ${assertions} assertions passed; all stations, retained reasons, numeric gates, linkage and unknowns`)

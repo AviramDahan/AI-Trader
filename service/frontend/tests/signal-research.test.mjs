@@ -109,6 +109,14 @@ assert.ok(cacheView({ missing_symbol_count: 1, missing_symbols: ['TEST'], reques
 const shortHistory = cacheView({ history_gap_details: { TEST: {
   reason: 'insufficient_completed_history', completed_bars: 8, required_bars: 65 } } })
 assert.ok(shortHistory.includes('היסטוריה קצרה מדי לניתוח טכני') && shortHistory.includes('8/65'))
+const optionalNewsData={...data,records:[{...data.records[0],rejection:'ai_hold',
+  ai_decision:{action:'HOLD',confidence:.85,news_relevance:null,news_sentiment:null,
+    news_context:{mode:'price_context',availability:'NO_ELIGIBLE_STORIES'}}}]}
+for(const he of [true,false]){
+  const html=render({he,data:optionalNewsData})
+  assert.ok(html.includes(he?'לא נמדדה; לא נמצאו כתבות בתוקף':'Not measured; no eligible stories'))
+  assert.ok(!html.includes('NaN'))
+}
 console.log('Signal research, evidence, explanation and history rendering assertions passed')
 if (process.env.RESEARCH_PREVIEW_HTML) {
   // Optional disposable visual-QA artifact. Real component/CSS, synthetic data;

@@ -507,6 +507,12 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
         raise ValueError("Invalid target order")
     cfg = lifecycle_settings()
     created = now_z()
+    if candidate.get('news_context'):
+        from price_news_policy import prepare_admission, retained_metadata
+        from stock_scanner import settings as scanner_settings
+        candidate = prepare_admission(candidate, scanner_settings(), entry, signal.get('quote_at'), created)
+        retained_metadata(candidate)
+        discovery = candidate['entry_discovery']
     if discovery and parse_time(discovery['detected_at']) > parse_time(created):
         raise ValueError('future_discovery_decision')
     if discovery and BASELINE not in discovery['strategy_ids']:
@@ -566,6 +572,13 @@ def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: d
         "news_relevance": decision.get("news_relevance"),
         "news_sentiment": decision.get("news_sentiment"),
     }
+    if candidate.get('news_context'):
+        from price_news_policy import public_context
+        basis['news_context'] = public_context(candidate['news_context'])
+        if basis['news_context']['availability'] == 'NO_ELIGIBLE_STORIES':
+            basis['news_sentiment'] = None
+            basis['news_relevance'] = None
+            basis['news_evidence_status'] = 'NOT_MEASURED_NO_ELIGIBLE_STORIES'
     news = signal.get("relevant_news") or []
     news_he = signal.get("telegram_news_he") or []
     structured_news = [{**item, "title_he": news_he[index] if index < len(news_he) else ""}
