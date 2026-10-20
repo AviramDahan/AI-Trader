@@ -83,6 +83,23 @@ def collect(p,at):
     return result
 
 
+def _next_check_notice(pid,value):
+    """Presentation only: persisted next_at is not a terminal retry promise."""
+    if not value.get('terminal'):
+        return '\nNext check: '+str(value.get('next_at') or 'n/a')
+    if value.get('status')=='disabled':
+        return '\nNext check: not scheduled (provider disabled)'
+    if (pid in {'prnewswire','globenewswire'} and value.get('http_status')==403
+            and value.get('error')=='http_error' and value.get('last_success')):
+        # Do not duplicate or run recover_terminal here. Actual approval,
+        # cooldown and consumed-probe fences remain the collector's decision.
+        return ('\nNext check: no routine retry (terminal provider state)'
+                '\nRecovery: a single conditional 403 probe requires current approval, '
+                'at least one-hour cooldown and an unused recovery allowance; '
+                'timing is not guaranteed.')
+    return '\nNext check: not scheduled (terminal provider state; operator review required)'
+
+
 def notify_changes(before,after,at):
     """Only provider transitions, private durable Admin outbox, no public send."""
     from ai_operations import enqueue
@@ -99,4 +116,4 @@ def notify_changes(before,after,at):
                 ('\nTimezone: UTC — provider_specific_operational_rule' if pid=='investing' else '')+
                 '\nStatus: '+status+'\nReason: '+str(value.get('error') or 'none')+
                 '\nHTTP: '+str(value.get('http_status') or 'n/a')+
-                '\nNext check: '+str(value.get('next_at') or 'n/a'))
+                _next_check_notice(pid,value))
