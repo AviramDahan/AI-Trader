@@ -4,6 +4,15 @@ import { entryPriceWait } from './signalPresentation'
 export type Row = Record<string, any>
 export const STATIONS = ['technical', 'targets', 'evidence', 'ai', 'signal', 'order', 'position', 'exit'] as const
 export type Station = typeof STATIONS[number]
+export type StationKnowledge = Partial<Record<Station, boolean>>
+/** Source completeness for DISPLAY counts, not an approval of any trading gate. */
+export function stationKnowledge(research: Row | null, dashboard: Row | null, now = Date.now()): StationKnowledge {
+  const researchKnown = !!research && Array.isArray(research.records) && timestamp(research.generated_at) > 0 && timestamp(research.generated_at) <= now
+  const dashboardKnown = !!dashboard && Array.isArray(dashboard.trades) && Array.isArray(dashboard.signals)
+  return { technical: researchKnown, targets: researchKnown, evidence: researchKnown, ai: researchKnown,
+    signal: researchKnown && dashboardKnown, order: researchKnown && dashboardKnown,
+    position: dashboardKnown, exit: researchKnown && dashboardKnown }
+}
 export type ActivityItem = {
   id: string; ticker: string; company: string; station: Station
   state: 'recorded' | 'blocked' | 'waiting' | 'uncertain' | 'open' | 'closed'

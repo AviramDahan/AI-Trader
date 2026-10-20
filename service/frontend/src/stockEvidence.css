@@ -61,3 +61,6 @@
 .evidence-thesis > small { color:var(--ev-muted); font-size:12px; }
 @media(min-width:760px) { .stock-evidence > .evidence-block > .evidence-grid { grid-template-columns:repeat(4,minmax(0,1fr)); } }
 @media(max-width:370px) { .evidence-status { padding:13px; } .evidence-grid { gap:12px 10px; } .evidence-stage > summary { padding:12px 10px; } }
+.retained-discovery { border:1px solid var(--border-color,#2b4159); border-radius:12px; padding:10px 12px; margin:12px 0; font-size:13px; line-height:1.7; overflow-wrap:anywhere; }
+.retained-discovery p { margin:4px 0; }
+.retained-discovery small { opacity:.8; }

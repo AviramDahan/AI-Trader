@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { scannerRecordPath, revealScannerRecord } from './scannerNavigation'
+import { MiniWorkspaceNav } from './MiniWorkspaceNav'
 
 import { API_ORIGIN, useLanguage } from './appShared'
 import { positionMove, unifiedSignals, activeTargetIndexes, entryRejectionCode, entryRejectionLabel } from './signalPresentation'
@@ -35,7 +37,8 @@ type Dashboard = {
 }
 
 const fmtPrice = (value: any) => value != null && value !== '' && Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '—'
-const fmtPct = (value: any) => Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : '—'
+const fmtPct = (value: any) => value!=null && value!=='' && typeof value!=='boolean' && Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : '—'
+const fmtMetric = (value: any, suffix = '', digits = 2) => value!=null && value!=='' && typeof value!=='boolean' && Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}${suffix}` : '—'
 const fmtMove = (entry: any, target: any, short = false) => {
   const from = Number(entry)
   const to = Number(target)
@@ -66,10 +69,22 @@ export function ScannerDashboard({ token }: { token: string | null }) {
   const [scopeFilter, setScopeFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [timeFilter, setTimeFilter] = useState('168')
+  const [newsLimit,setNewsLimit] = useState(30)
+  useEffect(()=>setNewsLimit(30),[tickerFilter,sentimentFilter,materialityFilter,sourceFilter,scopeFilter,categoryFilter,timeFilter])
   const [watchTicker, setWatchTicker] = useState('')
   const [watchStatus, setWatchStatus] = useState('')
   const [watchBusy, setWatchBusy] = useState(false)
   const [quoteInfo, setQuoteInfo] = useState<Record<string, any> | null>(null)
+  const [recordMissing,setRecordMissing] = useState(false)
+  const revealedRecord=useRef('')
+  useEffect(()=>{
+    if(!data || !/^#(?:signal|trade)-[1-9]\d*$/.test(location.hash)){revealedRecord.current='';setRecordMissing(false);return}
+    const key=`${tab}:${location.hash}`
+    if(revealedRecord.current===key)return
+    const found=revealScannerRecord(location.hash)
+    if(found)revealedRecord.current=key
+    setRecordMissing(!found)
+  },[data,tab,location.hash])
 
   const reads = useRef<ReturnType<typeof createReadPoller<Dashboard>> | null>(null)
   const load = async () => { await reads.current?.refresh(true) }
@@ -225,6 +240,12 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     return tickerOk && sentimentOk && materialityOk && sourceOk && scopeOk && categoryOk && timeOk
   }), [data, tickerFilter, sentimentFilter, materialityFilter, sourceFilter, scopeFilter, categoryFilter, timeFilter])
   const sourceOptions = useMemo(() => Array.from(new Set((data?.news || []).map(item => item.provider || item.publisher).filter(Boolean))).sort(), [data])
+  const visibleNews=filteredNews.slice(0,newsLimit)
+  const referenceLink=(kind:'signal'|'trade',id:unknown)=>{
+    const history=kind==='trade' ? !unified.open.some(t=>String(t.id)===String(id)) : unified.history.some(s=>String(s.id)===String(id))
+    const path=scannerRecordPath(kind,id,history,location.search)
+    return path?<Link to={path}>{kind==='signal'?text('לסיגנל','Signal'):text('לעסקה','Trade')}</Link>:null
+  }
 
   const tabs = [
     ['signals', text('סיגנלים', 'Signals')],
@@ -284,6 +305,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
 
   return <section className={`scanner-dashboard ${miniApp ? 'miniapp-secondary' : ''}`} dir={he ? 'rtl' : 'ltr'}>
     {miniHeader}
+    {recordMissing && <p role="status" className="scanner-warning">{text('הרשומה המקושרת אינה זמינה בתצוגה השמורה הזאת. אין להסיק שלא הייתה עסקה או שהפוזיציה נסגרה.','Linked record is unavailable in this retained view. This does not prove no trade existed or a position closed.')}</p>}
     {!miniApp && <header className="scanner-hero">
       <div>
         <p className="scanner-kicker">{text('סורק מניות ארה״ב', 'US STOCK SCANNER')}</p>
@@ -340,9 +362,9 @@ export function ScannerDashboard({ token }: { token: string | null }) {
     </div>}
 
     {tab === 'results' && <div className="scanner-section">
-      <h2>{text('השוואת אסטרטגיות יציאה', 'Exit strategy comparison')}</h2>
+      <h2>{text('השוואת מדיניות יציאה', 'Exit policy comparison')}</h2>
       <p className="scanner-note">{text('Drawdown נוכחי ומרבי אינם זמינים: טרם נאספה היסטוריית שווי תיק מתוארכת. השוואת Shadow היא השוואת עסקאות בלבד, לא תיק עם חשבונאות עצמאית.', 'Current and maximum drawdown are unavailable: no timestamped portfolio equity history has been collected. Shadow compares trade outcomes, not an independently accounted portfolio.')}</p>
-      <p className="scanner-note">{text(`האסטרטגיה הפעילה לעסקאות חדשות: ${data?.settings?.active_strategy === 'staged' ? 'מימוש מדורג' : 'יעד יחיד'}. אסטרטגיית Shadow אינה משפיעה על המזומן או על Telegram.`, `Active for new trades: ${data?.settings?.active_strategy || 'single'}. Shadow results never affect cash or Telegram.`)}</p>
+      <p className="scanner-note">{text(`מדיניות היציאה לעסקאות חדשות: ${data?.settings?.active_strategy === 'staged' ? 'מימוש מדורג' : 'יעד יחיד'}. זו אינה אסטרטגיית איתור נוספת. Shadow אינה משפיעה על המזומן או על Telegram.`, `Exit policy for new trades: ${data?.settings?.active_strategy || 'single'}. This is not an additional discovery route. Shadow never affects cash or Telegram.`)}</p>
       {token && <div className="scanner-strategy-controls"><button disabled={data?.settings?.active_strategy === 'single'} onClick={() => void changeStrategy('single')}>{text('הפעל יעד יחיד לעסקאות חדשות', 'Use single target for new trades')}</button><button disabled={data?.settings?.active_strategy === 'staged'} onClick={() => void changeStrategy('staged')}>{text('הפעל מימוש מדורג לעסקאות חדשות', 'Use staged exits for new trades')}</button></div>}
       <div className="scanner-table-wrap"><table className="scanner-table"><thead><tr>{[text('אסטרטגיה', 'Strategy'), text('עסקאות', 'Trades'), text('תוחלת R', 'Expectancy R'), text('הצלחה', 'Win rate'), 'TP1', 'TP2', 'TP3'].map(value => <th key={value}>{value}</th>)}</tr></thead>
         <tbody>{(data?.strategy_comparison || []).map(row => <tr key={row.strategy}><td>{row.strategy}</td><td>{row.trades} ({row.closed_trades} {text('סגורות', 'closed')})</td><td>{Number(row.expectancy_r || 0).toFixed(2)}R</td><td>{fmtPct(row.win_rate)}</td><td>{fmtPct(row.tp1_rate)}</td><td>{fmtPct(row.tp2_rate)}</td><td>{fmtPct(row.tp3_rate)}</td></tr>)}</tbody></table></div>
@@ -359,13 +381,13 @@ export function ScannerDashboard({ token }: { token: string | null }) {
 
     {tab === 'news' && <div className="scanner-section">
       <h2>{text('חדשות — מהחדש לישן', 'News — newest first')}</h2>
-      <section className="scanner-watchlist"><h3>{text('רשימת מעקב לחדשות Telegram', 'Telegram news watchlist')}</h3>
+      <details className="scanner-watchlist"><summary>{text('רשימת מעקב לחדשות Telegram', 'Telegram news watchlist')}</summary>
         <p>{text('חדשות חדשות, קשורות ומהותיות ינותחו ויישלחו גם ללא פוזיציה. הרשימה אינה יוצרת סיגנלים או עסקאות.', 'New, relevant, material news is analyzed and alerted even without a position. This list creates no signals or trades.')}</p>
         {token ? <div className="scanner-watchlist-form"><input aria-label={text('סימול להוספה', 'Ticker to add')} value={watchTicker} maxLength={10} onChange={event => setWatchTicker(event.target.value.toUpperCase())} onKeyDown={event => { if (event.key === 'Enter') void updateWatchlist(watchTicker) }} placeholder="AAPL"/><button disabled={watchBusy || !watchTicker.trim()} onClick={() => void updateWatchlist(watchTicker)}>{text('הוסף למעקב', 'Add to watchlist')}</button></div> : <p className="scanner-warning">{text('הוספה והסרה דורשות התחברות עם הרשאת ניהול לסורק; הקריאה ברשימה נשארת ציבורית.', 'Adding and removing require a login with scanner management permission; viewing remains public.')}</p>}
         {!!watchStatus && <p className="scanner-note">{watchStatus}</p>}
         <div className="scanner-watchlist-items">{(data?.news_watchlist || []).map(item => <span key={item.ticker}><b>{item.ticker}</b>{item.company && item.company !== item.ticker ? ` · ${item.company}` : ''}{token && <button aria-label={`${text('הסר', 'Remove')} ${item.ticker}`} disabled={watchBusy} onClick={() => void updateWatchlist(item.ticker, true)}>×</button>}</span>)}</div>
         {!(data?.news_watchlist || []).length && <small>{text('הרשימה ריקה.', 'Watchlist is empty.')}</small>}
-      </section>
+      </details>
       <div className="scanner-filters"><input value={tickerFilter} onChange={event => setTickerFilter(event.target.value)} placeholder={text('סינון לפי סימול', 'Filter ticker')} />
         <select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}><option value="all">{text('כל המקורות', 'All sources')}</option>{sourceOptions.map(source => <option value={source} key={source}>{source}</option>)}</select>
         <select value={sentimentFilter} onChange={event => setSentimentFilter(event.target.value)}><option value="all">{text('כל הסנטימנטים', 'All sentiment')}</option><option value="positive">{text('חיובי', 'Positive')}</option><option value="negative">{text('שלילי', 'Negative')}</option><option value="mixed">{text('מעורב', 'Mixed')}</option><option value="neutral">{text('ניטרלי', 'Neutral')}</option></select>
@@ -375,11 +397,11 @@ export function ScannerDashboard({ token }: { token: string | null }) {
         <select value={timeFilter} onChange={event => setTimeFilter(event.target.value)}><option value="24">{text('24 שעות', '24 hours')}</option><option value="168">{text('7 ימים', '7 days')}</option><option value="all">{text('כל הזמנים', 'All time')}</option></select></div>
       <p className="scanner-note">{text(`איסוף מחזורי, לא זרם בזמן אמת. פידים רשמיים משותפים נבדקים כל ${Math.round(Number(data?.news_meta?.requested_refresh_seconds || 300) / 60)} דקות; Yahoo מכסה בעדיפות עסקאות פתוחות, סיגנלים פעילים ומדגם מתחלף של מועמדים — לא את כל ${activity.universe_count || 0} המניות בכל מחזור.`, `Periodic collection, not a real-time wire. Shared official feeds are checked every ${Math.round(Number(data?.news_meta?.requested_refresh_seconds || 300) / 60)} minutes; Yahoo prioritizes open positions, active signals and a rotating candidate sample—not all ${activity.universe_count || 0} stocks each cycle.`)}</p>
       <p className="scanner-news-meta">{text('רענון תצוגה', 'Screen refresh')}: {stamp(data?.news_meta?.screen_generated_at)} · {text('בדיקת ספק אחרונה', 'Last provider check')}: {stamp(data?.news_meta?.last_collected_at)} · {text('ידיעה אחרונה שנאספה', 'Latest collected item')}: {stamp(data?.news_meta?.latest_item_collected_at)}</p>
-      <div className="scanner-status-grid">{(data?.news_providers || []).map(provider => <article key={provider.provider} className={`scanner-status ${provider.status}`}><h3>{providerName(provider.provider)}</h3><strong>{providerStatus(provider.status)}</strong><p>{providerCoverage(provider)}</p><small>{providerCounters(provider)}<br/>{text('הצלחה אחרונה', 'Last success')}: {stamp(provider.last_success_at)}<br/>{text('בדיקה הבאה', 'Next check')}: {stamp(provider.next_check_at)}</small></article>)}</div>
+      <details className="scanner-news-diagnostics"><summary>{text('מצב מקורות ופרטי איסוף','Source status and collection details')}</summary><div className="scanner-status-grid">{(data?.news_providers || []).map(provider => <article key={provider.provider} className={`scanner-status ${provider.status}`}><h3>{providerName(provider.provider)}</h3><strong>{providerStatus(provider.status)}</strong><p>{providerCoverage(provider)}</p><small>{providerCounters(provider)}<br/>{text('הצלחה אחרונה', 'Last success')}: {stamp(provider.last_success_at)}<br/>{text('בדיקה הבאה', 'Next check')}: {stamp(provider.next_check_at)}</small></article>)}</div></details>
       {!!data?.news_meta?.latency?.samples && <p className="scanner-news-meta">{text('מדידת חדשות אחרונות', 'Recent news measurements')}: {data.news_meta.latency.samples} · {text('ניתוח ממוצע', 'Mean analysis')}: {Math.round(data.news_meta.latency.model_seconds || 0)}s · {text('קליטה עד סיום ניתוח, כולל המתנה', 'Ingest to analysis completion, including wait')}: {Math.round(data.news_meta.latency.processing_seconds || 0)}s · {text('קליטה עד Telegram', 'Ingest to Telegram')}: {data.news_meta.delivery_latency?.samples ? `${Math.round(data.news_meta.delivery_latency.seconds)}s (${data.news_meta.delivery_latency.samples})` : text('טרם נמדד', 'Not measured yet')}</p>}
       {!!data?.news_meta?.historical_reviews_pending && <p>{text(`תקצירים היסטוריים שממתינים לבדיקה מחדש: ${data.news_meta.historical_reviews_pending}. מקורותיהם נשמרו; לא יישלחו מחדש כהתראות חדשות.`, `Historical summaries awaiting review: ${data.news_meta.historical_reviews_pending}. Sources are retained; no replay as new alerts.`)}</p>}
       {(['market', 'watchlist', 'active_signal', 'universe', 'open_position'] as const).map(scope => {
-        const rows = filteredNews.filter(item => item.scope === scope)
+        const rows = visibleNews.filter(item => item.scope === scope)
         if (!rows.length) return null
         const label = scope === 'market' ? text('חדשות שוק רחבות', 'Broad market news') : scope === 'open_position' ? text('חדשות לעסקאות פתוחות', 'Open-position news') : scope === 'watchlist' ? text('חדשות מרשימת המעקב', 'Watchlist news') : scope === 'active_signal' ? text('חדשות לסיגנלים פעילים', 'Active-signal news') : text('חדשות מניות ביקום הסריקה', 'Scanner-universe news')
         return <div key={scope}><h3>{label}</h3>{rows.map(item => <article className="scanner-news-card" key={item.id}>
@@ -392,11 +414,12 @@ export function ScannerDashboard({ token }: { token: string | null }) {
           {item.summary_he && <p><b>{text('תקציר בעברית', 'Hebrew summary')}:</b> {item.summary_he}</p>}
           <p className="scanner-source-fact"><b>{text('מידע מהמקור', 'Source information')}:</b> {item.title}{item.source_facts?.source_excerpt ? ` — ${item.source_facts.source_excerpt}` : ` — ${text('זמינה כותרת/מטא־דאטה בלבד; גוף הכתבה לא נותח.', 'Headline/metadata only; the full article was not analyzed.')}`}</p>
           {item.interpretation_he && <p className="scanner-ai-interpretation"><b>{text('פרשנות AI', 'AI interpretation')}:</b> {item.interpretation_he}</p>}
-          <p>{text('סנטימנט', 'Sentiment')}: {item.analysis_status === 'analyzed' ? item.sentiment : text('לא נותח', 'Not analyzed')} · {text('מהותיות', 'Materiality')}: {item.publication_reasons?.includes('insufficient_information') ? text('לא ניתן לקבוע — מידע חסר', 'Insufficient evidence to assess') : item.analysis_status === 'analyzed' ? item.materiality : text('לא נותחה', 'Not analyzed')}</p>
-          <footer>{text('קטגוריה', 'Category')}: {categoryName(item.news_category || 'company')} · {text('מפרסם מקורי', 'Original publisher')}: {item.original_publisher || item.publisher} · {text('פורסם', 'Published')}: {stamp(item.published_at)} · {text('נאסף לראשונה', 'First collected')}: {stamp(item.collected_at || item.fetched_at)}{item.publication_time_corrected && <> · {text('זמן הפרסום עודכן מאוחר יותר על־ידי המקור', 'The source revised its publication timestamp later')}</>} · <a href={item.url} target="_blank" rel="noreferrer">{text('מקור ישיר', 'Direct source')}</a>{item.signal_id && <> · <a href={`/market?tab=signals#signal-${item.signal_id}`}>{text('לסיגנל', 'Signal')}</a></>}{item.trade_ids?.[0] && <> · <a href={`/market?tab=trades#trade-${item.trade_ids[0]}`}>{text('לעסקה', 'Trade')}</a></>}{item.alternate_sources?.length > 1 && <details><summary>{text('מקורות נוספים', 'Additional sources')} ({item.alternate_sources.length - 1})</summary>{item.alternate_sources.slice(1).map((source: any) => <a key={`${source.provider}-${source.url}`} href={source.url} target="_blank" rel="noreferrer">{source.publisher}</a>)}</details>}</footer>
+          <p>{text('סנטימנט', 'Sentiment')}: {item.analysis_status === 'analyzed' ? (he?({positive:'חיובי',negative:'שלילי',mixed:'מעורב',neutral:'ניטרלי'} as Record<string,string>)[item.sentiment]||'לא זמין':item.sentiment) : text('לא נותח', 'Not analyzed')} · {text('מהותיות', 'Materiality')}: {item.publication_reasons?.includes('insufficient_information') ? text('לא ניתן לקבוע — מידע חסר', 'Insufficient evidence to assess') : item.analysis_status === 'analyzed' ? (he?({high:'גבוהה',medium:'בינונית',low:'נמוכה'} as Record<string,string>)[item.materiality]||'לא זמינה':item.materiality) : text('לא נותחה', 'Not analyzed')}</p>
+          <footer>{text('קטגוריה', 'Category')}: {categoryName(item.news_category || 'company')} · {text('מפרסם מקורי', 'Original publisher')}: {item.original_publisher || item.publisher} · {text('פורסם', 'Published')}: {stamp(item.published_at)} · {text('נאסף לראשונה', 'First collected')}: {stamp(item.collected_at || item.fetched_at)}{item.publication_time_corrected && <> · {text('זמן הפרסום עודכן מאוחר יותר על־ידי המקור', 'The source revised its publication timestamp later')}</>} · <a href={item.url} target="_blank" rel="noreferrer">{text('מקור ישיר', 'Direct source')}</a>{item.signal_id && <> · {referenceLink('signal',item.signal_id)}</>}{item.trade_ids?.[0] && <> · {referenceLink('trade',item.trade_ids[0])}</>}{item.alternate_sources?.length > 1 && <details><summary>{text('מקורות נוספים', 'Additional sources')} ({item.alternate_sources.length - 1})</summary>{item.alternate_sources.slice(1).map((source: any) => <a key={`${source.provider}-${source.url}`} href={source.url} target="_blank" rel="noreferrer">{source.publisher}</a>)}</details>}</footer>
         </article>)}</div>
       })}
       {!filteredNews.length && <Empty text={text('אין חדשות תואמות. תקלה בספק תוצג בלשונית מצב הסורק ואינה מסומנת כ״אין חדשות״.', 'No matching news. Provider failures appear under Scanner status and are not labeled “no news”.')} />}
+      {!!filteredNews.length && <div className="scanner-news-pagination"><p role="status">{text(`מוצגות ${visibleNews.length} מתוך ${filteredNews.length} ידיעות בתצוגה השמורה. הסינון מתייחס לכל הרשומות שנקראו.`,`Showing ${visibleNews.length} of ${filteredNews.length} retained news items. Filters apply to all loaded records.`)}</p>{visibleNews.length<filteredNews.length&&<button type="button" onClick={()=>setNewsLimit(n=>n+30)}>{text('הצג עוד 30 ידיעות','Show 30 more news items')}</button>}</div>}
     </div>}
 
     {tab === 'status' && <div className="scanner-section">
@@ -419,6 +442,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
       <p>{text('המשתמש והתיק הראשיים', 'Primary user and portfolio')}: <b>{primaryName}</b> · {text('המשתמש היחיד שמוצג בדשבורד', 'the only user exposed in the dashboard')}</p>
       <p>{text('מפתח טכני יציב', 'Stable technical key')}: <code>{data?.primary_user?.key || data?.scanner_name}</code> · Ollama: <code>{activity.model || '—'}</code></p>
     </div>}
+    {miniApp && <MiniWorkspaceNav he={he} secondary onSelect={view=>navigate(preserveMiniApp(`/market?tab=live&view=${view}`,location.search,''))}/>}
   </section>
 }
 
@@ -486,7 +510,7 @@ export function SignalCard({ signal, he }: { signal: Record<string, any>, he: bo
     <div className="scanner-levels"><span>{he ? 'כניסה מתוכננת' : 'Planned entry'}<b>{fmtPrice(signal.planned_entry)}</b></span><span>{he ? 'כניסה בפועל' : 'Actual entry'}<b>{fmtPrice(signal.actual_entry)}</b></span><span>{he ? 'סטופ מקורי' : 'Original stop'}<b>{fmtPrice(signal.original_stop)}</b></span><span>{he ? 'סטופ נוכחי' : 'Current stop'}<b>{fmtPrice(signal.current_stop)}</b></span></div>
     <TargetPlanDetails plan={plan} he={he} />
     </details>
-    <p><b>{he ? 'ציון איכות מודל לא־מכויל' : 'Uncalibrated model quality score'}:</b> {fmtPct(signal.confidence)} · {he ? 'תוכנית משוקללת' : 'Weighted plan'} {Number(signal.weighted_rr).toFixed(1)}R</p>
+    <p><b>{he ? 'ציון איכות מודל לא־מכויל' : 'Uncalibrated model quality score'}:</b> {fmtPct(signal.confidence)} · {he ? 'תוכנית משוקללת' : 'Weighted plan'} {fmtMetric(signal.weighted_rr,'R',1)}</p>
     <details className="signal-secondary"><summary>{he ? 'מקור הציון — אינו הסתברות להצלחה' : 'Score basis — not a probability of success'}</summary><dl>{Object.entries(basis).filter(([key,value]) => key !== 'label' && value != null && typeof value !== 'object').map(([key,value]) => <div key={key}><dt>{he ? ({model:'ציון המודל', calibrated:'מכויל', source:'מקור', technical_score:'ציון טכני', combined_rank_score:'דירוג משולב', news_sentiment:'סנטימנט חדשות', news_relevance:'רלוונטיות חדשות', model_confidence:'ציון המודל'} as Record<string,string>)[key] || key.replace(/_/g,' ') : key.replace(/_/g,' ')}</dt><dd>{typeof value === 'boolean' ? (value ? (he ? 'כן' : 'Yes') : (he ? 'לא' : 'No')) : String(value)}</dd></div>)}</dl></details>
     <details className="signal-secondary"><summary>{he ? 'הניתוח המלא וחדשות המקור' : 'Full analysis and source news'}</summary>
       <p>{(he && signal.reason_he) || signal.reason}</p>
@@ -525,7 +549,7 @@ function TradeCard({ trade, signal, schedules, he }: { trade: Record<string, any
     {opened && trade.status === 'open' && <LevelChart record={trade} kind="trade" he={he} initiallyOpen />}
     <h3>{he ? 'תוכנית המימוש' : 'Exit plan'}</h3>
     <TargetRows record={trade} entry={trade.entry_price} strategy={trade.strategy} he={he} indices={activeTargets} />
-    {trade.policy_version ? <><p>{he ? 'השוואת STAGED: לא זמינה' : 'STAGED comparison: unavailable'}</p><p>{he ? 'ממומש נטו, כולל עמלות ששולמו' : 'Realized net, including paid fees'}: {Number(trade.realized_net_pct).toFixed(2)}% / {Number(trade.realized_net_r).toFixed(2)}R · {he ? 'פתוח ברוטו, משוקלל לפי יתרת הפוזיציה' : 'Open gross, weighted by remaining position'}: {Number(trade.open_gross_pct).toFixed(2)}% / {Number(trade.open_gross_r).toFixed(2)}R</p></> : <details className="signal-secondary"><summary>{he ? 'יעדי השוואה — Shadow' : 'Comparison targets — Shadow'}</summary><TargetRows record={trade} entry={trade.entry_price} strategy={trade.strategy} he={he} indices={[1,2,3].filter(i => !activeTargets.includes(i))} /></details>}
+    {trade.policy_version ? <><p>{he ? 'השוואת STAGED: לא זמינה' : 'STAGED comparison: unavailable'}</p><p>{he ? 'ממומש נטו, כולל עמלות ששולמו' : 'Realized net, including paid fees'}: {fmtMetric(trade.realized_net_pct,'%')} / {fmtMetric(trade.realized_net_r,'R')} · {he ? 'פתוח ברוטו, משוקלל לפי יתרת הפוזיציה' : 'Open gross, weighted by remaining position'}: {fmtMetric(trade.open_gross_pct,'%')} / {fmtMetric(trade.open_gross_r,'R')}</p></> : <details className="signal-secondary"><summary>{he ? 'יעדי השוואה — Shadow' : 'Comparison targets — Shadow'}</summary><TargetRows record={trade} entry={trade.entry_price} strategy={trade.strategy} he={he} indices={[1,2,3].filter(i => !activeTargets.includes(i))} /></details>}
     <TargetPlanDetails plan={plan} he={he} />
     <details className="signal-secondary"><summary>{he ? 'חדשות העסקה' : 'Trade news'}</summary>
     <p>{he ? 'בדיקה אחרונה' : 'Last check'}: {stamp(schedule?.last_success_at)}{trade.status === 'open' && <> · {he ? 'הבאה' : 'Next'}: {stamp(schedule?.next_due_at)}</>} · {he ? ({no_new:'אין חדשות חדשות',closed:'המעקב הסתיים',error:'תקלה',idle:'ממתין',ok:'תקין'} as Record<string,string>)[schedule?.status] || schedule?.status || '—' : schedule?.status || '—'}</p>
@@ -539,9 +563,10 @@ function TradeCard({ trade, signal, schedules, he }: { trade: Record<string, any
 
 function TargetRows({ record, entry, strategy, he, indices = [1,2,3] }: { record: Record<string, any>, entry: any, strategy: string, he: boolean, indices?: number[] }) {
   return <div className="scanner-targets">{indices.filter(index => record[`tp${index}`] != null).map(index => {
-    const allocation = Number(record[`operational_tp${index}_pct`] ?? record[`tp${index}_pct`] ?? 0)
+    const rawAllocation = record[`operational_tp${index}_pct`] ?? record[`tp${index}_pct`]
+    const allocation = typeof rawAllocation==='number'&&Number.isFinite(rawAllocation)?rawAllocation:null
     const rr = record[`rr${index}`] == null ? (Number(record[`tp${index}`]) - Number(entry)) / (Number(entry) - Number(record.original_stop)) : Number(record[`rr${index}`])
-    const execution = allocation > 0
+    const execution = allocation === null ? (he ? 'הקצאת המימוש לא נשמרה' : 'Exit allocation not retained') : allocation > 0
       ? strategy === 'single'
         ? (he ? 'יעד פעיל — סגירה מלאה' : 'Active target — full exit')
         : (he ? 'יעד פעיל — מימוש מדורג' : 'Active target — staged exit')
