@@ -40,6 +40,8 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   const controls = networkControls(compact,mapWidth)
   const updatedStations=new Set(available?items.filter(i=>changed.has(i.id)).map(i=>i.station):[])
   const t = (a: string, b: string) => he ? a : b
+  const completeCounts = !knownStations || STATIONS.every(s=>knownStations[s]!==false)
+  const sampleCount = completeCounts ? String(stockCount(items)).padStart(2,'0') : items.length ? `${stockCount(items)} (${t('מידע חלקי','partial data')})` : t('לא זמין','Unavailable')
   const activate = (e: React.KeyboardEvent<SVGGElement>, action: () => void) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); action() }
   }
@@ -83,7 +85,7 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   return <div ref={panel} className="system-network-panel">
     <div className="system-network-heading"><div><span className="system-eyebrow">THE INTELLIGENCE WEB</span><h3>{t('רשת המניות', 'Stock network')}</h3></div>
     </div>
-    <div className="system-network-readout"><span><i className={available?'connected':''}/>{available?t('עדכון מחזורי מחובר','PERIODIC FEED CONNECTED'):t('ממתין לנתונים תקינים','AWAITING VALID DATA')}</span><bdi>{String(stockCount(items)).padStart(2,'0')} {t('מניות במדגם','SAMPLED STOCKS')}</bdi><span>{marketOpen === true ? t('מסחר פתוח','MARKET OPEN') : marketOpen === false ? t('מחוץ למסחר','OUTSIDE SESSION') : t('מצב שוק לא ידוע','SESSION UNKNOWN')}</span></div>
+    <div className="system-network-readout"><span><i className={available?'connected':''}/>{available?t('עדכון מחזורי מחובר','PERIODIC FEED CONNECTED'):t('ממתין לנתונים תקינים','AWAITING VALID DATA')}</span><bdi>{sampleCount} {t('מניות במדגם','SAMPLED STOCKS')}</bdi><span>{marketOpen === true ? t('מסחר פתוח','MARKET OPEN') : marketOpen === false ? t('מחוץ למסחר','OUTSIDE SESSION') : t('מצב שוק לא ידוע','SESSION UNKNOWN')}</span></div>
     {flat}
     <div className="system-state-key" aria-label={t('מקרא מצב המניות','Stock state legend')}>{(['blocked','waiting','uncertain','open'] as const).map(s=><span className={`system-state-badge state-${s}`} key={s}><bdi aria-hidden="true">{STATE_SYMBOLS[s]}</bdi>{STATE_LABELS[s][he?0:1]}</span>)}</div>
     <div className="system-network-legend"><span><i className="system-legend-event"/>{t('סימון מניה: שינוי מתועד שנקלט — לא מצב Worker בזמן אמת', 'Stock marker: a received retained-data change — not real-time worker activity')}</span></div>

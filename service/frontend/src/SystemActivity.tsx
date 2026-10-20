@@ -125,7 +125,7 @@ export function SystemActivityView({ miniApp = false, he, research, dashboard, e
         <p>{t('מניה מופיעה בתחנה לפי התיעוד האחרון שלה. זה אינו אומר שהיא עברה את כל התחנות הקודמות או שה־Worker מטפל בה כרגע. סימון עדכון מציין רק שינוי מתועד חדש שנקלט בתצוגה.', 'A stock is placed by its latest retained evidence, not proof that earlier stages passed or a worker is processing it now. An update marker indicates only new retained evidence received by the view.')}</p>
         <p>{t('מחקר מתרענן כל דקה; מצב הסורק כל 30 שניות. זה אינו זרם עסקאות בזמן אמת.', 'Research refreshes every minute; scanner status every 30 seconds. This is not a real-time trade feed.')}</p>
         <p>{t('מוצגת הסריקה האחרונה שנשמרה לכל מניה במדגם, לצד הסיגנלים והפוזיציות. זו אינה רשימת כל ה־Universe. התצוגה הציבורית היא לצפייה בלבד; לחיצות וחיפוש אינם משנים מעקב או מסחר.', 'Latest retained scan per sampled stock, alongside signals and positions. Not the entire universe. This public view is read-only; selecting and searching do not change the watchlist or trading.')}</p>
-        </details><dl><div><dt>{t('מניות במדגם התחנות', 'Stocks in station sample')}</dt><dd>{new Set(filtered.map(i => i.ticker)).size}</dd></div>
+        </details><dl><div><dt>{t('מניות במדגם התחנות', 'Stocks in station sample')}</dt><dd>{Object.values(knownStations).every(Boolean)?stockCount(filtered):filtered.length?`${stockCount(filtered)} (${t('מידע חלקי','partial data')})`:t('לא זמין','Unavailable')}</dd></div>
           <div><dt>{t('פוזיציות דמה פתוחות', 'Open paper positions')}</dt><dd>{dashboard ? items.filter(i => i.state === 'open').length : '—'}</dd></div>
           <div><dt>{t('מחזור סריקה אחרון', 'Last scan')}</dt><dd><bdi>{stamp(dashboard?.activity?.last_scan_at ? new Date(dashboard.activity.last_scan_at*1000).toISOString() : null, he)}</bdi></dd></div></dl>
         {open === false && <p className="system-session-note">{t('מחוץ למסחר: האיסוף יכול להמשיך. כניסה ממתינה אינה פוזיציה פעילה.', 'Outside session: collection can continue. A waiting entry is not an active position.')}</p>}
@@ -140,7 +140,7 @@ export function SystemActivityView({ miniApp = false, he, research, dashboard, e
     </div></details>
     {!!research?.records_clipped || !!research?.clipped?.length ? <details className="system-sample-warning scanner-warning"><summary>{t('מדגם מוגבל — לא כל ההיסטוריה מוצגת', 'Capped sample — not all history is shown')}</summary><p>{t('המדגם מוגבל: חלק מפרטי ההיסטוריה לא נכללו. אין להסיק שאין פעילות במניה שלא מופיעה.', 'Sample is capped: some history is omitted. An absent ticker does not prove inactivity.')}</p></details> : null}
     {!research && !error && <p role="status">{t('טוען את תיעוד התחנות…', 'Loading station evidence…')}</p>}
-    <details className="system-support-details"><summary>{t('פרטי המניות במדגם', 'Sampled stock details')} <bdi>{stockCount(filtered)}</bdi></summary>
+    <details className="system-support-details"><summary>{t('פרטי המניות במדגם', 'Sampled stock details')} <bdi>{Object.values(knownStations).every(Boolean)?stockCount(filtered):t('מידע חלקי','partial data')}</bdi></summary>
       <StationFlow he={he} items={filtered} station={station} selected={selected} select={setSelected}
         changed={new Set()} stale={!available} knownStations={knownStations} onDetails={()=>setDetailsOpen(true)} /></details>
     {fullJourney}

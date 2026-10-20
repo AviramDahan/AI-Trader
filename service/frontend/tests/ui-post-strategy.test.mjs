@@ -65,4 +65,7 @@ const verifiedEmpty=renderToStaticMarkup(createElement(MemoryRouter,{},createEle
   he:true,research:emptyResearch,dashboard:{trades:[],signals:[]}})))
 assert.ok(verifiedEmpty.includes('data-count-known="true"'))
 assert.ok(verifiedEmpty.includes('אין מניות במדגם'))
+const notLoaded=renderToStaticMarkup(createElement(MemoryRouter,{},createElement(SystemActivityView,{he:true,research:null,dashboard:null})))
+const readout=notLoaded.match(/class="system-network-readout">(.*?)<\/div>/s)[1]
+assert.ok(readout.includes('לא זמין')&&!readout.includes('>00 '))
 console.log('Post-strategy UI: zero-attempt AI, rejected/approved plan separation and unknown station counts passed')
