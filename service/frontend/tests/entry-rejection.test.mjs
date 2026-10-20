@@ -32,6 +32,11 @@ for(const he of [true,false]) {
   const card=renderToStaticMarkup(createElement(SignalCard,{signal,he}))
   assert.ok(card.includes(he?'יחס הסיכוי־סיכון במחיר הביצוע נמוך מ־2R':'Execution-price reward/risk is below 2R'))
   assert.ok(!card.includes('NaN')&&!card.includes('Infinity'))
+  const missingMetrics=renderToStaticMarkup(createElement(SignalCard,{signal:{...signal,
+    confidence:null,weighted_rr:null,tp1_pct:undefined,operational_tp1_pct:undefined},he}))
+  assert.ok(!missingMetrics.includes('NaN')&&!missingMetrics.includes('Infinity'))
+  assert.ok(missingMetrics.includes(he?'הקצאת המימוש לא נשמרה':'Exit allocation not retained'))
+  assert.ok(!missingMetrics.includes(he?'ציון איכות מודל לא־מכויל:</b> 0%':'Uncalibrated model quality score:</b> 0%'))
   const warning=card.match(/class="scanner-warning">(.*?)<\/p>/s)[1]
   assert.ok(!warning.includes('$')) // Existing quote-price formatting is not changed.
   for(const [status,label] of [['INVALID',he?'לא תקין — מצב הביצוע אינו מאומת':'Invalid — execution state unverified'],

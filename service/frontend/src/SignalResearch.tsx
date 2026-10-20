@@ -1,10 +1,19 @@
 import { useEffect, useState } from 'react'
 import { API_ORIGIN } from './appShared'
+import { createReadPoller } from './readPoller'
 import { reasonTitle } from './activityReasons'
 import { StrategyPerformance } from './StrategyPerformance'
 import { targetFacts, targetReasonCode } from './targetDiagnostics'
+import { RetainedDiscovery } from './RetainedDiscovery'
 
 type Row = Record<string, any>
+export function validResearchPayload(value: unknown): value is Row {
+  const data=value as Row|null
+  return !!data && Array.isArray(data.records) && Array.isArray(data.outcomes) &&
+    Array.isArray(data.outcome_groups) && !!data.rejection_stages && typeof data.rejection_stages==='object' &&
+    data.records.every((row:Row)=>row && ['target_checks','reviews','signals','orders'].every(key=>Array.isArray(row[key]))) &&
+    data.outcomes.every((row:Row)=>row && Array.isArray(row.exits))
+}
 const value = (v: any, suffix = '') => v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(2)}${suffix}` : '—'
 const reasonText = (reason: string, he: boolean) => reasonTitle(reason,he)
 const candidateReason = (row: Row, he: boolean) => {
@@ -59,6 +68,7 @@ function Candidate({ row, he }: { row: Row, he: boolean }) {
       <p>{he ? 'דירוג בסיס' : 'Baseline rank'} <bdi>{value(sec.baseline_rank_score)}</bdi> → {he ? 'דירוג משופר' : 'Enhanced rank'} <bdi>{value(sec.enhanced_rank_score)}</bdi> · {he ? 'שינוי' : 'Adjustment'} <bdi>{value(sec.sec_adjustment)}</bdi></p>
       <p>{he ? 'תוצאת המשך הבדיקה' : 'Subsequent review result'}: <bdi>{sec.rejection_reason ? reasonText(sec.rejection_reason, he) : (he ? 'לא נשמר חסם נוסף ברשומת SEC' : 'No additional blocker retained in SEC record')}</bdi></p>
     </div>}
+    <RetainedDiscovery checks={row.target_checks||[]} he={he}/>
     <ol className="research-timeline">
       <li>{he ? 'סינון טכני' : 'Technical'}: {row.technical_recorded ? (he ? 'מועמד מתועד' : 'Candidate recorded') : (he ? 'לא זמין' : 'Unavailable')}</li>
       {row.target_checks.map((check: Row, i: number) => <li key={i}>
@@ -98,26 +108,17 @@ export function SignalResearch({ he, mode = 'research' }: { he: boolean, mode?: 
   const [side, setSide] = useState('all')
   const [ticker, setTicker] = useState('')
   useEffect(() => {
-    let active = true
-    const controller = new AbortController()
-    let inFlight = false
     setData(null)
-    const refresh = async () => {
-      if (inFlight) return
-      inFlight = true
-      try {
-        const r = await fetch(`${API_ORIGIN}/api/scanner/research?hours=${hours}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]), cache: 'no-store' })
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        const result = await r.json()
-        if (active) { setData(result); setError('') }
-      } catch (e) { if (active) setError(e instanceof Error ? e.message : 'Unavailable') }
-      finally { inFlight = false }
-    }
-    void refresh()
-    const interval = window.setInterval(() => void refresh(), 60000)
-    return () => { active = false; controller.abort(); window.clearInterval(interval) }
+    setError('')
+    const poller=createReadPoller<Row>({
+      url:`${API_ORIGIN}/api/scanner/research?hours=${hours}`,intervalMs:60000,
+      onData:result=>{if(!validResearchPayload(result))throw new Error('Invalid research response');setData(result);setError('')},
+      onError:setError,
+    })
+    poller.start()
+    return ()=>poller.stop()
   }, [hours])
-  return <>{mode === 'results' && <StrategyPerformance he={he} />}
+  return <>{mode === 'results' && <StrategyPerformance he={he} hours={hours} setHours={setHours} />}
     <ResearchView he={he} mode={mode} data={data} error={error} hours={hours} setHours={setHours} side={side} setSide={setSide} ticker={ticker} setTicker={setTicker} /></>
 }
 

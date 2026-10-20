@@ -27,6 +27,11 @@ const data = {
 }
 const render = props => renderToStaticMarkup(createElement(ResearchView, { he: true, data, ...props }))
 const research = render({})
+const {validResearchPayload}=mod.exports
+assert.ok(validResearchPayload(data))
+assert.ok(!validResearchPayload({...data,outcome_groups:undefined}))
+assert.ok(!validResearchPayload({...data,records:[{...data.records[0],reviews:undefined}]}))
+assert.ok(!validResearchPayload({...data,outcomes:[{trade_id:1,exits:null}]}))
 assert.ok(research.includes('מחקר סיגנלים'))
 assert.ok(research.includes('מחוץ לשעות מסחר רגילות'))
 assert.ok(research.includes('1.33R'))

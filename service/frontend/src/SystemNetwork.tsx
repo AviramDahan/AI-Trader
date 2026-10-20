@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { LABELS, STATE_LABELS, STATE_SYMBOLS, STATIONS, stockCount, type ActivityItem, type ActivityUpdate, type Station } from './systemActivityModel'
+import { LABELS, STATE_LABELS, STATE_SYMBOLS, STATIONS, stockCount, type ActivityItem, type ActivityUpdate, type Station, type StationKnowledge } from './systemActivityModel'
 import { buildNetwork, buildConstellation, buildEvidenceSweep, networkControls, networkCentre as centre } from './systemNetworkGeometry'
 import { activityStatusLabel, explainActivity } from './activityExplanation'
 export { CLUSTERS, COMPACT_CLUSTERS, NETWORK_LIMIT, buildNetwork, buildConstellation, buildEvidenceSweep, networkControls, networkMotionAllowed } from './systemNetworkGeometry'
 
-export function SystemNetwork({ he, items, changed, updates = [], station, setStation, selected, select, available, marketOpen }: {
+export function SystemNetwork({ he, items, changed, updates = [], station, setStation, selected, select, available, marketOpen, knownStations }: {
   he: boolean; items: ActivityItem[]; changed: Set<string>; station: Station | 'all'; setStation: (v: Station | 'all') => void
   updates?: ActivityUpdate[]
+  knownStations?: StationKnowledge
   selected: string | null; select: (v: string|null) => void; available: boolean; marketOpen: boolean | undefined
 }) {
   const [compact, setCompact] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width:1000px)').matches)
@@ -39,6 +40,8 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   const controls = networkControls(compact,mapWidth)
   const updatedStations=new Set(available?items.filter(i=>changed.has(i.id)).map(i=>i.station):[])
   const t = (a: string, b: string) => he ? a : b
+  const completeCounts = !knownStations || STATIONS.every(s=>knownStations[s]!==false)
+  const sampleCount = completeCounts ? String(stockCount(items)).padStart(2,'0') : items.length ? `${stockCount(items)} (${t('מידע חלקי','partial data')})` : t('לא זמין','Unavailable')
   const activate = (e: React.KeyboardEvent<SVGGElement>, action: () => void) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); action() }
   }
@@ -72,8 +75,8 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
             </g>
           </g>)}
           <foreignObject x={c.x - controls.buttonWidth/2} y={c.y - controls.buttonOffset} width={controls.buttonWidth} height={controls.buttonHeight}>
-            <button type="button" className={`system-cluster-button ${updatedStations.has(c.station)?'system-new-evidence':''}`} style={{fontSize:controls.fontSize}} dir={he ? 'rtl' : 'ltr'} aria-pressed={station === c.station} aria-label={`${LABELS[c.station][he ? 0 : 1]}: ${stockCount(items.filter(i=>i.station===c.station))} ${t('מניות','stocks')}`}
-              onClick={() => setStation(station === c.station ? 'all' : c.station)}><span className="system-cluster-index" aria-hidden="true">{String(STATIONS.indexOf(c.station)+1).padStart(2,'0')}</span><span>{LABELS[c.station][he ? 0 : 1]}</span><bdi>{stockCount(items.filter(i=>i.station===c.station))}</bdi></button>
+            <button type="button" className={`system-cluster-button ${updatedStations.has(c.station)?'system-new-evidence':''}`} data-count-known={knownStations?.[c.station] !== false} style={{fontSize:controls.fontSize}} dir={he ? 'rtl' : 'ltr'} aria-pressed={station === c.station} aria-label={`${LABELS[c.station][he ? 0 : 1]}: ${knownStations?.[c.station] === false ? t('לא זמין','Unavailable') : stockCount(items.filter(i=>i.station===c.station))} ${t('מניות','stocks')}`}
+              onClick={() => setStation(station === c.station ? 'all' : c.station)}><span className="system-cluster-index" aria-hidden="true">{String(STATIONS.indexOf(c.station)+1).padStart(2,'0')}</span><span>{LABELS[c.station][he ? 0 : 1]}</span><bdi>{knownStations?.[c.station] === false ? '—' : stockCount(items.filter(i=>i.station===c.station))}</bdi></button>
           </foreignObject>
           {!!c.omitted && <text className="system-omitted" x={c.x} y={c.y + 100} textAnchor="middle">+{c.omitted} {t('ברשימת התחנה', 'in station list')}</text>}
         </g>)}
@@ -82,7 +85,7 @@ export function SystemNetwork({ he, items, changed, updates = [], station, setSt
   return <div ref={panel} className="system-network-panel">
     <div className="system-network-heading"><div><span className="system-eyebrow">THE INTELLIGENCE WEB</span><h3>{t('רשת המניות', 'Stock network')}</h3></div>
     </div>
-    <div className="system-network-readout"><span><i className={available?'connected':''}/>{available?t('עדכון מחזורי מחובר','PERIODIC FEED CONNECTED'):t('ממתין לנתונים תקינים','AWAITING VALID DATA')}</span><bdi>{String(stockCount(items)).padStart(2,'0')} {t('מניות במדגם','SAMPLED STOCKS')}</bdi><span>{marketOpen === true ? t('מסחר פתוח','MARKET OPEN') : marketOpen === false ? t('מחוץ למסחר','OUTSIDE SESSION') : t('מצב שוק לא ידוע','SESSION UNKNOWN')}</span></div>
+    <div className="system-network-readout"><span><i className={available?'connected':''}/>{available?t('עדכון מחזורי מחובר','PERIODIC FEED CONNECTED'):t('ממתין לנתונים תקינים','AWAITING VALID DATA')}</span><bdi>{sampleCount} {t('מניות במדגם','SAMPLED STOCKS')}</bdi><span>{marketOpen === true ? t('מסחר פתוח','MARKET OPEN') : marketOpen === false ? t('מחוץ למסחר','OUTSIDE SESSION') : t('מצב שוק לא ידוע','SESSION UNKNOWN')}</span></div>
     {flat}
     <div className="system-state-key" aria-label={t('מקרא מצב המניות','Stock state legend')}>{(['blocked','waiting','uncertain','open'] as const).map(s=><span className={`system-state-badge state-${s}`} key={s}><bdi aria-hidden="true">{STATE_SYMBOLS[s]}</bdi>{STATE_LABELS[s][he?0:1]}</span>)}</div>
     <div className="system-network-legend"><span><i className="system-legend-event"/>{t('סימון מניה: שינוי מתועד שנקלט — לא מצב Worker בזמן אמת', 'Stock marker: a received retained-data change — not real-time worker activity')}</span></div>
