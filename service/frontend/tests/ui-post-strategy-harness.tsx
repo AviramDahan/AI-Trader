@@ -40,7 +40,9 @@ window.fetch=async(input,options)=>{
   if(url.pathname.endsWith('/scanner/research')){
     if(failResearch)throw new Error('Synthetic research unavailable')
     return Response.json({...fixtureResearch,generated_at:now(),window_hours:Number(url.searchParams.get('hours')||48),
-      counts:{},rejection_reasons:{},records:[rejected,...fixtureResearch.records]})
+      counts:{},rejection_reasons:{},rejection_stages:{},outcome_groups:[],
+      outcomes:fixtureResearch.outcomes.map(o=>({...o,side:'long',status:o.remaining_pct?'open':'closed'})),
+      records:[rejected,...fixtureResearch.records]})
   }
   if(url.pathname.endsWith('/scanner/strategy-performance'))return Response.json({...performance,as_of:now()})
   throw new Error('Unexpected application request blocked by synthetic harness')
@@ -63,4 +65,6 @@ function Harness(){
     </MemoryRouter>
   </ThemeContext.Provider></LanguageContext.Provider>
 }
-createRoot(document.getElementById('root')!).render(<Harness/>)
+const root=createRoot(document.getElementById('root')!)
+root.render(<Harness/>)
+if(import.meta.hot)import.meta.hot.dispose(()=>root.unmount())

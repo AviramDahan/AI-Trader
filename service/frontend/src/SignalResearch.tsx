@@ -7,6 +7,13 @@ import { targetFacts, targetReasonCode } from './targetDiagnostics'
 import { RetainedDiscovery } from './RetainedDiscovery'
 
 type Row = Record<string, any>
+export function validResearchPayload(value: unknown): value is Row {
+  const data=value as Row|null
+  return !!data && Array.isArray(data.records) && Array.isArray(data.outcomes) &&
+    Array.isArray(data.outcome_groups) && !!data.rejection_stages && typeof data.rejection_stages==='object' &&
+    data.records.every((row:Row)=>row && ['target_checks','reviews','signals','orders'].every(key=>Array.isArray(row[key]))) &&
+    data.outcomes.every((row:Row)=>row && Array.isArray(row.exits))
+}
 const value = (v: any, suffix = '') => v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(2)}${suffix}` : '—'
 const reasonText = (reason: string, he: boolean) => reasonTitle(reason,he)
 const candidateReason = (row: Row, he: boolean) => {
@@ -105,7 +112,7 @@ export function SignalResearch({ he, mode = 'research' }: { he: boolean, mode?: 
     setError('')
     const poller=createReadPoller<Row>({
       url:`${API_ORIGIN}/api/scanner/research?hours=${hours}`,intervalMs:60000,
-      onData:result=>{if(!Array.isArray(result.records))throw new Error('Invalid research response');setData(result);setError('')},
+      onData:result=>{if(!validResearchPayload(result))throw new Error('Invalid research response');setData(result);setError('')},
       onError:setError,
     })
     poller.start()
