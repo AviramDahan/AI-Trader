@@ -9,6 +9,7 @@ Only encrypted snapshots and sanitized PASS receipts leave disposable CI RAM.
 from __future__ import annotations
 
 import copy
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -478,8 +479,12 @@ def main():
     if len(sys.argv) != 2 or sys.argv[1] not in PHASES:
         raise SystemExit('exact_intraday_test_phase_required')
     phase = sys.argv[1]
-    bootstrap(phase)
-    run(phase)
+    # Imported application/fixture libraries may log to stdout. Preserve every
+    # message on stderr; stdout is the strict one-receipt-per-phase protocol.
+    # Exceptions still propagate, so a failed phase emits no PASS receipt.
+    with redirect_stdout(sys.stderr):
+        bootstrap(phase)
+        run(phase)
     print(json.dumps(dict(version=1, phase=phase, status='PASS',
         build_sha=os.environ.get('BUILD_SHA'), probe_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         **DETAILS), sort_keys=True, allow_nan=False))
