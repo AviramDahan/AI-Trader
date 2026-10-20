@@ -479,6 +479,8 @@ def _enqueue_order_execution_update(cur, order_id: int) -> None:
 def record_signal(signal: dict[str, Any], candidate: dict[str, Any], decision: dict[str, Any],
                   market_context: dict[str, Any], scan_id: str) -> dict[str, Any]:
     """Validate and persist a strong signal. Signal creation never fills an order."""
+    if candidate.get('_intraday_provisional'):
+        raise ValueError('intraday_confirmation_not_valid')
     action = str(signal.get("action") or "").upper()
     if action not in {"BUY", "SELL", "HOLD", "SHORT"}:
         raise ValueError("Invalid signal action")

@@ -1,0 +1,232 @@
+name: Entry intraday format10 application images (no deployment)
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  images:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'codex/entry-evidence-intraday'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Build exact old74d, immutable bridge and candidate
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          old=74d09b2dba654bf29136a9b13020f36903c5dd3d
+          git worktree add --detach /tmp/intraday-old "$old"
+          docker build --build-arg BUILD_SHA="$old" -t entry-intraday-old:test /tmp/intraday-old
+          docker build --build-arg BUILD_SHA="$sha" --build-arg ENTRY_DISCOVERY_ROLE=bridge -t entry-intraday-bridge:test .
+          docker build --build-arg BUILD_SHA="$sha" --build-arg ENTRY_DISCOVERY_ROLE=candidate -t entry-intraday-candidate:test .
+          mkdir -p /tmp/intraday-proof /tmp/intraday-artifacts
+          chmod 777 /tmp/intraday-proof
+          # Plain fixture checkpoints and decrypted data stay on disposable RAM.
+          sudo mount -t tmpfs -o size=64M,mode=0777 tmpfs /tmp/intraday-proof
+          docker image inspect entry-intraday-old:test entry-intraday-bridge:test entry-intraday-candidate:test > /tmp/intraday-image-inspect.json
+          python - <<'PY'
+          import hashlib,json,os,subprocess
+          from pathlib import Path
+          sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          tree=subprocess.check_output(['git','rev-parse','HEAD^{tree}'],text=True).strip()
+          images=json.loads(Path('/tmp/intraday-image-inspect.json').read_text())
+          result=[]
+          for role,image in zip(('old','bridge','candidate'),images):
+              build=next(v.split('=',1)[1] for v in image['Config']['Env'] if v.startswith('BUILD_SHA='))
+              assert build==('74d09b2dba654bf29136a9b13020f36903c5dd3d' if role=='old' else sha)
+              assert image['Config']['User']=='10001:10001'
+              result.append({'role':role,'image_id':image['Id'],'bytes':image['Size'],'build_sha':build})
+          assert len({image['image_id'] for image in result})==3
+          Path('/tmp/intraday-artifacts/images.json').write_text(json.dumps(result,indent=2))
+          files=['scripts/entry_intraday_compatibility_probe.py','scripts/entry_discovery_compatibility_probe.py',
+                 '.github/workflows/entry-intraday-compatibility.yml','Dockerfile',
+                 'service/server/entry_discovery_capabilities.py','service/server/entry_intraday.py',
+                 'service/server/intraday_volume.py','service/server/entry_discovery.py',
+                 'service/server/entry_strategy_execution.py','service/server/recovery_state.py',
+                 'service/server/single_target_recovery.py','service/server/scanner_engine.py',
+                 'service/server/tests/test_entry_intraday.py','service/server/tests/test_intraday_volume.py',
+                 'service/server/tests_pg/test_recovery_holds.py']
+          receipt={'version':1,'source_commit':sha,'source_tree':tree,
+              'run_id':os.environ['GITHUB_RUN_ID'],'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],
+              'repository':os.environ['GITHUB_REPOSITORY'],
+              'file_sha256':{p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in files},
+              'scope':'SYNTHETIC_BINARY_LIFECYCLE_NOT_MARKET_AI_OR_PRODUCTION_PROOF',
+              'deployment_gate_unchanged':True}
+          Path('/tmp/intraday-artifacts/source-proof.json').write_text(json.dumps(receipt,indent=2))
+          PY
+      - name: Ordered real-image current-DB guards and RAM-only encrypted format10 restore
+        run: |
+          set -euo pipefail
+          docker network create --internal entry-intraday-test
+          docker run -d --name entry-discovery-pg --network entry-intraday-test \
+            -e POSTGRES_USER=isolated -e POSTGRES_PASSWORD=disposable -e POSTGRES_DB=isolated_entry postgres:17-bookworm
+          for i in $(seq 1 30); do docker exec entry-discovery-pg pg_isready -U isolated && break; sleep 2; done
+          docker exec entry-discovery-pg pg_isready -U isolated
+          docker exec entry-discovery-pg createdb -U isolated restored_intraday
+          probe() {
+            fixtures="$PWD/service/server"
+            if test "$1" = entry-intraday-old:test; then fixtures=/tmp/intraday-old/service/server; fi
+            docker run --rm --network entry-intraday-test \
+              -e DATABASE_URL="postgresql://isolated:disposable@entry-discovery-pg:5432/${3:-isolated_entry}" \
+              -e STOCK_SCANNER_EXIT_STRATEGY=single -e STOCK_SCANNER_SINGLE_TARGET_V2_ENABLED=true \
+              -e STOCK_SCANNER_MAX_TOTAL_EXPOSURE=10000 \
+              -e STOCK_SCANNER_SINGLE_BREAKOUT_ENABLED=true -e STOCK_SCANNER_FULL_BAR_ENTRY_ENABLED=true \
+              -e STOCK_SCANNER_ENTRY_PRICE_RETRY_ENABLED=true \
+              -v "$fixtures/tests:/fixtures/tests:ro" -v "$fixtures/tests_pg:/fixtures/tests_pg:ro" \
+              -v "$PWD/scripts/entry_intraday_compatibility_probe.py:/probe.py:ro" \
+              -v /tmp/intraday-proof:/proof \
+              --entrypoint python "$1" /probe.py "$2" | tee -a /tmp/intraday-artifacts/results.jsonl
+          }
+          probe entry-intraday-bridge:test identity_bridge
+          probe entry-intraday-candidate:test identity_candidate
+          probe entry-intraday-old:test old_seed
+          probe entry-intraday-candidate:test candidate_preserve_v1
+          probe entry-intraday-candidate:test candidate_intraday
+          probe entry-intraday-bridge:test bridge_creation_blocked
+          probe entry-intraday-bridge:test bridge_pending
+          probe entry-intraday-bridge:test bridge_restart
+          probe entry-intraday-candidate:test candidate_emergency
+          probe entry-intraday-bridge:test bridge_emergency
+          probe entry-intraday-old:test old_reader_refused10
+          probe entry-intraday-bridge:test bridge_restore10 restored_intraday
+          probe entry-intraday-bridge:test bridge_restored_exits restored_intraday
+          # SAME source DB throughout; the supported bridge never rewinds it.
+          probe entry-intraday-bridge:test bridge_resume
+          probe entry-intraday-bridge:test bridge_expiry
+          probe entry-intraday-bridge:test bridge_final
+          python - <<'PY'
+          import importlib.util,json
+          from pathlib import Path
+          spec=importlib.util.spec_from_file_location('probe','scripts/entry_intraday_compatibility_probe.py')
+          module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+          source=json.loads(Path('/tmp/intraday-artifacts/source-proof.json').read_text())
+          receipts=[json.loads(line) for line in Path('/tmp/intraday-artifacts/results.jsonl').read_text().splitlines()]
+          assert [r['phase'] for r in receipts]==list(module.PHASES)
+          for r in receipts:
+              assert r['status']=='PASS'
+              assert r['probe_sha256']==source['file_sha256']['scripts/entry_intraday_compatibility_probe.py']
+              assert r['build_sha']==(module.OLD_SHA if r['phase'] in ('old_seed','old_reader_refused10') else source['source_commit'])
+          Path('/tmp/intraday-artifacts/ordered-proof.json').write_text(json.dumps({
+              'source_commit':source['source_commit'],'phases':list(module.PHASES),'actual_pass_count':len(receipts),
+              'old_reader_source':module.OLD_SHA,'recovery_format':10,'same_source_db_no_rewind':True,
+              'no_production_activation':True},indent=2))
+          PY
+      - name: Retain and reload ONLY the actual tested immutable bridge within250MiB
+        run: |
+          set -euo pipefail
+          docker save entry-intraday-bridge:test | gzip -1 > /tmp/entry-intraday-bridge-tested.tar.gz
+          fallback=NOT_NEEDED
+          if test "$(stat -c %s /tmp/entry-intraday-bridge-tested.tar.gz)" -gt 262144000; then
+            fallback=FAILED_OR_TIMED_OUT
+            if timeout 240s bash -o pipefail -c 'docker save entry-intraday-bridge:test | xz -T2 -6 > /tmp/entry-intraday-bridge-tested.tar.xz'; then
+              fallback=COMPLETE
+            fi
+          fi
+          export BRIDGE_XZ_FALLBACK="$fallback"
+          python - <<'PY'
+          import hashlib,json,os,shutil,subprocess
+          from pathlib import Path
+          bridge=next(i for i in json.loads(Path('/tmp/intraday-artifacts/images.json').read_text()) if i['role']=='bridge')
+          def describe(path,compression):
+              with path.open('rb') as stream: digest=hashlib.file_digest(stream,'sha256').hexdigest()
+              return {'filename':path.name,'compression':compression,'bytes':path.stat().st_size,'sha256':digest,'status':'COMPLETE'}
+          attempts=[describe(Path('/tmp/entry-intraday-bridge-tested.tar.gz'),'gzip -1')]
+          fallback=os.environ['BRIDGE_XZ_FALLBACK']
+          if fallback=='COMPLETE': attempts.append(describe(Path('/tmp/entry-intraday-bridge-tested.tar.xz'),'xz -T2 -6'))
+          elif fallback!='NOT_NEEDED': attempts.append({'filename':'entry-intraday-bridge-tested.tar.xz',
+              'compression':'xz -T2 -6','status':fallback,'maximum_seconds':240,'not_a_verified_archive':True})
+          selected=min((a for a in attempts if a['status']=='COMPLETE'),key=lambda a:a['bytes'])
+          archive=Path('/tmp')/selected['filename'];retained=selected['bytes']<=250*1024*1024
+          loaded_id=None
+          if retained:
+              decoder='xz' if selected['compression'].startswith('xz') else 'gzip'
+              subprocess.run([decoder,'-t',str(archive)],check=True,timeout=120)
+              subprocess.run(['bash','-o','pipefail','-c',decoder+' -dc "$1" | docker load','_',str(archive)],
+                  check=True,capture_output=True,timeout=120)
+              loaded_id=subprocess.check_output(['docker','image','inspect','entry-intraday-bridge:test','--format','{{.Id}}'],text=True).strip()
+              assert loaded_id==bridge['image_id']
+              code="import json,os,pathlib,entry_discovery_capabilities as c,entry_discovery as d; p=pathlib.Path(c.__file__); x=c.capabilities(); assert c.BUILD_ROLE=='bridge' and not c.creation_allowed() and d.enabled_ids()==(); assert 10 in x['snapshot_formats'] and 'entry_discovery_intraday_v1' in x['audit_versions'] and 'independent_entry_execution_intraday_v1' in x['execution_versions']; assert os.geteuid()==10001 and p.stat().st_uid==p.parent.stat().st_uid==0 and p.stat().st_mode&0o222==0 and not os.access(p.parent,os.W_OK); print(json.dumps({'build_sha':os.environ['BUILD_SHA'],'capabilities':x,'immutable_file_and_parent_verified':True}))"
+              flags=['STOCK_SCANNER_VCP_DISCOVERY_ENABLED','STOCK_SCANNER_MOMENTUM_BURST_ENABLED',
+                  'STOCK_SCANNER_PEAD_ENABLED','STOCK_SCANNER_PULLBACK_RECLAIM_ENABLED','STOCK_SCANNER_RS_LEADER_ENABLED',
+                  'STOCK_SCANNER_INDEPENDENT_INTRADAY_ENABLED','STOCK_SCANNER_INTRADAY_RVOL_CONTEXT_ENABLED']
+              command=['docker','run','--rm','--network','none','-e','ENTRY_DISCOVERY_ROLE=candidate']
+              for flag in flags:command+=['-e',flag+'=true']
+              command+=['--entrypoint','python','entry-intraday-bridge:test','-c',code]
+              capability=json.loads(subprocess.check_output(command,text=True,timeout=60))
+              assert capability['build_sha']==bridge['build_sha']
+              Path('/tmp/intraday-artifacts/loaded-bridge-capability.json').write_text(json.dumps(capability,indent=2))
+          manifest={'archive_bytes':selected['bytes'],'archive_sha256':selected['sha256'],'bound_bytes':250*1024*1024,
+              'compression':selected['compression'],'retained_filename':archive.name if retained else None,
+              'compression_attempts':attempts,'xz_fallback_maximum_seconds':240,
+              'verified_loaded_image_id':loaded_id,'loaded_capability_verified':retained,
+              'status':'TESTED_FORMAT10_BRIDGE_ARCHIVE_RETAINED_ONE_DAY' if retained else 'ROLLBACK_ARTIFACT_NOT_RETAINED',
+              'source_commit':bridge['build_sha'],'image_identity_file':'images.json','recovery_format':10,
+              'rebuild_is_exact_binary_reproduction':False,
+              'activation_gate':'BLOCKED until this exact archive/source/config/canonical runnable chain is downloaded, independently verified and candidate-host pinned; old format9 gate is insufficient',
+              'retained_claim_requires_successful_workflow_upload':True,'no_production_activation':True}
+          Path('/tmp/intraday-artifacts/rollback-artifact.json').write_text(json.dumps(manifest,indent=2))
+          if retained:shutil.move(str(archive),'/tmp/intraday-artifacts/'+archive.name)
+          PY
+      - uses: actions/upload-artifact@v4
+        id: format10_artifact
+        if: always()
+        with:
+          name: entry-intraday-format10-sanitized-image-proof-and-bounded-bridge
+          path: /tmp/intraday-artifacts/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Fail closed unless all16 phases AND the actual retained loaded format10 bridge passed
+        if: always()
+        env:
+          ARTIFACT_UPLOAD_OUTCOME: ${{ steps.format10_artifact.outcome }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib,importlib.util,json,os,subprocess
+          from pathlib import Path
+          base=Path('/tmp/intraday-artifacts')
+          spec=importlib.util.spec_from_file_location('probe','scripts/entry_intraday_compatibility_probe.py')
+          module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+          source=json.loads((base/'source-proof.json').read_text())
+          ordered=json.loads((base/'ordered-proof.json').read_text())
+          manifest=json.loads((base/'rollback-artifact.json').read_text())
+          loaded=json.loads((base/'loaded-bridge-capability.json').read_text())
+          bridge=next(i for i in json.loads((base/'images.json').read_text()) if i['role']=='bridge')
+          receipts=[json.loads(line) for line in (base/'results.jsonl').read_text().splitlines()]
+          sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          assert os.environ['ARTIFACT_UPLOAD_OUTCOME']=='success'
+          assert ordered['actual_pass_count']==16 and ordered['phases']==list(module.PHASES)
+          assert [r['phase'] for r in receipts]==list(module.PHASES)
+          assert all(r['status']=='PASS' for r in receipts)
+          assert source['source_commit']==ordered['source_commit']==bridge['build_sha']==manifest['source_commit']==loaded['build_sha']==sha
+          for row in receipts:
+              assert row['build_sha']==(module.OLD_SHA if row['phase'] in ('old_seed','old_reader_refused10') else sha)
+              assert row['probe_sha256']==source['file_sha256']['scripts/entry_intraday_compatibility_probe.py']
+          assert manifest['status']=='TESTED_FORMAT10_BRIDGE_ARCHIVE_RETAINED_ONE_DAY'
+          assert manifest['loaded_capability_verified'] is True
+          assert manifest['verified_loaded_image_id']==bridge['image_id']
+          assert manifest['recovery_format']==ordered['recovery_format']==10
+          assert manifest['bound_bytes']==250*1024*1024 and 0<manifest['archive_bytes']<=manifest['bound_bytes']
+          caps=loaded['capabilities']
+          assert loaded['immutable_file_and_parent_verified'] is True
+          assert caps['build_role']=='bridge' and caps['independent_creation'] is False
+          assert 10 in caps['snapshot_formats'] and 'entry_discovery_intraday_v1' in caps['audit_versions']
+          assert 'independent_entry_execution_intraday_v1' in caps['execution_versions']
+          name=manifest['retained_filename']
+          assert name in ('entry-intraday-bridge-tested.tar.gz','entry-intraday-bridge-tested.tar.xz')
+          archive=base/name
+          assert archive.stat().st_size==manifest['archive_bytes']
+          with archive.open('rb') as stream:assert hashlib.file_digest(stream,'sha256').hexdigest()==manifest['archive_sha256']
+          print(json.dumps({'status':'PASS','source_commit':sha,'actual_binary_phases':16,
+              'tested_retained_loaded_format10_bridge':True,'production_activation':False}))
+          PY
+      - name: Remove only disposable CI resources
+        if: always()
+        run: |
+          docker rm -f entry-discovery-pg || true
+          docker network rm entry-intraday-test || true
+          sudo umount /tmp/intraday-proof || true

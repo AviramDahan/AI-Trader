@@ -49,6 +49,52 @@ TARGET_REFILL_MAX_CHECKS = 64
 TARGET_REFILL_SECONDS = 120
 
 
+class _ScanVolumeEvidence:
+    """Optional measured context; at most six distinct acquisitions per scan.
+
+    Cache-only reads do not consume acquisition slots. The post-fetch cache
+    evaluation uses its actual later clock, never backdates provider availability.
+    Baseline/daily routes never acquire a new mandatory volume gate.
+    """
+    def __init__(self, *, enabled=False, fetcher=None, history_cache=None):
+        self.enabled = enabled is True
+        self.fetcher = fetcher
+        self.history_cache = history_cache
+        self.acquired = set()
+
+    def attach(self, ticker, quote):
+        if not self.enabled or not hasattr(quote, 'evidence'):
+            return quote
+        from intraday_volume import get_evidence, unknown
+        try:
+            args = dict(current_observed_at=quote.source_observed_at,
+                completed_before=quote.completed_before, current_source=quote.volume_source,
+                enabled=True, fetcher=self.fetcher, history_cache=self.history_cache)
+            result = get_evidence(ticker, quote.volume_frame,
+                decision_at=datetime.now(timezone.utc), acquire=False, **args)
+            if result.get('reason') in {'UNKNOWN_HISTORY_CACHE_MISS'}:
+                if ticker not in self.acquired and len(self.acquired) < 6:
+                    self.acquired.add(ticker)
+                    get_evidence(ticker, quote.volume_frame,
+                        decision_at=datetime.now(timezone.utc), acquire=True, **args)
+                    # The immutable current quote/bar cutoff stays unchanged.
+                    result = get_evidence(ticker, quote.volume_frame,
+                        decision_at=datetime.now(timezone.utc), acquire=False, **args)
+                else:
+                    result = unknown('UNKNOWN_SCAN_ACQUISITION_BUDGET')
+        except Exception as exc:
+            LOG.warning('intraday_volume_evidence_failed:%s', type(exc).__name__)
+            result = unknown('UNKNOWN_COLLECTOR_FAILURE')
+        quote.evidence['relative_volume'] = result
+        quote.evidence['same_time_of_day_relative_volume'] = result.get('same_time_of_day_relative_volume')
+        quote.evidence['volume_comparison_status'] = result.get('volume_comparison_status', result.get('reason'))
+        return quote
+
+
+def _intraday_history(ticker, **kwargs):
+    return yf.Ticker(ticker).history(**kwargs)
+
+
 class _TargetRefill:
     """Keep the original shortlist first; replace only pre-AI target failures.
 
@@ -193,6 +239,8 @@ def settings() -> dict[str, Any]:
         "telegram_enabled": os.getenv("STOCK_SCANNER_TELEGRAM_ENABLED", "false").lower() == "true",
         "telegram_entry_alerts": os.getenv("STOCK_SCANNER_TELEGRAM_ENTRY_ALERTS", "false").lower() == "true",
         "telegram_level_alerts": os.getenv("STOCK_SCANNER_TELEGRAM_LEVEL_ALERTS", "true").lower() == "true",
+        "intraday_rvol_context": os.getenv("STOCK_SCANNER_INTRADAY_RVOL_CONTEXT_ENABLED", "false").lower() == "true",
+        "independent_intraday_enabled": os.getenv("STOCK_SCANNER_INDEPENDENT_INTRADAY_ENABLED", "false").lower() == "true",
     }
     from entry_discovery import enabled_ids
     independent = enabled_ids()
@@ -337,6 +385,7 @@ def _download_history(symbols: list[str], *, period: str = '6mo') -> dict[str, p
                 frame = data[symbol] if isinstance(data.columns, pd.MultiIndex) else data
                 frame = frame[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close", "High", "Low", "Volume"])
                 if len(frame) >= 65:
+                    frame.attrs['price_basis'] = 'yahoo_auto_adjusted_v1'
                     histories[symbol] = frame
                 else:
                     try:
@@ -364,6 +413,8 @@ def _read_history_cache(*, cache_path=None) -> tuple[dict[str, pd.DataFrame], fl
             frame = pd.read_json(StringIO(encoded if payload['schema'] == 1 else encoded['data']), orient="split")
             frame.index = pd.to_datetime(frame.index)
             frame.attrs['history_fetched_at'] = float(observed)
+            if payload['schema'] == 2 and encoded.get('price_basis') == 'yahoo_auto_adjusted_v1':
+                frame.attrs['price_basis'] = encoded['price_basis']
             frame = _completed_daily(frame)
             if len(frame) >= 65:
                 histories[symbol] = frame
@@ -377,6 +428,7 @@ def _write_history_cache(histories: dict[str, pd.DataFrame], fetched_at: float, 
     cache_path.parent.mkdir(exist_ok=True)
     payload = {"schema": 2, "fetched_at": fetched_at, "histories": {
         symbol: {'fetched_at': frame.attrs.get('history_fetched_at', fetched_at),
+                 'price_basis': frame.attrs.get('price_basis') if frame.attrs.get('price_basis') == 'yahoo_auto_adjusted_v1' else None,
                  'data': frame[["Open", "High", "Low", "Close", "Volume"]].to_json(
             orient="split", date_format="iso", double_precision=10)}
         for symbol, frame in histories.items() if len(frame) >= 65
@@ -746,7 +798,8 @@ def ai_review(candidate: dict[str, Any], news: list[dict[str, Any]], market_cont
     facts=price_facts(candidate,time_context)
     time_context['entry_price_facts']=facts
     excluded = {'single_target_source', '_strategy_projection', '_reference_context',
-                '_intraday_evidence', 'review_evidence_context', 'price_as_of', 'history_fetched_at',
+                '_intraday_evidence', '_intraday_setups', '_intraday_provisional', '_intraday_confirmation_results',
+                'review_evidence_context', 'price_as_of', 'history_fetched_at',
                 'entry','quote_at','daily_reference_close','daily_reference_as_of','validated_target_plan', *DAILY_FIELDS}
     if not sec_current:
         excluded.update({'sec_intelligence','sec_snapshot_id','sec_evidence_ids','sec_adjustment',
@@ -795,16 +848,29 @@ def ai_review(candidate: dict[str, Any], news: list[dict[str, Any]], market_cont
                    "invented confirmation or a mandatory BUY. HOLD and all common safeguards remain valid.")
     messages = [{"role": "system", "content": system},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(',', ':'), allow_nan=False)}]
+    # Private factual journal, not a new decision gate or a reconstructed prompt.
+    trace = final_ai.TRACE.get()
+    if trace is not None:
+        try:
+            from decision_input_facts import capture as capture_input
+            trace['input_facts'] = capture_input(payload, messages[1]['content'], observed_at=observed.isoformat())
+            final_ai.persist(trace)  # separate idempotent review_input stage
+        except Exception as exc:
+            LOG.warning('decision_input_capture_failed:%s', type(exc).__name__)
     return final_ai.review(messages, Validator(facts,
         lambda value: validate_ai_decision(value, candidate["technical_direction"])))
 
 
 def current_intraday_quote(ticker: str) -> tuple[float, str] | None:
     requested_at = datetime.now(timezone.utc)
-    frame = yf.Ticker(ticker).history(period="1d", interval="1m", prepost=False, auto_adjust=True, timeout=15)
+    enabled = (os.getenv('STOCK_SCANNER_INTRADAY_RVOL_CONTEXT_ENABLED', 'false').lower() == 'true' or
+               os.getenv('STOCK_SCANNER_INDEPENDENT_INTRADAY_ENABLED', 'false').lower() == 'true')
+    frame = yf.Ticker(ticker).history(period="1d", interval="1m", prepost=False, auto_adjust=True,
+        timeout=15, **({'actions':True} if enabled else {}))
     observed_at = datetime.now(timezone.utc)
     if frame is None or frame.empty:
         return None
+    volume_frame = frame
     frame = frame.dropna(subset=["Close"])
     if frame.empty:
         return None
@@ -816,8 +882,14 @@ def current_intraday_quote(ticker: str) -> tuple[float, str] | None:
     if age < -60 or age > 12 * 60 or not math.isfinite(price) or price <= 0:
         return None
     from review_evidence import ObservedQuote, completed_observation
-    return ObservedQuote(price, timestamp.to_pydatetime().astimezone(timezone.utc).isoformat(),
-                         completed_observation(frame, observed_at, completed_before=requested_at))
+    evidence = completed_observation(frame, observed_at, completed_before=requested_at)
+    if not enabled:
+        return ObservedQuote(price, timestamp.to_pydatetime().astimezone(timezone.utc).isoformat(), evidence)
+    from intraday_volume import SOURCE
+    evidence['price_basis'] = 'yahoo_auto_adjusted_v1'
+    return ObservedQuote(price, timestamp.to_pydatetime().astimezone(timezone.utc).isoformat(), evidence,
+        volume_frame=volume_frame, source_observed_at=observed_at, completed_before=requested_at,
+        volume_source={**SOURCE, 'interval': '1m'})
 
 
 def regular_session_open():
@@ -1148,6 +1220,9 @@ def run_scan() -> dict[str, Any]:
                                 record_signal, set_service_status)
     initialize_runtime()
     cfg = settings()
+    volume_evidence = _ScanVolumeEvidence(
+        enabled=cfg.get('intraday_rvol_context', False) or cfg.get('independent_intraday_enabled', False),
+        fetcher=_intraday_history)
     state = read_state()
     scan_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     state.update(mode="paper", agent="us-stock-scanner", model=final_ai.configuration()[1], status="scanning",
@@ -1275,12 +1350,36 @@ def run_scan() -> dict[str, Any]:
             if duplicate_in_cooldown(cooldowns, ticker, candidate["technical_direction"], cfg["cooldown_hours"]):
                 rejected.append({"ticker": ticker, "reason": "pre_duplicate_cooldown"})
                 continue
+            if candidate.get('_intraday_setups'):
+                from entry_discovery import (needs_intraday_volume, confirm_intraday_candidate,
+                    IntradayConfirmationError, strategy_ids)
+                confirm_at = datetime.now(timezone.utc)
+                if needs_intraday_volume(candidate, getattr(quote, 'evidence', {}),
+                        price=quote[0], quote_at=quote[1], decision_at=confirm_at):
+                    quote = volume_evidence.attach(ticker, quote)
+                try:
+                    candidate = confirm_intraday_candidate(candidate, getattr(quote, 'evidence', {}),
+                        price=quote[0], quote_at=quote[1], decision_at=datetime.now(timezone.utc))
+                    confirmation = candidate.get('_intraday_confirmation_results', {})
+                except IntradayConfirmationError as exc:
+                    for row in discovery_observations:
+                        if row['ticker'] == ticker:
+                            row['intraday_confirmation_results'] = exc.results
+                    rejected.append({'ticker': ticker, 'reason': 'pre_intraday_confirmation_not_valid'})
+                    continue
+                for row in discovery_observations:
+                    if row['ticker'] == ticker:
+                        row['intraday_confirmation_results'] = confirmation
+                        row['candidate_strategy_ids'] = strategy_ids(candidate)
             try:
                 plan = _candidate_target_plan(candidate, candidate["technical_direction"], quote[0], cfg, quote_at=quote[1])
             except ValueError as exc:
                 rejected.append({"ticker": ticker, "reason": "pre_" + str(exc)})
                 selection.target_failed(is_refill)
                 continue
+            if cfg.get('intraday_rvol_context') and 'relative_volume' not in getattr(quote, 'evidence', {}):
+                if not is_refill:
+                    quote = volume_evidence.attach(ticker, quote)
             if is_refill:
                 selection.target_passed()
                 shortlist.append(candidate)
@@ -1302,6 +1401,8 @@ def run_scan() -> dict[str, Any]:
                     rejected.append({'ticker':ticker, 'reason':'pre_refill_deferred'})
                     continue
             # Persist eligibility before calling a provider; the connection closes here.
+            if cfg.get('intraday_rvol_context') and 'relative_volume' not in getattr(quote, 'evidence', {}):
+                quote = volume_evidence.attach(ticker, quote)
             review_candidate = dict(candidate, daily_reference_close=candidate.get('entry'),
                 daily_reference_as_of=candidate.get('price_as_of'), entry=quote[0],
                 quote_at=quote[1], validated_target_plan=plan,

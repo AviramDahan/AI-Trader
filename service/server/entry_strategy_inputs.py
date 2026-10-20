@@ -116,6 +116,8 @@ def load_context(symbols, histories, universe, cfg, *, decision_at=None):
         return {}
     at = decision_at or datetime.now(timezone.utc)
     context = dict(expected_session=stock_scanner.latest_completed_session(at).isoformat(), by_ticker={})
+    from entry_intraday import enabled as intraday_enabled
+    intraday_on = intraday_enabled(cfg)
     # Use the same discovery prefix regardless of which other routes are ON:
     # enabling VCP must not silently change another route's EMA seed/history.
     # The original baseline frames remain the separate six-month acquisition.
@@ -128,12 +130,16 @@ def load_context(symbols, histories, universe, cfg, *, decision_at=None):
         # An unavailable discovery input is UNKNOWN, not an implicit fallback
         # to a shorter/differently seeded frame. Baseline still uses histories.
         context['by_ticker'][symbol] = dict(history_frame=long.get(symbol))
+        if intraday_on:
+            context['by_ticker'][symbol]['price_basis'] = getattr(long.get(symbol), 'attrs', {}).get('price_basis')
     benchmark = long.get('SPY')
     if benchmark is None:
         benchmark = histories.get('SPY')
     if benchmark is not None:
         context.update(benchmark_frame=benchmark,
                        benchmark_observed_at=benchmark.attrs.get('history_fetched_at'))
+        if intraday_on:
+            context['benchmark_price_basis'] = benchmark.attrs.get('price_basis')
     if 'PEAD' in ids:
         events, coverage = load_verified_earnings(symbols, datetime.now(timezone.utc))
         context['earnings_coverage'] = coverage

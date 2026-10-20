@@ -94,7 +94,7 @@ def sanitize(data):
 
 
 def validate(data):
-    if data.get('recovery_format') not in (1,2,3,4,5,6,7,8,9): raise ValueError('not_a_recovery_snapshot')
+    if data.get('recovery_format') not in (1,2,3,4,5,6,7,8,9,10): raise ValueError('not_a_recovery_snapshot')
     if data['recovery_format']!=data.get('version'): raise ValueError('recovery_format_version_mismatch')
     if set(data.get('runtime_policy',{}))!=set(POLICY_DEFAULTS):
         raise ValueError('recovery_runtime_policy_missing_or_unknown')
@@ -178,7 +178,7 @@ def export_postgres(url):
 
 def restore(data,url,scanner_token):
     validate(data)
-    if data['recovery_format'] not in (2,3,4,5,6,7,8,9): raise ValueError('legacy_hold_coverage_unknown_restore_refused')
+    if data['recovery_format'] not in (2,3,4,5,6,7,8,9,10): raise ValueError('legacy_hold_coverage_unknown_restore_refused')
     if data['runtime_policy']!=runtime_policy():
         raise ValueError('restore_runtime_policy_mismatch_configure_saved_policy_before_import')
     return active.import_data(data,url,allow_defaults=True,scanner_token=scanner_token)

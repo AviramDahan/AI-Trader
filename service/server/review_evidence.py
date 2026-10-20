@@ -33,9 +33,16 @@ def unknown(reason):
 
 class ObservedQuote(tuple):
     """Keep the existing two-value quote interface; attach bounded factual evidence."""
-    def __new__(cls,price,at,evidence):
+    def __new__(cls,price,at,evidence, *, volume_frame=None, source_observed_at=None,
+                completed_before=None, volume_source=None):
         quote=super().__new__(cls,(price,at))
         quote.evidence=copy.deepcopy(evidence)
+        # Private in-memory input, never part of the model/journal JSON. The
+        # explicit producer metadata is required; a DataFrame is not provenance.
+        quote.volume_frame=volume_frame
+        quote.source_observed_at=source_observed_at
+        quote.completed_before=completed_before
+        quote.volume_source=copy.deepcopy(volume_source)
         return quote
 
 
@@ -139,6 +146,13 @@ def context(candidate,observed_at,expected_session):
         intraday=unknown('UNKNOWN_NO_OBSERVATION')
     except (ValueError,TypeError):
         intraday=unknown('UNKNOWN_INVALID_OR_FUTURE_OBSERVATION')
+    if 'relative_volume' in intraday:
+        from intraday_volume import public_evidence
+        saved = public_evidence(intraday['relative_volume'], decision_at=now,
+            completed_through=intraday['bars'][-1]['end_at'] if intraday['bars'] else None)
+        intraday['relative_volume'] = saved
+        intraday['same_time_of_day_relative_volume'] = saved.get('same_time_of_day_relative_volume')
+        intraday['volume_comparison_status'] = saved['volume_comparison_status']
     plan=candidate.get('validated_target_plan') or {}
     high=plan.get('completed_high')
     for b in intraday['bars']:
