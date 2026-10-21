@@ -37,7 +37,7 @@ def test_market_scope_review_persists_without_repeat_or_trading(pg, monkeypatch,
         related=False, title_he="הבנק המרכזי פרסם החלטת מדיניות",
         summary_he="הבנק פרסם את החלטתו והסביר את הרקע הכלכלי.",
         interpretation_he="זהו מידע כלכלי ולא המלצת מסחר.",
-        sentiment="neutral", materiality="low", relevance=.4,
+        sentiment="neutral", materiality="medium", relevance=.4,
     )
     review = dict(
         faithful=True, fluent_hebrew=True, unsupported_claims=False,

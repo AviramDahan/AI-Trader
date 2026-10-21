@@ -159,7 +159,8 @@ def analyze_jobs(at=None):
         set_service_status('news_ai','idle','Canonical queue: no new due events',success=True)
         return dict(analyzed=0,alerts=recovered,errors=[])
     held,watched=membership()
-    rows.sort(key=lambda r:not bool(set(p.store.event(r['event_id'])['body']['tickers'])&(held|watched)))
+    from .editorial import priority
+    rows.sort(key=lambda r:priority(p.store.event(r['event_id'])['body'],held|watched))
     eid=rows[0]['event_id'];event=p.store.event(eid)['body']
     from .factual_evidence import sufficient
     if not sufficient(event):

@@ -853,6 +853,160 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
                  data_confidence, adjustment, status, _json(payload), _json(evidence_ids), POLICY))
 
 
+_PUBLIC_PRIMARY = ("revenue", "operating_income", "operating_cash_flow", "operating_margin")
+_PUBLIC_BALANCES = ("cash", "current_debt", "long_term_debt")
+_PUBLIC_METRICS = {"revenue": "הכנסות", "operating_income": "רווח תפעולי",
+                   "operating_margin": "מרווח תפעולי", "operating_cash_flow": "תזרים מפעילות שוטפת",
+                   "cash": "מזומן", "current_debt": "חוב שוטף", "long_term_debt": "חוב לטווח ארוך"}
+_PUBLIC_MEANING = {
+    "revenue": "הנתון מתאר את היקף ההכנסות שדווח לתקופה.",
+    "operating_income": "הנתון מתאר את תוצאת הפעילות התפעולית בדיווח.",
+    "operating_margin": "זהו שיעור הרווח התפעולי ביחס להכנסות.",
+    "operating_cash_flow": "הנתון מתאר כסף שנוצר או שימש בפעילות, לא יתרת מזומן.",
+    "cash": "זו יתרה לנקודת זמן, המוצגת לצד תזרים מאותה תקופה.",
+    "current_debt": "זו יתרה לנקודת זמן, המוצגת לצד תזרים מאותה תקופה.",
+    "long_term_debt": "זו יתרה לנקודת זמן, המוצגת לצד תזרים מאותה תקופה."}
+
+
+def _public_date(value):
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ValueError("public_period_unknown")
+    return datetime.strptime(value, "%Y-%m-%d").date()
+
+
+def _public_period_kind(fact):
+    """Public grouping only; never changes the parser or decision evidence."""
+    end = _public_date(fact.get("end"))
+    if fact["metric"] in _PUBLIC_BALANCES:
+        if fact.get("start") is not None:
+            raise ValueError("public_balance_period_invalid")
+        return "instant"
+    days = (end - _public_date(fact.get("start"))).days
+    # Keep quarter and annual comparisons distinct. Unsupported YTD durations
+    # do not suppress a separately retained, valid quarter for the same metric.
+    return "quarter" if 70 <= days <= 110 else "annual" if 350 <= days <= 380 else None
+
+
+def _public_finite(value):
+    try:
+        return type(value) in (int, float) and __import__("math").isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
+def _public_comparison_valid(fact):
+    previous = fact.get("previous")
+    concepts = {("us-gaap", tag): metric for tag, metric in FINANCIAL_TAGS.items()}
+    concepts[("derived", "operating_income/revenue")] = "operating_margin"
+    if (fact.get("reason") != "comparable_prior" or not isinstance(previous, dict)
+            or not {"value", "start", "end"} <= set(previous)
+            or not _public_finite(fact.get("value")) or not _public_finite(previous.get("value"))
+            or concepts.get((fact.get("namespace"), fact.get("tag"))) != fact["metric"]):
+        return False
+    prior = dict(previous, tag=fact["tag"], namespace=fact["namespace"], unit=fact["unit"])
+    if not _comparable(fact, prior):
+        return False
+    margin = fact["metric"] == "operating_margin"
+    delta = fact.get("change_pp" if margin else "change_pct")
+    if not _public_finite(delta) or (not margin and previous["value"] <= 0):
+        return False  # No signed/zero-denominator growth claim.
+    expected = fact["value"] - previous["value"] if margin else (fact["value"] / previous["value"] - 1) * 100
+    # Parser-derived margins/changes are rounded to three decimals separately.
+    return __import__("math").isclose(delta, expected, rel_tol=0, abs_tol=.002)
+
+
+def _public_latest_material(job, comparisons):
+    """Latest RETAINED metric/duration first, materiality second; max three later.
+
+    A new non-material or uncomparable period must not revive an old positive
+    comparison. Parser caps/order and all immutable trading snapshots stay as-is.
+    """
+    if not isinstance(comparisons, list) or len(comparisons) > 40:
+        return {}
+    groups, invalid_metrics = {}, set()
+    for fact in comparisons:
+        if not isinstance(fact, dict) or fact.get("metric") not in _PUBLIC_METRICS:
+            continue
+        metric = fact["metric"]
+        try:
+            if (fact.get("unit") != ("percent" if metric == "operating_margin" else "USD")
+                    or fact.get("accession", job["accession"]) != job["accession"]):
+                raise ValueError("public_basis_unknown")
+            kind = _public_period_kind(fact)
+            if job.get("accepted_at") and _public_date(fact["end"]) > _time(job["accepted_at"]).date():
+                raise ValueError("public_future_period")
+        except (ValueError, TypeError, KeyError):
+            invalid_metrics.add(metric)
+            continue
+        if kind:
+            groups.setdefault((metric, kind), []).append(fact)
+    controls, material = research_controls(), {}
+    for (metric, _kind), rows in groups.items():
+        if metric in invalid_metrics:
+            continue
+        newest = max(row["end"] for row in rows)
+        latest = [row for row in rows if row["end"] == newest]
+        # An alias with missing prior evidence can still contradict the latest
+        # current figure. Do not hide that ambiguity by filtering it first.
+        if (any(not _public_finite(row.get("value")) for row in latest) or
+                len({(row.get("start"), row["end"], row["value"]) for row in latest}) != 1):
+            continue
+        valid = [row for row in latest if _public_comparison_valid(row)]
+        if not valid:
+            continue
+        # Equivalent GAAP tags do not generate duplicate copy. Conflicting
+        # same-period values are unknown, not a largest-percentage tie-break.
+        signatures = {(row.get("start"), row["end"], row["value"], row["previous"].get("start"),
+                       row["previous"]["end"], row["previous"]["value"]) for row in valid}
+        if len(signatures) != 1:
+            continue
+        fact = min(valid, key=lambda row: (row["namespace"], row["tag"]))
+        delta = fact.get("change_pp") if metric == "operating_margin" else fact.get("change_pct")
+        threshold = controls["material_margin_pp" if metric == "operating_margin" else "material_change_pct"]
+        if abs(delta) >= threshold:
+            old = material.get(metric)
+            if old is None or (fact["end"], fact.get("start") or "") > (old["end"], old.get("start") or ""):
+                material[metric] = fact
+    return material
+
+
+def _public_number(value):
+    from decimal import Decimal
+    text = format(Decimal(str(value)), ",f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def _public_financial_text(job, evidence):
+    material = _public_latest_material(job, evidence.get("comparisons", []))
+    selected = [material[key] for key in _PUBLIC_PRIMARY if key in material][:3]
+    if not selected:
+        return None
+    cash_flow = next((row for row in selected if row["metric"] == "operating_cash_flow"), None)
+    if cash_flow:
+        for metric in _PUBLIC_BALANCES:
+            balance = material.get(metric)
+            if (balance and balance["end"] == cash_flow["end"] and
+                    balance["previous"]["end"] == cash_flow["previous"]["end"] and len(selected) < 3):
+                selected.append(balance)
+    lines = []
+    for fact in selected:
+        previous, metric = fact["previous"], fact["metric"]
+        unit = "%" if metric == "operating_margin" else " USD"
+        current_value, prior_value = _public_number(fact["value"])+unit, _public_number(previous["value"])+unit
+        if metric in _PUBLIC_BALANCES:
+            values = f"{current_value} ליום {fact['end']}, לעומת {prior_value} ליום {previous['end']}"
+        else:
+            values = (f"{current_value} בתקופה {fact['start']}–{fact['end']}, "
+                      f"לעומת {prior_value} בתקופה {previous['start']}–{previous['end']}")
+        delta = fact["change_pp"] if metric == "operating_margin" else fact["change_pct"]
+        change_unit = " נקודות אחוז" if metric == "operating_margin" else "%"
+        direction = "עלייה" if delta > 0 else "ירידה"
+        lines.append(f"• {_PUBLIC_METRICS[metric]}: {values}; {direction} של {abs(delta):.1f}{change_unit}. "
+                     + _PUBLIC_MEANING[metric])
+    lines.append("אלו נתונים חשבונאיים לתקופות שצוינו; הם אינם מסבירים לבדם את הגורם לשינוי ואינם תחזית או המלצת מסחר.")
+    return "\n".join(lines)
+
+
 def _material_public_fact(job: dict, evidence: dict, conn) -> str | None:
     """A conservative factual summary, never an investment recommendation."""
     if evidence.get("kind") == "ownership":
@@ -886,29 +1040,7 @@ def _material_public_fact(job: dict, evidence: dict, conn) -> str | None:
                 "אופי הביצוע אינו מאומת כעסקה בשוק הפתוח; אין בכך לבדו המלצת קנייה.")
     if evidence.get("kind") != "financial":
         return None
-    controls = research_controls()
-    metrics = {"revenue": "הכנסות", "operating_income": "רווח תפעולי",
-               "operating_margin": "מרווח תפעולי", "operating_cash_flow": "תזרים מפעילות שוטפת",
-               "cash": "מזומן", "current_debt": "חוב שוטף", "long_term_debt": "חוב לטווח ארוך"}
-    material = []
-    for fact in evidence.get("comparisons", []):
-        if fact.get("reason") != "comparable_prior" or fact.get("metric") not in metrics:
-            continue
-        pct, pp = fact.get("change_pct"), fact.get("change_pp")
-        if ((pct is not None and abs(pct) >= controls["material_change_pct"] and
-             (fact.get("previous") or {}).get("value", 0) > 0) or
-                (pp is not None and abs(pp) >= controls["material_margin_pp"])):
-            material.append(fact)
-    if not material:
-        return None
-    fact = max(material, key=lambda row: abs(row.get("change_pp") if row.get("change_pp") is not None
-                                             else row.get("change_pct") or 0))
-    delta = fact.get("change_pp") if fact.get("change_pp") is not None else fact["change_pct"]
-    units = "נקודות אחוז" if fact.get("change_pp") is not None else "%"
-    direction = "עלו" if delta > 0 else "ירדו"
-    return (f"{metrics[fact['metric']]} {direction} ב־{abs(delta):.1f}{units} "
-            f"בהשוואה לתקופה תואמת שהוגדרה בדיווח. "
-            "זהו נתון חשבונאי, לא תחזית לתשואה.")
+    return _public_financial_text(job, evidence)
 
 
 def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn) -> bool:

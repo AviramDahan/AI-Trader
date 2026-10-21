@@ -101,9 +101,9 @@ class Store:
                 VALUES(?,?,?,?,?,?,?,1)''',(source_key,event_id,source.provider_id,content,json.dumps(data),collected,source.source_id))
             for key in keys:c.execute('INSERT INTO ne_anchors VALUES(?,?) ON CONFLICT(anchor) DO NOTHING',(key,event_id))
             sources=[json.loads(r['body_json']) for r in c.execute('SELECT body_json FROM ne_sources WHERE event_id=? AND active=1 ORDER BY source_key',(event_id,))]
-            normalized,conflicts=combine(sources)
-            version=fingerprint([{'text':v['text'].lower(),'claims':v['claims']} for v in normalized])
             prior=json.loads(old['body_json']) if old else {}
+            normalized,conflicts=combine(sources,allow_macro=not (identities or prior.get('company_identity')))
+            version=fingerprint([{'text':v['text'].lower(),'claims':v['claims']} for v in normalized])
             # Every retained identity was already verified at ingestion. A
             # shorter syndicated observation must not erase the other verified
             # subjects of the same event (e.g. a two-company merger).
@@ -165,7 +165,7 @@ class Store:
                 self.metric(c,'withdrawal','held_for_review',timestamp(now),event_id,provider_id)
 
 
-def combine(sources):
+def combine(sources, *, allow_macro=False):
     # Identical facts shared across outlets count once in the model input.
     items={}
     claims={}
@@ -181,7 +181,13 @@ def combine(sources):
             # Narrow deterministic contradictions: same sentence frame with
             # different quantities. Never equate different periods/metrics via
             # fuzzy matching. Adapters may supply stronger structured claims.
-            grounded={**quantity_claims(excerpt),**s['claims']}
+            from .editorial import macro_release
+            release=macro_release(s) if allow_macro else None
+            # Reserved deterministic keys cannot be replaced by a provider's
+            # unrelated (even verbatim) numeric claim in the same excerpt.
+            provider_claims={k:v for k,v in s['claims'].items()
+                             if not str(k).startswith('macro_release:')}
+            grounded={**quantity_claims(excerpt),**provider_claims,**(release[1] if release else {})}
             for k,v in grounded.items():
                 # Provider structured facts must supply verbatim grounding.
                 if not isinstance(v,dict) or not v.get('quote') or v['quote'] not in excerpt or str(v.get('value','')) not in v['quote']:

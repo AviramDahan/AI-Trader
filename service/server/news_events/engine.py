@@ -33,7 +33,9 @@ def route(event,result,positions,watchlist,universe,policy):
     relevance=result['relevance'];materiality=result['materiality'];sentiment=result['sentiment']
     tickers=set(event['tickers'])
     if not tickers and event['event_type']=='market':
-        return ([('market_news',[])],None) if relevance>=policy.market_relevance else ([], 'below_market_threshold')
+        if relevance<policy.market_relevance:return [],'below_market_threshold'
+        if materiality not in ('medium','high'):return [],'low_importance'
+        return [('market_news',[])],None
     if relevance<policy.personal_relevance:return [],'below_relevance_threshold'
     if materiality not in ('medium','high'):return [],'low_importance'
     if sentiment not in ('positive','negative','mixed','neutral'):return [],'invalid_sentiment'
