@@ -403,3 +403,52 @@ def test_ci_source_archive_matches_github_single_root_strip_contract(deployer_ha
             for member in archive if member.isfile() and '/' in member.name}
     assert stripped == {'service/server/cloud_runtime.py': b'SCHEMA_VERSION = 7\n',
         'deploy/compose.yml': b'services: {}\n'}
+
+
+@pytest.mark.parametrize('role', ['bridge', 'candidate'])
+def test_loaded_capability_command_executes_exact_role_semantics_with_invented_identity(
+        tmp_path, monkeypatch, role):
+    import builtins
+    from contextlib import redirect_stdout
+    import importlib.util
+    import io
+    spec = importlib.util.spec_from_file_location('independent_actual_retention',
+        ROOT/'scripts/retain_entry_intraday_images.py')
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    output = tmp_path/'artifacts'; output.mkdir()
+    image = BRIDGE if role == 'bridge' else NEW
+    identity = dict(version=1, kind='classic', runnable_ref=image, platform='linux/amd64',
+        platform_manifest=None, config_digest=image, build_sha=SHA, user='10001:10001')
+    caps = dict(build_role=role, independent_creation=role=='candidate', snapshot_formats=list(range(1,11)),
+        audit_versions=['entry_discovery_v1','entry_discovery_intraday_v1'],
+        execution_versions=['independent_entry_execution_v1','independent_entry_execution_intraday_v1'])
+    capability = SimpleNamespace(__file__='/invented/capabilities.py', BUILD_ROLE=role,
+        creation_allowed=lambda: role=='candidate', capabilities=lambda: copy.deepcopy(caps))
+    file = SimpleNamespace(stat=lambda:SimpleNamespace(st_uid=0,st_mode=0o444),
+        parent=SimpleNamespace(stat=lambda:SimpleNamespace(st_uid=0)))
+    modules = dict(json=json, os=SimpleNamespace(environ={'BUILD_SHA':SHA}, geteuid=lambda:10001,
+        access=lambda *a:False, W_OK=2), pathlib=SimpleNamespace(Path=lambda value:file),
+        entry_discovery_capabilities=capability, entry_discovery=SimpleNamespace(enabled_ids=lambda:()))
+    def controlled_import(name, *args, **kwargs):
+        assert name in modules, 'unreviewed capability import'
+        return modules[name]
+    programs = []
+    def observed(command, **kwargs):
+        if command[:3] == ['bash','-o','pipefail'] and 'docker save' in command[4]:
+            Path(command[-1]).write_bytes(b'invented compressed image bytes')
+        elif command[:3] == ['docker','image','inspect']:
+            return SimpleNamespace(stdout=image+'\n')
+        elif command[:2] == ['docker','run']:
+            code = command[-1]; programs.append(code)
+            assert 'c.BUILD_ROLE' in code and 'ROLE_VALUE' not in code
+            with redirect_stdout(io.StringIO()) as captured:
+                exec(compile(code, '<actual retained capability program>', 'exec'),
+                    {'__builtins__':dict(vars(builtins), __import__=controlled_import)})
+            return SimpleNamespace(stdout=captured.getvalue())
+        return SimpleNamespace(stdout='')
+    monkeypatch.setattr(module, 'run', observed)
+    result = module.retain_role(role, dict(image_id=image, config_digest=image, identity=identity,
+        build_sha=SHA), output, SimpleNamespace(resolve_image=lambda *a, **k:copy.deepcopy(identity)))
+    assert len(programs) == 1 and result['loaded_capability_verified'] is True
+    loaded = json.loads((output/('loaded-'+role+'-capability.json')).read_bytes())
+    assert loaded['build_sha'] == SHA and loaded['capabilities'] == caps

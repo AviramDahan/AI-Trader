@@ -88,6 +88,34 @@ def test_cli_refuses_any_non_ci_artifact_directory_before_docker(tmp_path, monke
         RETENTION.main()
 
 
+@pytest.mark.parametrize('role', ['bridge', 'candidate'])
+def test_actual_generated_loaded_capability_program_compiles_without_rewriting_build_role(retained, monkeypatch, role):
+    import ast
+    from types import SimpleNamespace
+    row = next(row for row in json.loads((retained/'images.json').read_text()) if row['role'] == role)
+    loaded = (retained/('loaded-'+role+'-capability.json')).read_text()
+    output = retained/'probe-artifacts'
+    output.mkdir()
+    programs = []
+    def command(args, **kwargs):
+        if args[:3] == ['bash', '-o', 'pipefail'] and 'docker save' in args[4]:
+            Path(args[-1]).write_bytes(b'synthetic bounded image archive')
+        elif args[:3] == ['docker', 'image', 'inspect']:
+            return SimpleNamespace(stdout=row['image_id']+'\n')
+        elif args[:2] == ['docker', 'run']:
+            program = args[-1]
+            ast.parse(program)
+            assert 'c.BUILD_ROLE' in program
+            assert "c.BUILD_\'" not in program
+            programs.append(program)
+            return SimpleNamespace(stdout=loaded)
+        return SimpleNamespace(stdout='')
+    monkeypatch.setattr(RETENTION, 'run', command)
+    identity = SimpleNamespace(resolve_image=lambda *a, **k:row['identity'])
+    result = RETENTION.retain_role(role, row, output, identity)
+    assert len(programs) == 1 and result['loaded_capability_verified'] is True
+
+
 def test_main_push_and_exact_final_binaries_are_part_of_image_workflow():
     text = (ROOT / '.github/workflows/entry-intraday-compatibility.yml').read_text()
     assert 'branches: [main]' in text and "github.event_name == 'push'" in text

@@ -75,14 +75,14 @@ def retain_role(role, row, output, identity):
         assert loaded_identity == row['identity']
         code = """import json,os,pathlib,entry_discovery_capabilities as c,entry_discovery as d
 p=pathlib.Path(c.__file__);x=c.capabilities()
-assert c.BUILD_ROLE==ROLE and c.creation_allowed()==(ROLE=='candidate')
-if ROLE=='bridge':assert d.enabled_ids()==()
+assert c.BUILD_ROLE==ROLE_VALUE and c.creation_allowed()==(ROLE_VALUE=='candidate')
+if ROLE_VALUE=='bridge':assert d.enabled_ids()==()
 assert 10 in x['snapshot_formats'] and 'entry_discovery_intraday_v1' in x['audit_versions']
 assert 'independent_entry_execution_intraday_v1' in x['execution_versions']
 assert os.geteuid()==10001 and p.stat().st_uid==p.parent.stat().st_uid==0
 assert p.stat().st_mode&0o222==0 and not os.access(p.parent,os.W_OK)
 print(json.dumps({'build_sha':os.environ['BUILD_SHA'],'capabilities':x,'immutable_file_and_parent_verified':True}))
-""".replace('ROLE', repr(role))
+""".replace('ROLE_VALUE', repr(role))
         command = ['docker', 'run', '--rm', '--network', 'none',
                    '-e', 'ENTRY_DISCOVERY_ROLE=candidate']
         for flag in ('VCP_DISCOVERY', 'MOMENTUM_BURST', 'PEAD', 'PULLBACK_RECLAIM',
