@@ -142,6 +142,91 @@ def test_off_and_immutable_bridge_do_zero_io(monkeypatch):
     assert releases.produce(connect=connect, enabled=True)['status'] == 'off'
 
 
+def test_collection_only_flag_collects_fact_without_enabling_pead_entry(isolated, monkeypatch):
+    import entry_discovery
+    import entry_discovery_capabilities as capabilities
+    monkeypatch.setattr(capabilities, 'BUILD_ROLE', 'candidate')
+    monkeypatch.setenv('STOCK_SCANNER_PEAD_ENABLED', 'false')
+    monkeypatch.setenv('STOCK_SCANNER_PEAD_RELEASE_COLLECTION_ENABLED', 'true')
+    source(isolated)
+    client = Mock(request=Mock(return_value=page()))
+    summary = run(isolated, client, enabled=None)
+    assert summary['processed'] == 1, summary
+    assert summary['verified'] == 1
+    assert 'PEAD' not in entry_discovery.enabled_ids()
+    assert 'STOCK_SCANNER_PEAD_RELEASE_COLLECTION_ENABLED' not in entry_discovery.FLAGS.values()
+    facts, coverage = releases.read_facts(['TEST'], AT, connect=isolated)
+    assert coverage['source_rows'] == 1 and facts['TEST'][0]['verified']
+    assert facts['TEST'][0]['effective_available_at'] == AT.isoformat()
+    assert releases.read_facts(['TEST'], AT-timedelta(microseconds=1), connect=isolated)[0] == {}
+    client.request.assert_called_once_with(URL, headers={'Accept': 'text/html'})
+
+
+@pytest.mark.parametrize('pead,collection', [(None, None), ('false', 'false'), ('false', 'not-true')])
+def test_disabled_environment_flags_do_zero_producer_io(monkeypatch, pead, collection):
+    import entry_discovery_capabilities as capabilities
+    monkeypatch.setattr(capabilities, 'BUILD_ROLE', 'candidate')
+    for key, value in (('STOCK_SCANNER_PEAD_ENABLED', pead),
+                       ('STOCK_SCANNER_PEAD_RELEASE_COLLECTION_ENABLED', collection)):
+        if value is None:
+            monkeypatch.delenv(key, raising=False)
+        else:
+            monkeypatch.setenv(key, value)
+    connect = Mock(side_effect=AssertionError('disabled producer DB access'))
+    client = Mock(request=Mock(side_effect=AssertionError('disabled provider request')))
+    assert releases.produce(connect=connect, transport=client)['status'] == 'off'
+    connect.assert_not_called()
+    client.request.assert_not_called()
+
+
+@pytest.mark.parametrize('explicit', [None, True])
+def test_bridge_blocks_collection_only_flag_before_io(monkeypatch, explicit):
+    import entry_discovery_capabilities as capabilities
+    monkeypatch.setattr(capabilities, 'BUILD_ROLE', 'bridge')
+    monkeypatch.setenv('STOCK_SCANNER_PEAD_ENABLED', 'false')
+    monkeypatch.setenv('STOCK_SCANNER_PEAD_RELEASE_COLLECTION_ENABLED', 'true')
+    connect = Mock(side_effect=AssertionError('bridge DB access'))
+    client = Mock(request=Mock(side_effect=AssertionError('bridge provider request')))
+    assert releases.produce(connect=connect, transport=client, enabled=explicit)['status'] == 'off'
+    connect.assert_not_called()
+    client.request.assert_not_called()
+
+
+def test_explicit_off_overrides_both_environment_flags(monkeypatch):
+    monkeypatch.setenv('STOCK_SCANNER_PEAD_ENABLED', 'true')
+    monkeypatch.setenv('STOCK_SCANNER_PEAD_RELEASE_COLLECTION_ENABLED', 'true')
+    connect = Mock(side_effect=AssertionError('explicit OFF DB access'))
+    client = Mock(request=Mock(side_effect=AssertionError('explicit OFF provider request')))
+    assert releases.produce(connect=connect, transport=client, enabled=False)['status'] == 'off'
+    connect.assert_not_called()
+    client.request.assert_not_called()
+
+
+def test_existing_pead_flag_keeps_collection_enabled_without_new_flag(isolated, monkeypatch):
+    import entry_discovery_capabilities as capabilities
+    monkeypatch.setattr(capabilities, 'BUILD_ROLE', 'candidate')
+    monkeypatch.setenv('STOCK_SCANNER_PEAD_ENABLED', 'true')
+    monkeypatch.setenv('STOCK_SCANNER_PEAD_RELEASE_COLLECTION_ENABLED', 'false')
+    source(isolated)
+    assert run(isolated, enabled=None)['verified'] == 1
+
+
+def test_explicit_on_preserves_injected_test_argument_semantics(isolated, monkeypatch):
+    monkeypatch.setenv('STOCK_SCANNER_PEAD_ENABLED', 'false')
+    monkeypatch.setenv('STOCK_SCANNER_PEAD_RELEASE_COLLECTION_ENABLED', 'false')
+    source(isolated)
+    assert run(isolated, enabled=True)['verified'] == 1
+
+
+def test_collection_only_flag_does_not_bypass_provider_approval(isolated, monkeypatch):
+    monkeypatch.setenv('STOCK_SCANNER_PEAD_ENABLED', 'false')
+    monkeypatch.setenv('STOCK_SCANNER_PEAD_RELEASE_COLLECTION_ENABLED', 'true')
+    source(isolated)
+    client = Mock(request=Mock(side_effect=AssertionError('unapproved provider request')))
+    assert run(isolated, client, enabled=None, approvals=set())['processed'] == 0
+    client.request.assert_not_called()
+
+
 def test_empty_watchlist_automatic_worker_fact_reader_and_restart(isolated):
     source(isolated)
     client = Mock(request=Mock(return_value=page()))
