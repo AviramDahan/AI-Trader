@@ -99,11 +99,12 @@ def _prepare(frame, decision, observed, expected=None):
         if not market_session_state(datetime.combine(day, time(12), ET))['is_trading_day']:
             raise ValueError('invalid_market_session')
         values = {key.lower(): float(row[key]) for key in ('Open', 'High', 'Low', 'Close', 'Volume')}
+        current = dict(date=day.isoformat(), available_at=available.isoformat(), **values)
         if not all(math.isfinite(v) and v > 0 for v in values.values()):
-            raise ValueError('invalid_ohlcv')
+            raise _history_input_failure(rows, current, decision, observed, 'NONPOSITIVE_OR_NONFINITE_OHLCV')
         if not values['low'] <= min(values['open'], values['close']) <= max(values['open'], values['close']) <= values['high']:
-            raise ValueError('invalid_ohlcv')
-        rows.append(dict(date=day.isoformat(), available_at=available.isoformat(), **values))
+            raise _history_input_failure(rows, current, decision, observed, 'OHLC_ORDER')
+        rows.append(current)
     if not rows:
         raise ValueError('no_completed_bars')
     if rows != sorted(rows, key=lambda row: row['date']) or len({r['date'] for r in rows}) != len(rows):
@@ -119,6 +120,14 @@ def _prepare(frame, decision, observed, expected=None):
     if rows[-1]['date'] != str(expected):
         raise ValueError('history_not_current')
     return rows
+
+
+def _history_input_failure(rows, current, decision, observed, predicate):
+    error = ValueError('invalid_ohlcv')
+    from entry_input_diagnostics import history_failure_metadata
+    error.input_failure = history_failure_metadata([*rows, current], decision_at=decision,
+        source_observed_at=observed, predicate=predicate)
+    return error
 
 
 def _mean(values):
@@ -459,10 +468,12 @@ def detect_all(frame, *, decision_at, source_observed_at, enabled_ids=None, cont
     context = context or {}
     decision, observed = _instant(decision_at), _instant(source_observed_at)
     error = None
+    input_failure = None
     try:
         rows = _prepare(frame, decision, observed, context.get('expected_session'))
     except (ValueError, TypeError, KeyError, OverflowError) as exc:
         rows, error = [], str(exc) if str(exc) in HISTORY_REASONS else 'invalid_history'
+        input_failure = getattr(exc, 'input_failure', None)
     output = {}
     for strategy_id in ids:
         config = copy.deepcopy(DEFAULT_CONFIGS[strategy_id])
@@ -477,6 +488,8 @@ def detect_all(frame, *, decision_at, source_observed_at, enabled_ids=None, cont
         if config['min_history'] > MAX_BARS or config['min_history'] < DEFAULT_CONFIGS[strategy_id]['min_history']:
             raise ValueError('minimum_history_cannot_be_lowered')
         record = _record(strategy_id, config, decision, observed, rows)
+        if input_failure is not None:
+            record['features']['input_failure'] = copy.deepcopy(input_failure)
         if error:
             output[strategy_id] = _finish(record, 'UNKNOWN', error)
         elif len(rows) < config['min_history']:
@@ -496,6 +509,9 @@ def validate_trigger(record, price, quote_at, decision_at):
     Does not replace the existing planner, confidence/News/AI or execution gates.
     It cannot change a stop, target, order expiry or existing position.
     """
+    if isinstance(record, dict) and record.get('version') == 'independent_entry_discovery_intraday_v1':
+        from entry_intraday import validate_trigger as validate_intraday
+        return validate_intraday(record, price, quote_at, decision_at)
     if (not isinstance(record, dict) or record.get('version') != VERSION or record.get('source_pin') != SOURCE_PIN or
             record.get('strategy_id') not in STRATEGY_IDS or record.get('state') != 'DETECTED' or
             record.get('direction') != 'BUY' or not _finite(price) or price <= 0):

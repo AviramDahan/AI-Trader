@@ -13,6 +13,7 @@ psycopg[binary]>=3.2.1
 redis>=5.0.8
 pytest>=8.0.0
 yfinance>=0.2.30
+exchange_calendars==4.13.2
 psutil>=7,<8
 matplotlib>=3.8,<4
 jsonschema>=4.23,<5

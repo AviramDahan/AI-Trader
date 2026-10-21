@@ -3,6 +3,7 @@
 No trading writes; every telemetry connection is closed before network IO.
 """
 import json
+import hashlib
 import math
 import os
 import time
@@ -84,9 +85,10 @@ def persist(trace):
              sum(a["latency"] for a in attempts), max(0,len(attempts)-1),trace["result"],
              trace["reject_reason"],int(trace["ai_call_saved"]),_total(attempts,"estimated_cost"),
              json.dumps(attempts),datetime.now(timezone.utc).isoformat()))
-        from target_evidence import persist_checks, persist_decision
+        from target_evidence import persist_checks, persist_decision, persist_input_facts
         persist_checks(conn, trace)
         persist_decision(conn, trace)
+        persist_input_facts(conn, trace)
         conn.commit()
     finally:
         conn.close()
@@ -146,6 +148,8 @@ def review(messages, validator):
         provider, model = route.provider, route.model
         metrics = dict(retry_count=attempt, input_tokens=None, output_tokens=None,
                        estimated_cost=None, result="error", reject_reason=None)
+        metrics['logical_messages_sha256'] = hashlib.sha256(json.dumps(messages,
+            ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
         metrics.update(route.provenance())
         if provider == 'ollama_relay':metrics['estimated_cost']=0
         start = time.monotonic()

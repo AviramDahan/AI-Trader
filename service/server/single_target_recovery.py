@@ -42,12 +42,25 @@ def validate_settings(settings):
 
 
 def version(tables, settings=None):
-    if settings is not None and validate_settings(settings):
-        return 9
+    emergency = settings is not None and validate_settings(settings)
     from short_policy import in_snapshot
     from single_breakout_policy import is_breakout
     fields = (('scanner_signals','technical_json'), ('scanner_orders','plan_json'),
               ('scanner_trades','settings_json'))
+    # Highest content requirement wins. An emergency history cannot hide a new
+    # attribution/execution reader requirement under an older format 9 header.
+    for table, field in fields:
+        for row in tables[table]:
+            saved = json.loads(row.get(field) or '{}')
+            discovery = saved.get('entry_discovery') or {}
+            execution = saved.get('entry_strategy_execution') or {}
+            if (discovery.get('version') == 'entry_discovery_intraday_v1' or
+                    execution.get('version') == 'independent_entry_execution_intraday_v1' or
+                    any(r.get('version') == 'independent_entry_discovery_intraday_v1'
+                        for r in discovery.get('detections', []))):
+                return 10
+    if emergency:
+        return 9
     if any('entry_strategy_execution' in json.loads(r.get(field) or '{}') or
            'last_strategy_entry_block' in json.loads(r.get(field) or '{}')
            for table, field in fields for r in tables[table]):
@@ -77,17 +90,17 @@ def validate_snapshot(data):
     if required >= 7 or data['version'] >= 7:
         if data['version'] != required:
             raise ValueError('discovery_snapshot_format_content_mismatch')
-    if required == 9:
+    if any(row['key'] == 'paper_entry_emergency_v1' for row in data.get('settings', [])):
         from datetime import datetime
         control = next(row for row in data['settings'] if row['key'] == 'paper_entry_emergency_v1')
         updated = json.loads(control['value_json'])['updated_at']
         if updated is not None and datetime.fromisoformat(updated.replace('Z', '+00:00')) > datetime.fromisoformat(data['created_at'].replace('Z', '+00:00')):
             raise ValueError('future_emergency_snapshot_control')
-    if version(tables) == 6 and data['version'] not in (6, 9):
+    if version(tables) == 6 and data['version'] not in (6, 9, 10):
         raise ValueError('entry_price_retry_requires_format6')
-    if version(tables) == 5 and data['version'] not in (5,6,9):
+    if version(tables) == 5 and data['version'] not in (5,6,9,10):
         raise ValueError('entry_policy_requires_format5')
-    if version(tables) == 3 and data['version'] not in (3,4,5,6,9):
+    if version(tables) == 3 and data['version'] not in (3,4,5,6,9,10):
         raise ValueError('single_policy_requires_format3')
     from short_policy import is_short
     for table, field in (('scanner_signals','technical_json'), ('scanner_orders','plan_json'),

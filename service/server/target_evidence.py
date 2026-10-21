@@ -86,10 +86,10 @@ def public_discovery_context(value, *, decided_at=None):
     status=value.get('status')
     if status in ('NOT_RECORDED','NOT_VERIFIED'):
         return {'status':status}
-    from entry_discovery import BASELINE, FLAGS, VERSION, instant
+    from entry_discovery import BASELINE, FLAGS, VERSION, INTRADAY_VERSION, instant
     try:
         ids=value['strategy_ids']
-        if (status!='RECORDED' or value['version']!=VERSION or not isinstance(ids,list) or
+        if (status!='RECORDED' or value['version'] not in (VERSION, INTRADAY_VERSION) or not isinstance(ids,list) or
                 not 1<=len(ids)<=6 or any(not isinstance(key,str) for key in ids) or
                 len(set(ids))!=len(ids) or set(ids)-({BASELINE}|set(FLAGS)) or
                 value['primary_strategy_id']!=ids[0]):
@@ -226,3 +226,28 @@ def persist_decision(conn, trace):
         LOG.warning('ai_decision_evidence_persist_failed:%s', type(exc).__name__)
     finally:
         conn.execute('RELEASE SAVEPOINT ai_decision_evidence')
+
+
+def persist_input_facts(conn, trace):
+    """Separate idempotent journal row: never rewrite an earlier target check."""
+    facts = trace.get('input_facts')
+    if not facts:
+        return
+    conn.execute('SAVEPOINT review_input_evidence')
+    try:
+        from decision_input_facts import validate as validate_input
+        facts = validate_input(facts)
+        observation_id = trace['id'] + ':input_facts'
+        existing = conn.execute("SELECT metrics_json FROM scanner_candidates WHERE scan_id=? AND ticker=? AND stage='review_input'",
+            (trace['scan_id'], trace['ticker'])).fetchall()
+        if any(json.loads(row['metrics_json']).get('observation_id') == observation_id for row in existing):
+            return
+        record = dict(facts, observation_id=observation_id, review_id=trace['id'])
+        conn.execute("""INSERT INTO scanner_candidates(scan_id,ticker,company,stage,status,reason,metrics_json,created_at)
+            VALUES(?,?,NULL,'review_input','observed',NULL,?,?)""",
+            (trace['scan_id'], trace['ticker'], json.dumps(record, ensure_ascii=False, allow_nan=False), record['observed_at']))
+    except Exception as exc:
+        conn.execute('ROLLBACK TO SAVEPOINT review_input_evidence')
+        LOG.warning('review_input_evidence_persist_failed:%s', type(exc).__name__)
+    finally:
+        conn.execute('RELEASE SAVEPOINT review_input_evidence')
