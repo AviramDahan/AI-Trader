@@ -10,6 +10,7 @@ import pytest
     ('Gold rebounds as yields dip and the dollar softens', 'accepted'),
     ('Nasdaq drops as chip shares retreat', 'quality_rejected'),
     ('Gold prices climb as the dollar weakens', 'below_threshold'),
+    ('Gold prices climb as the dollar weakens', 'low_importance'),
 ])
 def test_market_movement_existing_outbox_survives_restart_without_trading(pg, monkeypatch, title, mode):
     from database import get_db_connection
@@ -37,7 +38,8 @@ def test_market_movement_existing_outbox_survives_restart_without_trading(pg, mo
     draft = dict(related=True, title_he='נרשמה תנועה בשוק לפי דיווח סינתטי',
         summary_he='לפי הכותרת הסינתטית נרשמה תנועה בשוק על רקע המסחר.',
         interpretation_he='זהו תיאור מדווח ולא המלצת מסחר.',
-        sentiment='neutral', materiality='low', relevance=.299 if mode=='below_threshold' else .4)
+        sentiment='neutral', materiality='low' if mode=='low_importance' else 'medium',
+        relevance=.299 if mode=='below_threshold' else .4)
     review = dict(faithful=True, fluent_hebrew=True,
         unsupported_claims=mode=='quality_rejected', duplicate_of=0,
         material_new_fact=False, explanation='בדיקה סינתטית בלבד', scope_related=True)
