@@ -31,6 +31,8 @@ deadline=$forward_deadline
 attempt=''
 work=''
 new=''
+rollback=''
+certified_candidate=0
 writers_stopped=0
 phase=STARTED
 remaining() {
@@ -111,12 +113,15 @@ failed() {
   fi
   bounded 90 "${dc[@]}" stop scanner telegram monitor || { set_phase ROLLBACK_DEFERRED || true; exit 70; }
   cp "$work/previous-compose.yml" deploy/compose.yml
-  export APP_IMAGE="$old"
+  export APP_IMAGE="${rollback:-$old}"
   start_healthy 180 api monitor scanner telegram || { set_phase ROLLBACK_DEFERRED || true; echo 'ROLLBACK FAILED: manual intervention required'; exit 70; }
   start_healthy "$backup_wait_seconds" backup || { set_phase ROLLBACK_DEFERRED || true; echo 'ROLLBACK FAILED: backup not healthy; no valid backup killed'; exit 70; }
-  bounded 30 docker tag "$old" ai-trader:staging || exit 70
+  bounded 30 docker tag "$APP_IMAGE" ai-trader:staging || exit 70
+  if [[ "$APP_IMAGE" != "$old" ]]; then
+    bounded 60 "$controller" --record-bridge-rollback --sha "$sha" --image "$APP_IMAGE" --old-image "$old" --request-id "$attempt" || { set_phase ROLLBACK_DEFERRED || true; exit 70; }
+  fi
   set_phase ROLLED_BACK || true
-  echo 'DEPLOY FAILED; previous version restored; database never rewound'
+  echo "DEPLOY FAILED; supported rollback image=$APP_IMAGE; observed previous image=$old; database never rewound"
   exit "$code"
 }
 trap 'failed $? 0' ERR
@@ -136,11 +141,31 @@ if [[ "$new" == '-' ]]; then
   old_schema=$(bounded 30 docker exec ai-trader-cloud-api-1 python -c 'from cloud_runtime import SCHEMA_VERSION; print(SCHEMA_VERSION)')
   new_schema=$(sed -n 's/^SCHEMA_VERSION *= *\([0-9]*\).*/\1/p' "$work/source/service/server/cloud_runtime.py")
   [[ "$old_schema" == "$new_schema" ]] || { echo 'Schema change requires operator-approved migration'; exit 66; }
-  bounded 600 docker build --build-arg BUILD_SHA="$sha" --label org.opencontainers.image.revision="$sha" -t "ai-trader:$sha" "$work/source"
-  new=$(bounded 20 docker image inspect --format '{{.Id}}' "ai-trader:$sha")
+  if [[ -e deploy/compatible-rollback-v1.json || -L deploy/compatible-rollback-v1.json ]]; then
+    if selected_candidate=$(bounded 360 "$controller" --compatible-candidate --sha "$sha" --image "$old" --print-ref); then
+      [[ "$selected_candidate" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'Certified candidate identity missing'; failed 67 0; }
+      new="$selected_candidate"
+    else
+      failed 67 0
+    fi
+    certified_candidate=1
+  else
+    bounded 600 docker build --build-arg BUILD_SHA="$sha" --label org.opencontainers.image.revision="$sha" -t "ai-trader:$sha" "$work/source"
+    new=$(bounded 20 docker image inspect --format '{{.Id}}' "ai-trader:$sha")
+  fi
   set_phase PREDEPLOY_PENDING
 fi
-if ! bounded 360 "$controller" --check-rollback --sha "$sha" --image "$old" --new-image "$new"; then
+rollback="$old"
+if [[ -e deploy/compatible-rollback-v1.json || -L deploy/compatible-rollback-v1.json ]]; then
+  certified_candidate=1
+fi
+if [[ "$certified_candidate" == 1 ]]; then
+  if rollback=$(bounded 360 "$controller" --check-rollback --sha "$sha" --image "$old" --new-image "$new" --request-id "$attempt" --print-ref); then
+    [[ "$rollback" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'Certified rollback identity missing'; failed 67 0; }
+  else
+    failed 67 0
+  fi
+elif ! bounded 360 "$controller" --check-rollback --sha "$sha" --image "$old" --new-image "$new"; then
   # Explicit exit bypasses ERR traps; persist the genuine pre-writer failure.
   failed 67 0
 fi
@@ -161,6 +186,9 @@ else
   code=$?
   [[ "$code" != 75 ]] || set_phase DEFERRED_DRAIN
   failed "$code" 0
+fi
+if [[ "$certified_candidate" == 1 ]]; then
+  bounded 180 "$controller" --verify-rollback-selection --sha "$sha" --image "$new" --old-image "$old" --request-id "$attempt"
 fi
 set_phase REPLACING
 writers_stopped=1

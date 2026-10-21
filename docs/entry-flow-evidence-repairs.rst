@@ -79,11 +79,15 @@ Bridge creation stays immutably disabled, while it must preserve pending/held
 contract guards, reservations, open positions and exits on the same current DB.
 Recovery still excludes ordinary pending orders/history: do not claim otherwise.
 
-The existing deployment rollback capability check is deliberately NOT weakened.
 The currently deployed old image cannot satisfy the new format/version capability
-gate even with creation flags OFF. A separately tested and pinned compatible
-Bridge10, encrypted backup/restore proof and explicit controlled release plan are
-mandatory before any future merge/deploy/activation. This change is isolated;
+gate even with creation flags OFF. The direct actual-old compatibility path is
+preserved. A separately verified exact-candidate certificate may select a
+supported immutable Bridge10 while preserving the actual old identity in the
+journal; a stored tag/pin by itself is insufficient. Strict format10 managed
+backup-proof support and a tested controlled forward/failure/rollback path are
+required. See ``compatible-paper-deployment.rst`` for exact final-main artifacts,
+target proof, serialized timer/helper handling and explicit paused-entry control.
+No old-image compatibility is fabricated and no safeguard is skipped. This change is isolated;
 engineering tests do not establish a natural trade or profitability. Paper
 performance remains DATA_INSUFFICIENT until properly attributed net closed trades
 exist; there is no promised entry count, win rate or return.
