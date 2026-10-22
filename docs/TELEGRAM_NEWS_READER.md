@@ -27,6 +27,11 @@ be distinct. Edits/deletions and media-only posts are not synchronized. This is 
 not a complete real-time feed. AI summaries are interpretations of post text, not verification.
 Disable TELEGRAM_NEWS_READER_ENABLED to stop collection. No trading behavior is changed.
 
+The separately opt-in Trump Truth Social relay notification path is documented
+in `trump-truth-posts.rst`. It bypasses economic relevance only for this pinned
+source/author, uses the existing outbox without AI, and does not assert primary
+authorship or complete coverage. All ordinary reader behavior above is retained.
+
 ## News topic routing
 
 - TELEGRAM_MARKET_NEWS_THREAD_ID: general market/economic news, including channel reader posts.

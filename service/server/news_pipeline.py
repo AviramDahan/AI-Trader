@@ -782,6 +782,18 @@ def _scope_context(tickers: list[str], published_at: str) -> tuple[str, int | No
 
 
 def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dict[str, int]:
+    # Human-requested all-topic Trump notifications are not financial news AI
+    # jobs, scanner evidence or a relevance/materiality exception for other feeds.
+    from trump_truth_posts import KIND, ingest as ingest_trump
+    special = [item for item in items if item.get('source_kind') == KIND]
+    if special:
+        counts = ingest_trump(special, at)
+        ordinary = [item for item in items if item.get('source_kind') != KIND]
+        if ordinary:
+            regular = ingest_items(ordinary, at)
+            for key in counts:
+                counts[key] += regular.get(key, 0)
+        return counts
     from news_events.control import active
     if active():
         from news_events.runtime import ingest_items as canonical_ingest

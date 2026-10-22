@@ -1169,14 +1169,21 @@ def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = No
     try:
         from telegram_topics import destination_fields, thread_id_for_event, with_news_community_link
         from telegram_presentation import telegram_text
-        if event_type == 'sec_intelligence' and thread_id_for_event(event_type) is None:
-            return json.dumps({'terminal': True, 'reason': 'sec_topic_not_configured'})
+        if event_type in {'sec_intelligence', 'trump_truth_post'} and thread_id_for_event(event_type) is None:
+            return json.dumps({'terminal': True, 'reason': 'sec_topic_not_configured' if event_type == 'sec_intelligence' else 'trump_truth_news_topic_not_configured'})
         session = requests.Session()
         session.trust_env = False
         response = session.post(f"https://api.telegram.org/bot{token}/sendMessage",
                                 data={**destination_fields(chat_id, event_type), "text": telegram_text(with_news_community_link(message, event_type)),
                                       "disable_web_page_preview": True}, timeout=15)
         response.raise_for_status()
+        if event_type == 'trump_truth_post':
+            receipt = response.json()
+            if (not isinstance(receipt, dict) or receipt.get('ok') is not True
+                    or not isinstance(receipt.get('result'), dict)
+                    or type(receipt['result'].get('message_id')) is not int
+                    or receipt['result']['message_id'] <= 0):
+                return json.dumps({'terminal': True, 'reason': 'delivery_unknown_manual_review'})
         return "sent"
     except requests.HTTPError as exc:
         from retry_policy import retry_after
@@ -1185,12 +1192,17 @@ def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = No
         delay=retry_after(response.headers.get('Retry-After')) if response is not None else 0
         try: delay=max(delay,float(response.json().get('parameters',{}).get('retry_after',0)))
         except (ValueError,TypeError,AttributeError):pass
-        return json.dumps({'http_status':status,'retry_after':delay,'terminal':status in {400,401,403,404}})
+        terminal = status in {400,401,403,404}
+        if event_type == 'trump_truth_post' and status != 429:
+            terminal = True  # No blind retry of an ambiguous remote failure.
+        return json.dumps({'http_status':status,'retry_after':delay,'terminal':terminal})
     except requests.ConnectTimeout:
         return 'connect_timeout'
     except (requests.ReadTimeout,requests.ConnectionError):
         return json.dumps({'terminal':True,'reason':'delivery_unknown_manual_review'})
     except Exception:
+        if event_type == 'trump_truth_post':
+            return json.dumps({'terminal': True, 'reason': 'delivery_unknown_manual_review'})
         return "failed"
 
 
