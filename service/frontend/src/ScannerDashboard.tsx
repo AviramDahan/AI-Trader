@@ -8,6 +8,7 @@ import { positionMove, unifiedSignals, activeTargetIndexes, entryRejectionCode, 
 import { SignalResearch } from './SignalResearch'
 import { HistoryCacheStatus } from './HistoryCacheStatus'
 import { SystemActivity } from './SystemActivity'
+import { TrumpTruthNews } from './TrumpTruthNews'
 import { createReadPoller } from './readPoller'
 import { isMiniAppEntry, preserveMiniApp, installMiniAppBackButton } from './telegramMiniApp'
 
@@ -24,6 +25,7 @@ type Dashboard = {
   signals: Record<string, any>[]
   trades: Record<string, any>[]
   news: Record<string, any>[]
+  trump_truth?: unknown
   news_schedules: Record<string, any>[]
   news_providers: Record<string, any>[]
   news_meta: Record<string, any>
@@ -381,6 +383,7 @@ export function ScannerDashboard({ token }: { token: string | null }) {
 
     {tab === 'news' && <div className="scanner-section">
       <h2>{text('חדשות — מהחדש לישן', 'News — newest first')}</h2>
+      <TrumpTruthNews he={he} initial={data?.trump_truth} />
       <details className="scanner-watchlist"><summary>{text('רשימת מעקב לחדשות Telegram', 'Telegram news watchlist')}</summary>
         <p>{text('חדשות חדשות, קשורות ומהותיות ינותחו ויישלחו גם ללא פוזיציה. הרשימה אינה יוצרת סיגנלים או עסקאות.', 'New, relevant, material news is analyzed and alerted even without a position. This list creates no signals or trades.')}</p>
         {token ? <div className="scanner-watchlist-form"><input aria-label={text('סימול להוספה', 'Ticker to add')} value={watchTicker} maxLength={10} onChange={event => setWatchTicker(event.target.value.toUpperCase())} onKeyDown={event => { if (event.key === 'Enter') void updateWatchlist(watchTicker) }} placeholder="AAPL"/><button disabled={watchBusy || !watchTicker.trim()} onClick={() => void updateWatchlist(watchTicker)}>{text('הוסף למעקב', 'Add to watchlist')}</button></div> : <p className="scanner-warning">{text('הוספה והסרה דורשות התחברות עם הרשאת ניהול לסורק; הקריאה ברשימה נשארת ציבורית.', 'Adding and removing require a login with scanner management permission; viewing remains public.')}</p>}

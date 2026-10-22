@@ -46,6 +46,28 @@ def _require_scanner_manager(authorization: str):
 
 
 def register_scanner_routes(app: FastAPI) -> None:
+    @app.get('/api/scanner/trump-media/{token}')
+    def trump_truth_asset(token: str):
+        from trump_truth_public import asset_payload
+        try:
+            data, mime = asset_payload(token)
+        except Exception:
+            raise HTTPException(404, 'trump_media_unavailable') from None
+        return Response(content=data, media_type=mime, headers={'Cache-Control':'no-store',
+            'X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox"})
+
+    @app.get('/api/scanner/trump-posts')
+    def trump_truth_archive(response: Response, limit: int = Query(20, ge=1, le=20),
+                            before: str | None = Query(None, pattern=r'^[1-9][0-9]{15,19}$')):
+        response.headers['Cache-Control'] = 'no-store'
+        from trump_truth_public import payload
+        try:
+            return payload(limit=limit, before=before)
+        except ValueError:
+            raise HTTPException(422, 'trump_archive_page_invalid') from None
+        except Exception:
+            raise HTTPException(503, 'trump_archive_unavailable') from None
+
     @app.get('/api/scanner/strategy-performance')
     def strategy_performance(response: Response, hours: int = Query(48, ge=24, le=168)):
         # The existing community statistics are public READ ONLY. No control,
