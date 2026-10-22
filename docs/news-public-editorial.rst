@@ -1,6 +1,48 @@
 Public news: impact and conservative release consolidation
 =========================================================
 
+Optional verified market briefs
+------------------------------
+
+``NEWS_EVENTS_MARKET_BRIEFS_ENABLED`` defaults to false. Only the explicit
+case-insensitive value ``true`` opts in; an unset, false or malformed value
+retains the medium/high-only policy below. This is an approved additional
+editorial tier, not a correction of low materiality into high materiality.
+
+When enabled, an already analyzed, independently quality-reviewed, related
+MARKET event with low materiality can use the SAME market-news topic/outbox.
+It must retain the existing numerical relevance threshold and pass BOTH
+``factual_title`` and ``sufficient``. A matching approved source needs a valid
+original URL and publication time; a long excerpt alone cannot qualify a vague
+or opinion headline. Company identity, event/source tickers, CIK or provider
+ticker hints exclude the brief path. There is no company-to-MARKET fallback.
+
+The whole reviewed Hebrew headline (at most 240 characters) and summary (at most
+600 characters) appear under ``עדכון שוק קצר`` with a matching source/link and
+the original event publication time. Longer text is not truncated to remove
+qualifiers: the low-impact item stays ineligible. Interpretation is omitted;
+all mandatory licensed credits, source/link and time must fit together under
+the existing message bound; an oversized brief is held, not silently cut.
+Neither this label nor an approved source certifies independent factual truth,
+significant impact, trading eligibility or expected return. Ordinary medium/high
+and company/personal rendering and routing remain unchanged.
+
+Queue and dispatch use the same pure eligibility helper. Current flag, epoch,
+version, quality outcome, age, conflicts, approved rights and membership are
+rechecked through the existing canonical path. Disabling the flag prevents a
+pending low-impact brief from dispatching. It does not stop exits or any trading
+operation. Existing canonical event/version/topic dedupe keys are unchanged;
+there is no second message/job for a brief, new topic, scheduler, AI call,
+retry allowance, provider, quota or increased AI budget. No historical
+``low_importance`` records are automatically replayed when the flag turns on.
+
+This change makes eligible new items publishable; it does not promise a daily
+count. Source access and insufficient evidence remain separate open issues.
+Synthetic fixtures and disposable PostgreSQL verify the engineering path, not
+natural public quality or increased volume. Publishing the work branch does
+not enable this feature. Production merge/deployment and flag activation need
+explicit approval for the reviewed version.
+
 Scope
 -----
 
