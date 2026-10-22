@@ -122,6 +122,12 @@ Only the bounded, cleaned relay excerpt is sent to the model as untrusted
 data. Account identity, timestamps, original/relay links, dedupe key and
 warnings are deterministic, never chosen by AI. No media captions are invented.
 An empty/media-only excerpt yields a Hebrew link notification without AI.
+A link-only RT/ReTruth is not the quoted post's body: it also bypasses AI and
+is explicitly labelled as a repost whose text was unavailable in the relay.
+Neither English ``Image/Video`` boilerplate nor an isolated RT link is sent as
+a purported source excerpt. The post/translation is placed before the compact
+source/time disclaimer; original publication time remains unverified and the
+relay's timestamp is displayed as a clearly labelled human-readable UTC time.
 Mechanical guards reject changed numbers, currencies, magnitude/percent units,
 unsafe scripts/controls and model-added link/contact forms. A second same-model
 pass must accept fluency, completeness and fidelity. These are negative guards,
@@ -144,8 +150,12 @@ delivery remains terminal/manual review, never blind resend.
 If both bounded attempts fail, send an explicitly labelled Hebrew
 ``translation unavailable`` notice and original/relay links, not an English
 excerpt masquerading as Hebrew. The final rendered message must fit Telegram's
-4096 UTF-16 limit; neither serialized provenance nor a translation is sliced
-to fit. The feature changes presentation only, not source coverage guarantees.
+4096 UTF-16 limit INCLUDING the final Telegram bidi-control expansion; neither
+serialized provenance nor a translation is sliced to fit. If the complete
+validated translation cannot fit, a whole explicitly unavailable notice and
+both links are used, without another model request. The shared formatter for
+other news/trade messages is unchanged. This is presentation only, not source
+coverage guarantees or a media download/upload capability.
 
 Enable consistently in scanner and Telegram through a separately approved
 release. Advance the existing ``TELEGRAM_TRUMP_TRUTH_NOT_BEFORE`` to a real new

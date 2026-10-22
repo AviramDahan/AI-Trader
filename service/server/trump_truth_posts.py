@@ -177,18 +177,22 @@ def render(item,hebrew=None):
     title = '📣 טראמפ · פוסט ב־Truth Social'
     if item['is_repost']:
         title += ' · שיתוף מחדש'
-    parts = [title, 'דיווח מערוץ מעקב; התוכן לא אומת מול החשבון המקורי.']
+    parts = [title]
+    from trump_truth_translation import source_text
+    excerpt=source_text(item)
     if hebrew and hebrew['status']=='translated':
         parts += ['תרגום AI לעברית של קטע הדיווח (לא אימות עובדות):\n'+hebrew['text_he']]
     elif hebrew and hebrew['status']=='unavailable':
         parts += ['התרגום לעברית אינו זמין כרגע. לצפייה בתוכן יש לפתוח את הפוסט המקורי בקישור.']
-    elif hebrew and hebrew['status']=='media_only':
-        parts += ['לא נמצא קטע טקסט לתרגום. אין תמלול או תיאור AI של המדיה.']
-    elif item['text_excerpt']:
-        parts += ['קטע מהדיווח (שפת המקור):\n'+item['text_excerpt']]
+    elif (hebrew and hebrew['status']=='link_only') or (not excerpt and item['is_repost'] and not item['has_media']):
+        parts += ['שיתוף מחדש ללא גוף הפוסט בדיווח הממסר. התוכן זמין בקישור לפוסט המקורי.']
+    elif (hebrew and hebrew['status']=='media_only') or not excerpt:
+        parts += ['פוסט ללא קטע טקסט לתרגום. אין תמלול או תיאור AI של המדיה.']
+    else:
+        parts += ['קטע מהדיווח (שפת המקור):\n'+excerpt]
     if item['has_media']:
         parts += ['תמונה/סרטון: לצפייה בפוסט המקורי. המדיה לא הורדה.']
-    parts += ['זמן הפרסום המקורי: לא אומת.\nזמן דיווח הערוץ (UTC): '+item['relay_published_at'],
+    parts += ['דיווח מערוץ מעקב; התוכן לא אומת מול החשבון המקורי.\nזמן הפרסום המקורי: לא אומת.\nדווח בערוץ: '+instant(item['relay_published_at']).strftime('%d.%m.%Y %H:%M UTC'),
               'לפוסט המלא ב־Truth Social:\n'+item['truth_url']+'\nערוץ המעקב:\nhttps://t.me/'+CHANNEL+'/'+str(item['relay_message_id'])]
     return '\n\n'.join(parts)
 
@@ -226,4 +230,9 @@ def delivery_message(row,at=None):
         if hebrew is None:return None
     elif hebrew_enabled():return None  # Never replay/translate old queued posts.
     message=render(envelope['item'],hebrew)
-    return message if len(message.encode('utf-16-le'))//2<=4096 else None
+    from telegram_presentation import telegram_text,utf16_length
+    # Measure the ENTIRE final bidi wire, not the shorter pre-format text. The
+    # shared sender retains its behavior, but must never clip this translation.
+    if utf16_length(telegram_text(message,limit=16384))>4096:
+        message=render(envelope['item'],{'status':'unavailable','text_he':''})
+    return message if utf16_length(telegram_text(message,limit=16384))<=4096 else None
