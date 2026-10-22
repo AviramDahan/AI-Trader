@@ -1,4 +1,4 @@
-"""Opt-in, attributed Truth Social relay notifications; no AI or trading input.
+"""Opt-in Truth relay notices; optional isolated Hebrew, never trading input.
 
 Only a pinned public broadcast and an exact author/header + footer link qualify.
 That verifies the relay's claim, NOT primary authorship/content or full coverage.
@@ -151,6 +151,8 @@ def ingest(items, at=None):
                 result['rejected_invalid'] += 1
                 continue
             envelope = dict(item=item, fence=fence(cur, item))
+            from trump_truth_translation import enabled as hebrew_enabled
+            if hebrew_enabled():envelope['presentation']='hebrew_v1'
             payload = json.dumps(envelope, ensure_ascii=False, separators=(',', ':'))
             if len(payload) > 3900:
                 raise ValueError('trump_truth_payload_bound')
@@ -159,8 +161,9 @@ def ingest(items, at=None):
             if added:
                 # Old binaries do not recognize these queue states and cannot
                 # accidentally dispatch raw envelopes to a trading fallback.
-                cur.execute("UPDATE scanner_telegram_outbox SET status='trump_pending' WHERE dedupe_key=? AND event_type=? AND status='pending'",
-                            (PREFIX+item['truth_post_id'], EVENT))
+                status='trump_hebrew_pending' if envelope.get('presentation')=='hebrew_v1' else 'trump_pending'
+                cur.execute("UPDATE scanner_telegram_outbox SET status=? WHERE dedupe_key=? AND event_type=? AND status='pending'",
+                            (status,PREFIX+item['truth_post_id'], EVENT))
             result['inserted'] += int(added)
             result['sources'] += int(added)
             result['duplicates'] += int(not added)
@@ -170,12 +173,18 @@ def ingest(items, at=None):
     return result
 
 
-def render(item):
+def render(item,hebrew=None):
     title = '📣 טראמפ · פוסט ב־Truth Social'
     if item['is_repost']:
         title += ' · שיתוף מחדש'
     parts = [title, 'דיווח מערוץ מעקב; התוכן לא אומת מול החשבון המקורי.']
-    if item['text_excerpt']:
+    if hebrew and hebrew['status']=='translated':
+        parts += ['תרגום AI לעברית של קטע הדיווח (לא אימות עובדות):\n'+hebrew['text_he']]
+    elif hebrew and hebrew['status']=='unavailable':
+        parts += ['התרגום לעברית אינו זמין כרגע. לצפייה בתוכן יש לפתוח את הפוסט המקורי בקישור.']
+    elif hebrew and hebrew['status']=='media_only':
+        parts += ['לא נמצא קטע טקסט לתרגום. אין תמלול או תיאור AI של המדיה.']
+    elif item['text_excerpt']:
         parts += ['קטע מהדיווח (שפת המקור):\n'+item['text_excerpt']]
     if item['has_media']:
         parts += ['תמונה/סרטון: לצפייה בפוסט המקורי. המדיה לא הורדה.']
@@ -184,14 +193,15 @@ def render(item):
     return '\n\n'.join(parts)
 
 
-def delivery_message(row, at=None):
-    """Re-check OFF, activation, cutover and source identity before every send."""
+def checked_envelope(row,at=None):
+    """Source identity/fences only; never inference or presentation-cache trust."""
     from database import get_db_connection
     from telegram_topics import thread_id_for_event
     if not enabled() or thread_id_for_event(EVENT) is None:
         return None
     try:
         envelope = json.loads(row['message']); item = envelope['item']
+        if 'presentation' in envelope and envelope['presentation']!='hebrew_v1':return None
         if row['event_type'] != EVENT or row['dedupe_key'] != PREFIX+item['truth_post_id']:
             return None
         if not valid_item(item, at or datetime.now(timezone.utc)):
@@ -199,6 +209,21 @@ def delivery_message(row, at=None):
         with get_db_connection() as conn:
             if envelope['fence'] != fence(conn.cursor(), item):
                 return None
-        return render(item)
+        return envelope
     except (AttributeError, KeyError, TypeError, ValueError, UnicodeError):
         return None
+
+
+def delivery_message(row,at=None):
+    """No inference on the shared Telegram/trading-alert send path."""
+    envelope=checked_envelope(row,at)
+    if envelope is None:return None
+    if str(row.get('status','')).startswith('trump_hebrew_') and envelope.get('presentation')!='hebrew_v1':return None
+    from trump_truth_translation import enabled as hebrew_enabled,presentation
+    hebrew=None
+    if envelope.get('presentation')=='hebrew_v1':
+        hebrew=presentation(row,envelope,at)
+        if hebrew is None:return None
+    elif hebrew_enabled():return None  # Never replay/translate old queued posts.
+    message=render(envelope['item'],hebrew)
+    return message if len(message.encode('utf-16-le'))//2<=4096 else None
