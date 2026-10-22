@@ -21,6 +21,10 @@ jobs:
         working-directory: service/frontend
   postgres:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     services:
       postgres:
         image: postgres:17-bookworm
@@ -53,7 +57,42 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17 age
       - name: Real PostgreSQL lifecycle, snapshot, concurrency, encrypted restore
-        run: python -m pytest service/server/tests_pg -q
+        run: python scripts/readiness_pg_shards.py --index ${{ matrix.shard }} --count 2
+  # Independent runner/database: retain the PG-backed regression environment,
+  # but do not serialize it behind the full lifecycle/restore suite. The release
+  # controller still requires SUCCESS for this whole workflow, including both.
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: cloud_test
+          POSTGRES_PASSWORD: disposable-ci-only
+          POSTGRES_DB: ai_trader_cloud_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U cloud_test -d ai_trader_cloud_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_POSTGRES_URL: postgresql://cloud_test:disposable-ci-only@127.0.0.1:5432/ai_trader_cloud_test
+      STOCK_SCANNER_ENABLED: "false"
+      TELEGRAM_NEWS_STREAM_ENABLED: "false"
+      TEST_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
+      TEST_PG_RESTORE: /usr/lib/postgresql/17/bin/pg_restore
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r service/requirements.txt -r service/requirements-telegram-reader.txt
+      - name: PostgreSQL client and encryption tools
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          printf 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt %s-pgdg main\n' "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17 age
       - name: Backend and scanner regression
         run: python -m pytest service/server/tests -q
   container:
