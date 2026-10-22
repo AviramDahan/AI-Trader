@@ -19,6 +19,7 @@ class Policy:
     max_age_hours: int=168
     market_age_hours: int=6
     universe_age_hours: int=6
+    market_briefs_enabled: bool=False
 
 
 @dataclass
@@ -34,7 +35,10 @@ def route(event,result,positions,watchlist,universe,policy):
     tickers=set(event['tickers'])
     if not tickers and event['event_type']=='market':
         if relevance<policy.market_relevance:return [],'below_market_threshold'
-        if materiality not in ('medium','high'):return [],'low_importance'
+        if materiality not in ('medium','high'):
+            from .market_briefs import eligible
+            if not (policy.market_briefs_enabled is True and eligible(event,result)):
+                return [],'low_importance'
         return [('market_news',[])],None
     if relevance<policy.personal_relevance:return [],'below_relevance_threshold'
     if materiality not in ('medium','high'):return [],'low_importance'

@@ -47,7 +47,8 @@ def pipeline():
     cfg=feed_settings()
     policy=effective_policy(cfg,_float_env('STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE',.3,.3,1),
         _int_env('STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS',6,1,24),
-        cfg['scan_bridge_max_age'],_int_env('STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS',168,24,720))
+        cfg['scan_bridge_max_age'],_int_env('STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS',168,24,720),
+        market_briefs_enabled=os.getenv('NEWS_EVENTS_MARKET_BRIEFS_ENABLED','').strip().lower()=='true')
     control=state()
     if control['mode']!='canonical' or not control['not_before']:raise RuntimeError('canonical_not_activated')
     return Pipeline(Store(connect,production=True),universe,membership,not_before=control['not_before'],policy=policy)
@@ -179,7 +180,10 @@ def analyze_jobs(at=None):
 def message(event,result,topic,tickers):
     from news_pipeline import _publication_time_he
     from news_presentation import hide_relay_branding
-    parts=['📰 '+hide_relay_branding(result['title_he'])]
+    from .market_briefs import eligible, source
+    brief=topic=='market_news' and eligible(event,result)
+    parts=(['📰 עדכון שוק קצר',hide_relay_branding(result['title_he'])]
+           if brief else ['📰 '+hide_relay_branding(result['title_he'])])
     if tickers:parts.append('מניות: '+', '.join(tickers))
     parts.append(hide_relay_branding(result['summary_he']))
     if topic!='market_news':parts.append('פרשנות AI: '+hide_relay_branding(result['interpretation_he']))
@@ -189,8 +193,16 @@ def message(event,result,topic,tickers):
     licenses={s.get('raw_metadata',{}).get('license_label','')+' '+s.get('raw_metadata',{}).get('license_url','')
               for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')}
     if licenses:parts.append('תרגום/תקציר AI · '+ '; '.join(sorted(licenses)))
+    if brief:
+        if not licenses:parts.append('תרגום/תקציר AI')
+        original=source(event)
+        parts.append('מקור: '+original['publisher']+'\n'+original['url'])
     parts.append('פורסם: '+_publication_time_he(event['published_at']))
-    return '\n\n'.join(parts)[:4000]
+    rendered='\n\n'.join(parts)
+    if brief:
+        if len(rendered)>4000:raise ValueError('market_brief_render_bound')
+        return rendered
+    return rendered[:4000]
 
 
 def queue_outbox(p,eid,at):

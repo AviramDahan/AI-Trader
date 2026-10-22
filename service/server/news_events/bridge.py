@@ -18,9 +18,9 @@ def scanner_identity_catalog(scanner_cache,sec_mapping=None):
     return universe
 
 
-def effective_policy(feed_settings,market_relevance,market_age_hours,universe_age_hours,max_age_hours):
+def effective_policy(feed_settings,market_relevance,market_age_hours,universe_age_hours,max_age_hours,*,market_briefs_enabled=False):
     """Pass effective deployed settings explicitly, never silently lower gates."""
     return Policy(personal_relevance=feed_settings['alert_min_relevance'],
         stock_relevance=feed_settings['broad_alert_min_relevance'],market_relevance=market_relevance,
         max_age_hours=max_age_hours,market_age_hours=market_age_hours,
-        universe_age_hours=universe_age_hours)
+        universe_age_hours=universe_age_hours,market_briefs_enabled=market_briefs_enabled is True)
