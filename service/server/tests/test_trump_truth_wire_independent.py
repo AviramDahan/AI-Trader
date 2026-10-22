@@ -133,7 +133,9 @@ def test_hebrew_wire_preserves_repost_and_media_limitations(hebrew, monkeypatch)
     session = transport(monkeypatch)
     assert hebrew.engine.process_telegram_outbox()['sent'] == 1
     text = visible(session.post.call_args.kwargs['data']['text'])
-    assert 'שיתוף מחדש' in text and 'המדיה לא הורדה' in text
+    assert 'שיתוף מחדש' in text
+    assert 'המדיה לא הורדה' in text or 'אין כאן קובץ מדיה מאומת זמין' in text
+    assert 'מצורפת מדיה' not in text, 'A bare media marker is not a verified attached asset'
     assert URL in text and RELAY in text
 
 

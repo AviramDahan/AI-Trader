@@ -34,8 +34,13 @@ Publication and coverage
 No relevance, materiality or economic-topic filter applies to this dedicated
 notification stream. These filters remain unchanged for ALL ordinary news.
 One original Truth post ID has one durable outbox key even if the relay repeats
-or edits it. Media notices produce a notification with the original post link;
-images/videos are not downloaded or reuploaded. Reposts are eligible only when
+or edits it. By default media notices produce a notification with the original
+post link. A separate default-OFF genuine-file capability is described in
+``trump-truth-media.rst``: only actual attached relay Photo/MP4 Document files
+can be boundedly acquired/reuploaded; markers and webpage previews cannot.
+The independently observed latest20 relay messages on22October contained20
+webpage previews and zero supported files. This sample does not establish
+future coverage or a natural successful media delivery. Reposts are eligible only when
 the relay supplies a distinct Trump account post footer, labelled as such.
 The source-language excerpt is explicitly labelled by default; the optional
 Hebrew presentation is labelled as AI translation of the relay EXCERPT, not
@@ -78,11 +83,15 @@ Defaults:
 
 * ``TELEGRAM_TRUMP_TRUTH_ENABLED=false``
 * ``TELEGRAM_TRUMP_TRUTH_HEBREW_ENABLED=false``
+* ``TELEGRAM_TRUMP_TRUTH_MEDIA_ENABLED=false``
 * ``TELEGRAM_TRUMP_TRUTH_NOT_BEFORE=``
 
 After release review, set a real aware UTC activation time and enable the flag
-consistently in scanner and Telegram roles through the existing controlled
+consistently in the API, scanner and Telegram roles through the reviewed controlled
 release process. The existing reader/session and news topic must be configured.
+These are independently reviewed flags, not permission to activate all features
+from an earlier source-only/two-key Hebrew approval. The final runtime, actual
+role starts, encrypted backup binding and exact-source gates must be verified.
 The pinned source is appended to at most five ordinary configured public
 channels; no join, private-dialog enumeration or personal-account send occurs.
 Check the first cursor fence, subsequent natural source observations, actual
@@ -155,7 +164,8 @@ serialized provenance nor a translation is sliced to fit. If the complete
 validated translation cannot fit, a whole explicitly unavailable notice and
 both links are used, without another model request. The shared formatter for
 other news/trade messages is unchanged. This is presentation only, not source
-coverage guarantees or a media download/upload capability.
+coverage guarantees. Optional file acquisition is a different, separately
+gated capability and never changes these translation/model budgets or guards.
 
 Enable consistently in scanner and Telegram through a separately approved
 release. Advance the existing ``TELEGRAM_TRUMP_TRUTH_NOT_BEFORE`` to a real new
@@ -174,3 +184,36 @@ There is no DB rewind, deletion, automatic queue replay or financial mutation.
 A full database restore preserves row/cache together; an active-state-only
 restore does NOT promise historical outbox or translation cache reconstruction.
 Missing cache means blocked/cancelled, not invented historical translation.
+
+Optional genuine media and published website archive
+-----------------------------------------------------
+Available media uses ``trump_truth_media_v1`` descriptors bound to literal relay
+identity, original post ID, activation, source clocks and cleaned source text.
+No access hash, Telegram file reference or private cache path is public. Actual
+acquisition happens only in the existing pinned reader with owned private
+session/cache permissions and strict file/count/byte/time limits. Marker-only,
+unsupported and failed acquisitions remain truthful ordinary link notices;
+they do not enter media-pending states or trigger invented captions.
+
+The new media pending/preparing/ready/retry/sending states are invisible to
+previous74b dispatchers. Long approved Hebrew is not clipped into a1024-unit
+caption: a short factual media caption and full notice use separate durable
+write-ahead/ACK stages. Each stage rechecks the exact prepared presentation and
+current authority. Missing/revoked cache, unknown ACK or an expired sending
+lease cannot authorize blind resend or text fallback after media failure.
+Partial two-stage delivery remains possible; exactly-once external delivery is
+not guaranteed.
+
+The website archive validates only already-sent Hebrew rows and their retained
+source/cache provenance. Current switches/cutover advancement do not erase past
+good published history and never authorize another send. A media endpoint uses
+an opaque content token bound by a complete known-ACK receipt to an exact sent
+row; no public request downloads from Telegram/Truth Social or generates text.
+Neither website stored-sent status nor Bot API ACK proves a phone displayed it.
+
+The optional file cache resides on the private runtime volume; it is NOT part
+of the encrypted application/database snapshot. A DB restore may retain media
+descriptors/receipts while the actual optional files are absent. Such media is
+unavailable/UNKNOWN, never regenerated, refetched or claimed restored. Cache
+loss and full-cache bounds may prevent file availability; original links remain
+the honest alternative. See ``trump-truth-media.rst`` for limits and recovery.

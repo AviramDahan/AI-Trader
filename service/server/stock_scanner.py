@@ -1718,6 +1718,7 @@ async def stock_news_translation_loop() -> None:
         return
     from scanner_engine import ingest_market_news, translate_pending_news
     from trump_truth_translation import prepare,enabled as hebrew_enabled
+    from trump_truth_media import prepare as prepare_media, enabled as media_enabled
     await asyncio.sleep(90)
     next_legacy=0.0
     while True:
@@ -1732,10 +1733,11 @@ async def stock_news_translation_loop() -> None:
             next_legacy=loop.time()+600
         try:
             await asyncio.to_thread(prepare)
+            await asyncio.to_thread(prepare_media)
         except Exception:
             from scanner_engine import set_service_status
             set_service_status('trump_truth_translation','error','Translation preparation unavailable')
-        await asyncio.sleep(15 if hebrew_enabled() else 600)
+        await asyncio.sleep(15 if hebrew_enabled() or media_enabled() else 600)
 
 
 async def stock_telegram_outbox_loop() -> None:

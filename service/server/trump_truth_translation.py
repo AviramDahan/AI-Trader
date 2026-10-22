@@ -200,31 +200,35 @@ def prepare(limit=1,at=None,completion=None):
         cur=c.cursor();begin_write_transaction(cur)
         # Safe to retry preparation after a crash: these states NEVER sent.
         cur.execute('UPDATE scanner_telegram_outbox SET status=? WHERE status=? AND next_attempt_at<=?',(PENDING,WORKING,stamp))
-        query='SELECT * FROM scanner_telegram_outbox WHERE event_type=? AND status=? AND next_attempt_at<=? ORDER BY id LIMIT 1'
+        from trump_truth_media import PENDING as MEDIA_PENDING,WORKING as MEDIA_WORKING,READY as MEDIA_READY
+        if enabled():
+            cur.execute('UPDATE scanner_telegram_outbox SET status=? WHERE status=? AND next_attempt_at<=?',(MEDIA_PENDING,MEDIA_WORKING,stamp))
+        query='SELECT * FROM scanner_telegram_outbox WHERE event_type=? AND status IN (?,?) AND next_attempt_at<=? ORDER BY id LIMIT 1'
         if using_postgres():query+=' FOR UPDATE SKIP LOCKED'
-        found=cur.execute(query,('trump_truth_post',PENDING,stamp)).fetchone()
+        found=cur.execute(query,('trump_truth_post',PENDING,MEDIA_PENDING if enabled() else PENDING,stamp)).fetchone()
         if not found:return {'prepared':0,'deferred':0}
         row=dict(found)
-        cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=? WHERE id=? AND status=?',(WORKING,lease,row['id'],PENDING))
+        pending,working,ready=(MEDIA_PENDING,MEDIA_WORKING,MEDIA_READY) if row['status']==MEDIA_PENDING else (PENDING,WORKING,READY)
+        cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=? WHERE id=? AND status=?',(working,lease,row['id'],pending))
         c.commit()
     envelope=eligible(row,at)
     if not envelope:
-        with get_db_connection() as c:c.execute('UPDATE scanner_telegram_outbox SET status=\'cancelled\',last_error=\'trump_hebrew_fenced\' WHERE id=? AND status=? AND next_attempt_at=?',(row['id'],WORKING,lease))
+        with get_db_connection() as c:c.execute('UPDATE scanner_telegram_outbox SET status=\'cancelled\',last_error=\'trump_hebrew_fenced\' WHERE id=? AND status=? AND next_attempt_at=?',(row['id'],working,lease))
         return {'prepared':0,'deferred':0}
     key=cache_key(row)
     with get_db_connection() as c:
         cur=c.cursor();begin_write_transaction(cur)
         active=cur.execute('SELECT status,next_attempt_at FROM scanner_telegram_outbox WHERE id=?',(row['id'],)).fetchone()
-        if not active or active['status']!=WORKING or active['next_attempt_at']!=lease:return {'prepared':0,'deferred':0}
+        if not active or active['status']!=working or active['next_attempt_at']!=lease:return {'prepared':0,'deferred':0}
         old=cur.execute('SELECT value_json FROM scanner_settings WHERE key=?',(key,)).fetchone()
         try:
             if old and len(old['value_json'].encode())>8192:raise ValueError('translation_cache_invalid')
             cached=checked_cache(row,envelope,json.loads(old['value_json'])) if old else None
         except (ValueError,TypeError,KeyError,RecursionError):
-            cur.execute("UPDATE scanner_telegram_outbox SET status='cancelled',last_error='trump_hebrew_cache_invalid' WHERE id=? AND status=? AND next_attempt_at=?",(row['id'],WORKING,lease))
+            cur.execute("UPDATE scanner_telegram_outbox SET status='cancelled',last_error='trump_hebrew_cache_invalid' WHERE id=? AND status=? AND next_attempt_at=?",(row['id'],working,lease))
             return {'prepared':0,'deferred':0}
         if cached and cached['status']!='working':
-            cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=? WHERE id=? AND status=? AND next_attempt_at=?',(READY,stamp,row['id'],WORKING,lease))
+            cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=? WHERE id=? AND status=? AND next_attempt_at=?',(ready,stamp,row['id'],working,lease))
             return {'prepared':1,'deferred':0}
         attempts=cached['attempts'] if cached else 0
         if attempts<MAX_ATTEMPTS:attempts+=1
@@ -239,7 +243,7 @@ def prepare(limit=1,at=None,completion=None):
             raise ValueError('translation_preparation_revoked')
         with get_db_connection() as c:
             owned=c.execute('SELECT status,next_attempt_at,message FROM scanner_telegram_outbox WHERE id=?',(row['id'],)).fetchone()
-        if (not owned or owned['status']!=WORKING or owned['next_attempt_at']!=lease
+        if (not owned or owned['status']!=working or owned['next_attempt_at']!=lease
                 or owned['message']!=row['message']):raise ValueError('translation_preparation_revoked')
         # Both local requests recheck permission/ownership; no DB connection is
         # held across the callback. An already in-flight request cannot be undone.
@@ -252,17 +256,17 @@ def prepare(limit=1,at=None,completion=None):
     with get_db_connection() as c:
         cur=c.cursor();begin_write_transaction(cur)
         active=cur.execute('SELECT status,next_attempt_at,message FROM scanner_telegram_outbox WHERE id=?',(row['id'],)).fetchone()
-        if (not active or active['status']!=WORKING or active['next_attempt_at']!=lease
+        if (not active or active['status']!=working or active['next_attempt_at']!=lease
             or active['message']!=row['message'] or finish.isoformat()>=lease):return {'prepared':0,'deferred':0}
         if not current or binding(row,current)!=value['binding']:
             cur.execute("UPDATE scanner_telegram_outbox SET status='cancelled',last_error='trump_hebrew_fenced' WHERE id=?",(row['id'],))
             return {'prepared':0,'deferred':0}
         if result is None and attempts<MAX_ATTEMPTS:
             due=(finish+timedelta(seconds=60)).isoformat()
-            cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=?,last_error=? WHERE id=?',(PENDING,due,'trump_hebrew_translation_deferred',row['id']))
+            cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=?,last_error=? WHERE id=?',(pending,due,'trump_hebrew_translation_deferred',row['id']))
             return {'prepared':0,'deferred':1}
         value.update(result or {'status':'unavailable','text_he':''})
         checked_cache(row,envelope,value)
         cur.execute('UPDATE scanner_settings SET value_json=?,updated_at=? WHERE key=?',(wire(value),finish.isoformat(),key))
-        cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=?,last_error=NULL WHERE id=?',(READY,finish.isoformat(),row['id']))
+        cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=?,last_error=NULL WHERE id=?',(ready,finish.isoformat(),row['id']))
     return {'prepared':1,'deferred':0}

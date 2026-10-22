@@ -787,7 +787,14 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
     from trump_truth_posts import KIND, ingest as ingest_trump
     special = [item for item in items if item.get('source_kind') == KIND]
     if special:
-        counts = ingest_trump(special, at)
+        # Genuine media is observed AFTER the existing reader's bounded
+        # download, not at its pre-fetch cycle clock. Preserve actual clocks;
+        # future/unbound packets still fail valid_item against this real clock.
+        # _now is injectable for deterministic offline fixtures. Ordinary news
+        # ingestion and old text-only relay snapshots retain their original at.
+        observed_at = _now() if any(isinstance(x.get('media'),dict) and
+            x['media'].get('status')=='available' for x in special) else at
+        counts = ingest_trump(special, observed_at)
         ordinary = [item for item in items if item.get('source_kind') != KIND]
         if ordinary:
             regular = ingest_items(ordinary, at)

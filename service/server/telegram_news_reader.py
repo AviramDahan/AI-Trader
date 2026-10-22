@@ -71,6 +71,9 @@ async def telegram_news_stream_loop():
                 item = stream_item(event.message, allowed, datetime.now(timezone.utc))
                 if item:
                     try:
+                        if item.get('source_kind')=='trump_truth_relay_v1':
+                            from trump_truth_media import capture
+                            item=await capture(client,event.message,item,datetime.now(timezone.utc))
                         await asyncio.to_thread(ingest_items, [item])
                         set_service_status('news_stream','ok','Public allowlisted update ingested',success=True)
                     except Exception as exc:
@@ -185,6 +188,9 @@ async def collect(client, state, current, names):
                 else:
                     item = message_item(message, name, current)
                 if item:
+                    if special:
+                        from trump_truth_media import capture
+                        item=await capture(client,message,item,current)
                     output.append(item)
             checkpoints[name] = {'last_id':last_id, 'last_success_at':current.isoformat()}
             if special:
