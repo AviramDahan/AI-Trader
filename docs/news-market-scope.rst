@@ -43,9 +43,11 @@ existing private Admin formatter; no raw editor/source text is added to alerts.
 Integration and compatibility
 -----------------------------
 
-Routing, relevance/materiality requirements, identity/rights/freshness checks,
-membership, deduplication and send-time revalidation are unchanged. No scanner,
-order, position, sizing, TP/SL or accounting policy changes are included.
+The original scope-consistency change left routing unchanged. The later
+``news-public-editorial.rst`` change deliberately requires medium/high materiality
+for public MARKET delivery, while low-materiality topical analysis remains valid.
+Identity/rights/freshness, membership and send-time checks remain mandatory.
+No scanner, order, position, sizing, TP/SL or accounting policy changes are included.
 
 No new flag, migration or backup-format change is required. The added field is
 a transient canonical market review contract, not a new public result field.

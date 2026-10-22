@@ -157,6 +157,10 @@ def anchors(source, identities):
     """No same-ticker/day or headline-similarity merges. Exact evidence only."""
     identity=','.join(sorted(v['ticker'] for v in identities)) or 'market'
     refs=[]
+    if not identities:
+        from .editorial import macro_release
+        release=macro_release(source.data())
+        if release:refs.append(release[0])
     for url in (source.url,*source.event_refs):
         try: url=canonical_url(url)
         except ValueError: continue

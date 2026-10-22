@@ -147,12 +147,12 @@ def item(title, now, **changes):
         event_type=event_type(title, ""), rights="approved"), **changes)
 
 
-def analyzer(related=True, relevance=.4):
+def analyzer(related=True, relevance=.4, materiality='medium'):
     return Mock(return_value=Analysis(dict(
         related=related, title_he="התקבל דיווח על תנועת השוק",
         summary_he="המקור דיווח על תנועה בשוק.",
         interpretation_he="זהו דיווח מקור ולא המלצת מסחר.",
-        sentiment="neutral", materiality="low", relevance=relevance)))
+        sentiment="neutral", materiality=materiality, relevance=relevance)))
 
 
 @pytest.mark.parametrize("title", OBSERVED)
@@ -210,3 +210,10 @@ def test_corporate_classification_is_not_replaced_by_commodity_word():
     assert event_type("Gold Hart Copper acquires a mine", "") == "merger"
     assert event_type("Nasdaq Inc. reports quarterly earnings", "") == "earnings"
     assert event_type("S&P Global appoints a new CEO", "") == "management"
+
+
+def test_reported_market_movement_still_needs_public_importance(isolated_pipeline):
+    pipeline,_,now=isolated_pipeline
+    eid=pipeline.ingest(item(OBSERVED[0],now),now)
+    assert pipeline.analyze(eid,analyzer(materiality='low'),now)=='done'
+    assert pipeline.queue(eid,now)==[]

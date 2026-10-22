@@ -262,11 +262,12 @@ def test_admin_outcome_exposes_only_fixed_scope_check_not_unknown_text():
     assert "PRIVATE_FREEFORM" not in text
 
 
-def test_route_thresholds_and_publication_result_contract_unchanged():
+def test_route_scores_unchanged_with_separate_public_importance_gate():
     from news_events.engine import Policy, route
 
     policy = Policy()
     assert (policy.market_relevance, policy.personal_relevance, policy.stock_relevance) == (0.3, 0.55, 0.7)
     macro = {"tickers": [], "event_type": "market"}
     assert route(macro, draft(related=False), set(), set(), {}, policy) == ([], "irrelevant")
-    assert route(macro, draft(materiality="low", relevance=0.3), set(), set(), {}, policy) == ([("market_news", [])], None)
+    assert route(macro, draft(materiality="low", relevance=0.3), set(), set(), {}, policy) == ([], "low_importance")
+    assert route(macro, draft(materiality="medium", relevance=0.3), set(), set(), {}, policy) == ([("market_news", [])], None)
