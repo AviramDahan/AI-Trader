@@ -61,7 +61,7 @@ def thread_id_for_event(event_type: str | None) -> int | None:
         return None  # General: omit message_thread_id, never trading fallback.
     if not event_type:
         return None
-    if event_type in MARKET_NEWS_EVENT_TYPES:
+    if event_type in MARKET_NEWS_EVENT_TYPES or event_type == 'trump_truth_post':
         names = ("TELEGRAM_MARKET_NEWS_THREAD_ID", "TELEGRAM_NEWS_THREAD_ID")
     elif event_type in SEC_INTELLIGENCE_EVENT_TYPES:
         # Never fall back to General or another public topic for SEC research.
