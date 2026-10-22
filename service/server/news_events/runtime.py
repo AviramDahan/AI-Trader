@@ -51,7 +51,8 @@ def pipeline():
         market_low_materiality_relevance=(
             _float_env('STOCK_SCANNER_GENERAL_NEWS_LOW_MATERIALITY_MIN_RELEVANCE',.90,.80,1)
             if os.getenv('STOCK_SCANNER_GENERAL_NEWS_LOW_MATERIALITY_ENABLED','true').lower()=='true'
-            else None))
+            else None),
+        market_briefs_enabled=os.getenv('NEWS_EVENTS_MARKET_BRIEFS_ENABLED','').strip().lower()=='true')
     control=state()
     if control['mode']!='canonical' or not control['not_before']:raise RuntimeError('canonical_not_activated')
     return Pipeline(Store(connect,production=True),universe,membership,not_before=control['not_before'],policy=policy)
@@ -196,7 +197,7 @@ def analyze_jobs(at=None):
     return dict(analyzed=int(good),alerts=alerts,errors=[] if good else [outcome])
 
 
-def message(event,result,topic,tickers):
+def message(event,result,topic,tickers,*,policy=None):
     from news_pipeline import _publication_time_he
     from news_presentation import hide_relay_branding
     from news_source_links import clean_draft, append_source, safe_source_url
@@ -206,6 +207,10 @@ def message(event,result,topic,tickers):
     compact_analyst = (not report and topic in ('market_news','important_stock_news')
                       and analyst_enabled() and analyst_event(event))
     parts=[(REPORT_PREFIX if report else '📰 ')+hide_relay_branding(clean_draft(result['title_he']))]
+    from .engine import market_brief_event
+    brief = topic == 'market_news' and policy is not None and market_brief_event(event,result,policy)
+    if brief:
+        parts = ['📰 עדכון שוק קצר', hide_relay_branding(clean_draft(result['title_he']))]
     if tickers:parts.append('מניות: '+', '.join(tickers))
     parts.append(hide_relay_branding(clean_draft(result['summary_he'])))
     if compact_analyst:
@@ -215,7 +220,7 @@ def message(event,result,topic,tickers):
     interpretation = hide_relay_branding(clean_draft(result.get('interpretation_he') or ''))
     if topic == 'market_news' and os.getenv('STOCK_SCANNER_PUBLIC_TRANSLATION_ONLY_ENABLED','false').lower() == 'true':
         interpretation = ''
-    if interpretation and not compact_analyst:parts.append('משמעות אפשרית לסוחר (AI): '+interpretation)
+    if interpretation and not compact_analyst and not brief:parts.append('משמעות אפשרית לסוחר (AI): '+interpretation)
     # Ingestion provenance stays in storage. Retain required licensed credits.
     credits=[clean_draft(s['publisher']) for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')]
     footer=[]
@@ -272,7 +277,7 @@ def queue_outbox(p,eid,at):
                     c.execute("UPDATE ne_delivery SET status='duplicate' WHERE event_id=? AND version=? AND topic=?",(eid,version,topic))
                     continue
                 key=keys[0]
-            if enqueue_telegram(c,key,kind,message(event,result,topic,tickers),published_at=event['published_at']):
+            if enqueue_telegram(c,key,kind,message(event,result,topic,tickers,policy=p.policy),published_at=event['published_at']):
                 c.execute('INSERT INTO ne_outbox VALUES(?,?,?,?,?) ON CONFLICT(dedupe_key) DO NOTHING',(key,eid,version,topic,control['epoch']))
                 count+=1
             c.execute("UPDATE ne_delivery SET status='outbox' WHERE event_id=? AND version=? AND topic=?",(eid,version,topic))
@@ -301,4 +306,4 @@ def delivery_message(outbox):
         max_age=p.policy.max_age_hours if set(event['tickers'])&(held|watched) else p.policy.market_age_hours if not event['tickers'] else p.policy.universe_age_hours
         if reason or not matching or not 0<=age<=max_age*3600:return None
         if event['published_at']<p.not_before or event['conflicts'] or any(s['rights']!='approved' for s in event['sources']):return None
-        return message(event,result,link['topic'],matching[0])
+        return message(event,result,link['topic'],matching[0],policy=p.policy)

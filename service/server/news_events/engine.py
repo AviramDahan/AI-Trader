@@ -20,6 +20,7 @@ class Policy:
     max_age_hours: int=168
     market_age_hours: int=6
     universe_age_hours: int=6
+    market_briefs_enabled: bool=False
 
 
 @dataclass
@@ -34,6 +35,19 @@ def public_translation_event(event):
     from .general_news import eligible_event
     return (os.getenv('STOCK_SCANNER_PUBLIC_TRANSLATION_ONLY_ENABLED','false').lower()=='true'
             and not event['tickers'] and (event['event_type']=='market' or eligible_event(event)))
+
+
+def supplemental_market_event(event, result, policy):
+    from news_public_importance import enabled
+    return (event['event_type'] == 'market' and result['materiality'] == 'low'
+            and not enabled() and policy.market_low_materiality_relevance is not None
+            and result['relevance'] >= policy.market_low_materiality_relevance)
+
+
+def market_brief_event(event, result, policy):
+    from .market_briefs import eligible
+    return (policy.market_briefs_enabled is True and not public_translation_event(event)
+            and eligible(event, result) and not supplemental_market_event(event, result, policy))
 
 
 def route(event,result,positions,watchlist,universe,policy):
@@ -54,11 +68,9 @@ def route(event,result,positions,watchlist,universe,policy):
             return [],'identity_unverified'
         if not public_allowed:return [],public_reason
         if relevance<max(policy.market_relevance,.55 if enabled() else 0):return [],'below_market_threshold'
-        supplemental_market = (event['event_type']=='market' and materiality=='low'
-            and not enabled()
-            and policy.market_low_materiality_relevance is not None
-            and relevance>=policy.market_low_materiality_relevance)
-        if materiality not in ('medium','high') and not supplemental_market:return [],'low_importance'
+        if (materiality not in ('medium','high') and not supplemental_market_event(event, result, policy)
+                and not market_brief_event(event, result, policy)):
+            return [],'low_importance'
         return [('market_news',[])],None
     if relevance<policy.personal_relevance:return [],'below_relevance_threshold'
     if materiality not in ('medium','high'):return [],'low_importance'
