@@ -183,7 +183,7 @@ async def collect(client, state, current, names):
                     item, reason = extract(message, current)
                     if reason:
                         rejected[reason] = rejected.get(reason, 0) + 1
-                        if reason not in {'other_author_or_header', 'outside_activation'}:
+                        if reason not in {'other_author_or_header', 'outside_activation', 'non_original_or_unverifiable'}:
                             errors.append(name + ':' + reason)
                 else:
                     item = message_item(message, name, current)

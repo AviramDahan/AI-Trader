@@ -3,8 +3,9 @@ Trump Truth Social relay notifications
 
 Scope and honest source identity
 --------------------------------
-The human selected Truth Social only, every new post (including non-economic
-posts), not X. This opt-in path reuses the existing public Telegram reader and
+The human selected Truth Social only, not X. The23October clarification below
+supersedes the earlier all-posts policy: original relay-classified publications
+only, including non-economic originals. This opt-in path reuses the existing public Telegram reader and
 durable bot outbox. It does not feed scanner news, change trading admission,
 increase AI budget, or create a worker/schedule. An independently opted-in
 local-only Hebrew presentation is described below; default source-language
@@ -40,8 +41,8 @@ post link. A separate default-OFF genuine-file capability is described in
 can be boundedly acquired/reuploaded; markers and webpage previews cannot.
 The independently observed latest20 relay messages on22October contained20
 webpage previews and zero supported files. This sample does not establish
-future coverage or a natural successful media delivery. Reposts are eligible only when
-the relay supplies a distinct Trump account post footer, labelled as such.
+future coverage or a natural successful media delivery. Reposts, including
+self-reposts with a distinct Trump account footer, are now excluded.
 The source-language excerpt is explicitly labelled by default; the optional
 Hebrew presentation is labelled as AI translation of the relay EXCERPT, not
 the complete primary post or factual endorsement. Neither mode is a trading
@@ -76,6 +77,52 @@ The version-specific ``trump_pending``, ``trump_retry`` and ``trump_sending``
 states are ignored by the previous9c/compatible older dispatcher. A rollback
 cannot accidentally send the JSON envelope or route it to trading. There is no
 DB rewind, queue deletion, automatic replay or change to existing event states.
+
+Original-only relay publication policy (23October clarification)
+----------------------------------------------------------------
+``original_relay_v1`` is a deterministic, conservative relay-marker policy,
+NOT primary authorship verification. Only pinned-channel extraction assigns
+``publication_policy`` after the existing exact Trump header/final footer and
+clock checks. Before source truncation or URL sanitization it inspects the
+entire bounded raw body and hidden TextUrl entity targets. RT, ReTruth,
+self-reshares, explicit quoted-post/repost markers and body Truth status links
+are excluded. Telegram forwarded/reply metadata also fails closed. Unicode
+compatibility normalization and removal of concealed format/control characters
+are used ONLY for classification, never to rewrite the visible source.
+An ordinary article quotation or non-Truth article link in an original comment
+is not by itself a platform quote-post. Markerless misclassification by the
+third-party relay remains possible; this does not certify official authorship,
+complete source text, complete coverage or all true original posts.
+
+Known policy exclusions advance the existing source cursor and have a bounded
+checkpoint rejection count; they are not provider errors or a reason to fetch
+history again. No channel switch, new provider, account, model, budget or
+schedule is introduced. Hebrew and literal retained original/source English
+remain displayed together; ordinary financial-news/trading gates do not change.
+
+Live validation requires the exact new policy and ``is_repost=false`` and
+rechecks retained markers. This existing validation path is used before
+translation, after preparation, for media capture and before EVERY external
+bilingual/media stage. Old unclassified queued notices are not grandfathered:
+they fail closed and become cancelled/terminal under the existing dispatcher
+semantics, without inference or a send. A known ACK is never resent and unknown
+delivery is never converted to permission to retry. No cursor/activation reset,
+source replay, DB migration, queue deletion or synthetic Production post occurs.
+
+The READ ONLY public feed additionally requires this policy, including on each
+frontend row, so a newer website cannot show unclassified rows from an older
+backend during rollout. Shared/unclassified old records are hidden from this
+feed; the immutable historical-envelope validator, original outbox text,
+translation/receipt audit rows and existing asset evidence are NOT rewritten
+or deleted. Previously published classified originals remain readable with the
+live source OFF. Public requests still never generate or retrieve source data.
+
+An older binary, including PR99, does NOT implement this originals-only policy.
+Its financial/schema compatibility is not policy compatibility: a rollback
+must keep the Trump source OFF across its producing/sending roles unless a
+policy-compatible binary is used. No automated rollback or flag change is
+performed by this change. Release review still requires exact CI/Readiness,
+independent QA, normal backup/recovery checks and explicit scoped approval.
 
 Controlled activation (not performed by this PR)
 ------------------------------------------------

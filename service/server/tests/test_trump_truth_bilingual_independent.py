@@ -66,6 +66,9 @@ def test_unavailable_translation_still_shows_actual_english_not_only_a_link(enab
     'This post contains the following media: image',
 ])
 def test_link_only_or_media_boilerplate_is_never_fabricated_as_original_english(enabled, body):
+    if not body.startswith('This post contains'):
+        assert source.item(source.post(body)) is None  # New policy rejects before translation.
+        return
     value = item(body)
     assert translation.source_text(value) == ''
     status = 'media_only' if value['has_media'] else 'link_only'

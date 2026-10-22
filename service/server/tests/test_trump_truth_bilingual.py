@@ -67,7 +67,12 @@ def test_whole_combined_hebrew_first_and_actual_source_visible(media):
 @pytest.mark.parametrize('status,body',[('unavailable','An original source policy statement.'),
     ('media_only','This post contains the following media: image'),('link_only','RT https://example.invalid/')])
 def test_unavailable_media_and_link_statuses_are_truthful_in_both_languages(media,status,body):
-    value=item(media,body)
+    # Pure historical plan must remain readable for retained old receipts;
+    # new extraction never grants publication authority to a link-only repost.
+    value=item(media,body) if status!='link_only' else item(media)
+    if status=='link_only':
+        value.update(text_excerpt='RT [קישור בגוף הפוסט — לצפייה במקור]',is_repost=True)
+        value.pop('publication_policy',None)
     if status=='media_only':value['has_media']=True
     parts=b.plan(value,{'status':status,'text_he':''})
     text=visible('\n'.join(p['text'] for p in parts))

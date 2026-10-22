@@ -124,19 +124,15 @@ def test_final_wire_safety_does_not_change_dedupe_or_unknown_delivery_policy(heb
     assert hebrew.trump.ingest([prepare_tests.make_item(number=101)], NOW)['duplicates'] == 1
 
 
-def test_hebrew_wire_preserves_repost_and_media_limitations(hebrew, monkeypatch):
+def test_repost_with_media_never_reaches_translation_or_sender(hebrew, monkeypatch):
     import trump_truth_translation as translation
-    value = prepare_tests.make_item('RT A synthetic personal statement.', media=True)
-    assert value['is_repost'] is True and value['has_media'] is True
-    hebrew.trump.ingest([value], NOW)
-    assert translation.prepare(at=NOW, completion=prepare_tests.good_completion('שיתוף מחדש של אמירה אישית סינתטית.'))['prepared'] == 1
+    assert prepare_tests.make_item('RT A synthetic personal statement.', media=True) is None
+    model=Mock(side_effect=AssertionError('No translation of a repost'))
+    assert translation.prepare(at=NOW, completion=model)['prepared'] == 0
+    model.assert_not_called()
     session = transport(monkeypatch)
-    assert hebrew.engine.process_telegram_outbox()['sent'] == 1
-    text = visible(session.post.call_args.kwargs['data']['text'])
-    assert 'שיתוף מחדש' in text
-    assert 'המדיה לא הורדה' in text or 'אין כאן קובץ מדיה מאומת זמין' in text
-    assert 'מצורפת מדיה' not in text, 'A bare media marker is not a verified attached asset'
-    assert URL in text and RELAY in text
+    assert hebrew.engine.process_telegram_outbox()['sent'] == 0
+    session.post.assert_not_called()
 
 
 def test_original_mode_final_wire_is_still_source_language_not_fake_hebrew(local_db, monkeypatch):
@@ -161,42 +157,29 @@ def test_original_mode_final_wire_is_still_source_language_not_fake_hebrew(local
 def test_link_only_repost_has_no_model_request_or_invented_media_caption(hebrew, monkeypatch, body):
     import trump_truth_translation as translation
     value = prepare_tests.make_item(body)
-    assert value['is_repost'] is True and value['has_media'] is False
-    assert hebrew.trump.ingest([value], NOW)['inserted'] == 1
+    assert value is None
     model = Mock(side_effect=AssertionError('A URL is not the quoted post body'))
-    assert translation.prepare(at=NOW, completion=model)['prepared'] == 1
+    assert translation.prepare(at=NOW, completion=model)['prepared'] == 0
     model.assert_not_called()
-    row = prepare_tests.rows(hebrew)[0]
-    assert prepare_tests.cache(hebrew, row)['status'] == 'link_only'
     session = transport(monkeypatch)
-    assert hebrew.engine.process_telegram_outbox()['sent'] == 1
-    shown = visible(session.post.call_args.kwargs['data']['text'])
-    assert 'שיתוף מחדש ללא גוף הפוסט' in shown
-    assert 'תרגום AI' not in shown and 'אין תמלול' not in shown
-    assert 'example.invalid' not in shown
-    assert URL in shown and RELAY in shown and 'לא אומת' in shown
     assert hebrew.engine.process_telegram_outbox()['sent'] == 0
-    assert session.post.call_count == 1
+    session.post.assert_not_called()
 
 
 @pytest.mark.parametrize('body', [
     'RT A synthetic statement. https://example.invalid/post',
     'ReTruth I disagree with this statement. https://example.invalid/post',
 ])
-def test_repost_with_real_prose_is_not_misclassified_as_link_only(hebrew, monkeypatch, body):
+def test_repost_with_real_prose_is_excluded_not_translated(hebrew, monkeypatch, body):
     import trump_truth_translation as translation
     value = prepare_tests.make_item(body)
-    assert hebrew.trump.ingest([value], NOW)['inserted'] == 1
-    model = prepare_tests.good_completion('שיתוף מחדש של אמירה סינתטית, ללא טענה נוספת.')
-    assert translation.prepare(at=NOW, completion=model)['prepared'] == 1
-    assert model.call_count == 2
-    assert 'source_excerpt' in model.call_args_list[0].args[1]
-    assert prepare_tests.cache(hebrew, prepare_tests.rows(hebrew)[0])['status'] == 'translated'
+    assert value is None
+    model=Mock(side_effect=AssertionError('No generation for shared prose'))
+    assert translation.prepare(at=NOW, completion=model)['prepared'] == 0
+    model.assert_not_called()
     session = transport(monkeypatch)
-    assert hebrew.engine.process_telegram_outbox()['sent'] == 1
-    shown = visible(session.post.call_args.kwargs['data']['text'])
-    assert 'תרגום AI' in shown and 'שיתוף מחדש ללא גוף הפוסט' not in shown
-    assert URL in shown and RELAY in shown
+    assert hebrew.engine.process_telegram_outbox()['sent'] == 0
+    session.post.assert_not_called()
 
 
 def test_link_only_classification_cannot_supply_missing_original_footer(enabled):
@@ -207,13 +190,19 @@ def test_link_only_classification_cannot_supply_missing_original_footer(enabled)
 
 def test_link_only_source_cannot_render_a_source_bound_but_invented_cached_translation(hebrew):
     import trump_truth_translation as translation
-    row = prepare_tests.enqueue(hebrew, 'RT https://example.invalid/post')
+    row = prepare_tests.enqueue(hebrew, 'An originally eligible source statement.')
     envelope = json.loads(row['message'])
+    envelope['item'].update(text_excerpt='RT [קישור בגוף הפוסט — לצפייה במקור]',is_repost=True)
+    envelope['item'].pop('publication_policy',None)
+    row['message']=json.dumps(envelope)
+    with hebrew.db.get_db_connection() as conn:
+        conn.execute('UPDATE scanner_telegram_outbox SET message=? WHERE id=?',(row['message'],row['id']))
     assert translation.source_text(envelope['item']) == ''
-    assert translation.prepare(at=NOW, completion=Mock(side_effect=AssertionError('No source body')))['prepared'] == 1
-    assert prepare_tests.cache(hebrew, row)['status'] == 'link_only'
+    assert translation.prepare(at=NOW, completion=Mock(side_effect=AssertionError('No shared source')))['prepared'] == 0
     value = dict(version=translation.VERSION, binding=translation.binding(row, envelope),
                  attempts=1, status='translated', text_he='זו אמירה שלא הופיעה בגוף הדיווח.')
-    prepare_tests.save_cache(hebrew, row, value)
+    with hebrew.db.get_db_connection() as conn:
+        conn.execute('INSERT INTO scanner_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json',
+                     (translation.cache_key(row),json.dumps(value),NOW.isoformat()))
     assert prepare_tests.cache(hebrew, row) == value
     assert hebrew.trump.delivery_message(row, NOW) is None

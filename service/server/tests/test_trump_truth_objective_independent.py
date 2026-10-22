@@ -95,6 +95,9 @@ def test_missing_or_bad_cache_is_truthfully_not_retained_not_a_fake_translation(
                 conn.execute('UPDATE scanner_telegram_outbox SET message=? WHERE id=?', (json.dumps(envelope), row['id']))
             encoded = '{' if damage == 'invalid_json' else json.dumps(value)
             conn.execute('UPDATE scanner_settings SET value_json=? WHERE key=?', (encoded, translation.cache_key(row)))
+    if damage == 'invented_empty_body':
+        assert report(hebrew)['items'] == []  # Shared rows are hidden, not relabelled originals.
+        return
     item = report(hebrew)['items'][0]
     assert item['translation_status'] == 'not_retained' and item['text_he'] is None
 

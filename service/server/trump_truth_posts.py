@@ -6,6 +6,7 @@ That verifies the relay's claim, NOT primary authorship/content or full coverage
 import json
 import os
 import re
+import unicodedata
 from datetime import datetime, timezone
 
 CHANNEL = 'realdonaldtrump_truth'
@@ -16,6 +17,40 @@ PREFIX = 'trump-truth:v1:'
 HEADER = 'New Post by realDonaldTrump on Truth Social'
 LABEL = 'Truth Social Post Link'
 LINK = re.compile(r'https://truthsocial\.com/(?:@realDonaldTrump/|users/realDonaldTrump/statuses/)([1-9][0-9]{15,19})', re.ASCII)
+ORIGINAL_POLICY = 'original_relay_v1'
+POLICY_REJECTION = 'non_original_or_unverifiable'
+
+
+def _classification_text(value):
+    # Classification only: never rewrite the retained/displayed source. Inspect
+    # the WHOLE bounded relay body before excerpt truncation or URL replacement.
+    normalized = unicodedata.normalize('NFKC', value)
+    return ''.join(ch for ch in normalized if unicodedata.category(ch) not in ('Cf', 'Cc')
+                   or ch in '\n\r\t').replace('\ufe0e', '').replace('\ufe0f', '')
+
+
+def _shared_body(value):
+    if type(value) is not str or len(value) > 32768:
+        return True
+    text = _classification_text(value)
+    return bool(re.search(
+        r'(?im)(?:^\W*(?:RT(?=[:@\s])|RE[\s-]?TRUTH\b|RE[\s-]?POST(?:ED)?\b|'
+        r'RE[\s-]?TWEET(?:ED)?\b|FORWARDED\s+FROM\b|QUOTE(?:D)?(?:\s+POST)?(?=\s*[:@]))|'
+        r'(?<!\w)(?:RT|RE[\s-]?TRUTH|RE[\s-]?POST(?:ED)?|RE[\s-]?TWEET(?:ED)?|'
+        r'FORWARDED\s+FROM|QUOTE(?:D)?(?:\s+POST)?)\s*[:@]|'
+        r'>>\s*QUOTE\b|\[\s*(?:RETRUTH|REPOST|QUOTE)\s*\])', text)
+        or re.search(r'https?://(?:www\.)?truthsocial\.com/(?:@[^/\s]+/(?:posts/)?|'
+                     r'users/[^/\s]+/statuses/|statuses/)[0-9]+', text, re.I))
+
+
+def original_policy_allows(item):
+    """Conservative relay-marker policy, NOT primary authorship verification.
+
+    No old queued record is upgraded by absence of RT. Only new pinned-source
+    extraction assigns this policy after checking raw text AND entity targets.
+    """
+    return (type(item) is dict and item.get('publication_policy') == ORIGINAL_POLICY
+            and item.get('is_repost') is False and not _shared_body(item.get('text_excerpt')))
 
 
 def enabled():
@@ -61,6 +96,9 @@ def extract(message, current):
         if (getattr(message, 'action', None) or type(message.id) is not int or message.id <= 0
                 or getattr(getattr(message, 'peer_id', None), 'channel_id', None) != CHANNEL_ID):
             return None, 'relay_identity'
+        if any(getattr(message, field, None) is not None for field in
+               ('fwd_from', 'forward', 'reply_to', 'reply_to_msg_id')):
+            return None, POLICY_REJECTION
         text = message.message
         if not isinstance(text, str) or len(text) > 32768:
             return None, 'relay_format'
@@ -91,6 +129,15 @@ def extract(message, current):
             return None, 'primary_link_unverifiable'
         post_id, before = footers[0]
         body = before[len(HEADER):].strip()
+        if _shared_body(body):
+            return None, POLICY_REJECTION
+        body_end = len(before.encode('utf-16-le')) // 2
+        for entity in getattr(message, 'entities', None) or []:
+            start, length = getattr(entity, 'offset', None), getattr(entity, 'length', None)
+            if type(start) is int and type(length) is int and start < body_end:
+                target = getattr(entity, 'url', None)
+                if isinstance(target, str) and _shared_body(target):
+                    return None, POLICY_REJECTION  # Hidden TextUrl targets count too.
         item = dict(source_kind=KIND, provider='telegram_channels', relay_channel=CHANNEL,
             relay_channel_id=CHANNEL_ID, relay_message_id=message.id, truth_post_id=post_id,
             truth_url='https://truthsocial.com/@realDonaldTrump/'+post_id,
@@ -99,7 +146,7 @@ def extract(message, current):
             activation=boundary, text_excerpt=clean_excerpt(body),
             has_media=bool(getattr(message, 'photo', None) or getattr(message, 'document', None)
                            or 'This post contains the following media:' in body),
-            is_repost=body.lstrip('🦅 \n').startswith(('RT ', 'RT:', 'ReTruth')))
+            is_repost=False, publication_policy=ORIGINAL_POLICY)
         from trump_truth_media import enabled as media_enabled, describe
         if media_enabled() and item['has_media']:
             item['media'] = describe(message, item)
@@ -113,6 +160,7 @@ def valid_item(item, current, *, active=True):
         match = LINK.fullmatch(item['truth_url'])
         from trump_truth_media import valid_descriptor
         return ((not active or enabled()) and item['source_kind'] == KIND and item['provider'] == 'telegram_channels'
+            and (not active or original_policy_allows(item))
             and item['relay_channel'] == CHANNEL and type(item['relay_channel_id']) is int
             and item['relay_channel_id'] == CHANNEL_ID
             and type(item['relay_message_id']) is int and item['relay_message_id'] > 0

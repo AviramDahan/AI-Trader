@@ -61,11 +61,10 @@ def test_bad_author_identity_url_time_never_enters_normal_news(enabled, msg):
     assert reader.message_item(msg, CHANNEL, NOW) is None
 
 
-def test_utf16_footer_and_repost_link_use_new_post_not_quoted_post(enabled):
+def test_repost_footer_cannot_make_a_self_reshare_an_original(enabled):
     msg = post(body='🦅 RT: https://truthsocial.com/users/realDonaldTrump/statuses/117400000000000001')
     item = reader.message_item(msg, CHANNEL, NOW)
-    assert item['truth_post_id'] == POST_ID
-    assert item['is_repost'] is True
+    assert item is None
 
 
 def test_disabled_source_cannot_fall_back_to_generic_economic_news(monkeypatch):

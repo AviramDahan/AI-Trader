@@ -129,7 +129,8 @@ def _projection(row, envelope, cache, at, conn):
     except (ValueError, TypeError, KeyError, OSError):
         media = {'status':'unavailable','kind':None}
     return dict(id='trump-truth:'+item['truth_post_id'], source_kind=t.KIND,
-        source_verification='relay_only', truth_post_id=item['truth_post_id'], truth_url=item['truth_url'],
+        source_verification='relay_only', publication_policy=t.ORIGINAL_POLICY,
+        truth_post_id=item['truth_post_id'], truth_url=item['truth_url'],
         relay_url='https://t.me/'+t.CHANNEL+'/'+str(item['relay_message_id']),
         source_excerpt=h.source_text(item), translation_status=status, text_he=text,
         relay_published_at=t.instant(item['relay_published_at']).isoformat(),
@@ -140,7 +141,7 @@ def _projection(row, envelope, cache, at, conn):
 
 def report(conn, *, now=None, limit=MAX_LIMIT, before=None):
     from database import using_postgres
-    from trump_truth_posts import EVENT, PREFIX, instant
+    from trump_truth_posts import EVENT, PREFIX, instant, ORIGINAL_POLICY, original_policy_allows
     if type(limit) is not int or not 1 <= limit <= MAX_LIMIT or (before is not None and
         (type(before) is not str or not POST_ID.fullmatch(before))):
         raise ValueError('public_archive_invalid_page')
@@ -174,7 +175,8 @@ def report(conn, *, now=None, limit=MAX_LIMIT, before=None):
         key = row['dedupe_key']
         if type(key) is str and key.startswith(PREFIX) and POST_ID.fullmatch(key[len(PREFIX):]): last=key[len(PREFIX):]
         envelope = historic_envelope(row, at)
-        if envelope is None or not publication_proven(row, envelope, conn=conn, at=at): excluded += 1; continue
+        if (envelope is None or not original_policy_allows(envelope['item'])
+            or not publication_proven(row, envelope, conn=conn, at=at)): excluded += 1; continue
         items.append(_projection(row, envelope, caches.get('trump_truth_hebrew_v1:'+str(row['id'])), at, conn))
         if len(items) == limit:
             exhausted = index == len(rows)-1
@@ -183,6 +185,7 @@ def report(conn, *, now=None, limit=MAX_LIMIT, before=None):
     result = dict(version=VERSION, generated_at=at.isoformat(), status='READY', items=items,
         next_cursor=last if more else None,
         coverage=dict(status='BOUNDED_RETAINED_ARCHIVE', history_days=HISTORY_DAYS,
+            publication_policy=ORIGINAL_POLICY, authorship='RELAY_CLAIM_NOT_PRIMARY_VERIFICATION',
             scanned=min(len(bounded),len(items)+excluded), excluded=excluded, scan_limit=SCAN_LIMIT-1,
             history_is_not_live_dispatch=True, original_publication_time='NOT_VERIFIED',
             delivery='STORED_SENT_STATUS_NOT_PHONE_RECEIPT', missing_cache='NOT_RETAINED_NOT_RECONSTRUCTED'))
