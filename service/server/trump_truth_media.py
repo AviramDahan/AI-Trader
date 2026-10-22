@@ -450,7 +450,10 @@ def public_media(row,envelope,at=None,conn=None):
         item=envelope['item'];d=item.get('media')
         if not d:return dict(result,status='marker_only' if item['has_media'] else 'none')
         if not valid_descriptor(item,at or datetime.now(timezone.utc)) or d['status']!='available':return result
-        r=_receipt(row,conn)
+        if envelope.get('presentation')=='bilingual_v1':
+            from trump_truth_bilingual import media_receipt
+            r=media_receipt(row,envelope,conn,at)
+        else:r=_receipt(row,conn)
         if (not r or r.get('status')!='complete' or r.get('asset_sha256')!=d['sha256']
             or type(r.get('media_message_id')) is not int or r['media_message_id']<=0):return result
         _verify(d['sha256'],d['bytes'])

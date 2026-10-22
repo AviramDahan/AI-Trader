@@ -6,6 +6,9 @@
 .truth-news-card h4 { margin-block: 0 .5rem; }
 .truth-news-body, .truth-news-original { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
 .truth-news-body { font-size: 1.05rem; }
+.truth-news-language { border-block-start: 1px solid #63728b44; padding-block-start: .65rem; margin-block: .75rem; }
+.truth-news-language h5 { margin: 0 0 .35rem; font-size: .88rem; }
+.truth-news-language-note { display: block; }
 .truth-news-status, .truth-news-card small, .truth-news-card footer { color: var(--text-secondary, #c1cbdc); line-height: 1.65; }
 .truth-news-media { display: block; width: 100%; max-height: 520px; object-fit: contain; background: #0b1220; border-radius: 8px; margin-block: .75rem; }
 .truth-news-card details { margin-block: .75rem; }

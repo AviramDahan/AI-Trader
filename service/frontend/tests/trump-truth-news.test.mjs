@@ -33,6 +33,8 @@ assert.ok(html.includes('חדשות — מהחדש לישן'),'fixture must reac
 assert.ok(html.includes(post.text_he),'actual NEWS view must display approved Hebrew, not omit Trump posts')
 assert.ok(html.includes('Truth Social')&&html.includes('דיווח מערוץ מעקב'))
 assert.ok(html.includes('שפת המקור')&&html.includes(post.source_excerpt))
+assert.ok(!/<details\b[^>]*>[\s\S]*?We will not raise tariffs by 5%\.[\s\S]*?<\/details>/.test(html), 'English source must be visibly present by default, not hidden behind details or a language toggle')
+assert.ok(html.includes('lang="en" dir="ltr"') && html.includes('lang="he" dir="rtl"'), 'both content languages must have explicit direction')
 assert.ok(html.includes('לא אומת')&&!html.includes('סנטימנט: חיובי'))
 assert.ok(html.includes('dir="rtl"')&&html.includes('miniapp-secondary'))
 inject=true;injectFilters=true
@@ -42,10 +44,21 @@ const viewModule={exports:{}}
 new Function('require','module','exports',bundle.outputFiles.find(f=>f.path.endsWith('TrumpTruthNews.js')).text)(require,viewModule,viewModule.exports)
 const {parseTruthArchive,TrumpTruthNewsView}=viewModule.exports
 const render=(value=archive,props={})=>renderToStaticMarkup(React.createElement(TrumpTruthNewsView,{he:true,data:parseTruthArchive(value),...props}))
+for(const he of [true,false]) {
+  const both=render(archive,{he})
+  assert.ok(both.includes(post.text_he)&&both.includes(post.source_excerpt),'both actual languages visible under either UI language')
+  assert.ok(!/<details\b/.test(both),'neither language is collapsed by default')
+  assert.equal((both.match(/data-truth-post=/g)||[]).length,1,'two languages must remain one published post')
+}
 for(const translation_status of ['unavailable','not_retained','media_only','link_only']) {
   const out=render({...archive,items:[{...post,translation_status,text_he:null}]})
   assert.ok(!out.includes(post.text_he)&&out.includes(post.truth_url),'fallback must never invent Hebrew or drop primary link')
+  assert.ok(out.includes('lang="he" dir="rtl"')&&out.includes('lang="en" dir="ltr"'))
+  assert.ok(out.includes(post.source_excerpt),'actual English is not discarded when Hebrew is unavailable')
 }
+const nobody=render({...archive,items:[{...post,translation_status:'media_only',text_he:null,source_excerpt:'',has_media:true}]})
+assert.ok(nobody.includes('No source body text was retained')&&nobody.includes('אין תמלול')&&!nobody.includes(post.source_excerpt))
+assert.ok(nobody.includes('Media is unavailable')&&nobody.includes('המדיה אינה זמינה'))
 assert.ok(render({...archive,items:[{...post,translation_status:'not_retained',text_he:null}]}).includes('אינה משוחזרת'))
 assert.ok(render(undefined,{error:'error'}).includes('role="alert"'))
 assert.ok(render({...archive,items:[]}).includes('אין כרגע הודעות עברית'))

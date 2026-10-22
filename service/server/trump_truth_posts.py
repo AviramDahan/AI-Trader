@@ -149,6 +149,10 @@ def ingest(items, at=None):
     if not enabled() or not items:
         result['rejected_invalid'] = len(items)
         return result
+    from trump_truth_bilingual import requested as bilingual_requested,enabled as bilingual_enabled,VERSION as bilingual_version
+    if bilingual_requested() and not bilingual_enabled():
+        result['rejected_invalid']=len(items)
+        return result  # Never silently fall back to a one-language contract.
     conn = get_db_connection()
     try:
         cur = conn.cursor(); begin_write_transaction(cur)
@@ -159,6 +163,7 @@ def ingest(items, at=None):
             envelope = dict(item=item, fence=fence(cur, item))
             from trump_truth_translation import enabled as hebrew_enabled
             if hebrew_enabled():envelope['presentation']='hebrew_v1'
+            if bilingual_enabled():envelope['presentation']=bilingual_version
             from trump_truth_media import enabled as media_enabled, VERSION as media_version
             if media_enabled() and item.get('media',{}).get('status')=='available':
                 envelope['media_version']=media_version
@@ -170,7 +175,8 @@ def ingest(items, at=None):
             if added:
                 # Old binaries do not recognize these queue states and cannot
                 # accidentally dispatch raw envelopes to a trading fallback.
-                status=('trump_media_pending' if envelope.get('media_version')==media_version else
+                status=('trump_bilingual_pending' if envelope.get('presentation')==bilingual_version else
+                    'trump_media_pending' if envelope.get('media_version')==media_version else
                     'trump_hebrew_pending' if envelope.get('presentation')=='hebrew_v1' else 'trump_pending')
                 cur.execute("UPDATE scanner_telegram_outbox SET status=? WHERE dedupe_key=? AND event_type=? AND status='pending'",
                             (status,PREFIX+item['truth_post_id'], EVENT))
@@ -217,7 +223,11 @@ def checked_envelope(row,at=None):
         return None
     try:
         envelope = json.loads(row['message']); item = envelope['item']
-        if 'presentation' in envelope and envelope['presentation']!='hebrew_v1':return None
+        from trump_truth_bilingual import requested as bilingual_requested,enabled as bilingual_enabled,VERSION as bilingual_version
+        if 'presentation' in envelope and envelope['presentation'] not in ('hebrew_v1',bilingual_version):return None
+        if envelope.get('presentation')==bilingual_version:
+            if not bilingual_enabled():return None
+        elif bilingual_requested():return None  # No old queued one-language fallback.
         if 'media_version' in envelope:
             from trump_truth_media import VERSION as media_version,enabled as media_enabled
             if envelope['media_version']!=media_version or not media_enabled():return None
@@ -243,6 +253,7 @@ def delivery_message(row,at=None,*,media_attached=False):
     """No inference on the shared Telegram/trading-alert send path."""
     envelope=checked_envelope(row,at)
     if envelope is None:return None
+    if envelope.get('presentation')=='bilingual_v1':return None  # Only the staged bilingual dispatcher may publish it.
     if str(row.get('status','')).startswith('trump_hebrew_') and envelope.get('presentation')!='hebrew_v1':return None
     from trump_truth_translation import enabled as hebrew_enabled,presentation
     hebrew=None

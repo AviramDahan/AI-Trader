@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "test:research": "node tests/signal-research.test.mjs && node tests/strategy-performance.test.mjs && node tests/target-diagnostics.test.mjs",
-    "test:activity": "node tests/read-poller.test.mjs && node tests/system-activity.test.mjs && node tests/system-web3d.test.mjs && node tests/telegram-miniapp.test.mjs && node tests/miniapp-workspace.test.mjs && node tests/entry-rejection.test.mjs && node tests/activity-explanations.test.mjs && node tests/admin-system.test.mjs && node tests/admin-agent-office.test.mjs && node tests/ui-post-strategy.test.mjs && node tests/trump-truth-news.test.mjs && node tests/trump-truth-objective-independent.test.mjs",
+    "test:activity": "node tests/read-poller.test.mjs && node tests/system-activity.test.mjs && node tests/system-web3d.test.mjs && node tests/telegram-miniapp.test.mjs && node tests/miniapp-workspace.test.mjs && node tests/entry-rejection.test.mjs && node tests/activity-explanations.test.mjs && node tests/admin-system.test.mjs && node tests/admin-agent-office.test.mjs && node tests/ui-post-strategy.test.mjs && node tests/trump-truth-news.test.mjs && node tests/trump-truth-objective-independent.test.mjs && node tests/trump-truth-bilingual-independent.test.mjs",
     "test:agents": "node tests/admin-agent-office.test.mjs",
     "test:trump": "node tests/trump-truth-news.test.mjs",
     "dev": "vite",

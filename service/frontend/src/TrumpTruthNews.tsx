@@ -47,18 +47,26 @@ function TruthCard({ item, he }: { item: TruthPost; he: boolean }) {
   const [mediaFailed, setMediaFailed] = useState(false)
   const text = (a: string, b: string) => he ? a : b
   const asset = item.media.status === 'available' && item.media.asset_token && !mediaFailed ? `${API_ORIGIN}/api/scanner/trump-media/${item.media.asset_token}` : null
-  const fallback = item.translation_status === 'not_retained' ? text('התרגום השמור אינו זמין. ההיסטוריה אינה משוחזרת ולא מתבצע תרגום בבקשת התצוגה.', 'The retained translation is unavailable. History is not reconstructed or translated on this read.') :
-    item.translation_status === 'link_only' ? text('שיתוף מחדש ללא גוף הפוסט בדיווח הממסר. התוכן זמין בקישור המקורי.', 'A repost without body text in the relay. Open the original post.') :
-      item.translation_status === 'media_only' ? text('פוסט ללא קטע טקסט לתרגום. אין תמלול או תיאור AI של המדיה.', 'No source text to translate. No AI media transcript or description was generated.') :
-        text('התרגום לעברית אינו זמין כרגע. התוכן זמין בקישור לפוסט המקורי.', 'Hebrew translation is unavailable. Open the original post for the content.')
+  const fallback = item.translation_status === 'not_retained' ? ['התרגום השמור אינו זמין. ההיסטוריה אינה משוחזרת ולא מתבצע תרגום בבקשת התצוגה.', 'The retained translation is unavailable. History is not reconstructed or translated on this read.'] :
+    item.translation_status === 'link_only' ? ['שיתוף מחדש ללא גוף הפוסט בדיווח הממסר. התוכן זמין בקישור המקורי.', 'A repost without body text in the relay. Open the original post.'] :
+      item.translation_status === 'media_only' ? ['פוסט ללא קטע טקסט לתרגום. אין תמלול או תיאור AI של המדיה.', 'No source text to translate. No AI media transcript or description was generated.'] :
+        ['התרגום לעברית אינו זמין כרגע. התוכן זמין בקישור לפוסט המקורי.', 'Hebrew translation is unavailable. Open the original post for the content.']
   return <article className="truth-news-card" data-truth-post={item.truth_post_id}>
     <header><h4>{text('טראמפ · Truth Social', 'Trump · Truth Social')}</h4>{item.is_repost && <span>{text('שיתוף מחדש', 'Repost')}</span>}</header>
-    {item.translation_status === 'translated' ? <><small>{text('תרגום AI לעברית של קטע הדיווח — לא אימות עובדות', 'AI Hebrew translation of the relay excerpt — not fact verification')}</small><p className="truth-news-body" lang="he" dir="rtl">{item.text_he}</p></> : <p className="truth-news-status">{fallback}</p>}
+    <section className="truth-news-language" aria-label="עברית / Hebrew" lang="he" dir="rtl">
+      <h5>עברית · Hebrew</h5>
+      {item.translation_status === 'translated' ? <><small>תרגום AI לעברית של קטע הדיווח — לא אימות עובדות</small><small className="truth-news-language-note" lang="en" dir="ltr">AI Hebrew translation of the relay excerpt — not fact verification.</small><p className="truth-news-body" lang="he" dir="rtl">{item.text_he}</p></> : <p className="truth-news-status">{fallback[0]}</p>}
+    </section>
+    <section className="truth-news-language truth-news-source-panel" aria-label="English / original relay excerpt" lang="en" dir="ltr">
+      <h5>English · קטע הדיווח בשפת המקור</h5>
+      <small>Original-language relay excerpt — not an independently verified primary post or AI-generated English.</small>
+      {item.source_excerpt ? <p className="truth-news-original" lang="en" dir="ltr">{item.source_excerpt}</p> : <p className="truth-news-status">No source body text was retained. No English caption, transcript or missing repost body is invented.</p>}
+      {item.translation_status !== 'translated' && <p className="truth-news-status">{fallback[1]}</p>}
+    </section>
     {asset && (item.media.kind === 'photo' ? <img className="truth-news-media" src={asset} alt={text('תמונה שצורפה בדיווח הממסר; התוכן לא אומת', 'Image attached by the relay; content unverified')} loading="lazy" referrerPolicy="no-referrer" onError={() => setMediaFailed(true)} /> :
       <video className="truth-news-media" src={asset} controls playsInline preload="none" onError={() => setMediaFailed(true)} />)}
-    {item.has_media && !asset && <p className="truth-news-status">{text('המדיה אינה זמינה בתצוגה השמורה. אפשר לצפות במקור; אין לנחש את תוכנה.', 'Media is unavailable in this archive. Open the source; its content is not inferred.')}</p>}
-    {item.source_excerpt && <details><summary>{text('קטע הדיווח בשפת המקור', 'Relay excerpt in the original language')}</summary><p className="truth-news-original" dir="auto">{item.source_excerpt}</p></details>}
-    <footer><p>{text('דיווח מערוץ מעקב; לא אומת מול החשבון המקורי. זמן הפרסום המקורי: לא אומת.', 'Relay-channel report, not verified against the original account. Original publication time: not verified.')}</p>
+    {item.has_media && !asset && <div className="truth-news-status"><p lang="he" dir="rtl">המדיה אינה זמינה בתצוגה השמורה. אפשר לצפות במקור; אין לנחש את תוכנה.</p><p lang="en" dir="ltr">Media is unavailable in this archive. Open the source; its content is not inferred.</p></div>}
+    <footer><p lang="he" dir="rtl">דיווח מערוץ מעקב; לא אומת מול החשבון המקורי. זמן הפרסום המקורי: לא אומת.</p><p lang="en" dir="ltr">Relay-channel report, not verified against the original account. Original publication time: not verified.</p>
       <dl><div><dt>{text('דווח בערוץ', 'Relay published')}</dt><dd><time dateTime={item.relay_published_at}><bdi>{item.relay_published_at}</bdi></time></dd></div>
         <div><dt>{text('נצפה לראשונה', 'First observed')}</dt><dd><time dateTime={item.observed_at}><bdi>{item.observed_at}</bdi></time></dd></div>
         <div><dt>{text('נרשם כנשלח', 'Recorded sent')}</dt><dd><time dateTime={item.sent_at}><bdi>{item.sent_at}</bdi></time></dd></div></dl>
@@ -72,7 +80,7 @@ export function TrumpTruthNewsView({ he, data, error = '', loading = false, onMo
   const stale = data.generated_at && Date.now() - Date.parse(data.generated_at) > 180000
   return <section className="truth-news" dir={he ? 'rtl' : 'ltr'} aria-labelledby="truth-news-heading">
     <h3 id="truth-news-heading">{text('טראמפ · ארכיון דיווחי Truth Social', 'Trump · Truth Social relay archive')}</h3>
-    <p>{text('מדור נפרד מחדשות המניות ומהסינון הפיננסי. הודעות בעברית שנרשמו כנשלחות בלבד, עד 7 ימים; ללא המלצת השקעה או סינון לפי השפעת שוק.', 'Separate from stock news and financial filters. Only Hebrew notices recorded as sent, up to 7 days; no investment advice or market-impact filter.')}</p>
+    <p>{text('מדור נפרד מחדשות המניות ומהסינון הפיננסי. הודעות בעברית ובדו־לשוני שנרשמו כנשלחות בלבד, עד 7 ימים; עברית וקטע המקור מוצגים יחד, ללא המלצת השקעה או סינון לפי השפעת שוק.', 'Separate from stock news and financial filters. Only Hebrew/bilingual notices recorded as sent, up to 7 days; Hebrew and the actual source excerpt appear together, with no investment advice or market-impact filter.')}</p>
     {(error || data.status !== 'READY') && <p role="alert">{text('ארכיון הפוסטים אינו זמין כרגע. זו אינה הוכחה שאין פוסטים חדשים.', 'The post archive is unavailable. This does not prove there are no new posts.')}</p>}
     {stale && <p role="status">{text('תצוגה שמורה — זמן הקריאה ישן; אין אישור לעדכניות הממסר.', 'Retained view — the read is stale; relay freshness is not verified.')}</p>}
     <div className="truth-news-grid">{data.items.map(item => <TruthCard key={item.id} item={item} he={he} />)}</div>

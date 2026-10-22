@@ -19,7 +19,12 @@ not the private outbox ID. The window is the last seven days of stored sent stat
 Invalid/expired cursors fail closed. A response is capped at 256 KiB. A failed
 projection is UNAVAILABLE, not an invented verified zero.
 
-Eligibility is already-sent, explicitly ``presentation=hebrew_v1`` only. The old
+Eligibility is already-sent, explicitly ``presentation=hebrew_v1`` or the new
+``presentation=bilingual_v1`` only. New bilingual rows additionally require the
+dedicated ``trump_bilingual_delivery_v1`` complete receipt: every bounded language
+and optional-media stage has a positive ACK tied to this exact source/plan. An
+old ``sent`` status or old media ``complete`` record cannot substitute for it.
+The old
 original-language envelopes are excluded even if sent; therefore the 14 old
 malformed notices deleted from Telegram and the nine older English notices are
 not republished on the new website. This is a read-only archive, not authority to
@@ -33,8 +38,21 @@ Only the exact bound validated translation cache is displayed as Hebrew. Missing
 working, corrupt or restored-without-cache data is ``not_retained`` with null text,
 never English relabelled as Hebrew or a new inference. ``unavailable``, media-only
 and link-only outcomes get concise truthful source-linked status cards. The same
-whole Telegram wire-size rule is applied to the cached translation, not clipping
-its tail on the website. The original source excerpt is separately expandable.
+whole Telegram wire-size rule is applied to legacy Hebrew-only cached notices,
+not clipping their tail on the website. The new bilingual contract instead
+retains a bounded multi-part plan and publishes only after every part's ACK;
+the legacy single-message fallback must not discard an approved translation
+just because the combined Hebrew+English exceeds one message.
+
+Both approved Hebrew and the exact cleaned original-language/English relay
+excerpt are visibly displayed by default in ONE card, under either UI language:
+Hebrew RTL, English/source LTR, separately attributed. English is not generated
+by AI and is not represented as the full primary post. A missing source body,
+link-only repost, missing translation or unavailable media has concise notices
+in BOTH languages, without inventing a caption/transcript/repost body. A missing
+retained translation is not reconstructed from a delivery receipt. Historical
+Hebrew-only Telegram posts remain readable with their real source excerpt on
+the website; they are not resent or relabelled as past bilingual Telegram sends.
 These are retained approved presentation inputs, not a historical phone-receipt
 or byte-for-byte reconstruction of an earlier Telegram rendering version.
 
@@ -62,7 +80,7 @@ not establish that the current relay actually supplies downloadable attachments.
 Display and scope
 -----------------
 
-The separate component is RTL/mobile responsive, escapes source strings, validates
+The separate component is RTL/LTR/mobile responsive, escapes source strings, validates
 fixed source links and media tokens and shows stale/error/empty states separately.
 At most 100 cards can be loaded in one browser view. Existing financial news,
 strategy controls, paper execution, AI model/budget and Telegram source gates are

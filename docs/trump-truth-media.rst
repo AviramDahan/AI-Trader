@@ -110,8 +110,12 @@ Release and recovery
 Repository defaults do not activate Production. Exact-source CI, independent
 QA, reviewed rollback compatibility, final-build/runtime/role-start-bound backup
 and a separately reviewed activation plan remain required. Runtime source,
-Hebrew and media flags must be verified in each owning role; prior two-key
-Hebrew activation approval is not media activation approval. Recovery preserves
+Hebrew, media and optional bilingual flags must be verified in each owning
+role; prior two-/three-key approval is not a four-flag bilingual activation
+approval. The new bilingual version uses separate per-part receipts and may
+require media, full Hebrew and full source ACKs; legacy media completion alone
+cannot certify it. Its asset gate enforces the new complete receipt too.
+Recovery preserves
 durable receipts and unknown stages; it must not retry an uncertain send or
 pretend a missing file cache was restored from the database. No public test
 message or test asset download is required or authorized by unit tests.

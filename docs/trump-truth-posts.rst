@@ -84,6 +84,7 @@ Defaults:
 * ``TELEGRAM_TRUMP_TRUTH_ENABLED=false``
 * ``TELEGRAM_TRUMP_TRUTH_HEBREW_ENABLED=false``
 * ``TELEGRAM_TRUMP_TRUTH_MEDIA_ENABLED=false``
+* ``TELEGRAM_TRUMP_TRUTH_BILINGUAL_ENABLED=false``
 * ``TELEGRAM_TRUMP_TRUTH_NOT_BEFORE=``
 
 After release review, set a real aware UTC activation time and enable the flag
@@ -184,6 +185,61 @@ There is no DB rewind, deletion, automatic queue replay or financial mutation.
 A full database restore preserves row/cache together; an active-state-only
 restore does NOT promise historical outbox or translation cache reconstruction.
 Missing cache means blocked/cancelled, not invented historical translation.
+
+Optional complete Hebrew and original/source publication (bilingual_v1)
+-----------------------------------------------------------------------
+The explicit bilingual goal is a separate default-OFF opt-in requiring BOTH
+the source and existing Hebrew flags. A requested bilingual mode with missing
+authority fails closed; it never silently falls back to an English-only or old
+Hebrew-only notice. The fourth flag must be included in the reviewed API,
+scanner and Telegram runtime activation together with the real new cutover.
+Old one-language queued work is not replayed or retroactively translated.
+
+The Hebrew block appears first, followed by the actual cleaned relay source
+excerpt, generally English but never assumed universally so. The source is
+not regenerated, translated into English or represented as the complete
+primary post. Media boilerplate and link-only repost placeholders are not
+invented bodies. Translation-unavailable, no-source/media-only and link-only
+statuses have truthful explanations in both languages and original links.
+Existing draft/editor numeric/fidelity checks and the same bounded local model
+calls remain unchanged; this introduces no new provider, model or paid call.
+
+One complete combined notice is preferred when the exact final UTF-16 wire
+fits4096 units. An available genuine asset can use one combined caption only
+when that entire wire fits1024 units. Otherwise complete language blocks are
+separate ACK-tracked parts; an asset uses a short factual bilingual caption,
+then one combined text or complete Hebrew and source parts, at most three
+external stages. Approved Hebrew and the retained source excerpt are NEVER
+clipped to fake completeness. Whole-block directional isolates bound bidi
+overhead rather than expanding every number and then dropping qualifiers.
+The legacy shared formatter and existing Hebrew/media contracts are unchanged.
+
+New ``trump_bilingual_pending/preparing/ready/retry/sending`` states are
+invisible to previous2d/74b/5b411 selectors. The existing preparation loop owns
+translation preparation; no new worker is created. A ``bilingual_v1`` cache is
+bound to the literal envelope version, source and row; legacy ``hebrew_v1``
+archives/caches retain their original validation. Separate
+``trump_bilingual_delivery_v1`` receipts bind the exact ordered part hashes,
+language coverage, destination and known ACK ID for EVERY part. An old media
+or Hebrew complete status cannot certify that the source/English part was
+sent. JSON object-key ordering is not interpreted as ACK order: the ACK set
+must equal an exact prefix of the ordered plan, with only its next stage active.
+
+Every external stage/WAL checks the exact unexpired claim, current source and
+four-flag authority as applicable, and the exact unchanged prepared cache/plan.
+Unknown ACK/crash or lost authority stops further parts without guessing or
+resending accepted ones. Safe retry resumes only unacknowledged parts. Partial
+two-/three-stage delivery is possible; exactly-once external delivery remains
+impossible to promise. A later flag/cutover change does not erase already-sent
+valid bilingual history or authorize a resend.
+
+The public archive requires the exact new COMPLETE receipt before labelling
+a bilingual publication. When its valid translation cache remains, its entire
+plan must match the sent hashes; a later valid-but-unsent substituted draft is
+not shown as published. A missing cache is explicitly NOT_RETAINED, never
+reconstructed, while literal retained source may remain visible. Asset access
+also requires this new proof, not a legacy media receipt. Old already-sent
+Hebrew history remains separately readable without reinterpretation.
 
 Optional genuine media and published website archive
 -----------------------------------------------------

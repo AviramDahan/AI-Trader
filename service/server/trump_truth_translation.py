@@ -35,7 +35,7 @@ def wire(value):
 
 
 def binding(row,envelope):
-    return hashlib.sha256(wire({'row_id':row['id'],'presentation':VERSION,
+    return hashlib.sha256(wire({'row_id':row['id'],'presentation':envelope.get('presentation',VERSION),
         'item':envelope['item'],'fence':envelope['fence']}).encode()).hexdigest()
 
 
@@ -159,8 +159,10 @@ def translate(item,completion=None):
 
 
 def checked_cache(row,envelope,value):
+    from trump_truth_bilingual import VERSION as bilingual_version
+    version=envelope.get('presentation')
     if (type(value) is not dict or set(value)!={'version','binding','attempts','status','text_he'}
-        or value['version']!=VERSION or value['binding']!=binding(row,envelope)
+        or version not in (VERSION,bilingual_version) or value['version']!=version or value['binding']!=binding(row,envelope)
         or type(value['attempts']) is not int or not 1<=value['attempts']<=MAX_ATTEMPTS
         or value['status'] not in ('working','translated','unavailable','media_only','link_only')
         or type(value['text_he']) is not str or len(wire(value).encode())>8192):
@@ -173,7 +175,11 @@ def checked_cache(row,envelope,value):
 
 
 def presentation(row,envelope,at=None):
-    if not enabled() or envelope.get('presentation')!=VERSION:return None
+    from trump_truth_bilingual import VERSION as bilingual_version,enabled as bilingual_enabled,requested
+    version=envelope.get('presentation')
+    if (not enabled() or version not in (VERSION,bilingual_version)
+        or (version==bilingual_version and not bilingual_enabled())
+        or (version==VERSION and requested())):return None
     from database import get_db_connection
     try:
         with get_db_connection() as c:
@@ -186,8 +192,10 @@ def presentation(row,envelope,at=None):
 
 def eligible(row,at):
     from trump_truth_posts import checked_envelope
+    from trump_truth_bilingual import VERSION as bilingual_version,enabled as bilingual_enabled
     envelope=checked_envelope(row,at)
-    return envelope if enabled() and envelope and envelope.get('presentation')==VERSION else None
+    return envelope if enabled() and envelope and (envelope.get('presentation')==VERSION or
+        (envelope.get('presentation')==bilingual_version and bilingual_enabled())) else None
 
 
 def prepare(limit=1,at=None,completion=None):
@@ -201,14 +209,17 @@ def prepare(limit=1,at=None,completion=None):
         # Safe to retry preparation after a crash: these states NEVER sent.
         cur.execute('UPDATE scanner_telegram_outbox SET status=? WHERE status=? AND next_attempt_at<=?',(PENDING,WORKING,stamp))
         from trump_truth_media import PENDING as MEDIA_PENDING,WORKING as MEDIA_WORKING,READY as MEDIA_READY
+        from trump_truth_bilingual import PENDING as BPENDING,WORKING as BWORKING,READY as BREADY
         if enabled():
             cur.execute('UPDATE scanner_telegram_outbox SET status=? WHERE status=? AND next_attempt_at<=?',(MEDIA_PENDING,MEDIA_WORKING,stamp))
-        query='SELECT * FROM scanner_telegram_outbox WHERE event_type=? AND status IN (?,?) AND next_attempt_at<=? ORDER BY id LIMIT 1'
+        cur.execute('UPDATE scanner_telegram_outbox SET status=? WHERE status=? AND next_attempt_at<=?',(BPENDING,BWORKING,stamp))
+        query='SELECT * FROM scanner_telegram_outbox WHERE event_type=? AND status IN (?,?,?) AND next_attempt_at<=? ORDER BY id LIMIT 1'
         if using_postgres():query+=' FOR UPDATE SKIP LOCKED'
-        found=cur.execute(query,('trump_truth_post',PENDING,MEDIA_PENDING if enabled() else PENDING,stamp)).fetchone()
+        found=cur.execute(query,('trump_truth_post',PENDING,MEDIA_PENDING if enabled() else PENDING,BPENDING,stamp)).fetchone()
         if not found:return {'prepared':0,'deferred':0}
         row=dict(found)
-        pending,working,ready=(MEDIA_PENDING,MEDIA_WORKING,MEDIA_READY) if row['status']==MEDIA_PENDING else (PENDING,WORKING,READY)
+        pending,working,ready=((BPENDING,BWORKING,BREADY) if row['status']==BPENDING else
+            (MEDIA_PENDING,MEDIA_WORKING,MEDIA_READY) if row['status']==MEDIA_PENDING else (PENDING,WORKING,READY))
         cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=? WHERE id=? AND status=?',(working,lease,row['id'],pending))
         c.commit()
     envelope=eligible(row,at)
@@ -232,7 +243,7 @@ def prepare(limit=1,at=None,completion=None):
             return {'prepared':1,'deferred':0}
         attempts=cached['attempts'] if cached else 0
         if attempts<MAX_ATTEMPTS:attempts+=1
-        value={'version':VERSION,'binding':binding(row,envelope),'attempts':attempts,'status':'working','text_he':''}
+        value={'version':envelope['presentation'],'binding':binding(row,envelope),'attempts':attempts,'status':'working','text_he':''}
         cur.execute('INSERT INTO scanner_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at',(key,wire(value),stamp))
         c.commit()
     result=None

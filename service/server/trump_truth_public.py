@@ -37,7 +37,7 @@ def historic_envelope(row, at):
             return None
         value = _json(row['message'], 16384)
         if (type(value) is not dict or not {'item','fence','presentation'} <= set(value)
-            or set(value)-{'item','fence','presentation','media_version'} or value['presentation'] != 'hebrew_v1'):
+            or set(value)-{'item','fence','presentation','media_version'} or value['presentation'] not in ('hebrew_v1','bilingual_v1')):
             return None  # Previous original-language envelopes never enter this archive.
         item, fence = value['item'], value['fence']
         if type(item) is not dict or type(fence) is not dict:
@@ -76,6 +76,22 @@ def historic_envelope(row, at):
         return None
 
 
+def publication_proven(row, envelope, conn=None, at=None):
+    """New bilingual publication needs every new staged ACK, not old sent alone.
+
+    Structural validation is separate to keep retained source checks pure and
+    avoid a receipt -> source -> receipt recursion. Caller first validates the
+    historic envelope; no current dispatch switch or generation is consulted.
+    """
+    if envelope.get('presentation') == 'hebrew_v1': return True
+    if envelope.get('presentation') != 'bilingual_v1': return False
+    try:
+        from trump_truth_bilingual import published_receipt
+        return published_receipt(row, envelope, conn=conn, at=at) is True
+    except (ImportError, ValueError, TypeError, KeyError, OSError, RecursionError):
+        return False
+
+
 def _projection(row, envelope, cache, at, conn):
     import trump_truth_posts as t
     import trump_truth_translation as h
@@ -87,7 +103,8 @@ def _projection(row, envelope, cache, at, conn):
             # Same whole-wire constraint as dispatch: never advertise an approved
             # translation that current Telegram presentation would have to clip.
             from telegram_presentation import telegram_text, utf16_length
-            if utf16_length(telegram_text(t.render(envelope['item'], checked), limit=16384)) > 4096:
+            if (envelope['presentation']=='hebrew_v1' and
+                utf16_length(telegram_text(t.render(envelope['item'], checked), limit=16384)) > 4096):
                 status, text = 'unavailable', None
     except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError):
         pass
@@ -157,7 +174,7 @@ def report(conn, *, now=None, limit=MAX_LIMIT, before=None):
         key = row['dedupe_key']
         if type(key) is str and key.startswith(PREFIX) and POST_ID.fullmatch(key[len(PREFIX):]): last=key[len(PREFIX):]
         envelope = historic_envelope(row, at)
-        if envelope is None: excluded += 1; continue
+        if envelope is None or not publication_proven(row, envelope, conn=conn, at=at): excluded += 1; continue
         items.append(_projection(row, envelope, caches.get('trump_truth_hebrew_v1:'+str(row['id'])), at, conn))
         if len(items) == limit:
             exhausted = index == len(rows)-1
