@@ -23,6 +23,55 @@ FORMAL_RETAIL_RELEASE = re.compile(
     +_RELEASE_NUMBER+r'%\s+\(FORECAST\s+'+_RELEASE_NUMBER
     +r'%,\s+PREVIOUS\s+'+_RELEASE_NUMBER+r'%\)'+_RELEASE_SUFFIX,re.I)
 
+# Policy-rate releases are macro subjects, not unverified company identities.
+# Keep an explicit jurisdiction/central-bank vocabulary: arbitrary proper nouns
+# (commercial banks included) cannot turn their own rates into policy decisions.
+_RATE_JURISDICTION = (
+    r'(?:Argentina|Argentinian|Australia|Australian|Brazil|Brazilian|Canada|Canadian|'
+    r'Chile|Chilean|China|Chinese|Colombia|Colombian|Czech(?: Republic|ia)?|'
+    r'Denmark|Danish|Eurozone|Euro Area|Hungary|Hungarian|Iceland|Icelandic|'
+    r'India|Indian|Indonesia|Indonesian|Israel|Israeli|Japan|Japanese|'
+    r'Malaysia|Malaysian|Mexico|Mexican|New Zealand|Norway|Norwegian|'
+    r'Peru|Peruvian|Philippines|Philippine|Poland|Polish|Romania|Romanian|'
+    r'Russia|Russian|Saudi Arabia|South Africa|South African|South Korea|South Korean|'
+    r'Sweden|Swedish|Switzerland|Swiss|Taiwan|Taiwanese|Thailand|Thai|'
+    r'Turkey|Turkish|United Kingdom|UK|U\.K\.|United States|US|U\.S\.)')
+_RATE_CENTRAL_BANK = (
+    r'(?:ECB|European Central Bank|Fed|Federal Reserve|BoE|Bank of England|'
+    r'Bank of Canada|Bank of Japan|Bank of Russia|Central Bank of Russia|'
+    r'Reserve Bank of Australia|Reserve Bank of New Zealand|Reserve Bank of India|'
+    r'People[\x27\u2019]s Bank of China|PBOC|Banco Central do Brasil|Bank of Israel|'
+    r'Swiss National Bank|Norges Bank|Riksbank|Bank of Korea|Central Bank of Turkey)')
+_RATE_AUTHORITY = r'(?:'+_RATE_JURISDICTION+'|'+_RATE_CENTRAL_BANK+')'
+_POLICY_RATE = r'(?:(?:(?:key|policy|benchmark)(?: interest)?|interest|cash|repo|bank) rate)'
+_RATE_PERCENT = r'[+-]?[0-9]{1,3}(?:\.[0-9]{1,4})?%'
+FORMAL_RATE_DECISION = re.compile(
+    _RELEASE_PREFIX+_RATE_AUTHORITY+r'\s+'+_POLICY_RATE+r' DECISION ACTUAL\s+'
+    +_RATE_PERCENT+r'\s+\(FORECAST\s+'+_RATE_PERCENT+r',\s+PREVIOUS\s+'
+    +_RATE_PERCENT+r'\)'+_RELEASE_SUFFIX,re.I)
+REPORTED_RATE_DECISION = re.compile(
+    _RELEASE_PREFIX+_RATE_AUTHORITY+r'\s+(?:'
+    r'(?:holds|held|keeps|kept|maintains|maintained|leaves|left)\s+'
+    r'(?:(?:its|the)\s+)?'+_POLICY_RATE+r'(?: unchanged)? at\s+'+_RATE_PERCENT+'|'
+    r'(?:raises|raised|hikes|hiked|cuts|cut|lowers|lowered)\s+'
+    r'(?:(?:its|the)\s+)?'+_POLICY_RATE+r' to\s+'+_RATE_PERCENT
+    +r'(?: from\s+'+_RATE_PERCENT+r')?)'
+    r'(?:,\s+as expected)?'+_RELEASE_SUFFIX,re.I)
+
+
+def reported_rate_decision(title):
+    """A complete, bounded reported policy-rate fact, not primary verification.
+
+    A literal ACTUAL/FORECAST/PREVIOUS tuple or an actual decision verb and
+    explicit rate are required. No preview, arbitrary bank/company, inferred
+    release period or inferred source authority is admitted by this rule. The
+    existing rights, freshness, analysis and publication gates remain mandatory.
+    """
+    return bool(type(title) is str and len(title)<=400
+                and all(c.isprintable() for c in title)
+                and (FORMAL_RATE_DECISION.fullmatch(title)
+                     or REPORTED_RATE_DECISION.fullmatch(title)))
+
 
 def reported_economic_release(title):
     """A complete literal bulletin, not publication approval or primary proof.
@@ -96,13 +145,14 @@ def diplomatic_talks(title):
 
 def market_headline(title):
     # Central-bank inflation outlooks are macro, not a company's guidance.
-    return bool(reported_economic_release(title) or reported_market_movement(title) or BENCHMARK.search(title) or diplomatic_talks(title)
+    return bool(reported_economic_release(title) or reported_rate_decision(title) or reported_market_movement(title) or BENCHMARK.search(title) or diplomatic_talks(title)
         or (CENTRAL_BANK.search(title) and ECONOMIC_FACT.search(title))
         or TREASURY_RATE.search(title) or attributed_fuel_export_plan(title))
 
 
 def factual_macro_title(title):
     if reported_economic_release(title):return True
+    if reported_rate_decision(title):return True
     if reported_market_movement(title):return True
     # A named benchmark + an explicit measured rate is concrete data.
     if BENCHMARK.search(title):

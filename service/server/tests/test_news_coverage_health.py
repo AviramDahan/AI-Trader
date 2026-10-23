@@ -25,7 +25,8 @@ def test_terminal_provider_is_visible_without_declaring_pipeline_broken():
                                {'prnewswire': {'status': 'requires_configuration'}})
     assert 'כיסוי מקורות חלקי' in message
     assert 'prnewswire' in message
-    assert 'הצינור תקין' in message
+    assert 'הצינור תקין' not in message
+    assert 'חיבורי המקורות' in message
 
 
 def test_disabled_and_retired_are_not_outages():

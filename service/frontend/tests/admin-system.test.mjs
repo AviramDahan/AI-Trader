@@ -94,6 +94,23 @@ hostile.nodes[0].providers[0].error_code='SECRET_UNTRUSTED'
 hostile.nodes[0].providers[0].http_status=null
 assert.equal(render(hostile).includes('SECRET_UNTRUSTED'),false)
 const source=readFileSync('src/AdminSystemMiniApp.tsx','utf8')+readFileSync('src/adminSystemModel.ts','utf8')
+// Throughput is not established by healthy collectors, a zero queue, or an
+// unrelated notice. The backend supplies a bounded current-version cohort.
+const funnelReview=opsFixture(),funnelNode=funnelReview.nodes.find(n=>n.id==='news_feed')
+funnelNode.state='degraded';funnelNode.reason='news_funnel_review_required'
+funnelNode.metrics={queue:0,news_events_6h:100,news_identity_blocked_6h:90,
+  news_analysis_done_6h:5,news_routed_6h:0,news_cohort_sent_6h:0,news_window_sent_6h:1,news_funnel_review_required:true}
+const funnelMarkup=render(funnelReview)
+assert.ok(funnelMarkup.includes('נדרש לבדוק את המעבר מאיסוף לפרסום'))
+assert.ok(funnelMarkup.includes('אירועים חדשים בחלון (עד 6 שעות)</dt><dd><bdi>100</bdi>'))
+assert.ok(funnelMarkup.includes('אירועים שנשלחו מהקבוצה</dt><dd><bdi>0</bdi>'))
+assert.ok(funnelMarkup.includes('כולל אירועים ישנים'))
+assert.ok(funnelMarkup.includes('תור ריק אינו אישור איכות או כיסוי'))
+const noFunnel=opsFixture(),unknownFunnelNode=noFunnel.nodes.find(n=>n.id==='news_feed')
+unknownFunnelNode.state='unknown';unknownFunnelNode.reason='news_funnel_unverified'
+unknownFunnelNode.metrics={news_events_6h:null,news_funnel_review_required:null}
+assert.ok(render(noFunnel).includes('אין תצפית משפך עדכנית ותקפה'))
+assert.ok(render(noFunnel).includes('אירועים חדשים בחלון (עד 6 שעות)</dt><dd><bdi>לא זמין</bdi>'))
 for(const forbidden of ['localStorage','sessionStorage','initDataUnsafe','sendData','/completion','method:'])assert.equal(source.includes(forbidden),false)
 const poller=readFileSync('src/readPoller.ts','utf8');assert.ok(poller.includes('options.headers()'))
 const app=readFileSync('src/App.tsx','utf8');assert.ok(app.includes('isAdminSystemEntry(location.search, location.hash)'))

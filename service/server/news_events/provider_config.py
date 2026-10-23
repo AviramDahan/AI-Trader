@@ -89,6 +89,13 @@ def _next_check_notice(pid,value):
         return '\nNext check: '+str(value.get('next_at') or 'n/a')
     if value.get('status')=='disabled':
         return '\nNext check: not scheduled (provider disabled)'
+    if (pid=='prnewswire' and value.get('http_status')==301
+            and value.get('error')=='http_error' and value.get('last_success')):
+        return ('\nNext check: not scheduled as a routine retry (terminal provider state; '
+                'operator review required if the conditional allowance is unavailable)'
+                '\nRecovery: a single conditional original-official-feed 301 probe requires '
+                'current approval, a due saved next-check, at least one-hour cooldown and '
+                'an unused verified-incident allowance; timing and success are not guaranteed.')
     if (pid in {'prnewswire','globenewswire'} and value.get('http_status')==403
             and value.get('error')=='http_error' and value.get('last_success')):
         # Do not duplicate or run recover_terminal here. Actual approval,

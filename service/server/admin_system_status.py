@@ -105,6 +105,28 @@ def scan_activity(node, runtime, now):
                     age_seconds=max(0, round(now.timestamp()-started)))
 
 
+def news_funnel(node, canonical, now):
+    """Project retained throughput, never infer it from an empty runnable queue."""
+    from news_events.funnel_health import projection
+    funnel = projection(canonical.get('funnel'),now)
+    counts = funnel['counts'] or {}
+    for field,key in (('news_events_6h','events'),('news_identity_blocked_6h','identity_unverified'),
+                      ('news_insufficient_6h','insufficient_information'),
+                      ('news_analysis_done_6h','current_analysis_done'),
+                      ('news_analysis_failed_6h','current_analysis_failed'),
+                      ('news_routed_6h','routed_events'),
+                      ('news_cohort_sent_6h','cohort_sent_events'),
+                      ('news_window_sent_6h','sent_window_notices')):
+        node['metrics'][field] = counts.get(key)
+    node['metrics']['news_funnel_review_required'] = (
+        None if funnel['status']=='unknown' else funnel['status']=='review_required')
+    if node['state'] in {'healthy','idle'}:
+        if funnel['status']=='review_required':
+            node.update(state='degraded',reason='news_funnel_review_required')
+        elif funnel['status']=='unknown':
+            node.update(state='unknown',reason='news_funnel_unverified')
+
+
 def canonical_providers(conn):
     """Filter before LIMIT: the table also contains thousands of evidence leases.
 
@@ -181,13 +203,15 @@ def build(conn, now):
         '''SELECT key,value_json FROM scanner_settings WHERE key IN
         ('ollama_connectivity_watch_v1','ai_cost_reconciliation','scanner_runtime')''')}
     # Production health includes cumulative breakdowns that can exceed 1 MiB.
-    # Project ONLY four scalar/allowlisted fields inside PG, never load the report.
+    # Project ONLY scalar fields and bounded funnel metadata, never cumulative
+    # breakdowns, article bodies, prompts or per-event details.
     if using_postgres():
         canonical_row = conn.execute('''SELECT jsonb_build_object(
             'checked_at',value_json::jsonb->'checked_at',
             'queue_size',value_json::jsonb->'queue_size',
             'oldest_queue_seconds',value_json::jsonb->'oldest_queue_seconds',
-            'alarms',value_json::jsonb->'alarms')::text AS value_json
+            'alarms',value_json::jsonb->'alarms',
+            'funnel',value_json::jsonb->'funnel')::text AS value_json
             FROM scanner_settings WHERE key='news_canonical_health' ''').fetchone()
     else:
         canonical_row = conn.execute("SELECT value_json FROM scanner_settings WHERE key='news_canonical_health'").fetchone()
@@ -238,6 +262,7 @@ def build(conn, now):
         by_id['news_feed'].update(state='degraded', reason='canonical_alarm')
     elif by_id['news_feed']['state'] in {'healthy','idle'} and by_id['news_feed']['metrics']['provider_issues']:
         by_id['news_feed'].update(state='degraded', reason='partial_provider_coverage')
+    news_funnel(by_id['news_feed'],canonical,now)
     sec = conn.execute('''SELECT COUNT(*) issuers,
         SUM(CASE WHEN last_checked_at IS NOT NULL AND catchup_active=0 THEN 1 ELSE 0 END) completed,
         SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END) errors FROM si_checkpoints''').fetchone()

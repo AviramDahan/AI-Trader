@@ -36,7 +36,7 @@ export function marketDescription(data: OpsSnapshot | null, fresh: boolean): str
   return data.market.is_open ? 'המסחר הרגיל פתוח' : 'מחוץ למסחר הרגיל; הניטור לפי חלונו'
 }
 export const OPS_NODES: Record<string, { title: string; subtitle: string; purpose: string }> = {
-  news_feed: { title: 'מקורות חדשות', subtitle: 'איסוף ותור עיבוד', purpose: 'מצב האיסוף והכיסוי לפי הספקים; אין כאן הורדת חדשות יזומה.' },
+  news_feed: { title: 'מקורות חדשות', subtitle: 'איסוף · סינון · פרסום', purpose: 'חיבורי מקורות, משפך האירועים החדשים ופרסום בפועל נמדדים בנפרד. תור ריק אינו אישור איכות או כיסוי. שיעור חסימה גבוה דורש בדיקה, לא ביטול סינון או מכסת פרסום. אין כאן איסוף יזום.' },
   sec_intelligence: { title: 'דיווחי SEC', subtitle: 'דוחות ובעלי עניין', purpose: 'תקינות הרכיב והשלמת גילוי הדיווחים מוצגות בנפרד. מוני ההשלמה מתייחסים לגילוי אצל המנפיקים, לא להוכחה שכל מסמך עובד או שכל המידע נתמך.' },
   quotes: { title: 'נתוני מחירים', subtitle: 'ציטוטים שמורים', purpose: 'מצב רענון המחירים הקיים. מחוץ למסחר הרגיל אין כאן הוכחה למחיר מסחר חי.' },
   scan: { title: 'סורק מניות', subtitle: 'סינון ודירוג', purpose: 'מצב המחזור האחרון והבא. אין סיגנלים הוא מצב תקין, לא תקלה כשלעצמו.' },
@@ -62,6 +62,8 @@ export const OPS_REASONS: Record<string, string> = {
   recent_completed_check: 'בדיקת הרכיב האחרונה הושלמה', lease_missing: 'אין עובד בעל lease פעיל לתפקיד',
   duplicate_role_lease: 'נצפתה יותר מבעלות אחת לתפקיד', canonical_alarm: 'בדיקת הצינור דיווחה על חריגה',
   partial_provider_coverage: 'הצינור פועל, אך חלק מהמקורות דורשים טיפול',
+  news_funnel_review_required: 'נדרש לבדוק את המעבר מאיסוף לפרסום; אין כאן הוכחה שכל חסימה שגויה',
+  news_funnel_unverified: 'אין תצפית משפך עדכנית ותקפה; לא אומתה תפוקת החדשות',
   completed_bars_not_fresh: 'יש מחיר/נר חסר או ישן בזמן המסחר הרגיל',
   recovery_review_required: 'יש פקודה חסומה באי־ודאות; אין לנחש ביצוע',
   retained_paper_state: 'מצב הדמה שנשמר, לא ביצוע יזום', local_route_disabled: 'השימוש במסלול המקומי כבוי',
@@ -90,6 +92,11 @@ export function providerExplanation(provider: NonNullable<OpsNode['providers']>[
 }
 export const OPS_METRICS: Record<string, string> = {
   queue: 'אירועים בתור', oldest_queue_seconds: 'גיל האירוע הוותיק (שניות)', provider_issues: 'מקורות דורשים טיפול',
+  news_events_6h: 'אירועים חדשים בחלון (עד 6 שעות)', news_identity_blocked_6h: 'נחסמו בזיהוי חברה באותה קבוצה',
+  news_insufficient_6h: 'נחסמו במידע חסר באותה קבוצה', news_analysis_done_6h: 'ניתוח הושלם לגרסה הנוכחית',
+  news_analysis_failed_6h: 'ניתוח נכשל לגרסה הנוכחית', news_routed_6h: 'אירועים שנותבו מהקבוצה (לא אישור שליחה)',
+  news_cohort_sent_6h: 'אירועים שנשלחו מהקבוצה', news_window_sent_6h: 'הודעות קנוניות שנשלחו בחלון (כולל אירועים ישנים)',
+  news_funnel_review_required: 'נדרשת בדיקת משפך החדשות',
   issuers: 'מנפיקים במעקב איסוף', completed: 'מנפיקים ששלב הגילוי הושלם אצלם', errors: 'שגיאות במעקב האיסוף',
   next_scan_at: 'סריקה הבאה', last_completed_at: 'הסריקה שהושלמה', universe_count: 'מניות ביקום',
   technical_candidates_count: 'מועמדות טכניות במחזור', ai_selected_count: 'נבחרו לסקירה במחזור', signals_published: 'סיגנלים שנשמרו במחזור',
