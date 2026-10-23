@@ -92,7 +92,7 @@ def test_material_cash_balance_can_accompany_matching_operating_cash_flow():
 def test_balance_context_must_match_both_period_ends():
     text = render(comparison("operating_cash_flow", value=200),
                   comparison("cash", year=2025, value=400, previous=200))
-    assert "תזרים מפעילות שוטפת" in text and "• מזומן:" not in text
+    assert "תזרים מפעילות שוטפת" in text and "• מזומן" not in text
 
 
 def test_margin_uses_percentage_points_and_signed_reported_values():
@@ -161,10 +161,10 @@ def test_maximum_three_operating_facts_without_percentage_magnitude_ranking():
              comparison("operating_margin", value=15, previous=10),
              comparison("cash", value=1000), comparison("current_debt", value=10_000)]
     text = render(*reversed(facts))
-    lines = [line for line in text.splitlines() if line.startswith("• ")]
-    assert len(lines) == 3 and all("USD" in line for line in lines)
-    assert "הכנסות" in lines[0] and "רווח תפעולי" in lines[1] and "תזרים מפעילות שוטפת" in lines[2]
-    assert "• מזומן:" not in text and "• חוב" not in text
+    blocks = [block for block in text.split("\n\n") if block.startswith("• ")]
+    assert len(blocks) == 3 and all("USD" in block for block in blocks)
+    assert "הכנסות" in blocks[0] and "רווח תפעולי" in blocks[1] and "תזרים מפעילות שוטפת" in blocks[2]
+    assert "• מזומן" not in text and "• חוב" not in text
     assert len(text) < 2000 and "https://" not in text
 
 
@@ -233,7 +233,7 @@ def test_public_process_preserves_evidence_correction_and_once_per_accession(iso
     assert "תיקון לדיווח קודם" in row["message"]
     assert "20.0%" in row["message"] and "300.0%" not in row["message"]
     assert "2026-07-01" in row["message"] and "2025-07-01" in row["message"]
-    assert "• מזומן:" not in row["message"] and "https://" not in row["message"]
+    assert "• מזומן" not in row["message"] and "https://" not in row["message"]
 
 
 @pytest.mark.parametrize("kind", ["uncomparable_latest", "stale_filing"])

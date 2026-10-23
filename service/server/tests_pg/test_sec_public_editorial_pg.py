@@ -14,7 +14,7 @@ def test_pg_latest_public_period_keeps_original_evidence_and_dedupe(pg, monkeypa
     assert rows[0]["status"] == "pending"
     assert "20.0%" in rows[0]["message"] and "300.0%" not in rows[0]["message"]
     assert "2026-09-30" in rows[0]["message"] and "2025-09-30" in rows[0]["message"]
-    assert "• מזומן:" not in rows[0]["message"]
+    assert "• מזומן" not in rows[0]["message"]
 
 
 @pytest.mark.parametrize("kind", ["uncomparable_latest", "stale_filing"])

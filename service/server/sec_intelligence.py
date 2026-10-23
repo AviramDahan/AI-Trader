@@ -988,23 +988,27 @@ def _public_financial_text(job, evidence):
             if (balance and balance["end"] == cash_flow["end"] and
                     balance["previous"]["end"] == cash_flow["previous"]["end"] and len(selected) < 3):
                 selected.append(balance)
-    lines = []
+    blocks = []
     for fact in selected:
         previous, metric = fact["previous"], fact["metric"]
         unit = "%" if metric == "operating_margin" else " USD"
         current_value, prior_value = _public_number(fact["value"])+unit, _public_number(previous["value"])+unit
         if metric in _PUBLIC_BALANCES:
-            values = f"{current_value} ליום {fact['end']}, לעומת {prior_value} ליום {previous['end']}"
+            current_period = f"ליום {fact['end']}"
+            prior_period = f"בהשוואה ליום {previous['end']}"
         else:
-            values = (f"{current_value} בתקופה {fact['start']}–{fact['end']}, "
-                      f"לעומת {prior_value} בתקופה {previous['start']}–{previous['end']}")
+            current_period = f"תקופת הדיווח: {fact['start']} עד {fact['end']}"
+            prior_period = f"תקופת ההשוואה: {previous['start']} עד {previous['end']}"
         delta = fact["change_pp"] if metric == "operating_margin" else fact["change_pct"]
         change_unit = " נקודות אחוז" if metric == "operating_margin" else "%"
         direction = "עלייה" if delta > 0 else "ירידה"
-        lines.append(f"• {_PUBLIC_METRICS[metric]}: {values}; {direction} של {abs(delta):.1f}{change_unit}. "
-                     + _PUBLIC_MEANING[metric])
-    lines.append("אלו נתונים חשבונאיים לתקופות שצוינו; הם אינם מסבירים לבדם את הגורם לשינוי ואינם תחזית או המלצת מסחר.")
-    return "\n".join(lines)
+        blocks.append("\n".join((f"• {_PUBLIC_METRICS[metric]}",
+            f"נוכחי: {current_value}", current_period,
+            f"קודם: {prior_value}", prior_period,
+            f"שינוי: {direction} של כ־{abs(delta):.1f}{change_unit}",
+            _PUBLIC_MEANING[metric])))
+    blocks.append("אלו נתונים חשבונאיים לתקופות שצוינו; הם אינם מסבירים לבדם את הגורם לשינוי ואינם תחזית או המלצת מסחר.")
+    return "\n\n".join(blocks)
 
 
 def _material_public_fact(job: dict, evidence: dict, conn) -> str | None:
@@ -1082,7 +1086,7 @@ def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn
     correction = " — תיקון לדיווח קודם" if job["form"].endswith("/A") else ""
     message = (f"📑 דיווח SEC מהותי{correction}\n\n"
                f"חברה: {company}\nסימול: {', '.join(tickers[:3])}\n\n{fact}\n\n"
-               f"דווח: {local_time} (שעון ישראל)")
+               f"נקלט ב־SEC: {local_time} (שעון ישראל)")
     return enqueue_telegram(conn.cursor(), f"sec-intelligence:{job['accession']}",
                             "sec_intelligence", message, published_at=job["accepted_at"])
 
