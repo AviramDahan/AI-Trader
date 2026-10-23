@@ -3,7 +3,7 @@ import { API_ORIGIN } from './appShared'
 import './TrumpTruthNews.css'
 
 type Media = { status: 'available' | 'unavailable' | 'marker_only' | 'disabled'; kind: 'photo' | 'video' | null; asset_token?: string }
-export type TruthPost = { id: string; truth_post_id: string; truth_url: string; relay_url: string; source_excerpt: string;
+export type TruthPost = { id: string; publication_policy: 'original_relay_v1'; truth_post_id: string; truth_url: string; relay_url: string; source_excerpt: string;
   translation_status: 'translated' | 'unavailable' | 'media_only' | 'link_only' | 'not_retained'; text_he: string | null;
   relay_published_at: string; observed_at: string; sent_at: string; is_repost: boolean; has_media: boolean; media: Media }
 export type TruthArchive = { version: 1; status: 'READY' | 'UNAVAILABLE'; generated_at: string | null; items: TruthPost[]; next_cursor: string | null }
@@ -19,13 +19,14 @@ export function parseTruthArchive(raw: unknown): TruthArchive {
   const items: TruthPost[] = []
   for (const row of page.items) {
     if (!row || row.source_kind !== 'trump_truth_relay_v1' || row.source_verification !== 'relay_only' || row.delivery_status !== 'sent' ||
+      row.publication_policy !== 'original_relay_v1' ||
       typeof row.truth_post_id !== 'string' || !postID.test(row.truth_post_id) || row.id !== `trump-truth:${row.truth_post_id}` ||
       row.truth_url !== `https://truthsocial.com/@realDonaldTrump/${row.truth_post_id}` ||
       typeof row.relay_url !== 'string' || !/^https:\/\/t\.me\/realdonaldtrump_truth\/[1-9][0-9]*$/.test(row.relay_url) ||
       row.original_published_at !== null || !time(row.relay_published_at) || !time(row.observed_at) || !time(row.sent_at) ||
       Date.parse(row.relay_published_at) > Date.parse(row.observed_at) || Date.parse(row.observed_at) > Date.parse(row.sent_at) ||
       Date.parse(row.sent_at) > Date.parse(page.generated_at) || typeof row.source_excerpt !== 'string' || row.source_excerpt.length > 3200 ||
-      typeof row.is_repost !== 'boolean' || typeof row.has_media !== 'boolean' ||
+      row.is_repost !== false || typeof row.has_media !== 'boolean' ||
       !['translated', 'unavailable', 'media_only', 'link_only', 'not_retained'].includes(row.translation_status) ||
       (row.translation_status === 'translated' ? typeof row.text_he !== 'string' || !/[\u0590-\u05ff]/.test(row.text_he) || row.text_he.length > 2400 : row.text_he !== null)) continue
     let media: Media = { status: row.has_media ? 'marker_only' : 'unavailable', kind: null }
@@ -35,7 +36,7 @@ export function parseTruthArchive(raw: unknown): TruthArchive {
       row.media.mime_type === (row.media.kind === 'photo' ? 'image/jpeg' : 'video/mp4') && Number.isInteger(row.media.bytes) &&
       row.media.bytes > 0 && row.media.bytes <= (row.media.kind === 'photo' ? 8 : 24) * 1024 * 1024)
       media = { status: 'available', kind: row.media.kind, asset_token: row.media.asset_token }
-    items.push({ id: row.id, truth_post_id: row.truth_post_id, truth_url: row.truth_url, relay_url: row.relay_url,
+    items.push({ id: row.id, publication_policy: 'original_relay_v1', truth_post_id: row.truth_post_id, truth_url: row.truth_url, relay_url: row.relay_url,
       source_excerpt: row.source_excerpt, translation_status: row.translation_status, text_he: row.text_he,
       relay_published_at: row.relay_published_at, observed_at: row.observed_at, sent_at: row.sent_at,
       is_repost: row.is_repost, has_media: row.has_media, media })
@@ -80,11 +81,11 @@ export function TrumpTruthNewsView({ he, data, error = '', loading = false, onMo
   const stale = data.generated_at && Date.now() - Date.parse(data.generated_at) > 180000
   return <section className="truth-news" dir={he ? 'rtl' : 'ltr'} aria-labelledby="truth-news-heading">
     <h3 id="truth-news-heading">{text('טראמפ · ארכיון דיווחי Truth Social', 'Trump · Truth Social relay archive')}</h3>
-    <p>{text('מדור נפרד מחדשות המניות ומהסינון הפיננסי. הודעות בעברית ובדו־לשוני שנרשמו כנשלחות בלבד, עד 7 ימים; עברית וקטע המקור מוצגים יחד, ללא המלצת השקעה או סינון לפי השפעת שוק.', 'Separate from stock news and financial filters. Only Hebrew/bilingual notices recorded as sent, up to 7 days; Hebrew and the actual source excerpt appear together, with no investment advice or market-impact filter.')}</p>
+    <p>{text('פרסומים מקוריים לפי סיווג ערוץ המעקב בלבד — ללא שיתופים מחדש, שיתופים עצמיים או פוסטים מצוטטים. זה אינו אימות מול החשבון הרשמי. הודעות שנרשמו כנשלחות בלבד, עד 7 ימים; עברית וקטע המקור מוצגים יחד, ללא המלצת השקעה או סינון פיננסי.', 'Original posts according to the relay classification only — no reposts, self-reshares or quoted posts. This is not verification against the official account. Only notices recorded as sent, up to 7 days; Hebrew and the source excerpt appear together, with no investment advice or financial filter.')}</p>
     {(error || data.status !== 'READY') && <p role="alert">{text('ארכיון הפוסטים אינו זמין כרגע. זו אינה הוכחה שאין פוסטים חדשים.', 'The post archive is unavailable. This does not prove there are no new posts.')}</p>}
     {stale && <p role="status">{text('תצוגה שמורה — זמן הקריאה ישן; אין אישור לעדכניות הממסר.', 'Retained view — the read is stale; relay freshness is not verified.')}</p>}
     <div className="truth-news-grid">{data.items.map(item => <TruthCard key={item.id} item={item} he={he} />)}</div>
-    {data.status === 'READY' && !data.items.length && <p role="status">{text('אין כרגע הודעות עברית שנשלחו וזמינות בארכיון הזה. הודעות ישנות בשפת המקור אינן מוצגות מחדש.', 'No sent Hebrew notices are available in this archive. Old original-language notices are not republished.')}</p>}
+    {data.status === 'READY' && !data.items.length && <p role="status">{text('אין כרגע הודעות עברית שנשלחו וזמינות לפי מדיניות המקוריים בלבד. שיתופים והודעות ישנות ללא הסיווג החדש אינם מוצגים; רשומות הביקורת אינן נמחקות.', 'No sent Hebrew notices are available under the originals-only policy. Reposts and old notices without the new classification are hidden; audit records are not deleted.')}</p>}
     {data.generated_at && <small>{text('הארכיון נקרא ב־', 'Archive read at ')}<bdi>{data.generated_at}</bdi></small>}
     {data.next_cursor && onMore && <button type="button" disabled={loading} onClick={onMore}>{loading ? text('טוען…', 'Loading…') : text('הצג הודעות קודמות', 'Show earlier notices')}</button>}
   </section>

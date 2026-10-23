@@ -30,7 +30,8 @@ def seed(c, number=1, *, hebrew=True, status='sent', cache=True, presentation='h
         truth_url='https://truthsocial.com/@realDonaldTrump/'+post,
         activation=(NOW-timedelta(hours=2)).isoformat(), relay_published_at=(NOW-timedelta(hours=1)).isoformat(),
         observed_at=(NOW-timedelta(minutes=59)).isoformat(), original_published_at=None,
-        source_verification='relay_only', text_excerpt='We will not raise tariffs by 5%.', has_media=False, is_repost=False)
+        source_verification='relay_only', text_excerpt='We will not raise tariffs by 5%.', has_media=False, is_repost=False,
+        publication_policy='original_relay_v1')
     item.update(overrides)
     envelope = {'item':item, 'fence':{'mode':'canonical','epoch':2,'not_before':'','environment_not_before':''}}
     if hebrew: envelope['presentation']=presentation

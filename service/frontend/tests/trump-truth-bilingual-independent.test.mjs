@@ -16,7 +16,7 @@ const post = { id: `trump-truth:${id}`, truth_post_id: id, source_kind: 'trump_t
   relay_url: 'https://t.me/realdonaldtrump_truth/456', source_excerpt: source,
   translation_status: 'translated', text_he: hebrew, original_published_at: null,
   relay_published_at: '2026-10-22T15:00:00Z', observed_at: '2026-10-22T15:01:00Z',
-  sent_at: '2026-10-22T15:02:00Z', is_repost: false, has_media: false,
+  sent_at: '2026-10-22T15:02:00Z', is_repost: false, has_media: false, publication_policy: 'original_relay_v1',
   media: { status: 'unavailable', kind: null } }
 const archive = { version: 1, status: 'READY', generated_at: '2026-10-22T15:03:00Z', items: [post], next_cursor: null }
 const bundle = await build({ entryPoints: ['src/ScannerDashboard.tsx', 'src/TrumpTruthNews.tsx'], outdir: 'unused',

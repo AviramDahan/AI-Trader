@@ -8,7 +8,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { fixtureDashboard } from './system-activity-fixtures.mjs'
 import { readFileSync, writeFileSync } from 'node:fs'
 
-const post={id:'trump-truth:117500000000000123',source_kind:'trump_truth_relay_v1',source_verification:'relay_only',
+const post={id:'trump-truth:117500000000000123',source_kind:'trump_truth_relay_v1',source_verification:'relay_only',publication_policy:'original_relay_v1',
   truth_post_id:'117500000000000123',truth_url:'https://truthsocial.com/@realDonaldTrump/117500000000000123',
   relay_url:'https://t.me/realdonaldtrump_truth/123',source_excerpt:'We will not raise tariffs by 5%.',
   translation_status:'translated',text_he:'לא נעלה את המכסים ב־5%.',relay_published_at:'2026-10-22T15:00:00Z',
@@ -65,6 +65,7 @@ assert.ok(render({...archive,items:[]}).includes('אין כרגע הודעות �
 assert.equal(parseTruthArchive(null).status,'UNAVAILABLE')
 assert.equal(parseTruthArchive({...archive,items:new Array(21).fill(post)}).status,'UNAVAILABLE')
 for(const corrupt of [{truth_url:'javascript:alert(1)'},{relay_url:'https://t.me/evil/123'},
+  {is_repost:true},{publication_policy:undefined},{publication_policy:'unknown'},
   {translation_status:'translated',text_he:'original English'}, {sent_at:'2099-01-01T00:00:00Z'},
   {original_published_at:post.sent_at}])assert.equal(parseTruthArchive({...archive,items:[{...post,...corrupt}]}).items.length,0)
 const hostile=render({...archive,items:[{...post,text_he:'<script>עברית</script>',source_excerpt:'<img src=x onerror=alert(1)>'}]})
