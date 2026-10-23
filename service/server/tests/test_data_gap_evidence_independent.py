@@ -112,6 +112,15 @@ def test_diagnostic_is_cache_bound_not_mutable_authority(db,hmod,translated):
     assert hmod.presentation(current,envelope,AT)==cache
 
 
+def test_invalid_schema_cache_is_fixed_private_failure_not_validation_payload(db,hmod,translated):
+    current,envelope,cache,value=translated
+    changed={**cache,'text_he':'א'*2401}
+    diagnostic_value={**value,'cache_sha256':hashlib.sha256(hmod.wire(changed).encode()).hexdigest()}
+    with pytest.raises(ValueError) as error:
+        hmod.checked_diagnostic(current,envelope,changed,diagnostic_value,AT)
+    assert type(error.value) is ValueError and str(error.value)=='translation_diagnostic_invalid'
+
+
 def test_no_historical_backfill_no_extra_inference_no_cache_or_envelope_rewrite(db,hmod,translated):
     current,envelope,cache,value=translated
     with db.get_db_connection() as c:
@@ -182,3 +191,26 @@ def test_arbitrary_exception_content_never_enters_diagnostic(db,hmod,failure):
     value=diagnostic(db,row(db));wire=json.dumps(value)
     assert value['category']=='unknown'
     assert all(word not in wire for word in ('PROMPT_SECRET','PRIVATE_SENTINEL','https','private'))
+
+
+@pytest.mark.parametrize('form',['4','4/A'])
+def test_existing_sec_resolver_already_uses_same_issuer_accession_original_xml(form):
+    import sec_intelligence as sec
+    job=dict(issuer_cik='123456',accession='0000123456-26-123456',form=form,
+        primary_document='xslF345X05/ownership.xml')
+    job['source_url']=sec._source_url(job['issuer_cik'],job['accession'],job['primary_document'])
+    assert sec._document_url(job)==sec._source_url(job['issuer_cik'],job['accession'],'ownership.xml')
+
+
+@pytest.mark.parametrize('change',[
+    {'source_url':'https://attacker.invalid/ownership.xml'},
+    {'primary_document':'xslF345X05/../ownership.xml'},
+    {'primary_document':'xslF345X05%2fownership.xml'},
+    {'source_url':'https://www.sec.gov/Archives/edgar/data/999999/000012345626123456/xslF345X05/ownership.xml'},
+])
+def test_existing_sec_wrapper_resolution_does_not_relax_verified_metadata(change):
+    import sec_intelligence as sec
+    job=dict(issuer_cik='123456',accession='0000123456-26-123456',form='4',
+        primary_document='xslF345X05/ownership.xml')
+    job['source_url']=sec._source_url(job['issuer_cik'],job['accession'],job['primary_document'])
+    with pytest.raises(ValueError):sec._document_url({**job,**change})
