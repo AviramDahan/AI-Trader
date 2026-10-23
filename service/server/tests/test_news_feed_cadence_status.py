@@ -10,10 +10,23 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import admin_system_status as ops
 import database
+from news_events.funnel_health import COUNTS
 from test_admin_system_status import isolated, seed
 
 NOW = datetime(2026, 10, 16, 13, tzinfo=timezone.utc)
 FUTURE = (NOW + timedelta(minutes=5)).isoformat()
+
+
+def current_health(**changes):
+    """No events in this synthetic DB; keep cadence guards independent of recall."""
+    value = {'checked_at': NOW.isoformat(), 'queue_size': 0,
+             'oldest_queue_seconds': 0, 'alarms': [],
+             'funnel': {'version': 1, 'status': 'no_input', 'checked_at': NOW.isoformat(),
+                        'window_start': (NOW-timedelta(hours=6)).isoformat(),
+                        'window_end': NOW.isoformat(), 'counts': {key: 0 for key in COUNTS},
+                        'advisories': []}}
+    value.update(changes)
+    return value
 
 
 class Result:
@@ -70,13 +83,12 @@ def snapshot(isolated, monkeypatch):
                      (json.dumps({'checked_at': NOW.isoformat(), 'remaining': 20, 'credit_balance': 2}),))
         conn.execute("UPDATE scanner_service_status SET status='backoff',detail='checked=0 inserted=0 errors=' WHERE component='news_feed'")
         conn.execute("INSERT INTO scanner_settings VALUES(?,?,?)", ('news_canonical_health',
-            json.dumps({'checked_at': NOW.isoformat(), 'queue_size': 0,
-                        'oldest_queue_seconds': 0, 'alarms': []}), NOW.isoformat()))
+            json.dumps(current_health()), NOW.isoformat()))
         conn.execute("""INSERT INTO scanner_news_providers
             (provider,status,last_success_at,next_check_at,cadence_seconds,coverage)
             VALUES('investing','ok',?,?,900,'fixture')""", (NOW.isoformat(), FUTURE))
 
-    def run(*, legacy=None, canonical=None, health=None, service=None, roles=None):
+    def run(*, legacy=None, canonical=None, health=None, service=None, roles=None, missing_funnel=False):
         with isolated() as conn:
             if legacy is not None:
                 conn.execute('DELETE FROM scanner_news_providers')
@@ -86,8 +98,11 @@ def snapshot(isolated, monkeypatch):
                         VALUES(?,?,?,?,900,'fixture',?)""",
                         (row.get('provider', 'investing'), row.get('status', 'ok'),
                          NOW.isoformat(), row.get('next_check_at', FUTURE), row.get('error')))
-            if health is not None:
-                conn.execute("UPDATE scanner_settings SET value_json=? WHERE key='news_canonical_health'", (json.dumps(health),))
+            if health is not None or missing_funnel:
+                effective = current_health(**(health or {}))
+                if missing_funnel:
+                    effective.pop('funnel')
+                conn.execute("UPDATE scanner_settings SET value_json=? WHERE key='news_canonical_health'", (json.dumps(effective),))
             if service:
                 for field, value in service.items():
                     assert field in {'status', 'detail', 'last_attempt_at'}
@@ -109,6 +124,13 @@ def test_normal_future_cadence_is_idle_not_retry_failure(snapshot):
     assert (node['state'], node['reason']) == ('idle', 'scheduled_wait')
     assert node['lease_holders'] == 1
     assert result['overall'] == 'observed_operational'
+
+
+def test_cadence_without_funnel_evidence_is_unknown_not_success(snapshot):
+    node, _ = snapshot(missing_funnel=True)
+    assert (node['state'], node['reason']) == ('unknown','news_funnel_unverified')
+    assert node['metrics']['news_events_6h'] is None
+    assert node['metrics']['news_funnel_review_required'] is None
 
 
 @pytest.mark.parametrize('status', ['error', 'rate_limited', 'degraded', 'requires_configuration', 'unknown'])

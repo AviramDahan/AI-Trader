@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tests'))
-from test_news_feed_cadence_status import NOW, FUTURE
+from test_news_feed_cadence_status import NOW, FUTURE, current_health
 import admin_system_status as ops
 import database
 
 
 @pytest.mark.parametrize('case', ['scheduled', 'legacy_error', 'legacy_due',
     'canonical_error', 'canonical_rate_limit', 'canonical_missing_due',
-    'unknown_error', 'alarm', 'missing_lease', 'fractional_queue'])
+    'unknown_error', 'alarm', 'missing_lease', 'fractional_queue', 'missing_funnel'])
 def test_actual_pg_projection_cadence_and_fail_closed_boundaries(pg, case):
     canonical = {'status': 'ok', 'last_attempt': NOW.isoformat(),
                  'last_success': NOW.isoformat(), 'next_at': FUTURE}
@@ -21,8 +21,8 @@ def test_actual_pg_projection_cadence_and_fail_closed_boundaries(pg, case):
     if case == 'canonical_rate_limit': canonical['http_status'] = 429
     if case == 'canonical_missing_due': canonical.pop('next_at')
     if case == 'unknown_error': canonical['error'] = 'PRIVATE_UNKNOWN_FIXTURE_ERROR'
-    health = {'checked_at': NOW.isoformat(), 'queue_size': 0,
-              'oldest_queue_seconds': 0, 'alarms': []}
+    health = current_health()
+    if case == 'missing_funnel': health.pop('funnel')
     if case == 'alarm': health['alarms'] = ['synthetic_alarm']
     if case == 'fractional_queue': health['queue_size'] = 0.5
     tables = ('scanner_signals', 'scanner_orders', 'scanner_trades', 'scanner_fills',
@@ -59,6 +59,9 @@ def test_actual_pg_projection_cadence_and_fail_closed_boundaries(pg, case):
         assert node['state'] != 'idle'
     if case == 'missing_lease':
         assert (node['state'], node['reason']) == ('failed', 'lease_missing')
+    if case == 'missing_funnel':
+        assert (node['state'], node['reason']) == ('unknown','news_funnel_unverified')
+        assert node['metrics']['news_events_6h'] is None
     assert 'PRIVATE_UNKNOWN_FIXTURE_ERROR' not in json.dumps(value)
     assert 'PRIVATE_LEGACY_FIXTURE_ERROR' not in json.dumps(value)
     assert value['read_only']
