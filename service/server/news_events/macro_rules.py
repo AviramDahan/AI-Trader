@@ -8,6 +8,31 @@ ECONOMIC_FACT = re.compile(r'\b(?:inflation|interest rates?|policy rates?|moneta
 TREASURY_RATE = re.compile(r'^(?:U\.?S\.?\s+)?(?:two|ten|2|10)[ -]year\s+Treasury\s+yield\b', re.I)
 FUEL_EXPORT_BAN = re.compile(r'^Russia\b.{0,90}\bextend\b.{0,10}\bdiesel export ban\b',re.I)
 
+# Two observed complete data-bulletin forms. A reported ACTUAL and both literal
+# comparisons are mandatory; an economic keyword, preview, or company name is
+# not enough. The relay decoration is optional and supplies no source authority.
+_RELEASE_NUMBER = r'[+-]?\d{1,3}(?:\.\d{1,4})?'
+_RELEASE_PREFIX = r'\s*(?:[‼❗]\ufe0f?\s*)?(?:BREAKING:\s*)?'
+_RELEASE_SUFFIX = r'(?:\s+\$MACRO\|FJ)?\s*'
+FORMAL_PMI_RELEASE = re.compile(
+    _RELEASE_PREFIX+r'(?:FRANCE|FRENCH)\s+MANUFACTURING\s+PMI\s+FLASH\s+ACTUAL\s+'
+    +_RELEASE_NUMBER+r'\s+\(FORECAST\s+'+_RELEASE_NUMBER
+    +r',\s+PREVIOUS\s+'+_RELEASE_NUMBER+r'\)'+_RELEASE_SUFFIX,re.I)
+FORMAL_RETAIL_RELEASE = re.compile(
+    _RELEASE_PREFIX+r'(?:UK|U\.K\.|UNITED KINGDOM)\s+RETAIL\s+SALES\s+(?:YOY|Y/Y|MOM|M/M)\s+ACTUAL\s+'
+    +_RELEASE_NUMBER+r'%\s+\(FORECAST\s+'+_RELEASE_NUMBER
+    +r'%,\s+PREVIOUS\s+'+_RELEASE_NUMBER+r'%\)'+_RELEASE_SUFFIX,re.I)
+
+
+def reported_economic_release(title):
+    """A complete literal bulletin, not publication approval or primary proof.
+
+    These forms do not state the reported month/year. Leave that period UNKNOWN;
+    do not manufacture a release identity, dedupe anchor, or source verification.
+    Existing rights, freshness, review, materiality and relevance still apply.
+    """
+    return bool(FORMAL_PMI_RELEASE.fullmatch(title) or FORMAL_RETAIL_RELEASE.fullmatch(title))
+
 # Match the subject and its reported movement, not a benchmark/metal word
 # elsewhere in a company headline. Bare company shares, Inc. and extra company
 # name words cannot fit between the anchored subject and the movement verb.
@@ -71,12 +96,13 @@ def diplomatic_talks(title):
 
 def market_headline(title):
     # Central-bank inflation outlooks are macro, not a company's guidance.
-    return bool(reported_market_movement(title) or BENCHMARK.search(title) or diplomatic_talks(title)
+    return bool(reported_economic_release(title) or reported_market_movement(title) or BENCHMARK.search(title) or diplomatic_talks(title)
         or (CENTRAL_BANK.search(title) and ECONOMIC_FACT.search(title))
         or TREASURY_RATE.search(title) or attributed_fuel_export_plan(title))
 
 
 def factual_macro_title(title):
+    if reported_economic_release(title):return True
     if reported_market_movement(title):return True
     # A named benchmark + an explicit measured rate is concrete data.
     if BENCHMARK.search(title):

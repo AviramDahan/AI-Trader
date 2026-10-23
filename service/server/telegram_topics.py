@@ -25,13 +25,20 @@ def with_news_community_link(message: str, event_type: str | None) -> str:
     link = os.getenv("TELEGRAM_COMMUNITY_URL", "").strip()
     # Presentation only: stored evidence/URLs and all eligibility stay intact.
     # Apply at send-time too, so already-queued news follows the same preference.
+    from news_source_links import SOURCE_LINE, safe_source_url
     def public_link(match):
         url = match.group(0)
         if url == link or urlsplit(url).hostname in {'creativecommons.org', 'www.creativecommons.org'}:
             return url  # Community invitation and license notices are not news sources.
         return ''
-    lines = []
+    lines, sources = [], []
     for line in message.splitlines():
+        source = SOURCE_LINE.fullmatch(line)
+        if source:
+            safe = safe_source_url(source[1])
+            if safe and not sources:
+                sources.append('מקור: ' + safe)
+            continue
         cleaned = re.sub(r'https?://[^\s<>]+', public_link, line)
         if cleaned != line:
             cleaned = cleaned.rstrip(' :')
@@ -42,18 +49,23 @@ def with_news_community_link(message: str, event_type: str | None) -> str:
     message = hide_relay_branding('\n'.join(lines))
     message = re.sub(r'\n{3,}', '\n\n', message).strip()
     parsed = urlsplit(link)
-    if (len(link) > 512 or parsed.scheme != "https" or parsed.netloc != "t.me" or
+    valid = not (len(link) > 512 or parsed.scheme != "https" or parsed.netloc != "t.me" or
             not parsed.path.strip('/') or parsed.path.startswith('/c/') or
-            any(char.isspace() for char in link)):
-        return message
+            any(char.isspace() for char in link))
     footer = "📣 להצטרפות לקהילת AI-Trader:\n" + link
-    if message.endswith(footer):
+    if valid and message.endswith(footer):
+        message = message[:-len(footer)].rstrip()
+    tails = sources + ([footer] if valid else [])
+    if not tails:
         return message
-    # Telegram measures the 4096-character limit in UTF-16 units.
-    suffix = "\n\n" + footer
-    budget = 4096 - len(suffix.encode('utf-16-le')) // 2
-    body = message.encode('utf-16-le')[:budget * 2].decode('utf-16-le', errors='ignore').rstrip()
-    return body + suffix
+    suffix = '\n\n' + '\n\n'.join(tails)
+    # Budget AFTER bidi isolates, not before: mixed Hebrew/Latin expands on
+    # the actual wire. Preserve both source and CTA even for a long invite URL.
+    from telegram_presentation import telegram_text, utf16_length
+    if utf16_length(telegram_text(message + suffix, limit=100_000)) > 4096:
+        budget = 4096 - utf16_length(telegram_text(suffix, limit=100_000))
+        message = telegram_text(message, limit=budget).rstrip()
+    return message + suffix
 
 
 def thread_id_for_event(event_type: str | None) -> int | None:

@@ -179,18 +179,20 @@ def analyze_jobs(at=None):
 def message(event,result,topic,tickers):
     from news_pipeline import _publication_time_he
     from news_presentation import hide_relay_branding
-    parts=['📰 '+hide_relay_branding(result['title_he'])]
+    from news_source_links import clean_draft, append_source, safe_source_url
+    parts=['📰 '+hide_relay_branding(clean_draft(result['title_he']))]
     if tickers:parts.append('מניות: '+', '.join(tickers))
-    parts.append(hide_relay_branding(result['summary_he']))
-    if topic!='market_news':parts.append('פרשנות AI: '+hide_relay_branding(result['interpretation_he']))
+    parts.append(hide_relay_branding(clean_draft(result['summary_he'])))
+    if topic!='market_news':parts.append('פרשנות AI: '+hide_relay_branding(clean_draft(result['interpretation_he'])))
     # Ingestion provenance stays in storage. Retain required licensed credits.
-    credits=[s['publisher'] for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')]
-    if credits:parts.append('\n'.join(dict.fromkeys(credits)))
-    licenses={s.get('raw_metadata',{}).get('license_label','')+' '+s.get('raw_metadata',{}).get('license_url','')
+    credits=[clean_draft(s['publisher']) for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')]
+    footer=[]
+    if credits:footer.append('\n'.join(dict.fromkeys(credits)))
+    licenses={clean_draft(s.get('raw_metadata',{}).get('license_label',''))+' '+safe_source_url(s.get('raw_metadata',{}).get('license_url',''))
               for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')}
-    if licenses:parts.append('תרגום/תקציר AI · '+ '; '.join(sorted(licenses)))
-    parts.append('פורסם: '+_publication_time_he(event['published_at']))
-    return '\n\n'.join(parts)[:4000]
+    if licenses:footer.append('תרגום/תקציר AI · '+ '; '.join(sorted(licenses)))
+    footer.append('פורסם: '+_publication_time_he(event['published_at']))
+    return append_source('\n\n'.join(parts),event['sources'],required_footer='\n\n'.join(footer))
 
 
 def queue_outbox(p,eid,at):
