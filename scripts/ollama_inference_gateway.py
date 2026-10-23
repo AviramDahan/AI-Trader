@@ -17,10 +17,50 @@ DIGEST = '6114515d63c17436a7c0417d82820ac65ad643e2806c5a3c89cb62846436ed0b'
 MAX_BYTES = 131072
 CONTEXT = 8192
 CONTEXT_POLICY = 'no_truncate_no_shift_v1'
+CAPACITY_HEADER = 'X-AI-Local-Capacity'
 
 
 class ContextCapacity(ValueError):
     """A bounded request does not fit; not an unavailable GPU/tunnel."""
+
+    def __init__(self, reason='local_context_capacity', evidence=None):
+        super().__init__(reason)
+        self.local_capacity = safe_local_capacity(evidence)
+
+
+def safe_local_capacity(value):
+    """Standalone copy of the cloud's optional, fixed capacity-evidence v1."""
+    if type(value) is not dict or type(value.get('version')) is not int or value['version'] != 1:
+        return {}
+    source = value.get('source')
+    shapes = {
+        'native_token_limit': {'context_tokens', 'prompt_tokens'},
+        'native_capacity_unspecified': {'context_tokens'},
+        'legacy_guard_upper_bound': {'context_tokens', 'legacy_guard_units'},
+        'gateway_request_bytes': {'request_bytes', 'request_byte_limit'},
+    }
+    if type(source) is not str or source not in shapes:
+        return {}
+    required = {'version', 'source'} | shapes[source]
+    if set(value) not in (required, required | {'requested_output_tokens'}):
+        return {}
+    if source != 'gateway_request_bytes':
+        if type(value['context_tokens']) is not int or value['context_tokens'] != CONTEXT:
+            return {}
+    else:
+        if type(value['request_byte_limit']) is not int or value['request_byte_limit'] != MAX_BYTES:
+            return {}
+    name, lower = (('prompt_tokens', CONTEXT) if source == 'native_token_limit' else
+                   ('legacy_guard_units', CONTEXT) if source == 'legacy_guard_upper_bound' else
+                   ('request_bytes', MAX_BYTES))
+    if source != 'native_capacity_unspecified':
+        if type(value[name]) is not int or not lower < value[name] <= 10_000_000:
+            return {}
+    if 'requested_output_tokens' in value:
+        predict = value['requested_output_tokens']
+        if type(predict) is not int or not 1 <= predict <= 2048:
+            return {}
+    return dict(value)
 
 
 def context_error(data):
@@ -64,6 +104,29 @@ def context_error(data):
         r'|request \(\d+ tokens\) exceeds the available context size \(\d+ tokens\), try increasing it)', error))
 
 
+def context_capacity_evidence(data):
+    """Recognize exactly the existing refusal; never retain its error text."""
+    if not context_error(data):
+        return {}
+    evidence = dict(version=1, source='native_capacity_unspecified', context_tokens=CONTEXT)
+    error = data['error']
+    # context_error already proved the exact keys, duplicate-key exclusion,
+    # type/count/message agreement and configured context on this branch.
+    if error.startswith('{'):
+        detail = json.loads(error)['error']
+        measured = safe_local_capacity(dict(version=1, source='native_token_limit',
+            context_tokens=detail['n_ctx'], prompt_tokens=detail['n_prompt_tokens']))
+        return measured or evidence
+    match = re.fullmatch(r'request \((\d+) tokens\) exceeds the available context size '
+                         r'\((\d+) tokens\), try increasing it', error)
+    if match:
+        measured = safe_local_capacity(dict(version=1, source='native_token_limit',
+            context_tokens=int(match[2]), prompt_tokens=int(match[1])))
+        if measured:
+            return measured
+    return evidence
+
+
 class Inference:
     def __init__(self):
         self.slot = threading.Lock()
@@ -85,7 +148,7 @@ class Inference:
                         raise ValueError('ollama_response_limit')
                 data = json.loads(raw)
                 if path == '/api/chat' and context_error(data):
-                    raise ContextCapacity('local_context_capacity')
+                    raise ContextCapacity(evidence=context_capacity_evidence(data))
                 if r.status_code != 200 or isinstance(data, dict) and data.get('error'):
                     raise ValueError('ollama_unavailable')
                 return data
@@ -137,8 +200,10 @@ class Inference:
         # applies its actual tokenizer/template; BOTH history truncation and
         # generation context shifting must be disabled. Oversize never drops
         # facts, and a context-length/unfinished result is not a valid decision.
-        if len(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()) > MAX_BYTES:
-            raise ContextCapacity('local_context_capacity')
+        request_bytes = len(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode())
+        if request_bytes > MAX_BYTES:
+            raise ContextCapacity(evidence=dict(version=1, source='gateway_request_bytes',
+                request_bytes=request_bytes, request_byte_limit=MAX_BYTES, requested_output_tokens=predict))
         if payload['schema'] is not None:
             import jsonschema
             jsonschema.Draft202012Validator.check_schema(payload['schema'])
@@ -149,10 +214,17 @@ class Inference:
             if not any(m['name'] == MODEL and m['digest'] == DIGEST for m in tags['models']):
                 self.loaded = False
                 raise ValueError('unapproved_model')
-            result = self.http('POST', '/api/chat', dict(model=MODEL, messages=messages,
-                stream=False, think=False, keep_alive='20m', format=payload['schema'] or 'json',
-                truncate=False, shift=False,
-                options={'temperature': 0, 'num_ctx': CONTEXT, 'num_predict': predict}), timeout=45)
+            try:
+                result = self.http('POST', '/api/chat', dict(model=MODEL, messages=messages,
+                    stream=False, think=False, keep_alive='20m', format=payload['schema'] or 'json',
+                    truncate=False, shift=False,
+                    options={'temperature': 0, 'num_ctx': CONTEXT, 'num_predict': predict}), timeout=45)
+            except ContextCapacity as exc:
+                evidence = safe_local_capacity(getattr(exc, 'local_capacity', None))
+                if evidence:
+                    evidence['requested_output_tokens'] = predict
+                    exc.local_capacity = safe_local_capacity(evidence)
+                raise
             # No response can execute a command. The cloud owns validation/action.
             tags = self.http('GET', '/api/tags')
             if not any(m['name'] == MODEL and m['digest'] == DIGEST for m in tags['models']):
@@ -171,11 +243,15 @@ def handler(engine):
         def log_message(self, *_):
             pass  # No prompts, credentials, private outputs or request paths logged.
 
-        def respond(self, status, body):
+        def respond(self, status, body, capacity=None):
             raw = json.dumps(body, allow_nan=False).encode()
             self.send_response(status)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(raw)))
+            evidence = safe_local_capacity(capacity)
+            if status == 413 and evidence:
+                # Body is unchanged for old strict protocol-1 cloud readers.
+                self.send_header(CAPACITY_HEADER, json.dumps(evidence, separators=(',', ':')))
             self.end_headers()
             self.wfile.write(raw)
 
@@ -192,9 +268,10 @@ def handler(engine):
                 self.connection.settimeout(3)
                 payload = json.loads(self.rfile.read(length))
                 self.respond(200, engine.complete(payload))
-            except ContextCapacity:
+            except ContextCapacity as exc:
                 try:
-                    self.respond(413, {'reason': 'local_context_capacity'})
+                    self.respond(413, {'reason': 'local_context_capacity'},
+                                 capacity=getattr(exc, 'local_capacity', None))
                 except OSError:
                     pass
             except Exception:

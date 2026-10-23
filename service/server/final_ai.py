@@ -142,7 +142,7 @@ def review(messages, validator):
     trace = TRACE.get()
     schema=getattr(validator,'response_schema',SCHEMA)
     from ai_routing import (Route, local_completion, local_usage, fallback_reason,
-                            _strict, safe_local_transport_failure)
+                            _strict, safe_local_transport_failure, safe_local_capacity, LocalCapacity)
     route = Route(provider, model)
     for attempt in range(2):  # One shared budget: retry OR repair, never both.
         provider, model = route.provider, route.model
@@ -239,6 +239,9 @@ def review(messages, validator):
             if provider == 'ollama_relay':
                 diagnostic=safe_local_transport_failure(getattr(exc,'local_transport_failure',None))
                 if diagnostic:metrics['local_transport']=diagnostic
+                if isinstance(exc, LocalCapacity):
+                    capacity=safe_local_capacity(getattr(exc,'local_capacity',None))
+                    if capacity:metrics['local_capacity']=capacity
             metrics["reject_reason"] = "http_" + str(status) if status else type(exc).__name__
             from retry_policy import defer_openrouter
             if provider=='openrouter' and exc.response is not None: defer_openrouter(exc.response)
