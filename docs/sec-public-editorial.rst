@@ -71,6 +71,30 @@ past facts and public eligibility decisions are not rewritten or replayed.
 No claim is made that all actual prior issuer notices selected an old period,
 that more publication is always useful, or that this change opens positions.
 
+Telegram reading layout
+-----------------------
+
+Each selected financial metric has its own short block: metric name, current
+full reported amount and unit, exact current period, previous amount and unit,
+exact comparison period, rounded change, then the existing one-line metric
+definition. Blank lines separate the at-most-three facts. A balance uses its
+``ליום`` date rather than a flow range. A margin keeps percentage units and a
+percentage-point change, not USD or percentage growth. Different metrics keep
+their own dates; no common period, fiscal-quarter name or business cause is
+inferred from a calendar range.
+
+Full amounts and signs remain unabridged. The existing one-decimal displayed
+change now says ``כ־`` to make its rounding explicit; the retained change and
+the unchanged materiality threshold are not rounded or recalculated for
+selection. No directional arrows or visual string reversal are introduced.
+The existing final Telegram boundary still applies its ordinary bidi handling.
+
+The footer ``נקלט ב־SEC`` labels the same retained ``accepted_at`` value already
+used by this notice. It is not the accounting period, processing time, outbox
+creation time or Telegram delivery time. This presentation-only update affects
+newly created copy, not existing queued/sent notices. It changes neither
+selection nor a source's factual accuracy and does not repair historical text.
+
 Verification
 ------------
 
