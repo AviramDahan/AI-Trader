@@ -96,6 +96,7 @@ def project(p,eid,at):
         mapping=c.execute('SELECT news_id FROM ne_projection WHERE event_id=?',(eid,)).fetchone()
         held,watched=membership(c);tickers=event['tickers']
         scope='open_position' if set(tickers)&held else 'watchlist' if set(tickers)&watched else 'universe' if tickers else 'market'
+        category='company' if tickers or event['event_type']!='market' else 'macro'
         first=event['sources'][0]
         facts=json.dumps({'title':event['title'],'source_excerpt':event['source_excerpt'],'canonical_event_id':eid})
         if not mapping:
@@ -106,18 +107,26 @@ def project(p,eid,at):
                 ('canonical:'+eid,tickers[0] if tickers else None,scope,event['title'],first['publisher'],first['url'],
                  event['published_at'],'canonical_pending',stamp,'canonical_events',eid,first['publisher'],
                  event['collected_at'],'canonical_evidence',int(not event['source_excerpt']),facts,json.dumps(tickers),
-                 json.dumps(event['provenance']),record['evidence_version'],stamp,'company' if tickers else 'macro'))
+                 json.dumps(event['provenance']),record['evidence_version'],stamp,category))
             nid=c.execute('SELECT id FROM scanner_news WHERE fingerprint=?',('canonical:'+eid,)).fetchone()['id']
             c.execute('INSERT INTO ne_projection VALUES(?,?)',(eid,nid))
         else:nid=mapping['news_id']
         analysis=c.execute("SELECT result_json FROM ne_analysis WHERE event_id=? AND version=? AND status='done'",(eid,record['evidence_version'])).fetchone()
         r=json.loads(analysis['result_json']) if analysis else {}
-        c.execute('''UPDATE scanner_news SET scope=?,title=?,title_he=?,summary_he=?,interpretation_he=?,sentiment=?,
+        c.execute('''UPDATE scanner_news SET ticker=?,verified_tickers_json=?,news_category=?,scope=?,title=?,title_he=?,summary_he=?,interpretation_he=?,sentiment=?,
             materiality=?,relevance=?,analysis_status=?,analysis_error=?,analyzed_at=?,alternate_sources_json=?,
             source_facts_json=?,content_hash=?,updated_at=? WHERE id=?''',
-            (scope,event['title'],r.get('title_he'),r.get('summary_he'),r.get('interpretation_he'),r.get('sentiment'),
+            (tickers[0] if tickers else None,json.dumps(tickers),category,scope,event['title'],r.get('title_he'),r.get('summary_he'),r.get('interpretation_he'),r.get('sentiment'),
              r.get('materiality'),r.get('relevance'),'analyzed' if analysis else 'canonical_'+record['status'],record['reason'],
              stamp if analysis else None,json.dumps(event['provenance']),facts,record['evidence_version'],stamp,nid))
+        # This is a CURRENT news projection, not the immutable canonical audit.
+        # A corrected observation cannot retain an obsolete position link.
+        if tickers:
+            marks=','.join('?' for _ in tickers)
+            c.execute(f'''DELETE FROM scanner_trade_news WHERE news_id=? AND trade_id NOT IN
+                (SELECT id FROM scanner_trades WHERE ticker IN ({marks}))''',(nid,*tickers))
+        else:
+            c.execute('DELETE FROM scanner_trade_news WHERE news_id=?',(nid,))
         for ticker in tickers:
             for trade in c.execute("SELECT id FROM scanner_trades WHERE ticker=? AND status='open' AND is_shadow=0",(ticker,)).fetchall():
                 c.execute('''INSERT INTO scanner_trade_news(trade_id,news_id,linked_at) VALUES(?,?,?)
@@ -195,6 +204,14 @@ def message(event,result,topic,tickers):
     return append_source('\n\n'.join(parts),event['sources'],required_footer='\n\n'.join(footer))
 
 
+def general_publication_keys(event, version, topic):
+    from telegram_topics import thread_id_for_event
+    from .general_news import publication_keys
+    kind={'market_news':'market_news','portfolio_watchlist':'position_news','important_stock_news':'stock_news'}[topic]
+    destination=[os.getenv('TELEGRAM_CHAT_ID','').strip(),thread_id_for_event(kind)]
+    return publication_keys(event,version,destination)
+
+
 def queue_outbox(p,eid,at):
     from scanner_engine import enqueue_telegram
     p.queue(eid,at);count=0
@@ -213,6 +230,15 @@ def queue_outbox(p,eid,at):
                 c.execute("UPDATE ne_delivery SET status='legacy_receipt' WHERE event_id=? AND version=? AND topic=?",(eid,version,topic));continue
             key='canonical:'+eid+':'+version+':'+topic
             kind={'market_news':'market_news','portfolio_watchlist':'position_news','important_stock_news':'stock_news'}[topic]
+            keys=general_publication_keys(event,version,topic)
+            if keys:
+                # Unique durable outbox keys, serialized by Store's existing
+                # write transaction. Never retry an unknown/failed prior send
+                # under a second event ID just because a ticker was discovered.
+                if any(c.execute('SELECT 1 FROM scanner_telegram_outbox WHERE dedupe_key=?',(k,)).fetchone() for k in keys):
+                    c.execute("UPDATE ne_delivery SET status='duplicate' WHERE event_id=? AND version=? AND topic=?",(eid,version,topic))
+                    continue
+                key=keys[0]
             if enqueue_telegram(c,key,kind,message(event,result,topic,tickers),published_at=event['published_at']):
                 c.execute('INSERT INTO ne_outbox VALUES(?,?,?,?,?) ON CONFLICT(dedupe_key) DO NOTHING',(key,eid,version,topic,control['epoch']))
                 count+=1
@@ -233,6 +259,9 @@ def delivery_message(outbox):
         result=c.execute("SELECT result_json FROM ne_analysis WHERE event_id=? AND version=? AND status='done'",(link['event_id'],link['version'])).fetchone()
         if not result:return None
         result=json.loads(result['result_json']);held,watched=membership(c)
+        if (outbox['dedupe_key'].startswith('canonical:general-v1:')
+                and outbox['dedupe_key'] not in general_publication_keys(event,link['version'],link['topic'])):
+            return None  # Evidence/source/destination changed since preparation.
         routes,reason=route(event,result,held,watched,p.universe,p.policy)
         matching=[tickers for topic,tickers in routes if topic==link['topic']]
         age=(now()-datetime.fromisoformat(event['published_at'])).total_seconds()

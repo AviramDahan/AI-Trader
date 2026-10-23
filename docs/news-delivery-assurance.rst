@@ -87,6 +87,47 @@ claim autonomous agent supervision without a real permitted dispatch. Existing
 cloud observations continue under their own service lifecycle. Merge, deployment
 and Production settings require their applicable explicit release authority.
 
+General publication without stock attribution
+--------------------------------------------
+
+A verified scanner ticker is NOT required for a sufficiently evidenced company
+story to enter GENERAL news review. The original corporate event type, sources
+and raw provider hints stay intact; it is not relabeled as macro and hints never
+become verified ticker/CIK/company identity. This path requires an approved source
+with publisher, valid URL/times, a concrete non-opinion headline and at least the
+existing twelve words of actual excerpt. Unknown kinds, placeholders and
+headline-only corporate items do not gain this exception.
+Routine unidentified inducement-grant notices retain their existing rejection.
+
+The existing market-scope independent bilingual review, factual checks, relevance,
+materiality, rights, conflicts, freshness, dedupe and durable outbox remain
+authoritative. An admitted item is a candidate for review, not a promised alert.
+Queue and actual send both revalidate retained general-news eligibility. A
+correction/retraction/version/epoch/rights change can revoke a pending delivery;
+restart cannot duplicate a known publication or repeat an ambiguous analysis.
+Exact corporate evidence version (literal title/excerpt and grounded claims),
+source publication time and effective destination also bound durable publication
+keys independently of later ticker discovery or verbatim syndication URL changes.
+This neither merges canonical audits nor suppresses genuinely changed evidence;
+URLs stay validated and attributed, not used for fuzzy matching. An already
+blocked/uncertain send is not retried under another event ID. A changed
+destination invalidates preparation rather than redirecting a pending notice.
+No bulk update, replay or requeue of old identity-blocked stories is performed.
+
+Without verified attribution, the only permitted route is ``market_news`` with
+an empty ticker list, even if a provider hint names a held/watched stock. The
+website/MiniApp current projection keeps category ``company`` but no ticker or
+position-news link; obsolete attribution is removed from that mutable projection,
+not from financial records or the retained canonical source/version audit.
+``signal_news`` independently requires exact verified identity/ticker and remains
+unchanged: a general publication cannot satisfy a stock entry-news gate.
+
+No provider, model, budget, AI retry/call limit, publication threshold or trading
+setting is changed. More admitted candidates may consume a larger share of the
+EXISTING news-AI queue/budget and increase latency; unchanged caps do not imply
+unchanged realized cost or throughput. Inspect natural outcomes after a separately
+approved release rather than promise that every prior rejection will publish.
+
 Regression acceptance
 ---------------------
 
