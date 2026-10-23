@@ -40,6 +40,7 @@ def test_funnel_real_pg_is_readonly_current_version_and_numeric_safe(pg):
 
 
 def test_funnel_real_watch_and_private_projection_never_failback_or_write_trades(pg,monkeypatch):
+    monkeypatch.setenv('NEWS_EVENTS_RUNTIME','true')
     from database import get_db_connection
     from news_events import watch
     import ai_operations
