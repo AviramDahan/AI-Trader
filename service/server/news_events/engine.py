@@ -32,7 +32,10 @@ def route(event,result,positions,watchlist,universe,policy):
     if not result.get('related'):return [],'irrelevant'
     relevance=result['relevance'];materiality=result['materiality'];sentiment=result['sentiment']
     tickers=set(event['tickers'])
-    if not tickers and event['event_type']=='market':
+    if not tickers:
+        from .general_news import eligible_event
+        if event['event_type'] != 'market' and not eligible_event(event):
+            return [],'identity_unverified'
         if relevance<policy.market_relevance:return [],'below_market_threshold'
         if materiality not in ('medium','high'):return [],'low_importance'
         return [('market_news',[])],None
@@ -60,7 +63,9 @@ class Pipeline:
             reason=None
             if published<datetime.fromisoformat(self.not_before):reason='backlog_blocked'
             elif age<0 or age>self.policy.max_age_hours*3600:reason='stale_or_future'
-            elif not identities and source.event_type!='market':reason='identity_unverified'
+            elif not identities and source.event_type!='market':
+                from .general_news import eligible_source
+                if not eligible_source(source):reason='identity_unverified'
             elif source.event_type=='unknown':reason='unsupported_or_noise'
             return self.store.ingest(source,identities,reason,queued_at=now)
         except (ValueError,TypeError,KeyError):
@@ -193,7 +198,7 @@ class Pipeline:
         event=record['body'];version=record['evidence_version']
         positions,watchlist=self.membership()
         age=(now-datetime.fromisoformat(event['published_at'])).total_seconds()
-        maximum=self.policy.max_age_hours if set(event['tickers'])&(set(positions)|set(watchlist)) else self.policy.market_age_hours if event['event_type']=='market' else self.policy.universe_age_hours
+        maximum=self.policy.max_age_hours if set(event['tickers'])&(set(positions)|set(watchlist)) else self.policy.market_age_hours if not event['tickers'] else self.policy.universe_age_hours
         reason=None
         if age<0 or age>maximum*3600:reason='stale_or_future'
         elif not sufficient(event):reason='insufficient_information'
@@ -251,7 +256,7 @@ class Pipeline:
             if not analyzed:return []
             age=(now-datetime.fromisoformat(event['published_at'])).total_seconds()
             personal=bool(set(event['tickers'])&(set(positions)|set(watchlist)))
-            max_age=self.policy.max_age_hours if personal else self.policy.market_age_hours if event['event_type']=='market' else self.policy.universe_age_hours
+            max_age=self.policy.max_age_hours if personal else self.policy.market_age_hours if not event['tickers'] else self.policy.universe_age_hours
             reason='backlog_blocked' if event['published_at']<self.not_before else 'stale_or_future' if not 0<=age<=max_age*3600 else 'source_conflict' if event['conflicts'] else 'license_required' if any(s['rights']!='approved' for s in event['sources']) else None
             routes=[]
             if not reason:routes,reason=route(event,json.loads(analyzed['result_json']),positions,watchlist,self.universe,self.policy)
