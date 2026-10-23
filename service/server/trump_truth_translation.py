@@ -19,6 +19,9 @@ RETRY = 'trump_hebrew_retry'
 SENDING = 'trump_hebrew_sending'
 MAX_ATTEMPTS = 2
 LEASE_SECONDS = 300  # At most two existing 50-second local requests + margin.
+DIAGNOSTIC_VERSION = 'trump_translation_diagnostic_v1'
+DIAGNOSTIC_FAILURES = frozenset({'unknown','local_unavailable','context_capacity',
+    'transport_failure','schema_invalid','not_grounded','editor_rejected','preparation_revoked'})
 SCHEMA = {'type':'object','properties':{'text_he':{'type':'string','minLength':1,'maxLength':2400}},
           'required':['text_he'],'additionalProperties':False}
 REVIEW = {'type':'object','properties':{k:{'type':'boolean'} for k in
@@ -42,6 +45,68 @@ def binding(row,envelope):
 def cache_key(row):
     if type(row['id']) is not int or row['id'] <= 0:raise ValueError('invalid_translation_row')
     return 'trump_truth_hebrew_v1:'+str(row['id'])
+
+
+def diagnostic_key(row):
+    cache_key(row)  # Same strict internal row identity; never a public identifier.
+    return DIAGNOSTIC_VERSION+':'+str(row['id'])
+
+
+def checked_diagnostic(row,envelope,cache,value,at=None):
+    """Optional forward evidence only; never a preparation or sending authority.
+
+    Status is the matching CACHE state, not proof an inference was started or
+    completed. Missing/restored historical evidence is not reconstructed.
+    """
+    from jsonschema.exceptions import ValidationError
+    try:
+        checked_cache(row,envelope,cache)
+        if (type(value) is not dict or set(value)!={'version','binding','cache_sha256',
+                'attempt','status','category','recorded_at'} or value['version']!=DIAGNOSTIC_VERSION
+            or value['binding']!=binding(row,envelope)
+            or value['cache_sha256']!=hashlib.sha256(wire(cache).encode()).hexdigest()
+            or type(value['attempt']) is not int or value['attempt']!=cache['attempts']
+            or value['status']!=cache['status'] or type(value['category']) is not str
+            or type(value['recorded_at']) is not str or len(value['recorded_at'])>40):
+            raise ValueError('translation_diagnostic_invalid')
+        allowed=({'none'} if cache['status']=='translated' else {'source_text_absent'}
+                 if cache['status'] in ('media_only','link_only') else DIAGNOSTIC_FAILURES)
+        stamp=datetime.fromisoformat(value['recorded_at'].replace('Z','+00:00'))
+        now=at or datetime.now(timezone.utc)
+        if (value['category'] not in allowed or stamp.tzinfo is None or now.tzinfo is None
+            or stamp.utcoffset()!=timedelta(0) or stamp>now):
+            raise ValueError('translation_diagnostic_invalid')
+        return value
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError,ValidationError):
+        raise ValueError('translation_diagnostic_invalid') from None
+
+
+def _failure_category(exc):
+    import jsonschema
+    import requests
+    try:
+        from ai_routing import LocalCapacity
+        if isinstance(exc,LocalCapacity):return 'context_capacity'
+    except ImportError:
+        pass
+    if isinstance(exc,jsonschema.ValidationError):return 'schema_invalid'
+    if type(exc) is ValueError:
+        return {'translation_local_unavailable':'local_unavailable',
+            'translation_not_grounded':'not_grounded','translation_review_rejected':'editor_rejected',
+            'translation_preparation_revoked':'preparation_revoked'}.get(str(exc),'unknown')
+    if isinstance(exc,(requests.exceptions.ConnectionError,requests.exceptions.Timeout,
+                      TimeoutError,ConnectionError)):return 'transport_failure'
+    return 'unknown'
+
+
+def _save_diagnostic(cur,row,envelope,cache,category,at):
+    value={'version':DIAGNOSTIC_VERSION,'binding':binding(row,envelope),
+        'cache_sha256':hashlib.sha256(wire(cache).encode()).hexdigest(),
+        'attempt':cache['attempts'],'status':cache['status'],'category':category,
+        'recorded_at':at.astimezone(timezone.utc).isoformat()}
+    checked_diagnostic(row,envelope,cache,value,at)
+    cur.execute('INSERT INTO scanner_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at',
+                (diagnostic_key(row),wire(value),at.isoformat()))
 
 
 def source_text(item):
@@ -247,8 +312,9 @@ def prepare(limit=1,at=None,completion=None):
         if attempts<MAX_ATTEMPTS:attempts+=1
         value={'version':envelope['presentation'],'binding':binding(row,envelope),'attempts':attempts,'status':'working','text_he':''}
         cur.execute('INSERT INTO scanner_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at',(key,wire(value),stamp))
+        _save_diagnostic(cur,row,envelope,value,'unknown',at or datetime.now(timezone.utc))
         c.commit()
-    result=None
+    result=None;failure_category='unknown'
     def guarded_completion(system,payload,schema):
         check_at=at or datetime.now(timezone.utc)
         current=eligible(row,check_at)
@@ -263,7 +329,7 @@ def prepare(limit=1,at=None,completion=None):
         return (completion or local_json)(system,payload,schema)
     if not cached or cached['attempts']<MAX_ATTEMPTS:
         try:result=translate(envelope['item'],guarded_completion)
-        except Exception:pass  # No model/exception/source text in operational errors.
+        except Exception as exc:failure_category=_failure_category(exc)
     finish=at or datetime.now(timezone.utc)
     current=eligible(row,finish)
     with get_db_connection() as c:
@@ -276,10 +342,14 @@ def prepare(limit=1,at=None,completion=None):
             return {'prepared':0,'deferred':0}
         if result is None and attempts<MAX_ATTEMPTS:
             due=(finish+timedelta(seconds=60)).isoformat()
+            _save_diagnostic(cur,row,envelope,value,failure_category,finish)
             cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=?,last_error=? WHERE id=?',(pending,due,'trump_hebrew_translation_deferred',row['id']))
             return {'prepared':0,'deferred':1}
         value.update(result or {'status':'unavailable','text_he':''})
         checked_cache(row,envelope,value)
         cur.execute('UPDATE scanner_settings SET value_json=?,updated_at=? WHERE key=?',(wire(value),finish.isoformat(),key))
+        category=('none' if value['status']=='translated' else 'source_text_absent'
+                  if value['status'] in ('media_only','link_only') else failure_category)
+        _save_diagnostic(cur,row,envelope,value,category,finish)
         cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=?,last_error=NULL WHERE id=?',(ready,finish.isoformat(),row['id']))
     return {'prepared':1,'deferred':0}

@@ -21,6 +21,7 @@ PROTOCOL = 1
 MAX_BYTES = 131072
 CONTEXT = 8192
 CONTEXT_POLICY = 'no_truncate_no_shift_v1'
+CAPACITY_HEADER = 'X-AI-Local-Capacity'
 LOCAL_TRANSPORT_REASONS = frozenset({
     'relay_http_error', 'relay_response_too_large', 'relay_invalid_json',
     'relay_timeout', 'relay_socket_error', 'relay_http_protocol_error',
@@ -31,6 +32,55 @@ _until = 0.0
 
 class LocalCapacity(requests.ConnectionError):
     """Capacity rejection: fail over without poisoning healthy smaller jobs."""
+
+
+def safe_local_capacity(value):
+    """Optional diagnostic only: native tokens and legacy byte-units differ.
+
+    Keep this narrow v1 schema in sync with the standalone PC gateway. Missing
+    old-gateway metadata stays unknown; it never changes capacity selection.
+    """
+    if type(value) is not dict or type(value.get('version')) is not int or value['version'] != 1:
+        return {}
+    source = value.get('source')
+    shapes = {
+        'native_token_limit': {'context_tokens', 'prompt_tokens'},
+        'native_capacity_unspecified': {'context_tokens'},
+        'legacy_guard_upper_bound': {'context_tokens', 'legacy_guard_units'},
+        'gateway_request_bytes': {'request_bytes', 'request_byte_limit'},
+    }
+    if type(source) is not str or source not in shapes:
+        return {}
+    required = {'version', 'source'} | shapes[source]
+    if set(value) not in (required, required | {'requested_output_tokens'}):
+        return {}
+    if source != 'gateway_request_bytes':
+        if type(value['context_tokens']) is not int or value['context_tokens'] != CONTEXT:
+            return {}
+    else:
+        if type(value['request_byte_limit']) is not int or value['request_byte_limit'] != MAX_BYTES:
+            return {}
+    name, lower = (('prompt_tokens', CONTEXT) if source == 'native_token_limit' else
+                   ('legacy_guard_units', CONTEXT) if source == 'legacy_guard_upper_bound' else
+                   ('request_bytes', MAX_BYTES))
+    if source != 'native_capacity_unspecified':
+        if type(value[name]) is not int or not lower < value[name] <= 10_000_000:
+            return {}
+    if 'requested_output_tokens' in value:
+        predict = value['requested_output_tokens']
+        if type(predict) is not int or not 1 <= predict <= 2048:
+            return {}
+    return dict(value)
+
+
+def _capacity_header(value):
+    if (type(value) is not str or len(value) > 512
+            or any(not 32 <= ord(ch) < 127 for ch in value)):
+        return {}
+    try:
+        return safe_local_capacity(_strict(value))
+    except (ValueError, RecursionError):
+        return {}
 
 
 def fallback_reason(exc):
@@ -112,7 +162,11 @@ def relay(method, path, payload=None, timeout=2):
             capacity = _strict(raw) == {'reason': 'local_context_capacity'}
             decoding = False
             if capacity:
-                raise LocalCapacity('local_context_capacity')
+                error = LocalCapacity('local_context_capacity')
+                evidence = _capacity_header(response.getheader(CAPACITY_HEADER))
+                if evidence:
+                    error.local_capacity = evidence
+                raise error
         if response.status != 200:
             raise _local_transport_error('relay_http_error', response.status)
         decoding = True
@@ -199,10 +253,22 @@ def local_completion(messages, schema, predict, *, validate_response=True):
     state = relay('GET', '/health')
     guarded = (isinstance(state, dict) and state.get('context_policy') == CONTEXT_POLICY
                and type(state.get('context_length')) is int and state['context_length'] == CONTEXT)
-    if not guarded and sum(len(m['content'].encode())+128 for m in messages)+predict+512 > CONTEXT:
-        raise LocalCapacity('local_context_capacity')
-    body = relay('POST', '/completion', dict(protocol=PROTOCOL, model=MODEL, digest=DIGEST,
-        messages=messages, schema=schema, predict=predict, request_id=uuid.uuid4().hex), timeout=50)
+    if not guarded:
+        legacy_units = sum(len(m['content'].encode())+128 for m in messages)+predict+512
+        if legacy_units > CONTEXT:
+            error = LocalCapacity('local_context_capacity')
+            error.local_capacity = safe_local_capacity(dict(version=1, source='legacy_guard_upper_bound',
+                context_tokens=CONTEXT, legacy_guard_units=legacy_units, requested_output_tokens=predict))
+            raise error
+    try:
+        body = relay('POST', '/completion', dict(protocol=PROTOCOL, model=MODEL, digest=DIGEST,
+            messages=messages, schema=schema, predict=predict, request_id=uuid.uuid4().hex), timeout=50)
+    except LocalCapacity as exc:
+        evidence = safe_local_capacity(getattr(exc, 'local_capacity', None))
+        if evidence:
+            evidence['requested_output_tokens'] = predict
+            exc.local_capacity = safe_local_capacity(evidence)
+        raise
     if time.monotonic() > deadline:
         raise requests.Timeout('local_deadline_exceeded')
     if isinstance(body, dict) and body.get('done_reason') == 'length':
