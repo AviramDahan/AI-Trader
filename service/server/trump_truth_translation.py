@@ -121,8 +121,10 @@ def local_json(system,payload,schema):
     from ai_operations import record
     started=time.monotonic();body=None;success=False
     try:
+        # Native JSON preserves the exact SOURCE/DRAFT without inflating every
+        # Hebrew character into six ASCII escape characters in the editor input.
         value,body=local_completion([{'role':'system','content':system},
-            {'role':'user','content':json.dumps(payload,ensure_ascii=True)}],schema,1400)
+            {'role':'user','content':json.dumps(payload,ensure_ascii=False)}],schema,1400)
         success=True
         return value
     except Exception as exc:

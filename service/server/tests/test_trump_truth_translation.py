@@ -164,3 +164,70 @@ def test_local_transport_never_paid_fallback_and_records_native_usage(monkeypatc
     monkeypatch.setattr(ai_routing,'ready',lambda:False)
     with pytest.raises(ValueError):h.local_json('system',{},h.SCHEMA)
     assert local.call_count==2
+
+
+def test_complete_hebrew_editor_uses_native_json_without_escape_capacity_inflation(monkeypatch):
+    """Same whole source/draft fits the existing bound in native UTF-8 JSON.
+
+    Execute the real translation and pinned local_completion paths; only relay
+    I/O and the usage sink are synthetic. No budget/context limit is changed.
+    """
+    import ai_operations,ai_routing,trump_truth_translation as h
+    source=('We support peace. '*80).strip()
+    hebrew=('אנחנו תומכים בשלום. '*80).strip()
+    posts=[]
+    monkeypatch.setattr(ai_routing,'enabled',lambda:True)
+    monkeypatch.setattr(ai_routing,'ready',lambda:True)
+    monkeypatch.setattr(ai_operations,'record',Mock())
+    def relay(method,path,payload=None,timeout=2):
+        if method=='GET':
+            assert path=='/health'
+            # The supported rolling-update conservative path stays unchanged.
+            return {}
+        assert method=='POST' and path=='/completion' and payload['predict']==1400
+        logical=json.loads(payload['messages'][1]['content'])
+        posts.append(logical)
+        value={'text_he':hebrew} if 'text_he' in payload['schema']['properties'] else {
+            'faithful':True,'fluent_hebrew':True,'complete':True,'unsupported_claims':False}
+        return {'model':ai_routing.MODEL,'model_digest':ai_routing.DIGEST,'done':True,
+            'done_reason':'stop','message':{'content':json.dumps(value,ensure_ascii=False)},
+            'prompt_eval_count':10,'eval_count':20}
+    monkeypatch.setattr(ai_routing,'relay',relay)
+    result=h.translate({'text_excerpt':source,'has_media':False,'is_repost':False})
+    assert result=={'status':'translated','text_he':hebrew}
+    assert posts==[{'source_excerpt':source},{'source_excerpt':source,'draft_he':hebrew}]
+
+
+def test_local_native_json_preserves_full_payload_and_existing_generation_contract(monkeypatch):
+    import ai_operations,ai_routing,trump_truth_translation as h
+    source='We will not raise tariffs by 5%.'
+    draft='לא נעלה את המכסים ב־5%.'
+    logical={'source_excerpt':source,'draft_he':draft}
+    captured=[]
+    monkeypatch.setattr(ai_routing,'enabled',lambda:True)
+    monkeypatch.setattr(ai_routing,'ready',lambda:True)
+    monkeypatch.setattr(ai_operations,'record',Mock())
+    def complete(messages,schema,predict):
+        captured.append(messages[1]['content'])
+        assert schema is h.REVIEW and predict==1400
+        assert json.loads(messages[1]['content'])==logical
+        return ({'faithful':True,'fluent_hebrew':True,'complete':True,'unsupported_claims':False},
+                {'prompt_eval_count':10,'eval_count':20})
+    monkeypatch.setattr(ai_routing,'local_completion',complete)
+    h.local_json('Synthetic editor',logical,h.REVIEW)
+    assert draft in captured[0] and '\\u05' not in captured[0]
+
+
+def test_native_json_does_not_bypass_real_oversized_context_guard(monkeypatch):
+    import ai_operations,ai_routing,trump_truth_translation as h
+    monkeypatch.setattr(ai_routing,'enabled',lambda:True)
+    monkeypatch.setattr(ai_routing,'ready',lambda:True)
+    recorded=Mock();monkeypatch.setattr(ai_operations,'record',recorded)
+    monkeypatch.setattr(ai_routing,'Route',lambda *a:pytest.fail('paid fallback'))
+    def relay(method,path,payload=None,timeout=2):
+        assert method=='GET' and path=='/health', 'Oversized request must never POST'
+        return {}
+    monkeypatch.setattr(ai_routing,'relay',relay)
+    with pytest.raises(ai_routing.LocalCapacity):
+        h.local_json('Synthetic editor',{'source_excerpt':'S'*1600,'draft_he':'ש'*2400},h.REVIEW)
+    assert recorded.call_count==1 and recorded.call_args.args[4] is False
