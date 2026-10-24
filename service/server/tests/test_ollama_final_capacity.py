@@ -269,7 +269,13 @@ def test_large_local_review_reaches_real_pending_entry_exit_without_paid_call(db
     decision=dict(DECISION,action='BUY',confidence=.91,news_relevance=.9,news_sentiment=.3,
                   entry_price_relation='equal',entry_price_concern='none')
     tags={'models':[{'name':g.MODEL,'digest':g.DIGEST}]}
-    local.http=Mock(side_effect=[tags,native(decision),tags])
+    def upstream(method,path,payload=None,**kwargs):
+        if path=='/api/tags':return tags
+        if path=='/api/version':return {'version':'0.40.7'}
+        if path=='/api/ps':return {'models':[{'name':g.MODEL,'digest':g.DIGEST,'context_length':8192}]}
+        assert (method,path)==('POST','/api/chat')
+        return native(decision)
+    local.http=Mock(side_effect=upstream)
     def relay(method,path,payload=None,**kwargs):
         if path=='/health':return local.health()
         calls.append(payload)

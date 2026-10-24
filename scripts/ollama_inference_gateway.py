@@ -21,6 +21,9 @@ CONTEXT = 8192
 CONTEXT_POLICY = 'no_truncate_no_shift_v1'
 KEEP_ALIVE = '2m'
 KEEP_ALIVE_SECONDS = 120
+COMPLETION_POLICY = 'bounded_cold_start_v2'
+COLD_REQUEST_SECONDS = 120
+WARM_REQUEST_SECONDS = 45
 
 
 class ContextCapacity(ValueError):
@@ -75,6 +78,7 @@ class Inference:
         self.available = False
         self.at = 0.0
         self.version = None
+        self.last_request = None
 
     def http(self, method, path, payload=None, timeout=2):
         until = time.monotonic() + timeout
@@ -173,12 +177,15 @@ class Inference:
             ready=self._metadata_ready() and not self.slot.locked(), capacity=1,
             context_policy=CONTEXT_POLICY, context_length=CONTEXT,
             model_loaded=self.loaded if self._metadata_ready() else None,
-            load_policy='on_demand', keep_alive_seconds=KEEP_ALIVE_SECONDS)
+            load_policy='on_demand', keep_alive_seconds=KEEP_ALIVE_SECONDS,
+            completion_policy=COMPLETION_POLICY, supported_completion_protocols=[1, 2],
+            completion_timeout_seconds=COLD_REQUEST_SECONDS,
+            last_request=self.last_request)
 
     def complete(self, payload):
         if not isinstance(payload, dict) or set(payload) != {'protocol','model','digest','messages','schema','predict','request_id'}:
             raise ValueError('invalid_request')
-        if type(payload['protocol']) is not int or payload['protocol'] != 1 or payload['model'] != MODEL or payload['digest'] != DIGEST:
+        if type(payload['protocol']) is not int or payload['protocol'] not in (1, 2) or payload['model'] != MODEL or payload['digest'] != DIGEST:
             raise ValueError('unapproved_model')
         messages, predict = payload['messages'], payload['predict']
         if not isinstance(predict, int) or isinstance(predict, bool) or not 1 <= predict <= 2048:
@@ -198,41 +205,63 @@ class Inference:
             jsonschema.Draft202012Validator.check_schema(payload['schema'])
         if not self.slot.acquire(blocking=False):
             raise ValueError('local_not_ready')
+        started = time.monotonic()
+        budget = COLD_REQUEST_SECONDS if payload['protocol'] == 2 else WARM_REQUEST_SECONDS
+        phase, outcome, cold = 'metadata', 'failed', None
         try:
-            deadline = time.monotonic() + 45
+            deadline = started + budget
             # Direct requests can also bootstrap read-only metadata. Never
             # require resident weights before allowing the request that loads
             # them. No queue: a second caller fails busy without another load.
-            if not self._metadata_ready():
+            # Residency is re-observed inside admission. A cached warm health
+            # reply must not select the wrong budget after native idle eviction.
+            if payload['protocol'] == 2 or not self._metadata_ready():
                 self._refresh_locked(deadline)
             if not self._metadata_ready():
                 raise ValueError('local_not_ready')
+            cold = not self.loaded
+            if not cold:
+                budget = WARM_REQUEST_SECONDS
+                deadline = started + budget
             tags = self._bounded_http(deadline, 'GET', '/api/tags')
             if not any(m['name'] == MODEL and m['digest'] == DIGEST for m in tags['models']):
                 self.loaded = False
                 raise ValueError('unapproved_model')
+            phase = 'native_chat'
             result = self._bounded_http(deadline, 'POST', '/api/chat', dict(model=MODEL, messages=messages,
                 stream=False, think=False, keep_alive=KEEP_ALIVE, format=payload['schema'] or 'json',
                 truncate=False, shift=False,
-                options={'temperature': 0, 'num_ctx': CONTEXT, 'num_predict': predict}), timeout=45)
+                options={'temperature': 0, 'num_ctx': CONTEXT, 'num_predict': predict}), timeout=budget)
             # No response can execute a command. The cloud owns validation/action.
+            phase = 'post_identity'
             tags = self._bounded_http(deadline, 'GET', '/api/tags')
             if not any(m['name'] == MODEL and m['digest'] == DIGEST for m in tags['models']):
                 self.loaded = False
                 raise ValueError('model_changed_during_request')
             result['model_digest'] = DIGEST
             result['ollama_version'] = self.version
+            if payload['protocol'] == 2:
+                result['gateway_protocol'] = 2
+                result['gateway_request_budget_seconds'] = budget
             self.loaded = True
             self.at = time.monotonic()
+            outcome = 'completed'
             return result
         except ContextCapacity:
             # Capacity remains a bounded request rejection, not an outage.
+            outcome = 'context_capacity'
             raise
         except Exception:
+            outcome = 'deadline_exceeded' if time.monotonic() >= deadline else 'failed'
             self.available = False
             self.loaded = False
             raise
         finally:
+            # One bounded, content-free observation. No request IDs, inputs,
+            # responses, native errors or research/checkpoint contents retained.
+            self.last_request = dict(protocol=payload['protocol'], cold=cold,
+                phase=phase, outcome=outcome, budget_seconds=budget,
+                elapsed_ms=round((time.monotonic()-started)*1000))
             self.slot.release()
 
 
