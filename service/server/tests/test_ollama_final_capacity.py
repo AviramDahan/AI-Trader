@@ -27,7 +27,7 @@ def request(g, content):
 
 
 def ready_gateway():
-    g=gateway(); engine=g.Inference();engine.loaded=True;engine.at=time.monotonic()
+    g=gateway(); engine=g.Inference();engine.loaded=True;engine.available=True;engine.at=time.monotonic()
     tags={'models':[{'name':g.MODEL,'digest':g.DIGEST}]}
     engine.http=Mock(side_effect=[tags,native({'ok':True}),tags])
     return g,engine
@@ -54,16 +54,15 @@ def test_upstream_context_capacity_releases_slot_without_marking_gateway_offline
     assert engine.health()['ready'] and not engine.slot.locked()
 
 
-def test_existing_loaded_model_still_gets_guarded_first_warmup():
+def test_existing_loaded_model_is_observed_without_first_warmup():
     g=gateway();engine=g.Inference()
     tags={'models':[{'name':g.MODEL,'digest':g.DIGEST}]}
     models={'models':[{'name':g.MODEL,'digest':g.DIGEST,'context_length':8192}]}
-    engine.http=Mock(side_effect=[tags,{'version':'0.34.4'},models,{'done':True},models])
+    engine.http=Mock(side_effect=[tags,{'version':'0.34.4'},models])
     engine.refresh()
-    warm=engine.http.call_args_list[3]
-    assert warm.args[:2]==('POST','/api/chat') and warm.args[2]['messages']==[]
-    assert warm.args[2]['truncate'] is False and warm.args[2]['shift'] is False
-    assert warm.kwargs['timeout']==90 and engine.health()['ready']
+    assert len(engine.http.call_args_list)==3
+    assert all(call.args[0]=='GET' for call in engine.http.call_args_list)
+    assert engine.health()['ready'] and engine.health()['model_loaded']
     assert engine.health()['context_policy']==routing.CONTEXT_POLICY
 
 
@@ -103,7 +102,7 @@ def test_other_or_inconsistent_wrapped_errors_are_not_capacity(change):
 
 def test_wrapped_native_error_traverses_real_gateway_http(monkeypatch):
     import threading
-    g=gateway();engine=g.Inference();engine.loaded=True;engine.at=time.monotonic()
+    g=gateway();engine=g.Inference();engine.loaded=True;engine.available=True;engine.at=time.monotonic()
     response=Mock(status_code=400)
     response.iter_content.return_value=[json.dumps({'error':json.dumps({'error':wrapped_capacity()})}).encode()]
     response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False)

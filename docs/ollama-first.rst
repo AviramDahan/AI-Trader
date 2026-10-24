@@ -105,11 +105,42 @@ repair remains terminal; this change does not authorize another model call.
 
 The inference gateway uses only loopback Ollama, pinned weights and an 8192
 context. It has one GPU slot/no generation queue, eight HTTP handlers, bounded
-input/output bytes, native no-truncation context rejection and a 45-second generation
-deadline. Warmup is separate and bounded (90 seconds); health remains false
-until the exact model is loaded. Busy, asleep, cold, disconnected, changed
-weights or oversized context is unavailable, not an opportunity to invent data.
+input/output bytes, native no-truncation context rejection and a 45-second
+real-request budget including metadata, cold loading and generation. The
+30-second metadata observation uses GET tags/version/running-models only;
+neither it nor GET health loads, unloads or renews a model lease. Compatible
+cold metadata is ready to accept work; resident weights are not a prerequisite.
+Busy, asleep, disconnected, changed weights, a wrong resident context or
+oversized context remains unavailable, not an opportunity to invent data.
 Large prompts may use paid fallback; "local when ready" includes capacity.
+
+Demand-only model lifetime
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Only a validated, nonempty real completion sends POST chat. The same existing
+nonblocking single GPU lock covers metadata validation, native demand loading,
+generation and result identity validation; competing requests do not queue or
+start another preload. There is no empty-message warmup. The native request's
+``keep_alive=2m`` allows Ollama to release weights after two idle minutes.
+The gateway never sends a periodic or timer-based unload, so it cannot unload
+an active request. Native expiry follows request completion; metadata polling
+does not extend that lease. No global Ollama/Windows/pagefile setting changes.
+
+Protocol1, model/digest, context policy and capacity1 are unchanged. Additive
+health fields ``model_loaded`` (last fresh metadata observation, or null),
+``load_policy=on_demand`` and ``keep_alive_seconds=120`` distinguish admission
+from residency. Health remains a fast200 response with identity even when busy
+or unavailable. Existing AI-Trader50s and Dahan60s client bounds, deferral,
+durable checkpoints, repair/circuit policy and paid protections are unchanged.
+A cold load plus a long generation can still exhaust the existing45s budget;
+this lifetime fix is not a guarantee against pressure during active research.
+
+The component-only rollout retains the exact previous gateway and launcher
+for return; it does not deploy the cloud applications or change their queues.
+Do not interrupt active research merely because a health snapshot looked idle.
+Check current source/process ownership and retained job state, account for the
+existing application supervisor, and preserve client retry/checkpoint behavior.
+No model/quality or research-input signature change is required.
 
 Final-review capacity correction
 -------------------------------
@@ -121,7 +152,7 @@ facts, unknowns or negative evidence. System instructions, decision validation
 and all trading gates are unchanged. The paid fallback sees the same facts.
 
 The pinned Ollama 0.34.4 API supports ``truncate=false`` and ``shift=false``.
-The gateway explicitly uses BOTH, including its first bounded empty warmup,
+The gateway explicitly uses BOTH on every actual request,
 retains context 8192, output/deadline/transport bounds and one GPU slot, and
 delegates actual token/template fit to that runtime rather than confusing bytes
 with tokens. Over-context error or incomplete output must fall back/fail closed;

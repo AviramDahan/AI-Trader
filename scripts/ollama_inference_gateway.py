@@ -17,6 +17,8 @@ DIGEST = '6114515d63c17436a7c0417d82820ac65ad643e2806c5a3c89cb62846436ed0b'
 MAX_BYTES = 131072
 CONTEXT = 8192
 CONTEXT_POLICY = 'no_truncate_no_shift_v1'
+KEEP_ALIVE = '2m'
+KEEP_ALIVE_SECONDS = 120
 
 
 class ContextCapacity(ValueError):
@@ -68,17 +70,19 @@ class Inference:
     def __init__(self):
         self.slot = threading.Lock()
         self.loaded = False
+        self.available = False
         self.at = 0.0
         self.version = None
-        self.guard_warmed = False
 
     def http(self, method, path, payload=None, timeout=2):
+        until = time.monotonic() + timeout
         with requests.Session() as session:
             session.trust_env = False
             with session.request(method, 'http://127.0.0.1:11434' + path, json=payload,
                                  timeout=(2, timeout), stream=True, allow_redirects=False) as r:
                 raw = bytearray()
-                until = time.monotonic() + timeout
+                if time.monotonic() > until:
+                    raise requests.Timeout('ollama_deadline')
                 for part in r.iter_content(4096):
                     raw.extend(part)
                     if len(raw) > MAX_BYTES or time.monotonic() > until:
@@ -90,36 +94,62 @@ class Inference:
                     raise ValueError('ollama_unavailable')
                 return data
 
-    def refresh(self):
-        """Metadata + bounded model preload; never warms while generating."""
-        if not self.slot.acquire(blocking=False):
-            return
+    def _bounded_http(self, deadline, method, path, payload=None, timeout=2):
+        remaining = deadline-time.monotonic()
+        if remaining <= 0:
+            raise requests.Timeout('ollama_deadline')
+        result = self.http(method, path, payload, timeout=min(timeout, remaining))
+        if time.monotonic() > deadline:
+            raise requests.Timeout('ollama_deadline')
+        return result
+
+    def _refresh_locked(self, deadline=None):
+        """Observe metadata only. A compatible cold runtime can accept work."""
+        self.available = False
         try:
+            def observe(path):
+                return (self.http('GET', path) if deadline is None else
+                        self._bounded_http(deadline, 'GET', path))
             self.loaded = False
-            tags = self.http('GET', '/api/tags')
+            tags = observe('/api/tags')
             if not any(m['name'] == MODEL and m['digest'] == DIGEST for m in tags['models']):
                 return
-            self.version = self.http('GET', '/api/version')['version']
+            self.version = observe('/api/version')['version']
             if tuple(int(v) for v in self.version.split('.')) < (0,34,4):
                 return
-            models = self.http('GET', '/api/ps')['models']
-            if not self.guard_warmed or not any(m['name'] == MODEL and m['digest'] == DIGEST and m.get('context_length') == CONTEXT for m in models):
-                self.http('POST', '/api/chat', dict(model=MODEL, messages=[], stream=False,
-                          keep_alive='20m', truncate=False, shift=False, options={'num_ctx': CONTEXT}), timeout=90)
-            models = self.http('GET', '/api/ps')['models']
+            models = observe('/api/ps')['models']
+            if not isinstance(models, list):
+                return
+            # Cold is eligible; an incompatible resident instance is NOT.
+            # Health must neither hide nor reload a wrong active context.
+            if any(m['name'] == MODEL and (m.get('digest') != DIGEST or
+                    m.get('context_length') != CONTEXT) for m in models):
+                return
             self.loaded = any(m['name'] == MODEL and m['digest'] == DIGEST
                 and m.get('context_length') == CONTEXT for m in models)
-            self.guard_warmed = self.loaded
+            self.available = True
             self.at = time.monotonic()
         except Exception:
             self.loaded = False
+
+    def refresh(self):
+        """Read-only periodic health; no preload, unload or generation."""
+        if not self.slot.acquire(blocking=False):
+            return
+        try:
+            self._refresh_locked()
         finally:
             self.slot.release()
 
+    def _metadata_ready(self):
+        return self.available and 0 <= time.monotonic()-self.at < 65
+
     def health(self):
         return dict(protocol=1, model=MODEL, digest=DIGEST, ollama_version=self.version,
-            ready=self.loaded and time.monotonic()-self.at < 65 and not self.slot.locked(), capacity=1,
-            context_policy=CONTEXT_POLICY, context_length=CONTEXT)
+            ready=self._metadata_ready() and not self.slot.locked(), capacity=1,
+            context_policy=CONTEXT_POLICY, context_length=CONTEXT,
+            model_loaded=self.loaded if self._metadata_ready() else None,
+            load_policy='on_demand', keep_alive_seconds=KEEP_ALIVE_SECONDS)
 
     def complete(self, payload):
         if not isinstance(payload, dict) or set(payload) != {'protocol','model','digest','messages','schema','predict','request_id'}:
@@ -142,26 +172,42 @@ class Inference:
         if payload['schema'] is not None:
             import jsonschema
             jsonschema.Draft202012Validator.check_schema(payload['schema'])
-        if not self.health()['ready'] or not self.slot.acquire(blocking=False):
+        if not self.slot.acquire(blocking=False):
             raise ValueError('local_not_ready')
         try:
-            tags = self.http('GET', '/api/tags')
+            deadline = time.monotonic() + 45
+            # Direct requests can also bootstrap read-only metadata. Never
+            # require resident weights before allowing the request that loads
+            # them. No queue: a second caller fails busy without another load.
+            if not self._metadata_ready():
+                self._refresh_locked(deadline)
+            if not self._metadata_ready():
+                raise ValueError('local_not_ready')
+            tags = self._bounded_http(deadline, 'GET', '/api/tags')
             if not any(m['name'] == MODEL and m['digest'] == DIGEST for m in tags['models']):
                 self.loaded = False
                 raise ValueError('unapproved_model')
-            result = self.http('POST', '/api/chat', dict(model=MODEL, messages=messages,
-                stream=False, think=False, keep_alive='20m', format=payload['schema'] or 'json',
+            result = self._bounded_http(deadline, 'POST', '/api/chat', dict(model=MODEL, messages=messages,
+                stream=False, think=False, keep_alive=KEEP_ALIVE, format=payload['schema'] or 'json',
                 truncate=False, shift=False,
                 options={'temperature': 0, 'num_ctx': CONTEXT, 'num_predict': predict}), timeout=45)
             # No response can execute a command. The cloud owns validation/action.
-            tags = self.http('GET', '/api/tags')
+            tags = self._bounded_http(deadline, 'GET', '/api/tags')
             if not any(m['name'] == MODEL and m['digest'] == DIGEST for m in tags['models']):
                 self.loaded = False
                 raise ValueError('model_changed_during_request')
             result['model_digest'] = DIGEST
             result['ollama_version'] = self.version
+            self.loaded = True
             self.at = time.monotonic()
             return result
+        except ContextCapacity:
+            # Capacity remains a bounded request rejection, not an outage.
+            raise
+        except Exception:
+            self.available = False
+            self.loaded = False
+            raise
         finally:
             self.slot.release()
 
@@ -235,11 +281,11 @@ def main():
     if not 1024 <= args.port <= 65535:
         parser.error('invalid_port')
     engine = Inference()
-    def warm():
+    def observe():
         while True:
             engine.refresh()
             time.sleep(30)
-    threading.Thread(target=warm, daemon=True).start()
+    threading.Thread(target=observe, daemon=True).start()
     server = BoundedServer(('127.0.0.1', args.port), handler(engine))
     server.serve_forever()
 
