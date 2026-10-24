@@ -233,7 +233,7 @@ def gateway():
 
 
 def test_gateway_no_model_download_single_slot_and_pinned_identity():
-    g=gateway();engine=g.Inference();engine.loaded=True;engine.at=time.monotonic()
+    g=gateway();engine=g.Inference();engine.loaded=True;engine.available=True;engine.at=time.monotonic()
     tags={'models':[{'name':g.MODEL,'digest':g.DIGEST}]}
     engine.http=Mock(side_effect=[tags,native({'ok':True}),tags])
     payload=dict(protocol=1,model=g.MODEL,digest=g.DIGEST,messages=[{'role':'user','content':'fixture'}],
@@ -293,7 +293,7 @@ def test_real_private_socket_and_no_public_http_endpoint(tmp_path,monkeypatch):
 
 
 def test_gateway_real_loopback_http_rejects_extra_routes_and_prompts(monkeypatch):
-    g=gateway();engine=g.Inference();engine.loaded=True;engine.at=time.monotonic()
+    g=gateway();engine=g.Inference();engine.loaded=True;engine.available=True;engine.at=time.monotonic()
     engine.http=Mock(side_effect=AssertionError('Upstream inference forbidden'))
     server=g.BoundedServer(('127.0.0.1',0),g.handler(engine))
     thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()

@@ -105,11 +105,68 @@ repair remains terminal; this change does not authorize another model call.
 
 The inference gateway uses only loopback Ollama, pinned weights and an 8192
 context. It has one GPU slot/no generation queue, eight HTTP handlers, bounded
-input/output bytes, native no-truncation context rejection and a 45-second generation
-deadline. Warmup is separate and bounded (90 seconds); health remains false
-until the exact model is loaded. Busy, asleep, cold, disconnected, changed
-weights or oversized context is unavailable, not an opportunity to invent data.
+input/output bytes, native no-truncation context rejection and a bounded
+real-request budget including metadata, loading and generation. The
+30-second metadata observation uses GET tags/version/running-models only;
+neither it nor GET health loads, unloads or renews a model lease. Compatible
+cold metadata is ready to accept work; resident weights are not a prerequisite.
+Busy, asleep, disconnected, changed weights, a wrong resident context or
+oversized context remains unavailable, not an opportunity to invent data.
 Large prompts may use paid fallback; "local when ready" includes capacity.
+
+Demand-only model lifetime
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Only a validated, nonempty real completion sends POST chat. The same existing
+nonblocking single GPU lock covers metadata validation, native demand loading,
+generation and result identity validation; competing requests do not queue or
+start another preload. There is no empty-message warmup. The native request's
+``keep_alive=2m`` allows Ollama to release weights after two idle minutes.
+The gateway never sends a periodic or timer-based unload, so it cannot unload
+an active request. Native expiry follows request completion; metadata polling
+does not extend that lease. No global Ollama/Windows/pagefile setting changes.
+
+Protocol1 health identity, model/digest, context policy and capacity1 are unchanged. Additive
+health fields ``model_loaded`` (last fresh metadata observation, or null),
+``load_policy=on_demand`` and ``keep_alive_seconds=120`` distinguish admission
+from residency. Health remains a fast200 response with identity even when busy
+or unavailable. Protocol1 completions keep their45s gateway budget. Version2
+is negotiated only for exact ``completion_policy=bounded_cold_start_v2``,
+``supported_completion_protocols=[1,2]`` and ``completion_timeout_seconds=120``
+with the pinned identity/context. No arbitrary advertised timeout is trusted.
+Missing or malformed capabilities retain legacy client behavior.
+
+Version2 observes native residency under the same GPU slot: a cold request has
+at most120s including metadata/load/generation/post-validation; a warm request
+still has45s. Both clients bound one version2 request to125s INCLUDING health
+(at most2s) and all response reads; POST receives the remaining budget, not a
+fresh125s. The gateway overrides ``gateway_protocol=2`` and the actual45/120s
+budget in the result. A result reporting a warm budget is still rejected after
+the original50s envelope. A rolling rollback cannot cause a hidden second POST
+or protocol downgrade after an ambiguous attempt. Existing attempt counts,
+deferral, circuit behavior and paid protections are unchanged. A whole research
+run can contain several separately bounded calls;125s is not its lifetime limit.
+
+One additive ``last_request`` health observation contains only protocol,
+cold/warm classification, fixed phase/outcome, budget and elapsed milliseconds.
+It retains no request ID, prompt, response, native error or checkpoint data.
+The120s cold budget is a finite application transport bound, NOT a Windows
+memory/pagefile limit change or a guarantee against active-research pressure.
+Actual cold completion and native idle eviction must pass separate live proof;
+green source tests alone are not release acceptance.
+
+The rollout retains the exact previous gateway and launcher for return. Stage
+compatible clients before activating the version2 gateway; while the old gateway
+is active they retain legacy behavior. Use the existing release process for
+the affected transport components only, with no queue or trading-setting edits.
+Do not interrupt active research merely because a health snapshot looked idle.
+Check current source/process ownership and retained job state, account for the
+existing application supervisor, and preserve client retry/checkpoint behavior.
+No model/quality change is required. Dahan hashes its transport module as part
+of its research engine signature: its separately reviewed exact-source transport
+compatibility bridge is required to preserve saved-call reuse. Unknown source
+or research-logic changes must still get a new signature; never relabel saved
+records or assume that a transport-only edit automatically preserves progress.
 
 Final-review capacity correction
 -------------------------------
@@ -121,7 +178,7 @@ facts, unknowns or negative evidence. System instructions, decision validation
 and all trading gates are unchanged. The paid fallback sees the same facts.
 
 The pinned Ollama 0.34.4 API supports ``truncate=false`` and ``shift=false``.
-The gateway explicitly uses BOTH, including its first bounded empty warmup,
+The gateway explicitly uses BOTH on every actual request,
 retains context 8192, output/deadline/transport bounds and one GPU slot, and
 delegates actual token/template fit to that runtime rather than confusing bytes
 with tokens. Over-context error or incomplete output must fall back/fail closed;

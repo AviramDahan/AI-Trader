@@ -4,9 +4,11 @@ No DB/broker/Telegram/cloud API key, no shell execution, no unbounded Ollama
 queue. Publish solely through a restricted outbound SSH Unix-socket tunnel.
 """
 import argparse
+import http.client
 import http.server
 import json
 import re
+import socket
 import threading
 import time
 
@@ -17,6 +19,11 @@ DIGEST = '6114515d63c17436a7c0417d82820ac65ad643e2806c5a3c89cb62846436ed0b'
 MAX_BYTES = 131072
 CONTEXT = 8192
 CONTEXT_POLICY = 'no_truncate_no_shift_v1'
+KEEP_ALIVE = '2m'
+KEEP_ALIVE_SECONDS = 120
+COMPLETION_POLICY = 'bounded_cold_start_v2'
+COLD_REQUEST_SECONDS = 120
+WARM_REQUEST_SECONDS = 45
 
 
 class ContextCapacity(ValueError):
@@ -68,63 +75,117 @@ class Inference:
     def __init__(self):
         self.slot = threading.Lock()
         self.loaded = False
+        self.available = False
         self.at = 0.0
         self.version = None
-        self.guard_warmed = False
+        self.last_request = None
 
     def http(self, method, path, payload=None, timeout=2):
-        with requests.Session() as session:
-            session.trust_env = False
-            with session.request(method, 'http://127.0.0.1:11434' + path, json=payload,
-                                 timeout=(2, timeout), stream=True, allow_redirects=False) as r:
-                raw = bytearray()
-                until = time.monotonic() + timeout
-                for part in r.iter_content(4096):
-                    raw.extend(part)
-                    if len(raw) > MAX_BYTES or time.monotonic() > until:
-                        raise ValueError('ollama_response_limit')
-                data = json.loads(raw)
-                if path == '/api/chat' and context_error(data):
-                    raise ContextCapacity('local_context_capacity')
-                if r.status_code != 200 or isinstance(data, dict) and data.get('error'):
-                    raise ValueError('ollama_unavailable')
-                return data
-
-    def refresh(self):
-        """Metadata + bounded model preload; never warms while generating."""
-        if not self.slot.acquire(blocking=False):
-            return
+        until = time.monotonic() + timeout
+        # Fixed loopback HTTP, no proxy/redirect machinery. A socket abort
+        # bounds the WHOLE call, not a fresh timeout for each response read.
+        conn = http.client.HTTPConnection('127.0.0.1', 11434, timeout=min(2, timeout))
+        active_socket = [None]
+        response = None
+        def abort():
+            sock = active_socket[0] or conn.sock
+            if sock is not None:
+                try: sock.shutdown(socket.SHUT_RDWR)
+                except OSError: pass
+        timer = threading.Timer(max(0.0, until-time.monotonic()), abort)
+        timer.daemon = True
+        timer.start()
         try:
+            conn.connect()
+            active_socket[0] = conn.sock
+            remaining = until-time.monotonic()
+            if remaining <= 0:
+                raise requests.Timeout('ollama_deadline')
+            conn.sock.settimeout(remaining)
+            body = (json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()
+                    if payload is not None else None)
+            conn.request(method, path, body, headers={'Content-Type': 'application/json'})
+            response = conn.getresponse()
+            raw = response.read(MAX_BYTES+1)
+            if time.monotonic() > until:
+                raise requests.Timeout('ollama_deadline')
+            if len(raw) > MAX_BYTES:
+                raise ValueError('ollama_response_limit')
+            data = json.loads(raw)
+            if path == '/api/chat' and context_error(data):
+                raise ContextCapacity('local_context_capacity')
+            if response.status != 200 or isinstance(data, dict) and data.get('error'):
+                raise ValueError('ollama_unavailable')
+            return data
+        finally:
+            timer.cancel()
+            if response is not None: response.close()
+            conn.close()
+
+    def _bounded_http(self, deadline, method, path, payload=None, timeout=2):
+        remaining = deadline-time.monotonic()
+        if remaining <= 0:
+            raise requests.Timeout('ollama_deadline')
+        result = self.http(method, path, payload, timeout=min(timeout, remaining))
+        if time.monotonic() > deadline:
+            raise requests.Timeout('ollama_deadline')
+        return result
+
+    def _refresh_locked(self, deadline=None):
+        """Observe metadata only. A compatible cold runtime can accept work."""
+        self.available = False
+        try:
+            def observe(path):
+                return (self.http('GET', path) if deadline is None else
+                        self._bounded_http(deadline, 'GET', path))
             self.loaded = False
-            tags = self.http('GET', '/api/tags')
+            tags = observe('/api/tags')
             if not any(m['name'] == MODEL and m['digest'] == DIGEST for m in tags['models']):
                 return
-            self.version = self.http('GET', '/api/version')['version']
+            self.version = observe('/api/version')['version']
             if tuple(int(v) for v in self.version.split('.')) < (0,34,4):
                 return
-            models = self.http('GET', '/api/ps')['models']
-            if not self.guard_warmed or not any(m['name'] == MODEL and m['digest'] == DIGEST and m.get('context_length') == CONTEXT for m in models):
-                self.http('POST', '/api/chat', dict(model=MODEL, messages=[], stream=False,
-                          keep_alive='20m', truncate=False, shift=False, options={'num_ctx': CONTEXT}), timeout=90)
-            models = self.http('GET', '/api/ps')['models']
+            models = observe('/api/ps')['models']
+            if not isinstance(models, list):
+                return
+            # Cold is eligible; an incompatible resident instance is NOT.
+            # Health must neither hide nor reload a wrong active context.
+            if any(m['name'] == MODEL and (m.get('digest') != DIGEST or
+                    m.get('context_length') != CONTEXT) for m in models):
+                return
             self.loaded = any(m['name'] == MODEL and m['digest'] == DIGEST
                 and m.get('context_length') == CONTEXT for m in models)
-            self.guard_warmed = self.loaded
+            self.available = True
             self.at = time.monotonic()
         except Exception:
             self.loaded = False
+
+    def refresh(self):
+        """Read-only periodic health; no preload, unload or generation."""
+        if not self.slot.acquire(blocking=False):
+            return
+        try:
+            self._refresh_locked()
         finally:
             self.slot.release()
 
+    def _metadata_ready(self):
+        return self.available and 0 <= time.monotonic()-self.at < 65
+
     def health(self):
         return dict(protocol=1, model=MODEL, digest=DIGEST, ollama_version=self.version,
-            ready=self.loaded and time.monotonic()-self.at < 65 and not self.slot.locked(), capacity=1,
-            context_policy=CONTEXT_POLICY, context_length=CONTEXT)
+            ready=self._metadata_ready() and not self.slot.locked(), capacity=1,
+            context_policy=CONTEXT_POLICY, context_length=CONTEXT,
+            model_loaded=self.loaded if self._metadata_ready() else None,
+            load_policy='on_demand', keep_alive_seconds=KEEP_ALIVE_SECONDS,
+            completion_policy=COMPLETION_POLICY, supported_completion_protocols=[1, 2],
+            completion_timeout_seconds=COLD_REQUEST_SECONDS,
+            last_request=self.last_request)
 
     def complete(self, payload):
         if not isinstance(payload, dict) or set(payload) != {'protocol','model','digest','messages','schema','predict','request_id'}:
             raise ValueError('invalid_request')
-        if type(payload['protocol']) is not int or payload['protocol'] != 1 or payload['model'] != MODEL or payload['digest'] != DIGEST:
+        if type(payload['protocol']) is not int or payload['protocol'] not in (1, 2) or payload['model'] != MODEL or payload['digest'] != DIGEST:
             raise ValueError('unapproved_model')
         messages, predict = payload['messages'], payload['predict']
         if not isinstance(predict, int) or isinstance(predict, bool) or not 1 <= predict <= 2048:
@@ -142,27 +203,65 @@ class Inference:
         if payload['schema'] is not None:
             import jsonschema
             jsonschema.Draft202012Validator.check_schema(payload['schema'])
-        if not self.health()['ready'] or not self.slot.acquire(blocking=False):
+        if not self.slot.acquire(blocking=False):
             raise ValueError('local_not_ready')
+        started = time.monotonic()
+        budget = COLD_REQUEST_SECONDS if payload['protocol'] == 2 else WARM_REQUEST_SECONDS
+        phase, outcome, cold = 'metadata', 'failed', None
         try:
-            tags = self.http('GET', '/api/tags')
+            deadline = started + budget
+            # Direct requests can also bootstrap read-only metadata. Never
+            # require resident weights before allowing the request that loads
+            # them. No queue: a second caller fails busy without another load.
+            # Residency is re-observed inside admission. A cached warm health
+            # reply must not select the wrong budget after native idle eviction.
+            if payload['protocol'] == 2 or not self._metadata_ready():
+                self._refresh_locked(deadline)
+            if not self._metadata_ready():
+                raise ValueError('local_not_ready')
+            cold = not self.loaded
+            if not cold:
+                budget = WARM_REQUEST_SECONDS
+                deadline = started + budget
+            tags = self._bounded_http(deadline, 'GET', '/api/tags')
             if not any(m['name'] == MODEL and m['digest'] == DIGEST for m in tags['models']):
                 self.loaded = False
                 raise ValueError('unapproved_model')
-            result = self.http('POST', '/api/chat', dict(model=MODEL, messages=messages,
-                stream=False, think=False, keep_alive='20m', format=payload['schema'] or 'json',
+            phase = 'native_chat'
+            result = self._bounded_http(deadline, 'POST', '/api/chat', dict(model=MODEL, messages=messages,
+                stream=False, think=False, keep_alive=KEEP_ALIVE, format=payload['schema'] or 'json',
                 truncate=False, shift=False,
-                options={'temperature': 0, 'num_ctx': CONTEXT, 'num_predict': predict}), timeout=45)
+                options={'temperature': 0, 'num_ctx': CONTEXT, 'num_predict': predict}), timeout=budget)
             # No response can execute a command. The cloud owns validation/action.
-            tags = self.http('GET', '/api/tags')
+            phase = 'post_identity'
+            tags = self._bounded_http(deadline, 'GET', '/api/tags')
             if not any(m['name'] == MODEL and m['digest'] == DIGEST for m in tags['models']):
                 self.loaded = False
                 raise ValueError('model_changed_during_request')
             result['model_digest'] = DIGEST
             result['ollama_version'] = self.version
+            if payload['protocol'] == 2:
+                result['gateway_protocol'] = 2
+                result['gateway_request_budget_seconds'] = budget
+            self.loaded = True
             self.at = time.monotonic()
+            outcome = 'completed'
             return result
+        except ContextCapacity:
+            # Capacity remains a bounded request rejection, not an outage.
+            outcome = 'context_capacity'
+            raise
+        except Exception:
+            outcome = 'deadline_exceeded' if time.monotonic() >= deadline else 'failed'
+            self.available = False
+            self.loaded = False
+            raise
         finally:
+            # One bounded, content-free observation. No request IDs, inputs,
+            # responses, native errors or research/checkpoint contents retained.
+            self.last_request = dict(protocol=payload['protocol'], cold=cold,
+                phase=phase, outcome=outcome, budget_seconds=budget,
+                elapsed_ms=round((time.monotonic()-started)*1000))
             self.slot.release()
 
 
@@ -235,11 +334,11 @@ def main():
     if not 1024 <= args.port <= 65535:
         parser.error('invalid_port')
     engine = Inference()
-    def warm():
+    def observe():
         while True:
             engine.refresh()
             time.sleep(30)
-    threading.Thread(target=warm, daemon=True).start()
+    threading.Thread(target=observe, daemon=True).start()
     server = BoundedServer(('127.0.0.1', args.port), handler(engine))
     server.serve_forever()
 
