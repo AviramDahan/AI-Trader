@@ -103,19 +103,17 @@ def test_other_or_inconsistent_wrapped_errors_are_not_capacity(change):
 def test_wrapped_native_error_traverses_real_gateway_http(monkeypatch):
     import threading
     g=gateway();engine=g.Inference();engine.loaded=True;engine.available=True;engine.at=time.monotonic()
-    response=Mock(status_code=400)
-    response.iter_content.return_value=[json.dumps({'error':json.dumps({'error':wrapped_capacity()})}).encode()]
-    response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False)
-    session=Mock();session.request.return_value=response
-    session.__enter__=Mock(return_value=session);session.__exit__=Mock(return_value=False)
-    monkeypatch.setattr(g.requests,'Session',lambda:session)
+    response=Mock(status=400)
+    response.read.return_value=json.dumps({'error':json.dumps({'error':wrapped_capacity()})}).encode()
+    conn=Mock();conn.getresponse.return_value=response
+    monkeypatch.setattr(g.http.client,'HTTPConnection',lambda *a,**k:conn)
     original=engine.http
     engine.http=lambda method,path,payload=None,**kw: (
         {'models':[{'name':g.MODEL,'digest':g.DIGEST}]} if path=='/api/tags'
         else original(method,path,payload,**kw))
     server=g.BoundedServer(('127.0.0.1',0),g.handler(engine))
     thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
-    # Direct Session construction avoids the isolated upstream mock above.
+    # The real loopback HTTP client is independent of the upstream double.
     try:
         with requests.sessions.Session() as client:
             client.trust_env=False
@@ -129,17 +127,18 @@ def test_wrapped_native_error_traverses_real_gateway_http(monkeypatch):
 
 def test_upstream_http_error_is_bounded_and_safely_classified(monkeypatch):
     g=gateway();engine=g.Inference()
-    response=Mock(status_code=400)
-    response.iter_content.return_value=[b'{"error":"the input length exceeds the context length"}']
-    response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False)
-    session=Mock();session.request.return_value=response
-    session.__enter__=Mock(return_value=session);session.__exit__=Mock(return_value=False)
-    monkeypatch.setattr(g.requests,'Session',lambda:session)
+    response=Mock(status=400)
+    response.read.return_value=b'{"error":"the input length exceeds the context length"}'
+    conn=Mock();conn.getresponse.return_value=response
+    factory=Mock(return_value=conn)
+    monkeypatch.setattr(g.http.client,'HTTPConnection',factory)
     with pytest.raises(g.ContextCapacity,match='local_context_capacity'):
         engine.http('POST','/api/chat',{},timeout=1)
-    assert session.trust_env is False
-    assert session.request.call_args.kwargs['allow_redirects'] is False
-    response.iter_content.return_value=[b'x'*(g.MAX_BYTES+1)]
+    assert factory.call_args.args==('127.0.0.1',11434)
+    assert conn.request.call_args.args[:2]==('POST','/api/chat')
+    response.read.assert_called_with(g.MAX_BYTES+1)
+    assert conn.close.call_count==response.close.call_count==1
+    response.read.return_value=b'x'*(g.MAX_BYTES+1)
     with pytest.raises(ValueError,match='response_limit'):engine.http('POST','/api/chat',{})
 
 

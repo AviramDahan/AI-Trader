@@ -51,6 +51,57 @@ class Native:
     def posts(self):return [c for c in self.calls if c[0]=='POST']
 
 
+def mock_native_connection(g,clock,monkeypatch,*,headers=0,body_wait=0,connect_wait=0,raw=None,status=200):
+    """Deterministic blocking IO honors the actual abort Timer at its deadline."""
+    state={'timers':[],'shutdown':0,'closed':0,'response_closed':0,'requests':[]}
+    class Sock:
+        dead=False
+        def shutdown(self,how):
+            assert how==socket.SHUT_RDWR
+            self.dead=True;state['shutdown']+=1
+        def settimeout(self,value):assert value>0
+    sock=Sock()
+    def advance(seconds):
+        end=clock[0]+seconds
+        pending=[t for t in state['timers'] if not t.cancelled and not t.fired and t.at<=end]
+        for timer in sorted(pending,key=lambda t:t.at):
+            clock[0]=timer.at;timer.fired=True;timer.callback()
+            if sock.dead:raise ConnectionResetError('synthetic deadline socket abort')
+        clock[0]=end
+        if sock.dead:raise ConnectionResetError('synthetic aborted socket')
+    class Timer:
+        def __init__(self,seconds,callback):
+            self.at=clock[0]+seconds;self.callback=callback;self.cancelled=False;self.fired=False
+        def start(self):state['timers'].append(self)
+        def cancel(self):self.cancelled=True
+    class Response:
+        def __init__(self):self.status=status
+        def read(self,limit):
+            assert 0<limit<=g.MAX_BYTES+1
+            advance(body_wait)
+            return raw if raw is not None else b'{"done":true,"message":{"content":"{}"}}'
+        def close(self):state['response_closed']+=1
+    class Connection:
+        def __init__(self,host,port,timeout):
+            assert host=='127.0.0.1' and port==11434 and 0<timeout<=2
+            self.sock=None
+        def connect(self):advance(connect_wait);self.sock=sock
+        def request(self,method,path,body,headers):
+            assert method=='POST' and path=='/api/chat'
+            assert headers=={'Content-Type':'application/json'}
+            state['requests'].append(json.loads(body) if body is not None else None)
+        def getresponse(self):
+            advance(headers)
+            # http.client may detach a Connection-close response after headers;
+            # the abort must still use the captured public socket.
+            self.sock=None
+            return Response()
+        def close(self):state['closed']+=1
+    monkeypatch.setattr(g.http.client,'HTTPConnection',Connection)
+    monkeypatch.setattr(g.threading,'Timer',Timer)
+    return state
+
+
 @pytest.fixture
 def setup(monkeypatch):
     g=gateway();clock=[1000.0]
@@ -202,23 +253,10 @@ def test_real_chat_timeout_receives_only_remaining_shared_budget(setup):
 
 def test_http_deadline_starts_before_response_headers_not_after_them(setup,monkeypatch):
     g,e,n,clock,p=setup
-    body=json.dumps({'done':True,'message':{'content':'{}'}}).encode()
-    class Response:
-        status_code=200
-        def __enter__(self):return self
-        def __exit__(self,*a):pass
-        def iter_content(self,n):yield body
-    class Session:
-        trust_env=True
-        def __enter__(self):return self
-        def __exit__(self,*a):pass
-        def request(self,*a,**kw):
-            assert kw['allow_redirects'] is False and kw['stream'] is True
-            clock[0]+=46
-            return Response()
-    monkeypatch.setattr(g.requests,'Session',Session)
-    with pytest.raises((ValueError,TimeoutError,requests.Timeout)):
+    state=mock_native_connection(g,clock,monkeypatch,headers=46)
+    with pytest.raises((ValueError,OSError,requests.Timeout)):
         g.Inference().http('POST','/api/chat',{'messages':p['messages']},timeout=45)
+    assert clock[0]==1045 and state['shutdown']==1 and state['closed']==1
 
 
 @pytest.mark.parametrize('bad', [True,0,2049,-1,1.5,'450'])
@@ -284,18 +322,29 @@ def test_eight_handler_nonblocking_bound_and_permit_release_without_socket(setup
 @pytest.mark.parametrize('mode',['size','error'])
 def test_mock_http_response_caps_and_failures_keep_redirect_proxy_policy(setup,monkeypatch,mode):
     g,e,n,clock,p=setup
-    class Response:
-        status_code=503 if mode=='error' else 200
-        def __enter__(self):return self
-        def __exit__(self,*a):pass
-        def iter_content(self,n):yield b'x'*(g.MAX_BYTES+1) if mode=='size' else b'{"error":"synthetic failure"}'
-    class Session:
-        trust_env=True
-        def __enter__(self):return self
-        def __exit__(self,*a):pass
-        def request(self,method,url,**kwargs):
-            assert self.trust_env is False and kwargs['allow_redirects'] is False
-            assert url=='http://127.0.0.1:11434/api/chat' and kwargs['stream'] is True
-            return Response()
-    monkeypatch.setattr(g.requests,'Session',Session)
+    state=mock_native_connection(g,clock,monkeypatch,
+      status=503 if mode=='error' else 200,
+      raw=b'x'*(g.MAX_BYTES+1) if mode=='size' else b'{"error":"synthetic failure"}')
     with pytest.raises(ValueError):g.Inference().http('POST','/api/chat',{})
+    assert state['closed']==state['response_closed']==1
+    assert all(t.cancelled for t in state['timers'])
+
+
+@pytest.mark.parametrize('connect_wait,headers,body_wait',[(0,30,30),(2,29,29)])
+def test_http_two_phase_read_cannot_hold_shared_slot_beyond_45s(setup,monkeypatch,connect_wait,headers,body_wait):
+    g,e,n,clock,p=setup
+    started=clock[0]
+    state=mock_native_connection(g,clock,monkeypatch,headers=headers,body_wait=body_wait,connect_wait=connect_wait)
+    with pytest.raises((ValueError,OSError,requests.Timeout)):
+        g.Inference().http('POST','/api/chat',{'messages':p['messages']},timeout=45)
+    assert clock[0]-started<=45,'Post-read rejection is not a bounded whole-request abort'
+    assert state['shutdown']==1 and state['closed']==state['response_closed']==1
+    assert all(t.cancelled for t in state['timers'])
+
+
+def test_mock_http_native_capacity_retains413_classification(setup,monkeypatch):
+    g,e,n,clock,p=setup
+    state=mock_native_connection(g,clock,monkeypatch,status=400,
+      raw=b'{"error":"the input length exceeds the context length"}')
+    with pytest.raises(g.ContextCapacity):g.Inference().http('POST','/api/chat',{})
+    assert state['shutdown']==0 and state['closed']==state['response_closed']==1

@@ -4,9 +4,11 @@ No DB/broker/Telegram/cloud API key, no shell execution, no unbounded Ollama
 queue. Publish solely through a restricted outbound SSH Unix-socket tunnel.
 """
 import argparse
+import http.client
 import http.server
 import json
 import re
+import socket
 import threading
 import time
 
@@ -76,23 +78,45 @@ class Inference:
 
     def http(self, method, path, payload=None, timeout=2):
         until = time.monotonic() + timeout
-        with requests.Session() as session:
-            session.trust_env = False
-            with session.request(method, 'http://127.0.0.1:11434' + path, json=payload,
-                                 timeout=(2, timeout), stream=True, allow_redirects=False) as r:
-                raw = bytearray()
-                if time.monotonic() > until:
-                    raise requests.Timeout('ollama_deadline')
-                for part in r.iter_content(4096):
-                    raw.extend(part)
-                    if len(raw) > MAX_BYTES or time.monotonic() > until:
-                        raise ValueError('ollama_response_limit')
-                data = json.loads(raw)
-                if path == '/api/chat' and context_error(data):
-                    raise ContextCapacity('local_context_capacity')
-                if r.status_code != 200 or isinstance(data, dict) and data.get('error'):
-                    raise ValueError('ollama_unavailable')
-                return data
+        # Fixed loopback HTTP, no proxy/redirect machinery. A socket abort
+        # bounds the WHOLE call, not a fresh timeout for each response read.
+        conn = http.client.HTTPConnection('127.0.0.1', 11434, timeout=min(2, timeout))
+        active_socket = [None]
+        response = None
+        def abort():
+            sock = active_socket[0] or conn.sock
+            if sock is not None:
+                try: sock.shutdown(socket.SHUT_RDWR)
+                except OSError: pass
+        timer = threading.Timer(max(0.0, until-time.monotonic()), abort)
+        timer.daemon = True
+        timer.start()
+        try:
+            conn.connect()
+            active_socket[0] = conn.sock
+            remaining = until-time.monotonic()
+            if remaining <= 0:
+                raise requests.Timeout('ollama_deadline')
+            conn.sock.settimeout(remaining)
+            body = (json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()
+                    if payload is not None else None)
+            conn.request(method, path, body, headers={'Content-Type': 'application/json'})
+            response = conn.getresponse()
+            raw = response.read(MAX_BYTES+1)
+            if time.monotonic() > until:
+                raise requests.Timeout('ollama_deadline')
+            if len(raw) > MAX_BYTES:
+                raise ValueError('ollama_response_limit')
+            data = json.loads(raw)
+            if path == '/api/chat' and context_error(data):
+                raise ContextCapacity('local_context_capacity')
+            if response.status != 200 or isinstance(data, dict) and data.get('error'):
+                raise ValueError('ollama_unavailable')
+            return data
+        finally:
+            timer.cancel()
+            if response is not None: response.close()
+            conn.close()
 
     def _bounded_http(self, deadline, method, path, payload=None, timeout=2):
         remaining = deadline-time.monotonic()
