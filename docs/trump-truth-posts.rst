@@ -1,6 +1,10 @@
 Trump Truth Social relay notifications
 =====================================
 
+The25October operator-requested alternative Telegram channel and mandatory
+Hebrew contract is documented in ``trump-telegram-channel.rst``. Its explicit
+selector replaces this live source, without rewriting this retained history.
+
 Scope and honest source identity
 --------------------------------
 The human selected Truth Social only, not X. The23October clarification below

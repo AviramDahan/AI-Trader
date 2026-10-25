@@ -785,7 +785,8 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
     # Human-requested all-topic Trump notifications are not financial news AI
     # jobs, scanner evidence or a relevance/materiality exception for other feeds.
     from trump_truth_posts import KIND, ingest as ingest_trump
-    special = [item for item in items if item.get('source_kind') == KIND]
+    from trump_telegram_channel import KIND as CHANNEL_KIND
+    special = [item for item in items if item.get('source_kind') in {KIND,CHANNEL_KIND}]
     if special:
         # Genuine media is observed AFTER the existing reader's bounded
         # download, not at its pre-fetch cycle clock. Preserve actual clocks;
@@ -795,7 +796,7 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
         observed_at = _now() if any(isinstance(x.get('media'),dict) and
             x['media'].get('status')=='available' for x in special) else at
         counts = ingest_trump(special, observed_at)
-        ordinary = [item for item in items if item.get('source_kind') != KIND]
+        ordinary = [item for item in items if item.get('source_kind') not in {KIND,CHANNEL_KIND}]
         if ordinary:
             regular = ingest_items(ordinary, at)
             for key in counts:

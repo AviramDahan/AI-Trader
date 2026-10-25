@@ -48,7 +48,8 @@ async def telegram_news_stream_loop():
                 raise ValueError('Reader login expired')
             allowed = {}
             for name in names:
-                from trump_truth_posts import CHANNEL, valid_entity
+                from trump_truth_posts import source_channel, valid_entity
+                CHANNEL=source_channel()
                 try:
                     entity = await client.get_entity(name)
                     if name == CHANNEL and not valid_entity(entity):
@@ -65,13 +66,14 @@ async def telegram_news_stream_loop():
 
             trump_ready = False
             async def on_message(event):
-                from trump_truth_posts import CHANNEL_ID
+                from trump_truth_posts import source_channel_id
+                CHANNEL_ID=source_channel_id()
                 if getattr(getattr(event.message, 'peer_id', None), 'channel_id', None) == CHANNEL_ID and not trump_ready:
                     return  # Catch-up owns the first persisted activation cursor.
                 item = stream_item(event.message, allowed, datetime.now(timezone.utc))
                 if item:
                     try:
-                        if item.get('source_kind')=='trump_truth_relay_v1':
+                        if item.get('source_kind') in {'trump_truth_relay_v1','trump_telegram_channel_v1'}:
                             from trump_truth_media import capture
                             item=await capture(client,event.message,item,datetime.now(timezone.utc))
                         await asyncio.to_thread(ingest_items, [item])
@@ -90,7 +92,8 @@ async def telegram_news_stream_loop():
                 result = await asyncio.wait_for(collect(client,state,current,names),timeout=60)
                 cycle = await asyncio.to_thread(run_feed_cycle, {'telegram_channels':lambda *_: result}, current, True)
                 if isinstance(cycle, dict) and cycle.get('providers', {}).get('telegram_channels', {}).get('status') in {'ok', 'no_new', 'degraded'}:
-                    from trump_truth_posts import CHANNEL, activation, enabled
+                    from trump_truth_posts import source_channel, activation, enabled
+                    CHANNEL=source_channel()
                     checkpoint = result.get('checkpoint', {}).get('channels', {}).get(CHANNEL, {})
                     try:
                         trump_ready = enabled() and checkpoint.get('trump_activation') == activation()
@@ -113,10 +116,12 @@ async def telegram_news_stream_loop():
 def channel_names():
     names = list(dict.fromkeys(x.strip().lstrip('@').lower() for x in
                               os.getenv('TELEGRAM_NEWS_SOURCE_CHANNELS', '').split(',') if x.strip()))
-    from trump_truth_posts import CHANNEL, enabled
+    from trump_truth_posts import source_channel, enabled,CHANNEL as OLD
+    from trump_telegram_channel import CHANNEL as NEW
+    CHANNEL=source_channel()
     # At most five ordinary sources, plus this one fixed, separately approved
     # source. It is never accepted as a generic economically-filtered relay.
-    names = [name for name in names if name != CHANNEL]
+    names = [name for name in names if name not in {OLD,NEW}]
     if len(names) > 5 or any(not re.fullmatch(r'[a-z][a-z0-9_]{4,31}', x) for x in names):
         raise ValueError('Configure 1-5 public broadcast usernames')
     if enabled():
@@ -127,9 +132,10 @@ def channel_names():
 
 
 def message_item(message, username, current):
-    from trump_truth_posts import CHANNEL, CHANNEL_ID, extract
-    if username.lower() == CHANNEL or getattr(getattr(message, 'peer_id', None), 'channel_id', None) == CHANNEL_ID:
-        return extract(message, current)[0] if username.lower() == CHANNEL else None
+    from trump_truth_posts import source_channel,extract,CHANNEL as OLD,CHANNEL_ID as OLD_ID
+    from trump_telegram_channel import CHANNEL as NEW,CHANNEL_ID as NEW_ID
+    if username.lower() in {OLD,NEW} or getattr(getattr(message, 'peer_id', None), 'channel_id', None) in {OLD_ID,NEW_ID}:
+        return extract(message,current)[0] if username.lower()==source_channel() else None
     text = (getattr(message, 'message', None) or '').strip()
     published = getattr(message, 'date', None)
     if not text or not published or getattr(message, 'action', None):
@@ -156,7 +162,8 @@ async def collect(client, state, current, names):
             entity = await client.get_entity(name)
             if not getattr(entity, 'broadcast', False) or not getattr(entity, 'username', None):
                 raise ValueError('Not a public broadcast channel')
-            from trump_truth_posts import CHANNEL, enabled, activation, valid_entity, extract
+            from trump_truth_posts import source_channel, enabled, activation, valid_entity, extract
+            CHANNEL=source_channel()
             special = name == CHANNEL
             if special and (not enabled() or not valid_entity(entity)):
                 raise ValueError('Trump relay disabled or identity changed')

@@ -58,7 +58,7 @@ def register_scanner_routes(app: FastAPI) -> None:
 
     @app.get('/api/scanner/trump-posts')
     def trump_truth_archive(response: Response, limit: int = Query(20, ge=1, le=20),
-                            before: str | None = Query(None, pattern=r'^[1-9][0-9]{15,19}$')):
+                            before: str | None = Query(None, pattern=r'^(?:[1-9][0-9]{15,19}|tg:1462338131:[1-9][0-9]{0,9})$')):
         response.headers['Cache-Control'] = 'no-store'
         from trump_truth_public import payload
         try:

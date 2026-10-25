@@ -49,12 +49,31 @@ def original_policy_allows(item):
     No old queued record is upgraded by absence of RT. Only new pinned-source
     extraction assigns this policy after checking raw text AND entity targets.
     """
+    from trump_telegram_channel import is_item,original
+    if is_item(item):return original(item)
     return (type(item) is dict and item.get('publication_policy') == ORIGINAL_POLICY
             and item.get('is_repost') is False and not _shared_body(item.get('text_excerpt')))
 
 
 def enabled():
-    return os.getenv('TELEGRAM_TRUMP_TRUTH_ENABLED', '').strip().lower() == 'true'
+    mode=os.getenv('TELEGRAM_TRUMP_SOURCE','truth_relay_v1').strip()
+    if mode=='telegram_channel_v1':
+        # Keep the LEGACY source OFF in the release environment: an older
+        # rollback binary cannot accidentally resume the replaced relay.
+        return (os.getenv('TELEGRAM_TRUMP_CHANNEL_ENABLED','false').strip().lower()=='true'
+            and os.getenv('TELEGRAM_TRUMP_TRUTH_ENABLED','false').strip().lower()=='false'
+            and os.getenv('TELEGRAM_TRUMP_TRUTH_HEBREW_ENABLED','false').strip().lower()=='true')
+    return mode=='truth_relay_v1' and os.getenv('TELEGRAM_TRUMP_TRUTH_ENABLED','false').strip().lower()=='true'
+
+
+def source_channel():
+    from trump_telegram_channel import selected,CHANNEL as new
+    return new if selected() else CHANNEL
+
+
+def source_channel_id():
+    from trump_telegram_channel import selected,CHANNEL_ID as new
+    return new if selected() else CHANNEL_ID
 
 
 def instant(value):
@@ -71,19 +90,22 @@ def activation():
 
 
 def valid_entity(entity):
-    return (getattr(entity, 'id', None) == CHANNEL_ID and getattr(entity, 'broadcast', False)
-            and (getattr(entity, 'username', '') or '').lower() == CHANNEL)
+    return (getattr(entity, 'id', None) == source_channel_id() and getattr(entity, 'broadcast', False)
+            and (getattr(entity, 'username', '') or '').lower() == source_channel())
 
 
-def clean_excerpt(value):
+def clean_excerpt(value,*,max_units=1600):
     # Text only, no source-supplied bidi controls or unsafe links in the excerpt.
     value = re.sub('[\x00-\x08\x0b-\x1f\x7f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]', '', value)
     value = re.sub(r'https?://\S+', '[קישור בגוף הפוסט — לצפייה במקור]', value)
-    return value.encode('utf-16-le')[:3200].decode('utf-16-le', errors='ignore').strip()
+    if max_units is None:return value.strip()
+    return value.encode('utf-16-le')[:max_units*2].decode('utf-16-le', errors='ignore').strip()
 
 
 def extract(message, current):
     """Return item and fixed rejection code. Never guess URL from quoted RT text."""
+    from trump_telegram_channel import selected,extract as new_extract
+    if selected():return new_extract(message,current)
     if not enabled():
         return None, 'disabled'
     try:
@@ -156,6 +178,9 @@ def extract(message, current):
 
 
 def valid_item(item, current, *, active=True):
+    from trump_telegram_channel import is_item,valid_item as new_valid,selected
+    if is_item(item):return new_valid(item,current,active=active)
+    if active and selected():return False
     try:
         match = LINK.fullmatch(item['truth_url'])
         from trump_truth_media import valid_descriptor
@@ -198,7 +223,8 @@ def ingest(items, at=None):
         result['rejected_invalid'] = len(items)
         return result
     from trump_truth_bilingual import requested as bilingual_requested,enabled as bilingual_enabled,VERSION as bilingual_version
-    if bilingual_requested() and not bilingual_enabled():
+    from trump_telegram_channel import selected
+    if not selected() and bilingual_requested() and not bilingual_enabled():
         result['rejected_invalid']=len(items)
         return result  # Never silently fall back to a one-language contract.
     conn = get_db_connection()
@@ -211,12 +237,15 @@ def ingest(items, at=None):
             envelope = dict(item=item, fence=fence(cur, item))
             from trump_truth_translation import enabled as hebrew_enabled
             if hebrew_enabled():envelope['presentation']='hebrew_v1'
-            if bilingual_enabled():envelope['presentation']=bilingual_version
+            if not selected() and bilingual_enabled():envelope['presentation']=bilingual_version
             from trump_truth_media import enabled as media_enabled, VERSION as media_version
             if media_enabled() and item.get('media',{}).get('status')=='available':
                 envelope['media_version']=media_version
             payload = json.dumps(envelope, ensure_ascii=False, separators=(',', ':'))
             if len(payload) > 3900:
+                if selected():
+                    result['rejected_invalid']+=1
+                    continue  # One bounded new-channel item cannot stall catch-up.
                 raise ValueError('trump_truth_payload_bound')
             added = enqueue_telegram(cur, PREFIX+item['truth_post_id'], EVENT, payload,
                                      published_at=item['relay_published_at'])
@@ -238,6 +267,15 @@ def ingest(items, at=None):
 
 
 def render(item,hebrew=None,*,media_attached=False):
+    from trump_telegram_channel import is_item
+    if is_item(item):
+        if not hebrew or hebrew['status'] not in ('translated','media_only'):return None
+        body=(hebrew['text_he'] if hebrew['status']=='translated' else
+              'פוסט מדיה ללא טקסט. אין תמלול או תיאור מומצא של המדיה.')
+        return ('📣 טראמפ · מהערוץ בטלגרם\n\n'+body+
+            '\n\nתרגום AI של תוכן הערוץ; לא אימות עובדות או שיוך רשמי.\nפורסם בערוץ: '+
+            instant(item['relay_published_at']).strftime('%d.%m.%Y %H:%M UTC')+
+            '\nמקור:\n'+item['truth_url'])
     title = '📣 טראמפ · פוסט ב־Truth Social'
     if item['is_repost']:
         title += ' · שיתוף מחדש'
@@ -271,11 +309,14 @@ def checked_envelope(row,at=None):
         return None
     try:
         envelope = json.loads(row['message']); item = envelope['item']
+        from trump_telegram_channel import is_item
+        new=is_item(item)
         from trump_truth_bilingual import requested as bilingual_requested,enabled as bilingual_enabled,VERSION as bilingual_version
         if 'presentation' in envelope and envelope['presentation'] not in ('hebrew_v1',bilingual_version):return None
-        if envelope.get('presentation')==bilingual_version:
+        if new and envelope.get('presentation')!='hebrew_v1':return None
+        if not new and envelope.get('presentation')==bilingual_version:
             if not bilingual_enabled():return None
-        elif bilingual_requested():return None  # No old queued one-language fallback.
+        elif not new and bilingual_requested():return None  # No old queued one-language fallback.
         if 'media_version' in envelope:
             from trump_truth_media import VERSION as media_version,enabled as media_enabled
             if envelope['media_version']!=media_version or not media_enabled():return None
@@ -310,9 +351,11 @@ def delivery_message(row,at=None,*,media_attached=False):
         if hebrew is None:return None
     elif hebrew_enabled():return None  # Never replay/translate old queued posts.
     message=render(envelope['item'],hebrew,media_attached=media_attached)
+    if message is None:return None
     from telegram_presentation import telegram_text,utf16_length
     # Measure the ENTIRE final bidi wire, not the shorter pre-format text. The
     # shared sender retains its behavior, but must never clip this translation.
     if utf16_length(telegram_text(message,limit=16384))>4096:
         message=render(envelope['item'],{'status':'unavailable','text_he':''},media_attached=media_attached)
+        if message is None:return None
     return message if utf16_length(telegram_text(message,limit=16384))<=4096 else None
