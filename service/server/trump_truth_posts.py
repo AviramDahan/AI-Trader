@@ -272,10 +272,9 @@ def render(item,hebrew=None,*,media_attached=False):
         if not hebrew or hebrew['status'] not in ('translated','media_only'):return None
         body=(hebrew['text_he'] if hebrew['status']=='translated' else
               'פוסט מדיה ללא טקסט. אין תמלול או תיאור מומצא של המדיה.')
-        return ('📣 טראמפ · מהערוץ בטלגרם\n\n'+body+
-            '\n\nתרגום AI של תוכן הערוץ; לא אימות עובדות או שיוך רשמי.\nפורסם בערוץ: '+
-            instant(item['relay_published_at']).strftime('%d.%m.%Y %H:%M UTC')+
-            '\nמקור:\n'+item['truth_url'])
+        return ('📣 עדכון המיוחס לטראמפ\n\n'+body+
+            '\n\nתרגום AI; התוכן והשיוך לחשבון רשמי לא אומתו.\nזמן הדיווח: '+
+            instant(item['relay_published_at']).strftime('%d.%m.%Y %H:%M UTC'))
     title = '📣 טראמפ · פוסט ב־Truth Social'
     if item['is_repost']:
         title += ' · שיתוף מחדש'
