@@ -266,7 +266,7 @@ def test_success_retry_and_restart_reuse_only_complete_hebrew(db, monkeypatch):
     saved = rows(db)[0]; envelope = saved['message']
     text = posts.delivery_message(saved, AT)
     assert SOURCE not in text and 'Truth Social' not in text
-    assert 'אנו תומכים' in text and 'https://t.me/real_DonaldJTrump/19' in text
+    assert 'אנו תומכים' in text and 'https://t.me/real_DonaldJTrump/19' not in text
     assert utf16_length(telegram_text(text, limit=16384)) <= 4096
     sender = Mock(side_effect=['connect_timeout', 'sent'])
     monkeypatch.setattr(stock_scanner, 'send_telegram', sender)
@@ -328,7 +328,7 @@ def test_utf16_bidi_expansion_blocks_rather_than_clips_accepted_hebrew(db, monke
     sender.assert_not_called()
 
 
-def test_actual_sender_keeps_whole_hebrew_source_url_and_news_destination(db, monkeypatch):
+def test_actual_sender_keeps_hebrew_without_source_url_and_news_destination(db, monkeypatch):
     import re
     import scanner_engine, stock_scanner, trump_truth_translation as h
     from telegram_presentation import telegram_text, utf16_length
@@ -347,7 +347,7 @@ def test_actual_sender_keeps_whole_hebrew_source_url_and_news_destination(db, mo
     assert fields['message_thread_id'] == 991 and 'parse_mode' not in fields
     assert approved('', {}, h.SCHEMA)['text_he'] in visible
     assert SOURCE not in visible and 'Truth Social' not in visible
-    assert 'https://t.me/real_DonaldJTrump/19' in visible
+    assert 'https://t.me/real_DonaldJTrump/19' not in visible and 'מקור:' not in visible
     assert utf16_length(wire) <= 4096 and telegram_text(wire) == wire
 
 

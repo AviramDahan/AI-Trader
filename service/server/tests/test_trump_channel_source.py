@@ -58,4 +58,16 @@ def test_new_source_success_dedupe_restart_keeps_only_hebrew(db,selected):
     assert h.prepare(at=NOW,completion=ok)['prepared']==1
     text=t.delivery_message(saved(db)[0],NOW)
     assert 'המחיר הוא 100 דולר.' in text and 'The price' not in text
-    assert 'Truth Social' not in text and item['truth_url'] in text
+    assert 'Truth Social' not in text and item['truth_url'] not in text
+    assert 'מקור:' not in text and 'שיוך לחשבון רשמי לא אומת' in text
+
+
+def test_new_source_long_media_caption_omits_source_link(selected):
+    import trump_truth_media as media
+    item={'source_kind':'trump_telegram_channel_v1',
+          'truth_url':'https://t.me/real_DonaldJTrump/123'}
+    planned=media.delivery_plan('דיווח בעברית '*120,item)
+    assert planned['text'] is not None
+    assert item['truth_url'] not in planned['caption']
+    assert 'מקור:' not in planned['caption']
+    assert 'שיוך לחשבון רשמי לא אומת' in planned['caption']

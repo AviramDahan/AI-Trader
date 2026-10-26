@@ -62,6 +62,11 @@ queued items are rechecked and cannot send after the switch. Do not reset old
 cursors, replay history, bulk translate/requeue or delete prior messages.
 No Telegram test send or synthetic Production event is needed for acceptance.
 
+Telegram notices for the new channel omit the source URL and the source label;
+the channel-only authorship caveat remains visible. Media fallback captions
+also omit that URL. The exact source identity and link stay in the retained
+envelope and the read-only archive for attribution and deduplication.
+
 Website/MiniApp archives retain old classified Truth history unchanged. New
 Telegram rows have Telegram labels and exact source links; nonempty new-source
 rows without a bound successful Hebrew cache are excluded. A read never

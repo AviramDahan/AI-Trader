@@ -262,7 +262,11 @@ def delivery_plan(text,item):
     full=telegram_text(text,limit=16384)
     if utf16_length(full)>4096:raise ValueError('media_text_bound')
     if utf16_length(full)<=1024:return {'caption':full,'text':None}
-    caption=telegram_text('📣 טראמפ · מדיה מצורפת מהדיווח בערוץ המעקב.\nאין תמלול או אימות תוכן.\n'+item['truth_url'],limit=16384)
+    from trump_telegram_channel import is_item
+    caption_text=('📣 עדכון המיוחס לטראמפ · מדיה מצורפת.\nתוכן ההודעה מופיע בנפרד; השיוך לחשבון רשמי לא אומת.'
+                  if is_item(item) else
+                  '📣 טראמפ · מדיה מצורפת מהדיווח בערוץ המעקב.\nאין תמלול או אימות תוכן.\n'+item['truth_url'])
+    caption=telegram_text(caption_text,limit=16384)
     if utf16_length(caption)>1024:raise ValueError('media_caption_bound')
     return {'caption':caption,'text':text}
 
