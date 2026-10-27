@@ -192,7 +192,8 @@ def message(event,result,topic,tickers):
     parts=['📰 '+hide_relay_branding(clean_draft(result['title_he']))]
     if tickers:parts.append('מניות: '+', '.join(tickers))
     parts.append(hide_relay_branding(clean_draft(result['summary_he'])))
-    if topic!='market_news':parts.append('פרשנות AI: '+hide_relay_branding(clean_draft(result['interpretation_he'])))
+    interpretation = hide_relay_branding(clean_draft(result['interpretation_he']))
+    if interpretation:parts.append('משמעות אפשרית לסוחר (AI): '+interpretation)
     # Ingestion provenance stays in storage. Retain required licensed credits.
     credits=[clean_draft(s['publisher']) for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')]
     footer=[]

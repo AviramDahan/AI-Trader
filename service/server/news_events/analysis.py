@@ -10,7 +10,7 @@ import re
 import time
 import jsonschema
 from .engine import Analysis
-from news_quality import ANALYSIS_SCHEMA, REVIEW_SCHEMA, numbers_grounded, terminology_grounded
+from news_quality import ANALYSIS_SCHEMA, REVIEW_SCHEMA, TRADER_NEWS_CONTEXT, numbers_grounded, terminology_grounded
 
 
 # Canonical MARKET only: keep company/legacy review and public results intact.
@@ -104,7 +104,8 @@ class CanonicalAnalyzer:
             'official primary evidence has stronger grounding but do not conceal disagreement. '
             'related means topical relevance, not a trade recommendation. Low materiality is valid. '
             'durable goods=מוצרים בני קיימא, consensus=תחזית האנליסטים, yen=ין, '
-            'SEC filing=דיווח לרשות ניירות הערך (not a lawsuit). Each text under 45 words.')
+            'SEC filing=דיווח לרשות ניירות הערך (not a lawsuit). Each text under 45 words. '
+            + TRADER_NEWS_CONTEXT)
         market_scope=context['scope']=='market'
         if market_scope:
             system+=MARKET_SCOPE_CONTRACT+MARKET_IMPACT_CONTRACT
@@ -114,7 +115,9 @@ class CanonicalAnalyzer:
             'Compare Hebrew draft ONLY to original attributed evidence. Reject unsupported claims, '
             'mistranslation and incomplete/malformed Hebrew. No previous events supplied; duplicate_of must be 0. '
             'Keep explanation concise, at most 40 words: state the decisive evidence/checks only. '
-            'Do not rewrite the draft or reproduce source text in explanation. Evaluate all checks independently.')
+            'Do not rewrite the draft or reproduce source text in explanation. '
+            'Reject unsupported market-impact claims, invented price reactions and trade instructions; '
+            'an explicit statement that evidence is insufficient is acceptable. Evaluate all checks independently.')
         if market_scope:
             review_prompt+=MARKET_IMPACT_CONTRACT
             review_prompt+=(

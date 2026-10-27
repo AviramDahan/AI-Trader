@@ -11,7 +11,7 @@ from unittest.mock import Mock
 import pytest
 
 from news_events.analysis import AnalysisFailure, CanonicalAnalyzer
-from news_quality import ANALYSIS_SCHEMA, REVIEW_SCHEMA
+from news_quality import ANALYSIS_SCHEMA, REVIEW_SCHEMA, TRADER_NEWS_CONTEXT
 
 
 @pytest.fixture(autouse=True)
@@ -113,6 +113,8 @@ def test_conditional_topical_statement_preserves_uncertainty_and_legacy_analysis
     assert result.result==draft() and 'מותנית' in result.result['interpretation_he']
     assert source==before
     assert client.call_args_list[0].args[3]==analysis_schema==ANALYSIS_SCHEMA
+    assert TRADER_NEWS_CONTEXT in client.call_args_list[0].args[1]
+    assert 'unsupported market-impact claims' in client.call_args_list[1].args[1]
     schema=client.call_args_list[1].args[3]
     assert schema['properties']['scope_related']['type']=='boolean'
     assert 'scope_related' in schema['required'] and schema['additionalProperties'] is False
