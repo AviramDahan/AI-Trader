@@ -47,7 +47,11 @@ def pipeline():
     cfg=feed_settings()
     policy=effective_policy(cfg,_float_env('STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE',.3,.3,1),
         _int_env('STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS',6,1,24),
-        cfg['scan_bridge_max_age'],_int_env('STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS',168,24,720))
+        cfg['scan_bridge_max_age'],_int_env('STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS',168,24,720),
+        market_low_materiality_relevance=(
+            _float_env('STOCK_SCANNER_GENERAL_NEWS_LOW_MATERIALITY_MIN_RELEVANCE',.90,.80,1)
+            if os.getenv('STOCK_SCANNER_GENERAL_NEWS_LOW_MATERIALITY_ENABLED','true').lower()=='true'
+            else None))
     control=state()
     if control['mode']!='canonical' or not control['not_before']:raise RuntimeError('canonical_not_activated')
     return Pipeline(Store(connect,production=True),universe,membership,not_before=control['not_before'],policy=policy)
