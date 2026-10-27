@@ -27,6 +27,8 @@ def test_source_remains_in_event_but_not_canonical_telegram_message():
         output = with_news_community_link(message(source, draft(), 'market_news', []), 'market_news')
     assert 'מקור:' not in output
     assert 'https://www.sec.gov/Archives/edgar/data/123/filing.htm' not in output
+    assert 'משמעות אפשרית לסוחר (AI):' in output
+    assert draft()['interpretation_he'] in output
     assert output.count('https://t.me/+example') == 1
     assert source == original
 

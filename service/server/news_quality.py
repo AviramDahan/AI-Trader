@@ -13,6 +13,20 @@ from news_call_context import call as news_call
 
 QUALITY_VERSION = 2
 
+# Presentation guidance only. News relevance, publication thresholds and trade
+# admission remain controlled by their existing independent checks.
+TRADER_NEWS_CONTEXT = (
+    'Write for a US-stock paper trader, not as a generic translation service. '
+    'In summary_he report source-backed facts first: what changed, when, and which '
+    'company, sector or market is affected; distinguish actual from forecast and prior '
+    'values only when the source supplies them. In interpretation_he explain the '
+    'specific possible market transmission, catalyst or risk and what subsequent '
+    'reported fact a trader should monitor. Separate this scenario from confirmed '
+    'facts. If the supplied evidence gives no clear trading implication, say so '
+    'plainly instead of inventing one. Do not assume a price reaction, position, '
+    'technical setup, earnings surprise, timing, target or return; do not advise '
+    'buying or selling. News relevance is not permission to enter a trade. ')
+
 
 def object_schema(properties):
     return {"type": "object", "properties": properties,
@@ -189,7 +203,8 @@ def analyze_market_fast(row):
         'including neutral updates with no ticker. related means topical news relevance, NOT a trade '
         'recommendation or verified price impact. related=false only for ads or unrelated/non-news content. '
         'title_he: translated headline. summary_he: at most two short source-only sentences. '
-        'interpretation_he: state only that this is a translation, not an independently verified fact or trade advice. '
+        + TRADER_NEWS_CONTEXT +
+        'interpretation_he must remain a cautious AI inference, never an independently verified fact or trade advice. '
         'Use unclear sentiment and low materiality if unsupported; do not inflate importance. '
         'Financial glossary: durable goods=מוצרים בני קיימא, consensus=תחזית האנליסטים, '
         'preferred stock=מניות בכורה, yen=ין, yields=תשואות, billion=מיליארד, trillion=טריליון. '
@@ -282,6 +297,7 @@ def analyze_strict(row):
         'quantities and uncertainty exactly. title_he translates the title; summary_he summarizes only the '
         'source excerpt, or repeats the title translation if no excerpt. Never infer article contents from '
         'a headline. No technical indicators, recommendations or price forecasts unless stated in source. '
+        + TRADER_NEWS_CONTEXT +
         'interpretation_he is a separate cautious AI interpretation, not a source fact. '
         'Scope market includes economic, geopolitical, company and business news; relevance is topical fit '
         'For company/watchlist/position scope, related=true when the source actually discusses a verified ticker; '

@@ -1306,15 +1306,19 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
         ON CONFLICT(news_id,channel,ticker,event_version) DO NOTHING""", (row["id"], version, stamp))
     if not cur.rowcount:
         return False
-    # Short source translation, not an investment recommendation or AI opinion.
+    # Keep source facts and trader-oriented interpretation visibly separate.
     summary = str(result.get("summary_he") or "").strip()
+    interpretation = str(result.get("interpretation_he") or "").strip()
     telegram_post = row.get("source_kind") == "telegram_post"
     if telegram_post:
         title = _telegram_bulletin_text(title)
         summary = _telegram_bulletin_text(summary)
+        interpretation = _telegram_bulletin_text(interpretation)
     parts = ["📰 " + title[:350]]
     if (telegram_post or not row.get("headline_only")) and summary and summary != title:
         parts.append(summary[:450])
+    if interpretation:
+        parts.append("משמעות אפשרית לסוחר (AI): " + interpretation[:350])
     # General translation/source limitations live in the pinned topic notice.
     # Never remove attribution or uncertainty from the actual reported facts.
     if telegram_post:
