@@ -25,25 +25,19 @@ def with_news_community_link(message: str, event_type: str | None) -> str:
     link = os.getenv("TELEGRAM_COMMUNITY_URL", "").strip()
     # Presentation only: stored evidence/URLs and all eligibility stay intact.
     # Apply at send-time too, so already-queued news follows the same preference.
-    from news_source_links import SOURCE_LINE, safe_source_url
+    source_metadata = re.compile(r'^\s*(?:מקור|Source|מפרסם מקורי|קישור ישיר|קישור)\s*:', re.I)
     def public_link(match):
         url = match.group(0)
         if url == link or urlsplit(url).hostname in {'creativecommons.org', 'www.creativecommons.org'}:
             return url  # Community invitation and license notices are not news sources.
         return ''
-    lines, sources = [], []
+    lines = []
     for line in message.splitlines():
-        source = SOURCE_LINE.fullmatch(line)
-        if source:
-            safe = safe_source_url(source[1])
-            if safe and not sources:
-                sources.append('מקור: ' + safe)
+        if source_metadata.match(line):
             continue
         cleaned = re.sub(r'https?://[^\s<>]+', public_link, line)
         if cleaned != line:
             cleaned = cleaned.rstrip(' :')
-            if cleaned in {'מקור', 'Source'}:
-                cleaned = ''
         lines.append(cleaned)
     from news_presentation import hide_relay_branding
     message = hide_relay_branding('\n'.join(lines))
@@ -55,12 +49,12 @@ def with_news_community_link(message: str, event_type: str | None) -> str:
     footer = "📣 להצטרפות לקהילת AI-Trader:\n" + link
     if valid and message.endswith(footer):
         message = message[:-len(footer)].rstrip()
-    tails = sources + ([footer] if valid else [])
+    tails = [footer] if valid else []
     if not tails:
         return message
     suffix = '\n\n' + '\n\n'.join(tails)
     # Budget AFTER bidi isolates, not before: mixed Hebrew/Latin expands on
-    # the actual wire. Preserve both source and CTA even for a long invite URL.
+    # the actual wire. Preserve the CTA even for a long invite URL.
     from telegram_presentation import telegram_text, utf16_length
     if utf16_length(telegram_text(message + suffix, limit=100_000)) > 4096:
         budget = 4096 - utf16_length(telegram_text(suffix, limit=100_000))

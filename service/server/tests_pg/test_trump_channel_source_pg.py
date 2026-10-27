@@ -6,7 +6,9 @@ from types import SimpleNamespace as NS
 from unittest.mock import Mock
 import pytest
 
-AT=datetime(2026,10,25,17,tzinfo=timezone.utc)
+# Delivery validates against the real clock; keep synthetic posts within the
+# short send window when this PostgreSQL suite runs after the original fixture day.
+AT=datetime.now(timezone.utc).replace(microsecond=0)
 
 
 @pytest.fixture
