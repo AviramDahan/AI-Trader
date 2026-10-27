@@ -16,6 +16,7 @@ class Policy:
     personal_relevance: float=.55
     stock_relevance: float=.70
     market_relevance: float=.30
+    market_low_materiality_relevance: float | None=None
     max_age_hours: int=168
     market_age_hours: int=6
     universe_age_hours: int=6
@@ -37,7 +38,10 @@ def route(event,result,positions,watchlist,universe,policy):
         if event['event_type'] != 'market' and not eligible_event(event):
             return [],'identity_unverified'
         if relevance<policy.market_relevance:return [],'below_market_threshold'
-        if materiality not in ('medium','high'):return [],'low_importance'
+        supplemental_market = (event['event_type']=='market' and materiality=='low'
+            and policy.market_low_materiality_relevance is not None
+            and relevance>=policy.market_low_materiality_relevance)
+        if materiality not in ('medium','high') and not supplemental_market:return [],'low_importance'
         return [('market_news',[])],None
     if relevance<policy.personal_relevance:return [],'below_relevance_threshold'
     if materiality not in ('medium','high'):return [],'low_importance'
