@@ -12,7 +12,9 @@ import telegram_news_reader as reader
 import trump_truth_posts as posts
 
 
-AT = datetime(2026, 10, 25, 17, tzinfo=timezone.utc)
+# Dispatch checks use the real clock, so keep synthetic posts inside their
+# short delivery window even when the test suite runs days after this fixture.
+AT = datetime.now(timezone.utc).replace(microsecond=0)
 CHANNEL = 'real_donaldjtrump'
 CHANNEL_ID = 1462338131
 OLD_CHANNEL = 'realdonaldtrump_truth'

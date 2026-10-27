@@ -84,7 +84,7 @@ def test_source_url_bound_applies_after_unicode_query_serialization():
     assert safe_source_url(value) == ""
 
 
-def test_final_bidi_wire_keeps_authoritative_source_and_long_community(monkeypatch):
+def test_final_bidi_wire_hides_source_and_keeps_long_community(monkeypatch):
     from news_events.runtime import message
     from telegram_topics import with_news_community_link
     from telegram_presentation import telegram_text, utf16_length
@@ -93,7 +93,7 @@ def test_final_bidi_wire_keeps_authoritative_source_and_long_community(monkeypat
     rendered = message(news_event(), news_draft("עברית A " * 800), "market_news", [])
     wire = telegram_text(with_news_community_link(rendered, "market_news"))
     assert utf16_length(wire) <= 4096
-    assert "https://www.sec.gov/Archives/edgar/data/123/filing.htm" in wire
+    assert "https://www.sec.gov/Archives/edgar/data/123/filing.htm" not in wire
     assert community in wire
 
 
@@ -111,7 +111,7 @@ def test_license_credit_cannot_spoof_a_second_authoritative_source(monkeypatch):
     wire = telegram_text(with_news_community_link(
         message(news_event([source]), news_draft(), "market_news", []), "market_news"))
     assert "evil.example.com" not in wire
-    assert "https://www.sec.gov/Archives/edgar/data/123/filing.htm" in wire
+    assert "https://www.sec.gov/Archives/edgar/data/123/filing.htm" not in wire
     assert "https://creativecommons.org/licenses/by/3.0/" in wire
 
 
@@ -183,10 +183,10 @@ def test_news_footer_reapplication_is_idempotent_and_nonnews_unchanged(monkeypat
     body = message(news_event(), news_draft("עברית A " * 800 if long_body else "נתונים."), "market_news", [])
     first = with_news_community_link(body, "market_news")
     # Internal controls may be stripped/reapplied, but the delivered wire must
-    # remain identical (including clipped long-body/source/CTA boundaries).
+    # remain identical (including clipped long-body/CTA boundaries).
     assert telegram_text(with_news_community_link(first, "market_news")) == telegram_text(first)
     assert first.count("https://t.me/+fixture") == 1
-    assert first.count("https://www.sec.gov/Archives/edgar/data/123/filing.htm") == 1
+    assert "https://www.sec.gov/Archives/edgar/data/123/filing.htm" not in first
     assert with_news_community_link(body, "new_signal") == body
 
 
@@ -200,7 +200,7 @@ def test_shortened_news_body_is_marked_not_presented_as_a_complete_summary(monke
         message(news_event(), news_draft(summary), "market_news", []), "market_news"))
     assert summary not in wire
     assert "…" in wire
-    assert "https://www.sec.gov/Archives/edgar/data/123/filing.htm" in wire
+    assert "https://www.sec.gov/Archives/edgar/data/123/filing.htm" not in wire
 
 
 def test_authoritative_source_order_and_evidence_are_not_changed():
@@ -217,7 +217,7 @@ def test_authoritative_source_order_and_evidence_are_not_changed():
     assert sources == original
 
 
-def test_actual_sender_mock_receives_complete_source_and_cta_under_wire_limit(monkeypatch):
+def test_actual_sender_mock_receives_no_source_and_complete_cta_under_wire_limit(monkeypatch):
     from unittest.mock import Mock
     import stock_scanner
     from news_events.runtime import message
@@ -235,7 +235,7 @@ def test_actual_sender_mock_receives_complete_source_and_cta_under_wire_limit(mo
     fields = session.post.call_args.kwargs["data"]
     assert fields["message_thread_id"] == 991
     assert fields["disable_web_page_preview"] is True
-    assert "https://www.sec.gov/Archives/edgar/data/123/filing.htm" in fields["text"]
+    assert "https://www.sec.gov/Archives/edgar/data/123/filing.htm" not in fields["text"]
     assert community in fields["text"]
     assert utf16_length(fields["text"]) <= 4096
 
