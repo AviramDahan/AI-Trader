@@ -131,7 +131,7 @@ def test_actual_enqueue_and_mock_send_final_wire_keep_topic_correction_and_no_cl
     wire=session.post.call_args.kwargs['data']['text'];visible=CONTROLS.sub('',wire)
     assert session.post.call_args.kwargs['data']['message_thread_id']==678
     assert utf16_length(wire)<=4096 and '…' not in wire
-    assert all(v in visible for v in ('1,350,000,001.25 USD','-75,000,000 USD','330,000,000 USD',
+    assert all(v in visible for v in ('כ־1.35 מיליארד דולר','-75 מיליון דולר','330 מיליון דולר',
         '2025-07-01','2024-09-30',link))
     assert with_news_community_link(with_news_community_link(message,'sec_intelligence'),'sec_intelligence')==with_news_community_link(message,'sec_intelligence')
     assert 'נקלט ב־SEC' in visible and '20/10/2026' in visible
