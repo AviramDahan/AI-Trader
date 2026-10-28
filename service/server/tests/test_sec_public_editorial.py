@@ -195,6 +195,7 @@ def seeded_public_process(monkeypatch, *, period_conflict=False, stale=False):
     monkeypatch.setenv("SEC_INTELLIGENCE_KILL_SWITCH", "false")
     monkeypatch.setenv("STOCK_SCANNER_TELEGRAM_ENABLED", "true")
     monkeypatch.setenv("TELEGRAM_SEC_INTELLIGENCE_THREAD_ID", "345")
+    monkeypatch.setenv("TELEGRAM_COMPANY_REPORTS_THREAD_ID", "346")
     monkeypatch.setenv("SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE", si._z(now-timedelta(days=1)))
     monkeypatch.setenv("NEWS_SEC_USER_AGENT", "Isolated Operator fixture@example.invalid")
     uid, _ = si.save_universe({"TEST": {"company": "Synthetic Issuer", "indexes": ["sp500"]}},

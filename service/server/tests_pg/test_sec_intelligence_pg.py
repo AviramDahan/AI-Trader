@@ -176,6 +176,7 @@ def test_postgres_sec_publication_is_atomic_and_once_per_accession(pg, monkeypat
     monkeypatch.setenv("SEC_INTELLIGENCE_MODE", "paper")
     monkeypatch.setenv("STOCK_SCANNER_TELEGRAM_ENABLED", "true")
     monkeypatch.setenv("TELEGRAM_SEC_INTELLIGENCE_THREAD_ID", "345")
+    monkeypatch.setenv("TELEGRAM_COMPANY_REPORTS_THREAD_ID", "346")
     monkeypatch.setenv("SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE", si._z(now-timedelta(hours=1)))
     monkeypatch.setenv("NEWS_SEC_USER_AGENT", "Isolated Test Operator test@example.com")
     uid, _ = si.save_universe({"AAPL": {"company": "Apple Inc.", "indexes": ["sp500"]}},

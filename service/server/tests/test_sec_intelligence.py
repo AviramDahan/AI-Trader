@@ -236,6 +236,7 @@ def test_material_sec_alert_is_fresh_paper_only_and_deduplicated(
     monkeypatch.setenv("SEC_INTELLIGENCE_MODE", mode)
     monkeypatch.setenv("STOCK_SCANNER_TELEGRAM_ENABLED", "true")
     monkeypatch.setenv("TELEGRAM_SEC_INTELLIGENCE_THREAD_ID", "345")
+    monkeypatch.setenv("TELEGRAM_COMPANY_REPORTS_THREAD_ID", "346")
     monkeypatch.setenv("SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE", si._z(now-timedelta(hours=8)))
     monkeypatch.setenv("NEWS_SEC_USER_AGENT", "Research Operator research@example.com")
     uid, _ = si.save_universe({"AAPL": {"company": "Apple Inc.", "indexes": ["sp500"]}},
