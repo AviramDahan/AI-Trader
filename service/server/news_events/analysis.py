@@ -52,6 +52,8 @@ class AnalysisFailure(ValueError):
 
 def completion_reason(exc):
     """Allowlisted diagnostics only; never copy a response or exception body."""
+    from ai_routing import LocalUnavailable
+    if isinstance(exc,LocalUnavailable):return exc.local_failure_reason
     if getattr(exc,'local_fallback_eligible',False):return 'local_transport_failed'
     if isinstance(exc, json.JSONDecodeError):return 'invalid_json'
     if isinstance(exc, jsonschema.ValidationError):return 'schema_validation_failed'
@@ -65,6 +67,8 @@ def completion_reason(exc):
 
 def schema_reason(exc):
     # Truncation remains terminal: diagnostic accuracy must not expand retries.
+    from ai_routing import LocalUnavailable
+    if isinstance(exc,LocalUnavailable):return None
     reason=completion_reason(exc)
     return None if reason=='ai_output_truncated' else reason
 

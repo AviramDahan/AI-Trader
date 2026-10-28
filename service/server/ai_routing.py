@@ -37,6 +37,9 @@ class LocalCapacity(requests.ConnectionError):
 
 class LocalUnavailable(requests.ConnectionError):
     """Local inference is required while paid failover is disabled."""
+    def __init__(self, message, *, reason=None):
+        super().__init__(message)
+        self.local_failure_reason=reason if reason in {'local_transport_failed','local_context_capacity'} else None
 
 
 def openrouter_fallback_enabled():
@@ -202,7 +205,7 @@ class Route:
                     return  # Existing bounded repair may still use Ollama.
                 if reason != 'local_context_capacity':
                     failed()
-                raise LocalUnavailable('ollama_failed_openrouter_fallback_disabled')
+                raise LocalUnavailable('ollama_failed_openrouter_fallback_disabled',reason=reason)
             if reason != 'local_context_capacity':
                 failed()
             self.provider, self.model = self.cloud_provider, self.cloud_model

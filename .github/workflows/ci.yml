@@ -28,7 +28,18 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install -r service/requirements.txt
       - name: Backend tests
-        run: python -m pytest service/server/tests --ignore=service/server/tests/test_stock_scanner.py -v
+        run: |
+          python - <<'PY'
+          import faulthandler, pytest
+          # Record where collection stalls if the hosted runner is interrupted.
+          faulthandler.dump_traceback_later(20)
+          class CollectionDiagnostics:
+              def pytest_collection_finish(self):
+                  faulthandler.cancel_dump_traceback_later()
+          raise SystemExit(pytest.main([
+              'service/server/tests', '--ignore=service/server/tests/test_stock_scanner.py', '-v'
+          ], plugins=[CollectionDiagnostics()]))
+          PY
       - name: Stock scanner tests (providers mocked)
         run: python -m pytest service/server/tests/test_stock_scanner.py -q
       - name: Independent entry discovery paired comparison (offline only)

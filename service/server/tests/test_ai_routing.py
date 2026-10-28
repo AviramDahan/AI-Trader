@@ -104,6 +104,13 @@ def test_canonical_fallback_stage_cannot_bypass_disabled_switch(fixture,monkeypa
     finally:CURRENT.reset(token)
 
 
+def test_disabled_fallback_retains_failure_diagnosis_without_repair_permission():
+    from news_events.analysis import completion_reason,schema_reason
+    error=routing.LocalUnavailable('synthetic',reason='local_transport_failed')
+    assert completion_reason(error)=='local_transport_failed'
+    assert schema_reason(error) is None
+
+
 def test_final_review_outage_never_falls_back_when_disabled(fixture,monkeypatch):
     relay,paid,budget,slot,_=fixture
     monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED','false')
