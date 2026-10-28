@@ -28,7 +28,7 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install -r service/requirements.txt
       - name: Backend tests
-        run: python -m pytest service/server/tests --ignore=service/server/tests/test_stock_scanner.py -q
+        run: python -m pytest service/server/tests --ignore=service/server/tests/test_stock_scanner.py -v
       - name: Stock scanner tests (providers mocked)
         run: python -m pytest service/server/tests/test_stock_scanner.py -q
       - name: Independent entry discovery paired comparison (offline only)
