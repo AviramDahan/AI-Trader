@@ -11,7 +11,8 @@ python-multipart>=0.0.6
 openrouter>=1.0.0
 psycopg[binary]>=3.2.1
 redis>=5.0.8
-pytest>=8.0.0
+# pytest 9.2 fixture discovery loops on module-level unittest.mock.call.
+pytest==9.1.1
 yfinance>=0.2.30
 exchange_calendars==4.13.2
 psutil>=7,<8
