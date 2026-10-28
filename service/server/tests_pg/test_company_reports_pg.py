@@ -9,3 +9,6 @@ def test_financial_notice_has_separate_route_without_second_outbox(pg, monkeypat
     assert rows[0]['dedupe_key'].startswith('sec-intelligence:')
     assert 'תוצאות פעילות החברה' in rows[0]['message']
     assert rows[0]['message'].count('תקופת הדיווח:') == 1
+    assert '🔮 ציפיות האנליסטים\nלא זמין' in rows[0]['message']
+    assert '📋 התוצאות בפועל' in rows[0]['message']
+    assert '120 דולר' in rows[0]['message'] and 'מעל הצפי' not in rows[0]['message']

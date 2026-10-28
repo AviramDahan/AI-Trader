@@ -11,10 +11,18 @@ comparison where the structured source supplies neither.
 The same verified material comparisons, dates, issuer validation, publication
 cutover, freshness, paper-mode and kill controls remain authoritative. No AI call
 is added. Identical comparison periods appear once, above the metric blocks;
-mixed periods stay attached to their metric. Exact amounts, signed losses,
-USD/percentage/percentage-point units and approximate change percentages remain.
+mixed periods stay attached to their metric. Stored amounts remain exact. Public
+USD amounts use Hebrew thousand/million/billion units, with up to two scaled
+decimal places and ``כ־`` whenever scaling rounds the amount. Small unscaled
+amounts, signed losses, percent and percentage-point units remain distinct.
 Fiscal quarter numbers, EPS, consensus, causes and price reactions are not guessed.
 No source link is shown. Existing source facts remain stored.
+
+``ציפיות האנליסטים`` and ``התוצאות בפועל`` are separate sections. The existing
+SEC comparison producer has no verified analyst-consensus feed, so expectations
+are explicitly ``לא זמין``. Previous-year reported values never become analyst
+estimates. No EPS, beat/miss or surprise percentage is fabricated and no consensus
+provider, subscription, AI call or new trading input is added by this format change.
 
 The durable ``sec_intelligence`` event type and accession dedupe key are unchanged
 for recovery/rollback compatibility. Old pending SEC financial notices are

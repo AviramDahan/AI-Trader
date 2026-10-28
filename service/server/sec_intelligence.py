@@ -1047,8 +1047,32 @@ def _material_public_fact(job: dict, evidence: dict, conn) -> str | None:
     return _public_financial_text(job, evidence)
 
 
+def _public_compact_usd(value) -> str:
+    """Presentation only; preserve signs and mark lossy scaling as approximate."""
+    from decimal import Decimal, ROUND_HALF_UP, localcontext
+    amount = Decimal(str(value))
+    if not amount.is_finite():
+        raise ValueError('public_nonfinite_amount')
+    if amount.is_zero(): amount = abs(amount)
+    units = ((Decimal('1000000000'), 'מיליארד דולר'),
+             (Decimal('1000000'), 'מיליון דולר'),
+             (Decimal('1000'), 'אלף דולר'), (Decimal('1'), 'דולר'))
+    index = next(i for i, (scale, _) in enumerate(units) if abs(amount) >= scale or scale == 1)
+    with localcontext() as context:
+        context.prec = max(32, len(amount.as_tuple().digits) + abs(amount.adjusted()) + 12)
+        scale, label = units[index]
+        shown = (amount / scale).quantize(Decimal('.01'), rounding=ROUND_HALF_UP) if scale > 1 else amount
+        if abs(shown) >= 1000 and 0 < index < 3:
+            scale, label = units[index-1]
+            shown = (amount / scale).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
+        approximate = shown * scale != amount
+        number = format(shown, 'f')
+        if '.' in number: number = number.rstrip('0').rstrip('.')
+    return ('כ־' if approximate else '') + number + ' ' + label
+
+
 def _company_report_text(text: str) -> str:
-    """Simplify public copy only, retaining exact amounts and comparison periods.
+    """Separated expectations/results with compact display of retained amounts.
 
     Repeated identical period labels are shared above the metrics. Mixed periods
     remain attached to each metric; fiscal quarter numbers are never guessed.
@@ -1059,12 +1083,18 @@ def _company_report_text(text: str) -> str:
         ('תקופת הדיווח:', 'תקופת ההשוואה:', 'ליום ', 'בהשוואה ליום '))) for lines in facts]
     shared = bool(periods and periods[0] and all(p == periods[0] for p in periods))
     output = ['\n'.join(periods[0])] if shared else []
+    # This SEC comparison producer has no analyst-consensus input. Prior-year
+    # values are actual results, never estimates. Do not invent EPS or surprise.
+    output.append('🔮 ציפיות האנליסטים\nלא זמין — אין נתון צפי מאומת לדיווח זה.')
+    output.append('📋 התוצאות בפועל')
     meanings = set(_PUBLIC_MEANING.values())
     for lines in facts:
         kept = [line for line in lines if line not in meanings and
                 not (shared and line in periods[0])]
-        # Preserve signed values, USD vs percent and percentage-point changes.
-        output.append('\n'.join(kept))
+        compact = re.sub(r'([-+]?\d[\d,]*(?:\.\d+)?) USD',
+            lambda match: _public_compact_usd(match[1].replace(',', '')), '\n'.join(kept))
+        compact = compact.replace('נוכחי:', 'בפועל:').replace('קודם:', 'בתקופה המקבילה:')
+        output.append(compact)
     output.append('מה זה אומר: זו השוואה לתקופה המקבילה בשנה הקודמת, לא לתחזיות האנליסטים. '
                   'הנתונים לבדם אינם מסבירים את הגורם לשינוי או את תגובת המניה.')
     return '\n\n'.join(output)

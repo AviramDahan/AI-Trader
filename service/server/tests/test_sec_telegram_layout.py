@@ -101,4 +101,4 @@ def test_actual_enqueue_labels_acceptance_not_delivery_clock(isolated,monkeypatc
     assert len(rows)==1 and rows[0]['status']=='pending'
     assert 'נקלט ב־SEC:' in rows[0]['message'] and 'דווח:' not in rows[0]['message']
     assert 'נשלח:' not in rows[0]['message']
-    assert '\nנוכחי:' in rows[0]['message']
+    assert '\nבפועל:' in rows[0]['message']

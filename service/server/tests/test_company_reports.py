@@ -49,8 +49,8 @@ def test_simple_copy_keeps_exact_values_signs_and_mixed_periods():
     before = copy.deepcopy(facts)
     full = sec._public_financial_text(job, {'comparisons': facts})
     short = sec._company_report_text(full)
-    assert len(short) < len(full) and short.count('תקופת הדיווח:') == 1
-    for value in ('1,200,000,000 USD', '1,000,000,000 USD', '-50 USD', '150.0%', '2025-09-30'):
+    assert short.count('תקופת הדיווח:') == 1
+    for value in ('1.2 מיליארד דולר', '1 מיליארד דולר', '-50 דולר', '150.0%', '2025-09-30'):
         assert value in short
     assert facts == before
     facts[1] = comparison('operating_income', year=2025, value=120, previous=100,
