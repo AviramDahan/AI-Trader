@@ -142,7 +142,7 @@ def review(messages, validator):
     trace = TRACE.get()
     schema=getattr(validator,'response_schema',SCHEMA)
     from ai_routing import (Route, local_completion, local_usage, fallback_reason,
-                            _strict, safe_local_transport_failure)
+                            _strict, safe_local_transport_failure, LocalUnavailable)
     route = Route(provider, model)
     for attempt in range(2):  # One shared budget: retry OR repair, never both.
         provider, model = route.provider, route.model
@@ -249,7 +249,12 @@ def review(messages, validator):
             retry = attempt == 0 and (isinstance(exc,(requests.Timeout,requests.ConnectionError)) or status in {408,429,500,502,503,504})
             reason=fallback_reason(exc)
             if provider=='ollama_relay' and reason=='local_context_capacity':metrics['reject_reason']=reason
-            route.fallback(reason)
+            try:
+                route.fallback(reason)
+            except LocalUnavailable:
+                retry=False
+                metrics['reject_reason']='openrouter_fallback_disabled'
+                raise
             if not retry:
                 raise
         except Exception as exc:

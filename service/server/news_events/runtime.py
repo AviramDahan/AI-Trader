@@ -180,7 +180,10 @@ def analyze_jobs(at=None):
         p.enrich(eid,[SECEvidence(os.getenv('NEWS_SEC_USER_AGENT',''))],current)
     check() # Do not claim/bill a job if the global budget/cooldown is blocked.
     from news_structured_envelope import output_instruction
-    outcome=p.analyze(eid,CanonicalAnalyzer(completion,contract=lambda schema: ' '+output_instruction()),current)
+    from .publication_review import candidates
+    previous=candidates(p.store,p.store.event(eid)['body'],current)
+    outcome=p.analyze(eid,CanonicalAnalyzer(completion,contract=lambda schema: ' '+output_instruction(),
+                                          previous_publications=previous),current)
     project(p,eid,current)
     alerts=queue_outbox(p,eid,current) if outcome=='done' else 0
     good=outcome=='done'

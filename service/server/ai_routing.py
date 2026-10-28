@@ -35,6 +35,17 @@ class LocalCapacity(requests.ConnectionError):
     """Capacity rejection: fail over without poisoning healthy smaller jobs."""
 
 
+class LocalUnavailable(requests.ConnectionError):
+    """Local inference is required while paid failover is disabled."""
+    def __init__(self, message, *, reason=None):
+        super().__init__(message)
+        self.local_failure_reason=reason if reason in {'local_transport_failed','local_context_capacity'} else None
+
+
+def openrouter_fallback_enabled():
+    return os.getenv('AI_OPENROUTER_FALLBACK_ENABLED', 'false').strip().lower() == 'true'
+
+
 def fallback_reason(exc):
     return 'local_context_capacity' if isinstance(exc, LocalCapacity) else 'local_transport_failed'
 
@@ -163,6 +174,8 @@ def failed():
 def check_available():
     """Pre-job spend check. Every paid HTTP attempt still checks the hard cap."""
     if not ready():
+        if enabled() and not openrouter_fallback_enabled():
+            raise LocalUnavailable('ollama_unavailable_openrouter_fallback_disabled')
         from ai_budget import check
         check()
 
@@ -175,7 +188,11 @@ class Route:
         # must not depend on an unrelated process-wide outage cooldown.
         stage = (CURRENT.get() or {}).get('stage', '')
         canonical_fallback = isinstance(stage, str) and stage.startswith('local_fallback:')
-        self.provider = 'ollama_relay' if requested and not canonical_fallback and ready() else provider
+        canonical_fallback = canonical_fallback and openrouter_fallback_enabled()
+        local_ready = requested and not canonical_fallback and ready()
+        if requested and not local_ready and provider == 'openrouter' and not openrouter_fallback_enabled():
+            raise LocalUnavailable('ollama_unavailable_openrouter_fallback_disabled')
+        self.provider = 'ollama_relay' if local_ready else provider
         self.model = MODEL if self.provider == 'ollama_relay' else model
         self.cloud_provider, self.cloud_model = provider, model
         self.fallback_reason = ('canonical_local_fallback' if requested and canonical_fallback else
@@ -183,6 +200,12 @@ class Route:
 
     def fallback(self, reason):
         if self.provider == 'ollama_relay':
+            if self.cloud_provider == 'openrouter' and not openrouter_fallback_enabled():
+                if reason == 'local_schema_failed':
+                    return  # Existing bounded repair may still use Ollama.
+                if reason != 'local_context_capacity':
+                    failed()
+                raise LocalUnavailable('ollama_failed_openrouter_fallback_disabled',reason=reason)
             if reason != 'local_context_capacity':
                 failed()
             self.provider, self.model = self.cloud_provider, self.cloud_model
