@@ -36,6 +36,8 @@ def candidates(store, event, at):
           JOIN ne_versions v ON v.event_id=n.event_id AND v.version=n.version
           JOIN ne_events e ON e.event_id=n.event_id
           WHERE o.status='sent' AND o.event_type='market_news' AND o.sent_at>=? AND o.sent_at<=?
+          AND e.evidence_version=n.version AND e.status='analyzed'
+          AND (e.reason IS NULL OR e.reason NOT IN ('source_retracted','source_conflict'))
           AND n.event_id<>? ORDER BY o.sent_at DESC,o.id DESC LIMIT 60""",
           (lo,timestamp(at),event['event_id'])).fetchall()
     found=[];used=0;seen=set()

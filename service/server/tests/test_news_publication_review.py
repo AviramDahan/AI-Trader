@@ -82,9 +82,12 @@ def test_retrieval_uses_sent_immutable_version_and_excludes_pending_future_old(e
             c.execute('INSERT INTO scanner_telegram_outbox VALUES(?,?,?,?,?,?)',(i,status,'market_news',at.isoformat(),str(i),'הבנק מסר שהריבית עשויה לעלות אם האינפלציה תימשך.'))
             c.execute('INSERT INTO ne_outbox VALUES(?,?,?)',(str(i),eid,version))
         # The published snapshot stays original even if current metadata changes.
-        c.execute('UPDATE ne_events SET body_json=? WHERE event_id=?',(json.dumps({'title':'unpublished correction','published_at':NOW.isoformat()}),eid))
+        c.execute("UPDATE ne_events SET status='analyzed',body_json=? WHERE event_id=?",(json.dumps({'title':'unpublished correction','published_at':NOW.isoformat()}),eid))
     current={**event(),'event_type':'market','published_at':NOW.isoformat()}
     selected=candidates(s,current,NOW)
     assert [v['id'] for v in selected]==[1]
     assert 'unpublished correction' not in selected[0]['evidence']
     assert candidates(s,{**current,'tickers':['AAPL']},NOW)==[]
+    with s.transaction(True) as c:
+        c.execute("UPDATE ne_events SET reason='source_retracted' WHERE event_id=?",(eid,))
+    assert candidates(s,current,NOW)==[]
