@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 MARKET_NEWS_EVENT_TYPES = {"market_news"}
 SEC_INTELLIGENCE_EVENT_TYPES = {"sec_intelligence"}
+COMPANY_REPORT_EVENT_TYPES = {"company_report"}
 PERSONAL_NEWS_EVENT_TYPES = {"position_news", "watchlist_news", "watchlist_news_correction"}
 STOCK_NEWS_EVENT_TYPES = {
     "position_news", "watchlist_news", "watchlist_news_correction", "stock_news", "correction", "news_status",
@@ -20,7 +21,7 @@ PORTFOLIO_EVENT_TYPES = {"portfolio_status"}
 
 def with_news_community_link(message: str, event_type: str | None) -> str:
     """Append the server-configured join link to all news, never trade alerts."""
-    if event_type not in MARKET_NEWS_EVENT_TYPES | STOCK_NEWS_EVENT_TYPES | SEC_INTELLIGENCE_EVENT_TYPES:
+    if event_type not in MARKET_NEWS_EVENT_TYPES | STOCK_NEWS_EVENT_TYPES | SEC_INTELLIGENCE_EVENT_TYPES | COMPANY_REPORT_EVENT_TYPES:
         return message
     link = os.getenv("TELEGRAM_COMMUNITY_URL", "").strip()
     # Presentation only: stored evidence/URLs and all eligibility stay intact.
@@ -69,6 +70,9 @@ def thread_id_for_event(event_type: str | None) -> int | None:
         return None
     if event_type in MARKET_NEWS_EVENT_TYPES or event_type == 'trump_truth_post':
         names = ("TELEGRAM_MARKET_NEWS_THREAD_ID", "TELEGRAM_NEWS_THREAD_ID")
+    elif event_type in COMPANY_REPORT_EVENT_TYPES:
+        # A missing report topic must never spill financial results into SEC/General.
+        names = ("TELEGRAM_COMPANY_REPORTS_THREAD_ID",)
     elif event_type in SEC_INTELLIGENCE_EVENT_TYPES:
         # Never fall back to General or another public topic for SEC research.
         names = ("TELEGRAM_SEC_INTELLIGENCE_THREAD_ID",)

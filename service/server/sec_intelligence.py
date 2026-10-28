@@ -1047,6 +1047,29 @@ def _material_public_fact(job: dict, evidence: dict, conn) -> str | None:
     return _public_financial_text(job, evidence)
 
 
+def _company_report_text(text: str) -> str:
+    """Simplify public copy only, retaining exact amounts and comparison periods.
+
+    Repeated identical period labels are shared above the metrics. Mixed periods
+    remain attached to each metric; fiscal quarter numbers are never guessed.
+    """
+    blocks = text.split('\n\n')
+    facts = [block.splitlines() for block in blocks if block.startswith('• ')]
+    periods = [tuple(line for line in lines if line.startswith(
+        ('תקופת הדיווח:', 'תקופת ההשוואה:', 'ליום ', 'בהשוואה ליום '))) for lines in facts]
+    shared = bool(periods and periods[0] and all(p == periods[0] for p in periods))
+    output = ['\n'.join(periods[0])] if shared else []
+    meanings = set(_PUBLIC_MEANING.values())
+    for lines in facts:
+        kept = [line for line in lines if line not in meanings and
+                not (shared and line in periods[0])]
+        # Preserve signed values, USD vs percent and percentage-point changes.
+        output.append('\n'.join(kept))
+    output.append('מה זה אומר: זו השוואה לתקופה המקבילה בשנה הקודמת, לא לתחזיות האנליסטים. '
+                  'הנתונים לבדם אינם מסבירים את הגורם לשינוי או את תגובת המניה.')
+    return '\n\n'.join(output)
+
+
 def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn) -> bool:
     """Queue only fresh, material, verified SEC facts in paper mode.
 
@@ -1054,9 +1077,10 @@ def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn
     the same transaction as the processed filing and uses the existing outbox.
     """
     from telegram_topics import thread_id_for_event
+    event_type = 'company_report' if evidence.get('kind') == 'financial' else 'sec_intelligence'
     if (mode() != "paper" or killed() or
             os.getenv("STOCK_SCANNER_TELEGRAM_ENABLED", "false").lower() != "true" or
-            thread_id_for_event("sec_intelligence") is None):
+            thread_id_for_event(event_type) is None):
         return False
     boundary = os.getenv("SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE", "").strip()
     if not boundary:
@@ -1071,6 +1095,8 @@ def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn
     fact = _material_public_fact(job, evidence, conn)
     if not fact:
         return False
+    if event_type == 'company_report':
+        fact = _company_report_text(fact)
     from zoneinfo import ZoneInfo
     from scanner_engine import enqueue_telegram
     tickers = json.loads(job["tickers_json"])
@@ -1084,11 +1110,15 @@ def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn
     company = str(members[tickers[0]]["company"])[:180]
     local_time = accepted.astimezone(ZoneInfo("Asia/Jerusalem")).strftime("%d/%m/%Y %H:%M")
     correction = " — תיקון לדיווח קודם" if job["form"].endswith("/A") else ""
-    message = (f"📑 דיווח SEC מהותי{correction}\n\n"
+    heading = '📊 תוצאות פעילות החברה' if event_type == 'company_report' else '📑 דיווח SEC מהותי'
+    message = (f"{heading}{correction}\n\n"
                f"חברה: {company}\nסימול: {', '.join(tickers[:3])}\n\n{fact}\n\n"
                f"נקלט ב־SEC: {local_time} (שעון ישראל)")
     return enqueue_telegram(conn.cursor(), f"sec-intelligence:{job['accession']}",
-                            "sec_intelligence", message, published_at=job["accepted_at"])
+                            # Keep the durable event contract readable by the
+                            # existing recovery/rollback binary. Dispatch derives
+                            # the dedicated destination from retained evidence.
+                            'sec_intelligence', message, published_at=job["accepted_at"])
 
 
 def process_jobs(now: datetime | None = None, limit: int = 2) -> dict:

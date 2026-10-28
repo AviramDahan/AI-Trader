@@ -1695,6 +1695,15 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
     portfolio_changed = False
     for row in rows:
         cfg = settings()
+        if row['event_type'] == 'sec_intelligence' and row['dedupe_key'].startswith('sec-intelligence:'):
+            # Old unsent financial notices retain their durable key/receipt but
+            # use the new destination. Never guess the category from body text.
+            with get_db_connection() as lookup:
+                filing = lookup.execute('SELECT evidence_json FROM si_filing_jobs WHERE accession=?',
+                    (row['dedupe_key'][len('sec-intelligence:'):],)).fetchone()
+            if filing and _loads(filing['evidence_json'], {}).get('kind') == 'financial':
+                row['event_type'] = 'company_report'
+                row['message'] = row['message'].replace('📑 דיווח SEC מהותי', '📊 תוצאות פעילות החברה', 1)
         media_dispatch = row['event_type'] == 'trump_truth_post' and row.get('status') == 'trump_media_sending'
         bilingual_dispatch = row['event_type'] == 'trump_truth_post' and row.get('status') == 'trump_bilingual_sending'
         if row['event_type'] == 'trump_truth_post' and not (media_dispatch or bilingual_dispatch):
@@ -1708,10 +1717,11 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             # Keep the durable provenance envelope unchanged for retry/audit;
             # render only this claimed in-memory row, never the stored JSON.
             row['message'] = message
-        if row['event_type'] == 'sec_intelligence':
+        if row['event_type'] == 'sec_intelligence' or (row['event_type'] == 'company_report' and
+                row['dedupe_key'].startswith('sec-intelligence:')):
             from sec_intelligence import killed, mode
             from telegram_topics import thread_id_for_event
-            if mode() != 'paper' or killed() or thread_id_for_event('sec_intelligence') is None:
+            if mode() != 'paper' or killed() or thread_id_for_event(row['event_type']) is None:
                 conn = get_db_connection()
                 conn.execute("""UPDATE scanner_telegram_outbox SET status='cancelled',
                     last_error='sec_publication_disabled' WHERE id=? AND status='sending'""", (row['id'],))

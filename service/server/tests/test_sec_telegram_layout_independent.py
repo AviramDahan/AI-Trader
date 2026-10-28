@@ -109,7 +109,7 @@ def test_actual_enqueue_and_mock_send_final_wire_keep_topic_correction_and_no_cl
     from telegram_topics import with_news_community_link
     link='https://t.me/'+('x'*480 if long_link else 'SyntheticCommunity')
     for key,value in dict(SEC_INTELLIGENCE_MODE='paper',SEC_INTELLIGENCE_KILL_SWITCH='false',
-        STOCK_SCANNER_TELEGRAM_ENABLED='true',TELEGRAM_SEC_INTELLIGENCE_THREAD_ID='678',
+        STOCK_SCANNER_TELEGRAM_ENABLED='true',TELEGRAM_SEC_INTELLIGENCE_THREAD_ID='677',TELEGRAM_COMPANY_REPORTS_THREAD_ID='678',
         SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE=(AT-timedelta(hours=1)).isoformat(),
         TELEGRAM_BOT_TOKEN='synthetic-bot',TELEGRAM_CHAT_ID='synthetic-public',
         TELEGRAM_COMMUNITY_URL=link).items():monkeypatch.setenv(key,value)
@@ -127,7 +127,7 @@ def test_actual_enqueue_and_mock_send_final_wire_keep_topic_correction_and_no_cl
     assert queued.call_args.kwargs['published_at']==JOB['accepted_at'] and evidence==before
     session=Mock();session.post.return_value=Mock(raise_for_status=lambda:None)
     monkeypatch.setattr(stock_scanner.requests,'Session',lambda:session)
-    assert stock_scanner.send_telegram(message,{'telegram_enabled':True},'sec_intelligence')=='sent'
+    assert stock_scanner.send_telegram(message,{'telegram_enabled':True},'company_report')=='sent'
     wire=session.post.call_args.kwargs['data']['text'];visible=CONTROLS.sub('',wire)
     assert session.post.call_args.kwargs['data']['message_thread_id']==678
     assert utf16_length(wire)<=4096 and '…' not in wire

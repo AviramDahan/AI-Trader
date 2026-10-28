@@ -1169,6 +1169,8 @@ def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = No
     try:
         from telegram_topics import destination_fields, thread_id_for_event, with_news_community_link
         from telegram_presentation import telegram_text
+        if event_type == 'company_report' and thread_id_for_event(event_type) is None:
+            return json.dumps({'terminal': True, 'reason': 'company_reports_topic_not_configured'})
         if event_type in {'sec_intelligence', 'trump_truth_post'} and thread_id_for_event(event_type) is None:
             return json.dumps({'terminal': True, 'reason': 'sec_topic_not_configured' if event_type == 'sec_intelligence' else 'trump_truth_news_topic_not_configured'})
         session = requests.Session()
