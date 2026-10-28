@@ -104,14 +104,21 @@ def main(image):
             assert run(*ssh,user+'@127.0.0.1','true',check=False).returncode!=0,'shell unexpectedly allowed'
             denied=run(*ssh,'-NT','-R','127.0.0.1:17173:127.0.0.1:11434',user+'@127.0.0.1',check=False)
             assert denied.returncode!=0,'TCP forward unexpectedly allowed'
-            code="""import ai_routing as r
+            code="""import os,ai_routing as r
 assert r.ready()
+assert not r.openrouter_fallback_enabled()
 v,b=r.local_completion([{'role':'user','content':'START-LARGE '+('x'*12000)+' END-LARGE'}],{'type':'object'},16)
 assert v=={'ok':True}
 route=r.Route('openrouter','synthetic-no-paid')
 try:r.local_completion([{'role':'user','content':'synthetic-capacity-rejection'}],{'type':'object'},16)
-except r.LocalCapacity as exc:route.fallback(r.fallback_reason(exc))
+except r.LocalCapacity as exc:
+    try:route.fallback(r.fallback_reason(exc))
+    except r.LocalUnavailable:pass
+    else:raise AssertionError('disabled fallback selected paid provider')
 else:raise AssertionError('capacity error was masked')
+assert route.provider=='ollama_relay' and r._until==0
+os.environ['AI_OPENROUTER_FALLBACK_ENABLED']='true'
+route.fallback('local_context_capacity')
 assert route.fallback_reason=='local_context_capacity' and r._until==0 and r.ready()
 v,b=r.local_completion([{'role':'user','content':'small fixture after capacity rejection'}],{'type':'object'},16)
 assert v=={'ok':True}
@@ -121,7 +128,13 @@ print('restricted private bridge large/full-input and capacity/small-followup PA
                 '-v',str(relay)+':/run/ollama:ro','-e','AI_INFERENCE_MODE=ollama_first',
                 '--entrypoint','python',image,'-c',code)
             tunnel.terminate();tunnel.wait(5)
-            code="import ai_routing as r;assert not r.ready();print('disconnect readiness fails closed PASS')"
+            code="""import ai_routing as r
+assert not r.ready()
+try:r.Route('openrouter','synthetic-no-paid')
+except r.LocalUnavailable:pass
+else:raise AssertionError('disconnect selected paid provider')
+print('disconnect readiness and default paid fallback fail closed PASS')
+"""
             run('docker','run','--rm','--network','none','--group-add','20001','-v',str(relay)+':/run/ollama:ro',
                 '-e','AI_INFERENCE_MODE=ollama_first','--entrypoint','python',image,'-c',code)
             print('PASS: real SSH Unix relay, denied shell/TCP, actual network-none app image, disconnect; synthetic inference only')
