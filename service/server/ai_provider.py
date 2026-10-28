@@ -108,8 +108,8 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
                 error = ValueError("openrouter_transport_failed:"+failure)
                 error.local_fallback_eligible = local_failed
                 raise error from None
-            notify_failure=False  # Persist attempt cost/error, wait for bounded retry outcome.
             route.fallback(fallback_reason(exc))
+            notify_failure=False  # Persist attempt cost/error, wait for bounded retry outcome.
         except (ValueError, KeyError, IndexError, jsonschema.ValidationError) as exc:
             from retry_policy import validation_detail
             if attempt_route['provider'] == 'ollama_relay' and str(exc) == 'ai_output_truncated':

@@ -35,6 +35,7 @@ def cloud(value):
 @pytest.fixture
 def fixture(monkeypatch):
     monkeypatch.setenv('AI_INFERENCE_MODE','ollama_first')
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED','true')
     monkeypatch.setenv('AI_TRADER_CLOUD','true')
     monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-only')
     monkeypatch.setenv('OPENROUTER_NEWS_MODEL','existing-luna')
@@ -61,6 +62,61 @@ def test_cloud_only_default_never_probes_local(fixture,monkeypatch):
     paid.side_effect=None;paid.return_value=cloud({'ok':True})
     assert ai_provider.json_completion('fixture',{},schema=SCHEMA)=={'ok':True}
     relay.assert_not_called();budget.assert_called_once();slot.assert_called_once()
+
+
+def test_paid_fallback_defaults_off_and_unavailable_local_never_spends(fixture,monkeypatch):
+    relay,paid,budget,slot,_=fixture
+    monkeypatch.delenv('AI_OPENROUTER_FALLBACK_ENABLED')
+    monkeypatch.setattr(routing,'ready',lambda:False)
+    assert routing.openrouter_fallback_enabled() is False
+    with pytest.raises(routing.LocalUnavailable):routing.check_available()
+    with pytest.raises(routing.LocalUnavailable):ai_provider.json_completion('fixture',{},schema=SCHEMA)
+    paid.assert_not_called();budget.assert_not_called();slot.assert_not_called()
+
+
+@pytest.mark.parametrize('failure',[requests.Timeout(),routing.LocalCapacity(),ValueError('invalid_response_structure')])
+def test_disabled_fallback_local_failure_never_calls_paid_provider(fixture,monkeypatch,failure):
+    relay,paid,budget,slot,ledger=fixture
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED','false')
+    monkeypatch.setattr(routing,'local_completion',Mock(side_effect=failure))
+    with pytest.raises((routing.LocalUnavailable,ValueError)):
+        ai_provider.json_completion('fixture',{},schema=SCHEMA)
+    paid.assert_not_called();budget.assert_not_called();slot.assert_not_called()
+    assert ledger.call_count>=1
+    assert all(c.args[1].startswith('ollama/') for c in ledger.call_args_list)
+
+
+def test_disabled_paid_fallback_keeps_bounded_schema_repair_local(fixture,monkeypatch):
+    relay,paid,*_=fixture
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED','false')
+    local=Mock(side_effect=[ValueError('invalid_response_structure'),({'ok':True},native({'ok':True}))])
+    monkeypatch.setattr(routing,'local_completion',local)
+    assert ai_provider.json_completion('fixture',{},schema=SCHEMA)=={'ok':True}
+    assert local.call_count==2
+    paid.assert_not_called()
+
+
+def test_canonical_fallback_stage_cannot_bypass_disabled_switch(fixture,monkeypatch):
+    from news_events.call_context import CURRENT
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED','false')
+    token=CURRENT.set({'stage':'local_fallback:source_analysis'})
+    try:assert routing.Route('openrouter','existing-luna').provider=='ollama_relay'
+    finally:CURRENT.reset(token)
+
+
+def test_final_review_outage_never_falls_back_when_disabled(fixture,monkeypatch):
+    relay,paid,budget,slot,_=fixture
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED','false')
+    monkeypatch.setattr(routing,'local_completion',Mock(side_effect=requests.Timeout()))
+    trace=final_ai.new_trace('synthetic','FIXTURE',1)
+    token=final_ai.TRACE.set(trace)
+    try:
+        with pytest.raises(routing.LocalUnavailable):
+            final_ai.review([{'role':'user','content':'synthetic'}],lambda v:v)
+    finally:final_ai.TRACE.reset(token)
+    assert trace['result']=='error'
+    assert trace['attempts'][0]['reject_reason']=='openrouter_fallback_disabled'
+    paid.assert_not_called();budget.assert_not_called();slot.assert_not_called()
 
 
 @pytest.mark.parametrize('task',['news','translation','summary'])

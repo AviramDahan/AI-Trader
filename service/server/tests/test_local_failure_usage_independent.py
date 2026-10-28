@@ -42,6 +42,7 @@ def isolated(monkeypatch):
     monkeypatch.setattr(ai_provider.requests, 'post', denied)
     monkeypatch.setenv('AI_TRADER_CLOUD', 'true')
     monkeypatch.setenv('AI_INFERENCE_MODE', 'ollama_first')
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED', 'true')
     monkeypatch.setenv('OPENROUTER_NEWS_MODEL', 'synthetic-paid-model')
     monkeypatch.setenv('OPENROUTER_API_KEY', 'synthetic-only')
     monkeypatch.setattr(ai_routing, 'ready', lambda: True)

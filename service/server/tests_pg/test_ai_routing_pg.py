@@ -55,6 +55,7 @@ def test_transport_diagnostic_trace_restart_keeps_one_paid_retry_and_no_trading(
     import database, ai_routing, final_ai
     monkeypatch.setenv('AI_TRADER_CLOUD', 'true')
     monkeypatch.setenv('AI_INFERENCE_MODE', 'ollama_first')
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED', 'true')
     monkeypatch.setenv('OPENROUTER_API_KEY', 'synthetic')
     monkeypatch.setenv('STOCK_SCANNER_FINAL_AI_PROVIDER', 'openrouter')
     monkeypatch.setenv('STOCK_SCANNER_FINAL_AI_MODEL', 'synthetic')

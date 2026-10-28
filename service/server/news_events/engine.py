@@ -26,6 +26,7 @@ class Policy:
 class Analysis:
     result:dict
     calls:list=field(default_factory=list)
+    publication_duplicate:dict | None=None
 
 
 def route(event,result,positions,watchlist,universe,policy):
@@ -242,7 +243,11 @@ class Pipeline:
             # If new facts arrived during the call, old output cannot publish.
             current=c.execute('SELECT evidence_version,reason FROM ne_events WHERE event_id=?',(event_id,)).fetchone()
             if current['evidence_version']==version and current['reason']!='source_retracted':
-                c.execute('UPDATE ne_events SET status=?,reason=? WHERE event_id=?',('analyzed' if status=='done' else 'quality_failed',error,event_id))
+                publication_reason='duplicate_publication' if status=='done' and output.publication_duplicate else error
+                c.execute('UPDATE ne_events SET status=?,reason=? WHERE event_id=?',('analyzed' if status=='done' else 'quality_failed',publication_reason,event_id))
+                if output.publication_duplicate:
+                    self.store.metric(c,'publication_review','duplicate',timestamp(now),event_id,
+                                      version=version,prior=output.publication_duplicate)
             self.store.metric(c,'analysis',status,timestamp(now),event_id,providers=event['providers'],
                 latency=time.monotonic()-started,calls=output.calls,invocations=1)
             if self.store.production:
@@ -255,6 +260,7 @@ class Pipeline:
         with self.store.transaction(True) as c:
             r=c.execute('SELECT * FROM ne_events WHERE event_id=?',(event_id,)).fetchone()
             if r['status']!='analyzed':return []
+            if r['reason']=='duplicate_publication':return []
             event=json.loads(r['body_json']);version=r['evidence_version']
             analyzed=c.execute("SELECT result_json FROM ne_analysis WHERE event_id=? AND version=? AND status='done'",(event_id,version)).fetchone()
             if not analyzed:return []

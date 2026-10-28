@@ -153,6 +153,7 @@ def test_rationale_repair_cannot_promote_hold(cloud):
 def test_local_capacity_then_invalid_cloud_does_not_add_third_attempt(cloud, monkeypatch):
     post, ledger = cloud
     monkeypatch.setenv('AI_INFERENCE_MODE', 'ollama_first')
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED', 'true')
     monkeypatch.setattr(ai_routing, '_until', 0)
     def relay(method, path, *args, **kwargs):
         if path == '/health':

@@ -85,15 +85,17 @@ class CanonicalAnalyzer:
     Each returned usage represents exactly that request, not cumulative usage.
     Unknown/failed costs remain null, never treated as zero.
     """
-    def __init__(self,completion,contract=output_contract):
+    def __init__(self,completion,contract=output_contract,previous_publications=None):
         self.completion=completion
         self.contract=contract
+        self.previous_publications=previous_publications or []
 
     def __call__(self,event):
         calls=[];repair_used=False
         context={'canonical_event_id':event['event_id'],'evidence_version':event['evidence_version'],
                  'verified_company_identity':event['company_identity'],
                  'scope':'company' if event['tickers'] else 'market',
+                 'published_at':event.get('published_at'),
                  'title':event['title'],'evidence':event['normalized_evidence'],
                  'conflicts':event['conflicts']}
         facts={'title':event['title'],'source_excerpt':'\n'.join(v['text'] for v in event['normalized_evidence'])}
@@ -118,6 +120,17 @@ class CanonicalAnalyzer:
             'Do not rewrite the draft or reproduce source text in explanation. '
             'Reject unsupported market-impact claims, invented price reactions and trade instructions; '
             'an explicit statement that evidence is insufficient is acceptable. Evaluate all checks independently.')
+        previous=self.previous_publications if market_scope else []
+        if previous:
+            review_prompt=review_prompt.replace('No previous events supplied; duplicate_of must be 0.',
+                'Compare separately to previous_sources, which contain original evidence already sent. '
+                'duplicate_of may be a supplied id ONLY when the same specific event and all current '
+                'facts were already reported in its published_text, including a paraphrase. Original '
+                'evidence supports the comparison but does not prove each fact was publicly shown. '
+                'Same topic alone is not duplication. '
+                'Different metrics, periods, actors, decisions, quantities, forecasts, corrections, '
+                'attribution or uncertainty are material_new_fact=true; preserve them with duplicate_of=0. '
+                'If uncertain, duplicate_of=0. Never copy previous facts into the current draft.')
         if market_scope:
             review_prompt+=MARKET_IMPACT_CONTRACT
             review_prompt+=(
@@ -167,18 +180,22 @@ class CanonicalAnalyzer:
         try:
             draft=call('source_analysis',system,context,ANALYSIS_SCHEMA)
             for attempt in range(2):
+                review_payload={'source':context,'draft':draft}
+                if previous:review_payload['previous_sources']=[{k:v[k] for k in ('id','sent_at','published_at','evidence','published_text')} for v in previous]
                 review=call('quality_review' if not attempt else 'repair_review',
-                    review_prompt,{'source':context,'draft':draft},review_schema)
+                    review_prompt,review_payload,review_schema)
                 checks={'faithful':review['faithful'],'fluent_hebrew':review['fluent_hebrew'],
                     'no_unsupported_claims':not review['unsupported_claims'],
                     'numbers_grounded':numbers_grounded(draft,facts),
                     'terminology_grounded':terminology_grounded(draft,facts),
                     'hebrew_present':all(re.search('[\u0590-\u05ff]',draft[k]) for k in ('title_he','summary_he','interpretation_he')),
-                    'valid_duplicate_reference':review['duplicate_of']==0}
+                    'valid_duplicate_reference':review['duplicate_of']==0 or any(v['id']==review['duplicate_of'] for v in previous)}
                 if market_scope:
                     checks['scope_related_consistent']=review['scope_related']==draft['related']
                 failed=[key for key,value in checks.items() if not value]
-                if not failed:return Analysis(draft,calls)
+                if not failed:
+                    from .publication_review import duplicate_reference
+                    return Analysis(draft,calls,duplicate_reference(review,previous,event))
                 if attempt or repair_used:raise AnalysisFailure('news_quality_rejected:'+','.join(failed),calls)
                 repair_used=True
                 feedback={**context,'draft':draft,'editor_feedback':review['explanation'],'failed_checks':failed}
