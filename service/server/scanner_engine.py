@@ -1693,7 +1693,7 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
     rows = _claim_telegram_outbox(limit)
     sent = failed = 0
     portfolio_changed = False
-    for row in rows:
+    for row in sorted(rows, key=lambda item: item['id']):
         cfg = settings()
         if row['event_type'] == 'sec_intelligence' and row['dedupe_key'].startswith('sec-intelligence:'):
             # Old unsent financial notices retain their durable key/receipt but
@@ -1764,6 +1764,15 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             conn.execute("UPDATE scanner_telegram_outbox SET message=? WHERE id=? AND status='sending'",
                          (message, row['id']))
             conn.commit(); conn.close()
+        from news_report_routing import delivery_type, prior_report_delivery
+        if row['event_type'] in NEWS_TYPES and delivery_type(row['event_type'],row['message']) == 'company_report':
+            with get_db_connection() as report_conn:
+                duplicate = prior_report_delivery(report_conn,row)
+                if duplicate:
+                    report_conn.execute("UPDATE scanner_telegram_outbox SET status='cancelled',last_error=? WHERE id=? AND status='sending'",
+                                        (duplicate,row['id']))
+                    report_conn.commit()
+                    continue
         if bilingual_dispatch:
             from trump_truth_bilingual import dispatch as dispatch_trump_bilingual
             result = dispatch_trump_bilingual(row, cfg)
