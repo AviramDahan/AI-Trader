@@ -12,8 +12,8 @@ NEWS_TYPES = frozenset({'market_news','stock_news','position_news','watchlist_ne
 REPORT_PREFIX = '📊 דיווח תוצאות — '
 CONTROLS = re.compile('[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]')
 PERIOD = re.compile(r'\b(?:Q[1-4]|[1-4]Q|quarter\w*|annual|fiscal year|full.year)\b|רבעו|לשנת',re.I)
-METRIC = re.compile(r'\b(?:EPS|EBITDA|earnings per share|net (?:profit|income|loss)|'
-    r'operating (?:profit|income|loss)|revenue|sales)\b|'
+METRIC = re.compile(r'\b(?:EPS|EBITDA|(?:earnings|loss) per share|net (?:profit|income|loss)|'
+    r'operating (?:profit|income|loss)|revenues?|rev|sales)\b|'
     r'רווח(?:ים)?\s+(?:למניה|נקי|תפעולי)|הפסד(?:ים)?\s+(?:למניה|נקי|תפעולי)|הכנסות',re.I)
 RESULTS = re.compile(r'\b(?:financial results|quarterly (?:financial )?results|annual (?:financial )?results)\b|'
     r'תוצאות(?:יה|יו)?\s+(?:הכספיות|לרבעון|הרבעון|רבעון|לשנת)',re.I)
@@ -38,8 +38,8 @@ def is_company_report(title, excerpt=''):
     if (re.search(r'\b(?:clinical|trial|election|poll|exam|sports|acquisition|merger|appoints?)\b|'
                   r'תוצאות ניסוי|תוצאות בחירות|מינוי מנכ',headline,re.I)
             and not re.search(r'financial results|תוצאות כספיות',headline,re.I)):return False
-    if re.search(r'\b(?:GDP|CPI|PPI|PCE|import prices|export prices|jobless|unemployment)\b|'
-                 r'תוצר מקומי|מדד המחירים|מחירי היבוא|מחירי הייצוא',headline,re.I):return False
+    if re.search(r'\b(?:GDP|CPI|PPI|PCE|import prices|export prices|retail sales|jobless|unemployment)\b|'
+                 r'תוצר מקומי|מדד המחירים|מחירי היבוא|מחירי הייצוא|מכירות קמעונאיות',headline,re.I):return False
     if PREVIEW.search(headline) and not PAST.search(headline):return False
     if re.search(r'\banalyst\b|price target|מחיר יעד',headline,re.I) and not ACTUAL.search(headline):return False
     if MACRO_REVENUE.search(text):return False
@@ -47,7 +47,7 @@ def is_company_report(title, excerpt=''):
     if not (PERIOD.search(text) and METRIC.search(text)):return False
     if ACTUAL.search(text):return True
     # Compact wire headlines: SYN 3Q ADJ EPS $2.10, EST $2.00.
-    return bool(re.search(r'\b(?:EPS|EBITDA|REVENUE|SALES|NET PROFIT|OPERATING PROFIT)'
+    return bool(re.search(r'\b(?:EPS|EBITDA|REVENUES?|REV|SALES|LOSS PER SHARE|NET PROFIT|OPERATING PROFIT)'
         r'\s*[:$€£]?\s*-?\d',text,re.I))
 
 

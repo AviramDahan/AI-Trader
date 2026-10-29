@@ -40,6 +40,9 @@ def pending(connect, news_id, version=VERSION):
     ('Synthetic Auto מדווחת על תוצאות רבעון שלישי','הכנסות של 60 מיליארד אירו והפסד תפעולי.'),
     ('Synthetic Q3 financial results','Reported revenue rose to 100 million dollars.'),
     ('SYN 3Q ADJ EPS $2.10, EST. $2.00',''),
+    ('SYN 3Q REVENUES $100M',''),
+    ('SYN Q3 REV $100M',''),
+    ('SYN Q3 LOSS PER SHARE $1.20',''),
     ('Synthetic annual financial results',''),
     ('Synthetic reports Q3 revenue and raises guidance','The company will host a call tomorrow.'),
 ])
@@ -52,6 +55,7 @@ def test_company_results_are_routed_independently_of_verified_ticker(title,summa
     ('Australia Q3 import prices fell 1.1%',''),
     ('מחירי הייצוא של אוסטרליה עלו ברבעון השלישי','הנתון משפיע על יבואנים.'),
     ('US Q3 GDP rises 3.1%',''),
+    ('US Q3 retail sales $100B',''),
     ('US GDP quarterly results','The government reported GDP growth of 3.1%.'),
     ('Government reports Q3 tax revenue','Tax revenue rose to 100 billion dollars.'),
     ('Synthetic will report Q3 earnings tomorrow','Revenue last year was 100 million dollars.'),
