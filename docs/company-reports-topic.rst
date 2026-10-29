@@ -3,8 +3,10 @@ Company financial reports: separate destination and simpler copy
 
 SEC structured financial notices (quarterly and annual) dispatch as ``company_report``
 to the dedicated ``TELEGRAM_COMPANY_REPORTS_THREAD_ID``. Ownership notices
-remain ``sec_intelligence`` in their existing topic. Canonical company news,
-guidance headlines and market news retain their existing publication rules.
+remain ``sec_intelligence`` in their existing topic. Corporate results arriving
+through regular news, stock/personal alerts and canonical news also use the
+dedicated reports topic at the shared send boundary. Publication eligibility,
+membership, evidence/version/epoch, freshness and single-publisher rules remain.
 This change does not generate a full earnings release or analyst-consensus
 comparison where the structured source supplies neither.
 
@@ -23,6 +25,37 @@ SEC comparison producer has no verified analyst-consensus feed, so expectations
 are explicitly ``לא זמין``. Previous-year reported values never become analyst
 estimates. No EPS, beat/miss or surprise percentage is fabricated and no consensus
 provider, subscription, AI call or new trading input is added by this format change.
+
+News-source results routing
+---------------------------
+
+``news_report_routing`` identifies actual corporate financial-result content in
+English/Hebrew. Original reviewed source text marks regular/canonical result
+headings; the shared sender also handles older pending message bodies. The AI
+interpretation alone never determines the category. Quarterly GDP/CPI/import/
+export-price releases, nonfinancial trial/election results, calendar previews
+and standalone analyst actions stay news. Classification selects a destination,
+never eligibility, issuer identity, numeric claims or a trading decision.
+
+News-derived notices retain their reviewed text, currencies, explicit source
+expectations and existing rendering. They are not reconstructed as a structured
+SEC comparison and do not acquire invented analyst estimates or USD conversion.
+
+The saved original news type/key remains unchanged for publisher fences and
+rollback compatibility. The effective send type becomes ``company_report``
+after all normal dispatch revalidation. Missing reports-topic configuration fails
+closed. Historical notices are not moved or replayed. A rollback to an older
+sender restores its old news destination; retain the compatible sender to keep
+this routing behavior. Outbox ``event_type`` identifies the original publisher
+contract, not proof of the actual historical Telegram thread.
+
+Under the existing sole Telegram role lease, claimed rows are processed by ID.
+Exact source/version peers converging from multiple old topics are suppressed
+after a known sent or ambiguous receipt. General canonical aliases reuse the
+existing exact evidence/time destination keys across old topics; saved keys are
+not rewritten. New evidence versions are preserved. This adds no fuzzy merge or
+guarantee of remote exactly-once delivery; existing transport/recovery rules stay
+authoritative. Peer lookups are bounded and overflow fails closed explicitly.
 
 The durable ``sec_intelligence`` event type and accession dedupe key are unchanged
 for recovery/rollback compatibility. Old pending SEC financial notices are

@@ -196,7 +196,9 @@ def message(event,result,topic,tickers):
     from news_pipeline import _publication_time_he
     from news_presentation import hide_relay_branding
     from news_source_links import clean_draft, append_source, safe_source_url
-    parts=['📰 '+hide_relay_branding(clean_draft(result['title_he']))]
+    from news_report_routing import is_company_report, REPORT_PREFIX
+    report=any(is_company_report(s.get('title'),s.get('source_excerpt')) for s in event['sources'])
+    parts=[(REPORT_PREFIX if report else '📰 ')+hide_relay_branding(clean_draft(result['title_he']))]
     if tickers:parts.append('מניות: '+', '.join(tickers))
     parts.append(hide_relay_branding(clean_draft(result['summary_he'])))
     interpretation = hide_relay_branding(clean_draft(result['interpretation_he']))
