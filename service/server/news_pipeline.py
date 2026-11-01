@@ -1441,6 +1441,14 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
     if not NEWS_ANALYSIS_LOCK.acquire(blocking=False):
         return {'analyzed': 0, 'alerts': 0, 'errors': [], 'busy': True}
     try:
+        if analyzer is None:
+            from ai_routing import enabled, openrouter_fallback_enabled
+            from news_local_backoff import remaining
+            delay = remaining() if enabled() and not openrouter_fallback_enabled() else 0
+            if delay > 0:
+                # No job claim, attempt increment, source mutation or publication.
+                return {'analyzed': 0, 'alerts': 0, 'errors': [],
+                        'deferred': True, 'retry_after_seconds': delay}
         from news_events.control import active
         if active():
             from news_events.runtime import analyze_jobs

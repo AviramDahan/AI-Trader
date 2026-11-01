@@ -45,6 +45,9 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
     from ai_routing import (Route, local_completion, local_usage, native_messages,
                             fallback_reason, safe_local_failure_usage, safe_local_transport_failure)
     route = Route('openrouter', model)
+    from ai_schema_guidance import numeric_guidance, repair_guidance
+    if route.provider == 'ollama_relay' and task == 'news':
+        messages[0] = {**messages[0], 'content': messages[0]['content'] + numeric_guidance(schema)}
     for attempt in range(max_attempts):
         from ai_budget import check, acquire_request_slot
         if route.provider == 'openrouter':
@@ -90,12 +93,19 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
             elif not isinstance(value, dict):
                 raise ValueError("ai_object_required")
             success=True
+            if route.provider == 'ollama_relay' and task == 'news':
+                from news_local_backoff import recovered
+                recovered()
             return value
         except requests.RequestException as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             from retry_policy import detail, defer_openrouter
             failure=detail(exc)
             if route.provider == 'ollama_relay':
+                from ai_routing import openrouter_fallback_enabled
+                if task == 'news' and not openrouter_fallback_enabled() and fallback_reason(exc) != 'local_context_capacity':
+                    from news_local_backoff import failed
+                    failed()
                 diagnostic=safe_local_transport_failure(getattr(exc,'local_transport_failure',None))
                 if diagnostic:failure=json.dumps({**json.loads(failure),'local_transport':diagnostic})
             if route.provider == 'openrouter' and exc.response is not None: defer_openrouter(exc.response)
@@ -121,11 +131,17 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
                 usage_sink['structure_detail']=json.loads(failure).get('structure_detail')
                 usage_sink['json_diagnostic']=json.loads(failure).get('json_diagnostic')
             if attempt + 1 >= max_attempts:
+                if route.provider == 'ollama_relay' and task == 'news':
+                    from ai_routing import openrouter_fallback_enabled
+                    from news_local_backoff import failed
+                    if not openrouter_fallback_enabled():
+                        failed()
                 route.fallback('local_schema_failed')
                 raise ValueError("openrouter_schema_failed:"+failure) from None
             notify_failure=False
             route.fallback('local_schema_failed')
-            messages.append({"role": "user", "content": "Return valid JSON matching the required schema; do not invent missing source facts."})
+            messages.append({"role": "user", "content": repair_guidance(schema, failure) if route.provider == "ollama_relay" and task == "news" else
+                             "Return valid JSON matching the required schema; do not invent missing source facts."})
         except (TypeError, AttributeError) as exc:
             # Diagnose malformed envelopes without making previously terminal
             # exceptions retryable or changing the shared repair allowance.
