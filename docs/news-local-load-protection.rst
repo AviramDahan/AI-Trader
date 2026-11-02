@@ -86,13 +86,16 @@ cuda_v13 ggml-cuda.dll detected RTX3080Ti, with about11100MiB free. No model was
 loaded by those probes. This localizes a backend-discovery/loading defect; it
 does not prove the exact daemon discovery implementation or GPU generation.
 
-scripts/ollama_gpu_environment.py prepares a scoped environment for the EXISTING
-shared daemon owner's reviewed next startup. It enumerates devices without a
-model, preserves parallelism/cache/device restrictions, refuses conflicts and
-fails rather than silently claiming CUDA success. It does NOT start/restart the
-daemon or alter Windows/user environment. It is NOT installed into Dahan's live
-guard. A coordinated idle startup and one bounded native canary are still needed;
-changing a gateway deadline cannot repair CPU-only backend discovery.
+Follow-up discovery control: a fresh isolated Ollama 0.40.13 daemon, started
+with an empty disposable model directory and no inference requests, discovered
+CUDA both with its default environment and with an explicit CUDA backend path.
+An independently launched llama-server not finding CUDA by default therefore
+does NOT prove that setting GGML_BACKEND_PATH fixes daemon startup. The old
+long-running shared daemon had detected only CPU on its 1 November startup;
+the condition that caused that historical failure remains unknown. No backend
+override is included or installed. A coordinated idle restart and one bounded
+native canary remain necessary; changing a gateway deadline cannot repair
+CPU-only backend discovery.
 
 Historical maximum events stored only the validator, not values, contract digest
 or field paths. Neither news nor canonical call links exist for the39-attempt
@@ -129,5 +132,5 @@ modify Dahan control or terminate another user's active request for this test.
 
 Release remains BLOCKED: root causes of historical bound errors and daemon GPU
 startup, actual GPU generation, PG checkpoint integration and final-head CI are
-not all proven. The new environment helper is a prepared startup correction,
-NOT a deployed shared-runtime fix or a justification for merging this Draft.
+not all proven. Neither a deployed shared-runtime fix nor authorization to merge
+this Draft follows from model-free discovery alone.
