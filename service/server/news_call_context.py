@@ -21,6 +21,42 @@ def call(stage, function, *args, **kwargs):
     value = CURRENT.get()
     token = CURRENT.set({**value, 'stage': stage} if value else None)
     try:
-        return function(*args, **kwargs)
+        return _checkpointed(stage, function, value, args, kwargs)
     finally:
         CURRENT.reset(token)
+
+
+def _checkpointed(stage, function, context, args, kwargs):
+    import json
+    import os
+    import jsonschema
+    from datetime import datetime, timezone
+    from ai_routing import MODEL, DIGEST, enabled, openrouter_fallback_enabled
+    schema = kwargs.get('schema')
+    stages = {'source_analysis','quality_review','editorial_repair','repair_review','event_deduplication'}
+    if not (context and stage in stages and isinstance(schema,dict) and enabled()
+            and not openrouter_fallback_enabled()):
+        return function(*args, **kwargs)
+    # Full prompt/input/schema/output budget, source revision and pinned model.
+    # No request body, stale peer set or editorial draft may cross this identity.
+    identity = dict(policy='strict-news-stage-v1', article=context, stage=stage,
+        args=args, kwargs=kwargs, model=MODEL, digest=DIGEST,
+        configured_model=os.getenv('OLLAMA_NEWS_MODEL'),
+        cloud_model=os.getenv('OPENROUTER_NEWS_MODEL'))
+    raw=json.dumps(identity,sort_keys=True,ensure_ascii=True,allow_nan=False)
+    key='news-stage-v1:'+sha256(raw.encode()).hexdigest()
+    from database import get_db_connection
+    with get_db_connection() as c:
+        row=c.execute('SELECT result_json FROM news_review_cache WHERE cache_key=?',(key,)).fetchone()
+    if row and row['result_json']:
+        result=json.loads(row['result_json'])
+        jsonschema.validate(result,schema)  # Never trust a saved invalid draft.
+        return result
+    result=function(*args, **kwargs)
+    jsonschema.validate(result,schema)
+    serialized=json.dumps(result,ensure_ascii=False,allow_nan=False)
+    with get_db_connection() as c:
+        c.execute('''INSERT INTO news_review_cache(cache_key,content_version,result_json,created_at)
+            VALUES(?,?,?,?) ON CONFLICT(cache_key) DO NOTHING''',
+            (key,context['content_version'],serialized,datetime.now(timezone.utc).isoformat()))
+    return result

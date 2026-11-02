@@ -156,6 +156,18 @@ def checked_duplicate(duplicate, facts, peers):
 
 
 def analyze_one(row):
+    # Evidence enrichment is optional; stage identity/checkpointing must not be.
+    from news_call_context import CURRENT, article
+    if CURRENT.get() is None and os.getenv('AI_TRADER_CLOUD')=='true':
+        from hashlib import sha256
+        facts=source_facts(row)
+        version=row.get('content_hash') or sha256(json.dumps(facts,sort_keys=True,ensure_ascii=True).encode()).hexdigest()
+        with article(row['id'],version,facts['source_excerpt']):
+            return _analyze_one(row)
+    return _analyze_one(row)
+
+
+def _analyze_one(row):
     started = time.perf_counter()
     facts = source_facts(row)
     routine = re.match(r'^(424B2|424B3|FWP)\s+-\s+', facts['title'])

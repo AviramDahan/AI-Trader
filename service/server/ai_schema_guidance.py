@@ -33,9 +33,13 @@ def repair_guidance(schema, failure):
     # Failure text and model output are deliberately excluded from the prompt.
     import json
     try:
-        validator = json.loads(failure).get('validator')
+        metadata=json.loads(failure)
+        validator = metadata.get('validator')
     except (ValueError, TypeError, AttributeError):
         validator = None
     detail = f' The previous result violated {validator}.' if validator in {'minimum', 'maximum', 'type'} else ''
+    if validator in {'minimum','maximum'} and metadata.get('schema_field') in {
+            'relevance','confidence','news_relevance','news_sentiment'}:
+        detail += ' Violated output field: ' + metadata['schema_field'] + '.'
     return ('Return valid JSON matching the required schema; do not invent missing source facts.' +
             detail + numeric_guidance(schema))

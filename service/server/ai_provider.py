@@ -124,7 +124,7 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
             from retry_policy import validation_detail
             if attempt_route['provider'] == 'ollama_relay' and str(exc) == 'ai_output_truncated':
                 failure_usage=safe_local_failure_usage(getattr(exc,'local_failure_usage',None))
-            failure=validation_detail(exc,body)
+            failure=validation_detail(exc,body,schema=schema)
             if failure_usage:
                 failure=json.dumps({**json.loads(failure),'local_finish_reason':failure_usage['done_reason']})
             if usage_sink is not None:
@@ -146,7 +146,7 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
             # Diagnose malformed envelopes without making previously terminal
             # exceptions retryable or changing the shared repair allowance.
             from retry_policy import validation_detail
-            failure=validation_detail(exc,body)
+            failure=validation_detail(exc,body,schema=schema)
             if usage_sink is not None:
                 usage_sink['structure_detail']=json.loads(failure).get('structure_detail')
             raise
