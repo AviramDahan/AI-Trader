@@ -118,3 +118,18 @@ def test_canonical_pipeline_retries_failed_review_without_repeating_source_or_us
     assert model.call_count==3
     assert completed.result==draft
     assert [call['stage'] for call in completed.calls]==['quality_review']
+
+
+def test_canonical_checkpoint_rejects_changed_evidence_and_review_input(cache,monkeypatch):
+    from news_events.runtime import completion
+    import ai_provider
+    model=Mock(return_value={'relevance':.7})
+    monkeypatch.setattr(ai_provider,'json_completion',model)
+    source={'canonical_event_id':'fixture','evidence_version':'v1','evidence':'original'}
+    for payload in (source,{**source,'evidence':'corrected'},
+                    {**source,'evidence_version':'v2'}):
+        completion('source_analysis','prompt',payload,SCHEMA)
+    assert model.call_count==3
+    for draft in ('first','changed'):
+        completion('quality_review','prompt',{'source':source,'draft':draft},SCHEMA)
+    assert model.call_count==5
