@@ -1440,6 +1440,7 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
     # the same story concurrently or compare duplicates before the first commits.
     if not NEWS_ANALYSIS_LOCK.acquire(blocking=False):
         return {'analyzed': 0, 'alerts': 0, 'errors': [], 'busy': True}
+    story_token = None
     try:
         if analyzer is None:
             from ai_routing import enabled, openrouter_fallback_enabled
@@ -1449,6 +1450,8 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
                 # No job claim, attempt increment, source mutation or publication.
                 return {'analyzed': 0, 'alerts': 0, 'errors': [],
                         'deferred': True, 'retry_after_seconds': delay}
+            from news_local_backoff import begin_story
+            story_token = begin_story()
         from news_events.control import active
         if active():
             from news_events.runtime import analyze_jobs
@@ -1468,6 +1471,9 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
             story_incomplete()
         raise
     finally:
+        if story_token is not None:
+            from news_local_backoff import end_story
+            end_story(story_token)
         NEWS_ANALYSIS_LOCK.release()
 
 

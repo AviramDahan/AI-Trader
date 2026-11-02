@@ -16,7 +16,9 @@ import news_local_backoff as backoff
 def isolated_backoff(monkeypatch):
     monkeypatch.setattr(backoff,"_until",0.)
     monkeypatch.setattr(backoff,"_streak",0)
-    monkeypatch.setattr(backoff,"_validated_since_failure",False)
+    token=backoff.begin_story()
+    yield
+    backoff.end_story(token)
 from ai_schema_guidance import numeric_guidance, repair_guidance
 
 SCHEMA={'type':'object','properties':{'relevance':{'type':'number','minimum':0,'maximum':1}},
@@ -128,14 +130,19 @@ def test_cooldown_resets_only_after_complete_story_with_live_valid_stage(monkeyp
     monkeypatch.setattr(news_pipeline,'_analyze_news_jobs',lambda *args:{'analyzed':1,'errors':[]})
     news_pipeline.analyze_news_jobs()
     assert backoff._streak==1  # An entirely cached result proves no recovery.
-    backoff.validated_stage()
-    monkeypatch.setattr(news_pipeline,'_analyze_news_jobs',lambda *args:{'analyzed':0,'errors':['quality_failed']})
+    def failed_story(*args):
+        backoff.validated_stage()
+        return {'analyzed':0,'errors':['quality_failed']}
+    monkeypatch.setattr(news_pipeline,'_analyze_news_jobs',failed_story)
     news_pipeline.analyze_news_jobs()
     assert backoff._streak==1
     monkeypatch.setattr(news_pipeline,'_analyze_news_jobs',lambda *args:{'analyzed':1,'errors':[]})
     news_pipeline.analyze_news_jobs()
     assert backoff._streak==1  # Prior failed story's stage cannot count here.
-    backoff.validated_stage()
+    def valid_story(*args):
+        backoff.validated_stage()
+        return {'analyzed':1,'errors':[]}
+    monkeypatch.setattr(news_pipeline,'_analyze_news_jobs',valid_story)
     news_pipeline.analyze_news_jobs()
     assert backoff._streak==0
 
@@ -145,6 +152,12 @@ def test_news_backoff_does_not_change_shared_route_admission(fixture,monkeypatch
     backoff.failed()
     assert routing.ready() is True
     assert backoff.remaining()>119
+
+
+def test_unrelated_position_context_cannot_change_news_circuit():
+    from contextvars import Context
+    Context().run(backoff.failed)
+    assert backoff.remaining()==0 and backoff._streak==0
 
 
 def test_nested_batched_news_ranges_remain_explicit():
