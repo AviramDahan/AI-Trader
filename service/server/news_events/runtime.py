@@ -140,13 +140,16 @@ def project(p,eid,at):
 
 def completion(stage,system,payload,schema):
     from ai_provider import json_completion
+    from news_call_context import article, call as checkpointed_call
     from .call_context import CURRENT
     usage={'final_alert_owner':True}
     context=payload.get('source',payload)
     token=CURRENT.set(dict(event_id=context['canonical_event_id'],version=context['evidence_version'],stage=stage,final_alert_owner=True))
     try:
-        value=json_completion(system,payload,schema=schema,task='news',max_attempts=1,news_json_wrapping=True,structured_news=True,
-            usage_sink=usage,repair=stage in {'editorial_repair','repair_review'} or stage.startswith(('schema_repair:','local_fallback:')))
+        with article('canonical:'+context['canonical_event_id'],context['evidence_version'],
+                     json.dumps(context,sort_keys=True,ensure_ascii=True)):
+            value=checkpointed_call(stage,json_completion,system,payload,schema=schema,task='news',max_attempts=1,news_json_wrapping=True,structured_news=True,
+                usage_sink=usage,repair=stage in {'editorial_repair','repair_review'} or stage.startswith(('schema_repair:','local_fallback:')))
     except Exception as exc:
         exc.canonical_usage=usage
         raise

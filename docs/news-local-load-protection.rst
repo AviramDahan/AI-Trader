@@ -122,6 +122,20 @@ an approval bypass. Existing article serialization remains authoritative.
 The underlying39 historical attempts cannot be assigned to repeated articles;
 this is an executable code regression, not an invented historical attribution.
 
+Active canonical path follow-up
+-------------------------------
+The earlier checkpoint implementation covered the legacy analyzer only; the
+observed deployed scanner has canonical news enabled. A synthetic regression
+reproduced the same repeated source call on the canonical path. Canonical
+completion now uses the same schema-validated checkpoint, bound to the event
+and evidence version as well as the full prompt, payload, schema and model.
+A cache hit is not counted as a second provider invocation or charged as one.
+Changes to the source, review inputs, model or contract invalidate the checkpoint.
+The news quality and publication checks still execute for resumed work. The
+regression is synthetic; it does not establish how many historical requests
+repeated the same stage. A real model and the resulting sustained host load are
+still unverified; this change alone does not make CPU inference meet the deadline.
+
 Live inference performed by this investigation: ZERO. A future SINGLE canary,
 after safe idle startup by the shared daemon owner, should use a synthetic
 source-only news request with the unchanged actual schema, context and output

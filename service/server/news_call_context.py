@@ -51,6 +51,8 @@ def _checkpointed(stage, function, context, args, kwargs):
     if row and row['result_json']:
         result=json.loads(row['result_json'])
         jsonschema.validate(result,schema)  # Never trust a saved invalid draft.
+        if isinstance(kwargs.get('usage_sink'),dict):
+            kwargs['usage_sink']['checkpoint_hit']=True
         return result
     result=function(*args, **kwargs)
     jsonschema.validate(result,schema)

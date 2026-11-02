@@ -25,3 +25,19 @@ def test_postgres_reuses_only_validated_exact_stage_after_failure(pg,monkeypatch
         call('source_analysis',source,'prompt',{'source':'changed'},1000,schema=schema)
     with get_db_connection() as c:
         assert c.execute('SELECT count(*) AS n FROM news_review_cache').fetchone()['n']==1
+
+
+def test_canonical_runtime_reuses_exact_stage_in_postgres(pg,monkeypatch):
+    import ai_provider
+    from news_events.runtime import completion
+    monkeypatch.setenv('AI_INFERENCE_MODE','ollama_first')
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED','false')
+    model=Mock(return_value={'relevance':.8})
+    monkeypatch.setattr(ai_provider,'json_completion',model)
+    schema={'type':'object','properties':{'relevance':{'type':'number','minimum':0,'maximum':1}},
+            'required':['relevance'],'additionalProperties':False}
+    payload={'canonical_event_id':'synthetic','evidence_version':'v1'}
+    assert completion('source_analysis','prompt',payload,schema)[0]=={'relevance':.8}
+    value,usage=completion('source_analysis','prompt',payload,schema)
+    assert value=={'relevance':.8} and usage['checkpoint_hit'] is True
+    assert model.call_count==1

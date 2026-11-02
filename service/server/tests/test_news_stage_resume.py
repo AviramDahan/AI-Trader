@@ -82,3 +82,39 @@ def test_actual_strict_chain_resumes_only_completed_steps(cache,monkeypatch):
     with pytest.raises(TimeoutError):q.analyze_one(row)
     assert q.analyze_one(row)['duplicate_of']==0
     assert counts==dict(source=1,review=1,dedup=2)
+
+
+def test_canonical_completion_resumes_completed_source_without_second_model_call(cache,monkeypatch):
+    from news_events.runtime import completion
+    import ai_provider
+    source={'canonical_event_id':'synthetic-event','evidence_version':'v1'}
+    model=Mock(return_value={'relevance':.7})
+    monkeypatch.setattr(ai_provider,'json_completion',model)
+    first,first_usage=completion('source_analysis','prompt',source,SCHEMA)
+    second,second_usage=completion('source_analysis','prompt',source,SCHEMA)
+    assert first==second=={'relevance':.7}
+    assert model.call_count==1
+    assert second_usage.get('checkpoint_hit') is True
+    assert first_usage.get('checkpoint_hit') is not True
+
+
+def test_canonical_pipeline_retries_failed_review_without_repeating_source_or_usage(cache,monkeypatch):
+    from news_events.runtime import completion
+    from news_events.analysis import CanonicalAnalyzer,AnalysisFailure
+    import ai_provider
+    event={'event_id':'fixture','evidence_version':'v1','company_identity':None,
+           'event_type':'market','tickers':[],'published_at':'2026-11-02T00:00:00Z',
+           'title':'Company published a new report',
+           'normalized_evidence':[{'text':'Company published a new report.'}],'conflicts':[]}
+    draft=dict(related=True,title_he='החברה פרסמה דוח חדש',summary_he='החברה פרסמה דוח חדש.',
+               interpretation_he='המשמעות אינה ודאית.',sentiment='neutral',materiality='low',relevance=.5)
+    review=dict(faithful=True,fluent_hebrew=True,unsupported_claims=False,duplicate_of=0,
+                material_new_fact=True,explanation='תקין',scope_related=True)
+    model=Mock(side_effect=[draft,TimeoutError('synthetic'),review])
+    monkeypatch.setattr(ai_provider,'json_completion',model)
+    analyzer=CanonicalAnalyzer(completion)
+    with pytest.raises(AnalysisFailure):analyzer(event)
+    completed=analyzer(event)
+    assert model.call_count==3
+    assert completed.result==draft
+    assert [call['stage'] for call in completed.calls]==['quality_review']
