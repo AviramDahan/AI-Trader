@@ -86,9 +86,15 @@ def test_actual_strict_chain_resumes_only_completed_steps(cache,monkeypatch):
 
 def test_canonical_completion_resumes_completed_source_without_second_model_call(cache,monkeypatch):
     from news_events.runtime import completion
+    from news_call_context import CURRENT
+    from news_events.call_context import CURRENT as EVENT_CALL
     import ai_provider
     source={'canonical_event_id':'synthetic-event','evidence_version':'v1'}
-    model=Mock(return_value={'relevance':.7})
+    def invoke(*args,**kwargs):
+        assert CURRENT.get() is None
+        assert EVENT_CALL.get()['event_id']=='synthetic-event'
+        return {'relevance':.7}
+    model=Mock(side_effect=invoke)
     monkeypatch.setattr(ai_provider,'json_completion',model)
     first,first_usage=completion('source_analysis','prompt',source,SCHEMA)
     second,second_usage=completion('source_analysis','prompt',source,SCHEMA)

@@ -4,6 +4,7 @@ from contextvars import ContextVar
 from hashlib import sha256
 
 CURRENT = ContextVar('news_evidence_call', default=None)
+CHECKPOINT = ContextVar('news_checkpoint_call', default=None)
 
 
 @contextmanager
@@ -17,9 +18,23 @@ def article(news_id, version, excerpt):
         CURRENT.reset(token)
 
 
+@contextmanager
+def checkpoint_article(event_id, version, excerpt):
+    # Canonical calls have their own usage linkage; never enter the legacy
+    # news_id context or attempt to write the legacy integer-FK ledger.
+    token = CHECKPOINT.set(dict(news_id='canonical:'+event_id, content_version=version,
+                                source_excerpt_hash=sha256(excerpt.encode()).hexdigest(),
+                                source_excerpt_chars=len(excerpt)))
+    try:
+        yield
+    finally:
+        CHECKPOINT.reset(token)
+
+
 def call(stage, function, *args, **kwargs):
-    value = CURRENT.get()
-    token = CURRENT.set({**value, 'stage': stage} if value else None)
+    value = CHECKPOINT.get() or CURRENT.get()
+    legacy = CURRENT.get()
+    token = CURRENT.set({**legacy, 'stage': stage} if legacy else None)
     try:
         return _checkpointed(stage, function, value, args, kwargs)
     finally:
