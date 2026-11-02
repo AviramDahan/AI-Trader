@@ -32,8 +32,9 @@ def checkpoint_article(event_id, version, excerpt):
 
 
 def call(stage, function, *args, **kwargs):
-    value = CHECKPOINT.get() or CURRENT.get()
-    legacy = CURRENT.get()
+    checkpoint = CHECKPOINT.get()
+    value = checkpoint or CURRENT.get()
+    legacy = CURRENT.get() if checkpoint is None else None
     token = CURRENT.set({**legacy, 'stage': stage} if legacy else None)
     try:
         return _checkpointed(stage, function, value, args, kwargs)

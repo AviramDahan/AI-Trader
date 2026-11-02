@@ -96,8 +96,9 @@ def test_canonical_completion_resumes_completed_source_without_second_model_call
         return {'relevance':.7}
     model=Mock(side_effect=invoke)
     monkeypatch.setattr(ai_provider,'json_completion',model)
-    first,first_usage=completion('source_analysis','prompt',source,SCHEMA)
-    second,second_usage=completion('source_analysis','prompt',source,SCHEMA)
+    with article(123,'legacy-version','other source'):
+        first,first_usage=completion('source_analysis','prompt',source,SCHEMA)
+        second,second_usage=completion('source_analysis','prompt',source,SCHEMA)
     assert first==second=={'relevance':.7}
     assert model.call_count==1
     assert second_usage.get('checkpoint_hit') is True
