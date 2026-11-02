@@ -8,6 +8,7 @@ import news_quality
 import scanner_engine
 from news_call_context import article, call
 from retry_policy import validation_detail
+from test_ai_routing import fixture, native
 
 SCHEMA={'type':'object','properties':{'relevance':{'type':'number','minimum':0,'maximum':1}},'required':['relevance']}
 
@@ -140,3 +141,42 @@ def test_canonical_checkpoint_rejects_changed_evidence_and_review_input(cache,mo
     for draft in ('first','changed'):
         completion('quality_review','prompt',{'source':source,'draft':draft},SCHEMA)
     assert model.call_count==5
+
+
+def test_canonical_queue_retries_only_failed_stage_and_escalates_cooldown(cache,fixture,monkeypatch):
+    import requests
+    import ai_routing
+    import news_local_backoff as backoff
+    import news_pipeline
+    from news_events.runtime import completion
+    from news_events.analysis import CanonicalAnalyzer,AnalysisFailure
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED','false')
+    monkeypatch.setattr('news_events.control.active',lambda:True)
+    monkeypatch.setattr(backoff,'_until',0.)
+    monkeypatch.setattr(backoff,'_streak',0)
+    clock=[100.]
+    monkeypatch.setattr(backoff.time,'monotonic',lambda:clock[0])
+    event={'event_id':'fixture','evidence_version':'v1','company_identity':None,
+           'event_type':'market','tickers':[],'published_at':'2026-11-02T00:00:00Z',
+           'title':'Company published a new report',
+           'normalized_evidence':[{'text':'Company published a new report.'}],'conflicts':[]}
+    draft=dict(related=True,title_he='החברה פרסמה דוח חדש',summary_he='החברה פרסמה דוח חדש.',
+               interpretation_he='המשמעות אינה ודאית.',sentiment='neutral',materiality='low',relevance=.5)
+    calls=[]
+    def local(messages,schema,predict):
+        calls.append(messages)
+        if len(calls)==1:return draft,native(draft)
+        raise requests.ConnectionError('synthetic')
+    monkeypatch.setattr(ai_routing,'local_completion',local)
+    def run_job(at):
+        try:CanonicalAnalyzer(completion)(event)
+        except AnalysisFailure:return {'analyzed':0,'errors':['synthetic_failure']}
+        raise AssertionError('review should fail')
+    monkeypatch.setattr('news_events.runtime.analyze_jobs',run_job)
+    assert news_pipeline.analyze_news_jobs()['errors']
+    assert len(calls)==2 and backoff.remaining()==120
+    assert news_pipeline.analyze_news_jobs()['deferred'] and len(calls)==2
+    clock[0]=221.
+    assert news_pipeline.analyze_news_jobs()['errors']
+    assert len(calls)==3 and backoff.remaining()==240
+    fixture[1].assert_not_called()  # No paid provider.
