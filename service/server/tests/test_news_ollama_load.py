@@ -16,6 +16,7 @@ import news_local_backoff as backoff
 def isolated_backoff(monkeypatch):
     monkeypatch.setattr(backoff,"_until",0.)
     monkeypatch.setattr(backoff,"_streak",0)
+    monkeypatch.setattr(backoff,"_validated_since_failure",False)
 from ai_schema_guidance import numeric_guidance, repair_guidance
 
 SCHEMA={'type':'object','properties':{'relevance':{'type':'number','minimum':0,'maximum':1}},
@@ -74,7 +75,18 @@ def test_transport_failure_does_not_generate_an_immediate_repair(fixture,monkeyp
     fixture[1].assert_not_called()
 
 
-def test_cooldown_increases_caps_and_only_valid_completion_resets(monkeypatch):
+def test_intermediate_valid_stage_does_not_clear_repeated_failure_cooldown(fixture,monkeypatch):
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED','false')
+    value={'relevance':.7}
+    monkeypatch.setattr(routing,'local_completion',Mock(return_value=(value,native(value))))
+    backoff.failed()
+    assert ai_provider.json_completion('Source only.',{},schema=SCHEMA)==value
+    assert backoff.remaining()>119
+    backoff.failed()
+    assert backoff.remaining()>239
+
+
+def test_cooldown_increases_caps_and_only_valid_story_completion_resets(monkeypatch):
     monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED','false')
     monkeypatch.setattr(backoff,'_until',0)
     clock=[100.]
@@ -83,7 +95,10 @@ def test_cooldown_increases_caps_and_only_valid_completion_resets(monkeypatch):
         backoff.failed()
         assert backoff.remaining()==wanted
         clock[0]+=wanted+1
-    backoff.recovered()
+    backoff.story_completed()
+    assert backoff._streak==4
+    backoff.validated_stage()
+    backoff.story_completed()
     assert backoff.remaining()==0
     backoff.failed()
     assert backoff.remaining()==120
@@ -100,6 +115,29 @@ def test_backoff_leaves_news_queue_and_attempts_untouched(monkeypatch):
     assert result['deferred'] and result['retry_after_seconds']==240
     forbidden.assert_not_called()
     assert not news_pipeline.NEWS_ANALYSIS_LOCK.locked()
+
+
+def test_cooldown_resets_only_after_complete_story_with_live_valid_stage(monkeypatch):
+    monkeypatch.setenv('AI_INFERENCE_MODE','ollama_first')
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED','false')
+    clock=[100.]
+    monkeypatch.setattr(backoff.time,'monotonic',lambda:clock[0])
+    monkeypatch.setattr('news_events.control.active',lambda:False)
+    backoff.failed()
+    clock[0]=221.
+    monkeypatch.setattr(news_pipeline,'_analyze_news_jobs',lambda *args:{'analyzed':1,'errors':[]})
+    news_pipeline.analyze_news_jobs()
+    assert backoff._streak==1  # An entirely cached result proves no recovery.
+    backoff.validated_stage()
+    monkeypatch.setattr(news_pipeline,'_analyze_news_jobs',lambda *args:{'analyzed':0,'errors':['quality_failed']})
+    news_pipeline.analyze_news_jobs()
+    assert backoff._streak==1
+    monkeypatch.setattr(news_pipeline,'_analyze_news_jobs',lambda *args:{'analyzed':1,'errors':[]})
+    news_pipeline.analyze_news_jobs()
+    assert backoff._streak==1  # Prior failed story's stage cannot count here.
+    backoff.validated_stage()
+    news_pipeline.analyze_news_jobs()
+    assert backoff._streak==0
 
 
 def test_news_backoff_does_not_change_shared_route_admission(fixture,monkeypatch):

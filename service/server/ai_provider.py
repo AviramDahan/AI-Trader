@@ -94,8 +94,8 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
                 raise ValueError("ai_object_required")
             success=True
             if route.provider == 'ollama_relay' and task == 'news':
-                from news_local_backoff import recovered
-                recovered()
+                from news_local_backoff import validated_stage
+                validated_stage()
             return value
         except requests.RequestException as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)

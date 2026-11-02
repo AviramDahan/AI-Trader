@@ -1452,8 +1452,21 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
         from news_events.control import active
         if active():
             from news_events.runtime import analyze_jobs
-            return analyze_jobs(at)
-        return _analyze_news_jobs(limit, analyzer, at)
+            outcome = analyze_jobs(at)
+        else:
+            outcome = _analyze_news_jobs(limit, analyzer, at)
+        if analyzer is None:
+            from news_local_backoff import story_completed, story_incomplete
+            if outcome.get('analyzed',0)>0 and not outcome.get('errors'):
+                story_completed()
+            else:
+                story_incomplete()
+        return outcome
+    except Exception:
+        if analyzer is None:
+            from news_local_backoff import story_incomplete
+            story_incomplete()
+        raise
     finally:
         NEWS_ANALYSIS_LOCK.release()
 

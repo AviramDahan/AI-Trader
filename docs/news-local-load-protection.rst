@@ -22,8 +22,10 @@ a hypothesis addressed by guidance, not an established cause of every violation.
 
 When paid fallback is disabled, consecutive local-news transport failures or
 exhausted schema repairs defer news admission for 120, 240, 480, then at most
-900 seconds. A validated news completion resets this streak. Health responses
-do not reset it. Context-capacity rejection does not poison smaller stories.
+900 seconds. The streak resets only after an entire news item passes its
+existing checks and at least one live local stage has validated since the last
+failure. A successful intermediate stage, cache-only completion or health
+response alone does not reset it. Context-capacity rejection does not poison smaller stories.
 The gate runs before either legacy or canonical queue handling, so waiting does
 not claim an item, increment attempts, delete an article or publish an alert.
 Actual attempted failures retain their existing queue retry accounting and
