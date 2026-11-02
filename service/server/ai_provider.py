@@ -23,9 +23,11 @@ def request_options():
 
 def json_completion(system, payload, *, predict=1000, schema=None, task="news",
                     max_attempts=2, usage_sink=None, repair=False, news_json_wrapping=False,
-                    structured_news=False):
+                    structured_news=False, usage_task=None):
     if max_attempts not in (1, 2):
         raise ValueError('invalid_ai_attempt_limit')
+    if usage_task not in (None,'translation') or (usage_task and task!='news'):
+        raise ValueError('invalid_ai_usage_task')
     model = (os.getenv("OPENROUTER_" + task.upper() + "_MODEL") or
              os.getenv("OPENROUTER_NEWS_MODEL") or os.getenv("OPENROUTER_MODEL"))
     key = os.getenv("OPENROUTER_API_KEY")
@@ -148,7 +150,7 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
             recorded_model = ('ollama/' + attempt_route['model'] + '@' + attempt_route['model_digest']
                               if local_attempt else model)
             from ai_operations import record
-            record('news_translation' if task in {'translation','news_translation','summary'} else 'news_analysis',
+            record('news_translation' if (usage_task or task) in {'translation','news_translation','summary'} else 'news_analysis',
                    recorded_model,billing_body,started,success,None if success else failure,retry=repair or attempt>0,
                    notify_failure=notify_failure)
             if usage_sink is not None:
