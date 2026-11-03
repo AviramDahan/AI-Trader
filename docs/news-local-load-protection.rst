@@ -126,9 +126,11 @@ this is an executable code regression, not an invented historical attribution.
 
 Active canonical path follow-up
 -------------------------------
-The earlier checkpoint implementation covered the legacy analyzer only; the
-observed deployed scanner has canonical news enabled. A synthetic regression
-reproduced the same repeated source call on the canonical path. Canonical
+The earlier checkpoint implementation covered the legacy analyzer only. The
+deployed scanner has the canonical runtime environment enabled, but a read-only
+check on 3 November found the effective database mode is ``phase1``; it is not
+currently publishing through the canonical path. A synthetic regression
+reproduced the same repeated source call on the optional canonical path. Canonical
 completion now uses the same schema-validated checkpoint, bound to the event
 and evidence version as well as the full prompt, payload, schema and model.
 A cache hit is not counted as a second provider invocation or charged as one.
@@ -145,6 +147,8 @@ GPU residency. The request completed in 34.19 seconds including cold start;
 model evaluation was 1.57 seconds. The structured schema, Hebrew presence and
 deterministic grounding checks passed. This does not test independent factual
 review, historic maximum values, production throughput or the shared daemon.
+The effective deployed publisher uses phase1, so that canonical-schema control
+does not validate the exact live publisher prompt or its output schema.
 The isolated process was stopped after the test; no shared daemon was restarted.
 
 Release remains unverified: the historical bound values and the condition that
