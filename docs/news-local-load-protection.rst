@@ -138,15 +138,17 @@ regression is synthetic; it does not establish how many historical requests
 repeated the same stage. A real model and the resulting sustained host load are
 still unverified; this change alone does not make CPU inference meet the deadline.
 
-Live inference performed by this investigation: ZERO. A future SINGLE canary,
-after safe idle startup by the shared daemon owner, should use a synthetic
-source-only news request with the unchanged actual schema, context and output
-budget; record physical GPU residency, prompt/eval durations, strict schema and
-Hebrew/source checks and cancellation outcome. It cannot prove historic maximum
-values, long-run quality or production throughput. Do not run a replay/batch,
-modify Dahan control or terminate another user's active request for this test.
+Live isolated GPU control, 3 November: a single synthetic source-stage request
+used the unchanged canonical schema, 8192 context and 1000 output budget. A new,
+separate Ollama daemon loaded a hash-verified independent model copy and observed
+GPU residency. The request completed in 34.19 seconds including cold start;
+model evaluation was 1.57 seconds. The structured schema, Hebrew presence and
+deterministic grounding checks passed. This does not test independent factual
+review, historic maximum values, production throughput or the shared daemon.
+The isolated process was stopped after the test; no shared daemon was restarted.
 
-Release remains BLOCKED: root causes of historical bound errors and daemon GPU
-startup, actual GPU generation, PG checkpoint integration and final-head CI are
-not all proven. Neither a deployed shared-runtime fix nor authorization to merge
-this Draft follows from model-free discovery alone.
+Release remains unverified: the historical bound values and the condition that
+caused the shared daemon to miss GPU discovery are unknown. The checkpoint and
+cooldown changes passed offline and PostgreSQL CI, but their impact on natural
+production traffic is not measured. A coordinated transition must protect both
+projects' active requests and be followed by real post-release observation.
