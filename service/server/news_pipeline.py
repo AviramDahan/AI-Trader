@@ -1444,13 +1444,40 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
     # the same story concurrently or compare duplicates before the first commits.
     if not NEWS_ANALYSIS_LOCK.acquire(blocking=False):
         return {'analyzed': 0, 'alerts': 0, 'errors': [], 'busy': True}
+    story_token = None
     try:
+        if analyzer is None:
+            from ai_routing import enabled, openrouter_fallback_enabled
+            from news_local_backoff import remaining
+            delay = remaining() if enabled() and not openrouter_fallback_enabled() else 0
+            if delay > 0:
+                # No job claim, attempt increment, source mutation or publication.
+                return {'analyzed': 0, 'alerts': 0, 'errors': [],
+                        'deferred': True, 'retry_after_seconds': delay}
+            from news_local_backoff import begin_story
+            story_token = begin_story()
         from news_events.control import active
         if active():
             from news_events.runtime import analyze_jobs
-            return analyze_jobs(at)
-        return _analyze_news_jobs(limit, analyzer, at)
+            outcome = analyze_jobs(at)
+        else:
+            outcome = _analyze_news_jobs(limit, analyzer, at)
+        if analyzer is None:
+            from news_local_backoff import story_completed, story_incomplete
+            if outcome.get('analyzed',0)>0 and not outcome.get('errors'):
+                story_completed()
+            else:
+                story_incomplete()
+        return outcome
+    except Exception:
+        if analyzer is None:
+            from news_local_backoff import story_incomplete
+            story_incomplete()
+        raise
     finally:
+        if story_token is not None:
+            from news_local_backoff import end_story
+            end_story(story_token)
         NEWS_ANALYSIS_LOCK.release()
 
 

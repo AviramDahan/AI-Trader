@@ -28,3 +28,21 @@ of lower latency. The existing local inference gateway, model, provider, budgets
 backoff, user positions and output/context limits are unchanged. A model running
 on CPU can still time out. No replay or test message is needed for rollout proof;
 observe natural new messages and record a lack of events as waiting, not success.
+
+Integrated local failure recovery
+---------------------------------
+
+Public translation and its independent review participate in the same exact-stage
+checkpoint mechanism as news analysis. A successful translation is reused after a
+later review transport failure, including after a process restart. Source version,
+prompt, draft, schema, model and output budget remain part of the cache identity;
+invalid output is rejected, never rescaled or stored as a valid stage. A cached
+result creates no new inference usage row.
+
+Local translation failures within the publication job also advance the existing
+news circuit. An intermediate valid stage does not reset that circuit; only a
+completed story containing a live validated stage does. Unrelated translation and
+position tasks cannot change it. These changes affect no shared gateway limits,
+Windows settings, trading analysis, provider fallback or publication fidelity
+requirements. Offline mocked failures prove resumption behaviour, not sustained
+real-model reliability. The feature remains OFF until an authorized release.
