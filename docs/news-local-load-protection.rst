@@ -156,3 +156,24 @@ caused the shared daemon to miss GPU discovery are unknown. The checkpoint and
 cooldown changes passed offline and PostgreSQL CI, but their impact on natural
 production traffic is not measured. A coordinated transition must protect both
 projects' active requests and be followed by real post-release observation.
+
+Strict-news output contract mismatch, 4 November
+------------------------------------------------
+
+The effective phase1 company-news producer calls ``analyze_strict`` with its
+existing output budget of2400. The exact installed gateway source, equal to the
+repository gateway after newline normalization, rejects ``predict>2048`` before
+any metadata or model call. An offline producer-to-gateway regression reproduced
+``invalid_predict`` using the real producer's requested budget. This proves an
+independent fast-failure path; it does not assign historical HTTP503 attempts to
+that path or explain ``maximum`` output validation failures.
+
+Protocol2 now supports that existing2400 ceiling. Protocol1 keeps its2048 bound;
+smaller requests keep their exact requested limits. Health advertises the new
+optional capability without changing protocol negotiation. Context8192, pinned
+model, no truncation/shift, single-slot concurrency, memory protections and45/120
+second deadlines remain unchanged. There is no larger default output budget or
+score normalization. Boundary and on-demand lifecycle tests use a mocked native
+runtime, not an actual2400-token generation. The running shared gateway must be
+updated separately through a coordinated idle transition before this correction
+can be claimed active; a cloud application deployment alone does not update it.
