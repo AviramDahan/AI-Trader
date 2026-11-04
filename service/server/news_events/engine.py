@@ -29,8 +29,19 @@ class Analysis:
     publication_duplicate:dict | None=None
 
 
+def public_translation_event(event):
+    import os
+    from .general_news import eligible_event
+    return (os.getenv('STOCK_SCANNER_PUBLIC_TRANSLATION_ONLY_ENABLED','false').lower()=='true'
+            and not event['tickers'] and (event['event_type']=='market' or eligible_event(event)))
+
+
 def route(event,result,positions,watchlist,universe,policy):
     """Provider/trust intentionally absent from all topic decisions."""
+    if result.get('_public_translation_only') is True:
+        if public_translation_event(event):
+            return [('market_news',[])],None
+        return [],'translation_scope_changed'
     if not result.get('related'):return [],'irrelevant'
     relevance=result['relevance'];materiality=result['materiality'];sentiment=result['sentiment']
     tickers=set(event['tickers'])
@@ -227,10 +238,16 @@ class Pipeline:
         try:
             # Network/LLM is strictly outside every DB transaction.
             output=analyzer(event)
-            from news_quality import ANALYSIS_SCHEMA
+            from news_quality import ANALYSIS_SCHEMA,PUBLIC_TRANSLATION_SCHEMA
             import jsonschema
-            jsonschema.validate(output.result,ANALYSIS_SCHEMA)
-            if any(not __import__('re').search('[\u0590-\u05ff]',output.result[k]) for k in ('title_he','summary_he','interpretation_he')):
+            translation=output.result.get('_public_translation_only') is True
+            if translation:
+                if not public_translation_event(event):
+                    raise ValueError('translation_scope_changed')
+                jsonschema.validate({k:v for k,v in output.result.items() if k!='_public_translation_only'},PUBLIC_TRANSLATION_SCHEMA)
+            else:
+                jsonschema.validate(output.result,ANALYSIS_SCHEMA)
+            if any(not __import__('re').search('[\u0590-\u05ff]',output.result[k]) for k in (('title_he','summary_he') if translation else ('title_he','summary_he','interpretation_he'))):
                 raise ValueError('news_missing_hebrew')
             status='done';error=None
         except Exception as exc:

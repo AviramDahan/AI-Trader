@@ -121,7 +121,7 @@ def project(p,eid,at):
             materiality=?,relevance=?,analysis_status=?,analysis_error=?,analyzed_at=?,alternate_sources_json=?,
             source_facts_json=?,content_hash=?,updated_at=? WHERE id=?''',
             (tickers[0] if tickers else None,json.dumps(tickers),category,scope,event['title'],r.get('title_he'),r.get('summary_he'),r.get('interpretation_he'),r.get('sentiment'),
-             r.get('materiality'),r.get('relevance'),'analyzed' if analysis else 'canonical_'+record['status'],record['reason'],
+             r.get('materiality'),r.get('relevance'),('public_translated' if r.get('_public_translation_only') is True else 'analyzed') if analysis else 'canonical_'+record['status'],record['reason'],
              stamp if analysis else None,json.dumps(event['provenance']),facts,record['evidence_version'],stamp,nid))
         # This is a CURRENT news projection, not the immutable canonical audit.
         # A corrected observation cannot retain an obsolete position link.
@@ -140,13 +140,17 @@ def project(p,eid,at):
 
 def completion(stage,system,payload,schema):
     from ai_provider import json_completion
+    from news_call_context import checkpoint_article, call as checkpointed_call
     from .call_context import CURRENT
     usage={'final_alert_owner':True}
     context=payload.get('source',payload)
     token=CURRENT.set(dict(event_id=context['canonical_event_id'],version=context['evidence_version'],stage=stage,final_alert_owner=True))
     try:
-        value=json_completion(system,payload,schema=schema,task='news',max_attempts=1,news_json_wrapping=True,structured_news=True,
-            usage_sink=usage,repair=stage in {'editorial_repair','repair_review'} or stage.startswith(('schema_repair:','local_fallback:')))
+        with checkpoint_article(context['canonical_event_id'],context['evidence_version'],
+                                json.dumps(context,sort_keys=True,ensure_ascii=True)):
+            value=checkpointed_call(stage,json_completion,system,payload,schema=schema,task='news',max_attempts=1,news_json_wrapping=True,structured_news=True,
+                usage_task='translation' if stage.rsplit(':',1)[-1] in {'public_translation','public_translation_review'} else None,
+                usage_sink=usage,repair=stage in {'editorial_repair','repair_review'} or stage.startswith(('schema_repair:','local_fallback:')))
     except Exception as exc:
         exc.canonical_usage=usage
         raise
@@ -201,7 +205,9 @@ def message(event,result,topic,tickers):
     parts=[(REPORT_PREFIX if report else '📰 ')+hide_relay_branding(clean_draft(result['title_he']))]
     if tickers:parts.append('מניות: '+', '.join(tickers))
     parts.append(hide_relay_branding(clean_draft(result['summary_he'])))
-    interpretation = hide_relay_branding(clean_draft(result['interpretation_he']))
+    interpretation = hide_relay_branding(clean_draft(result.get('interpretation_he') or ''))
+    if topic == 'market_news' and os.getenv('STOCK_SCANNER_PUBLIC_TRANSLATION_ONLY_ENABLED','false').lower() == 'true':
+        interpretation = ''
     if interpretation:parts.append('משמעות אפשרית לסוחר (AI): '+interpretation)
     # Ingestion provenance stays in storage. Retain required licensed credits.
     credits=[clean_draft(s['publisher']) for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')]

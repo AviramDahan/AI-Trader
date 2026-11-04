@@ -1278,22 +1278,23 @@ def _telegram_bulletin_text(text: str) -> str:
     return re.sub(r'[ \t]{2,}', ' ', text).strip()
 
 
-def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
+def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_only=False) -> bool:
     """General news is separate from trade-impact alerts; never replay old backlog."""
     if os.getenv("STOCK_SCANNER_GENERAL_NEWS_ENABLED", "true").lower() != "true":
         return False
     title = str(result.get("title_he") or "").strip()
     age = (current - _parse_time(row["published_at"])).total_seconds()
     if (row.get("scope") != "market" or _loads(row.get("verified_tickers_json"), []) or
-            row.get("provider") not in PROVIDERS or result.get("related") is not True or
+            row.get("provider") not in PROVIDERS or (not translation_only and result.get("related") is not True) or
             not re.search(r"[\u0590-\u05ff]", title) or
             not 0 <= age <= _int_env("STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS", 6, 1, 24) * 3600):
         return False
-    try:
-        if float(result.get("relevance", 0)) < _float_env("STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE", .3, .3, 1):
+    if not translation_only:
+        try:
+            if float(result.get("relevance", 0)) < _float_env("STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE", .3, .3, 1):
+                return False
+        except (TypeError, ValueError):
             return False
-    except (TypeError, ValueError):
-        return False
     event_filter, values = _same_event_filter("seen", row)
     cur.execute(f"""SELECT 1 FROM scanner_news_broadcast_alerts a
         JOIN scanner_news seen ON seen.id=a.news_id
@@ -1308,7 +1309,8 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
         return False
     # Keep source facts and trader-oriented interpretation visibly separate.
     summary = str(result.get("summary_he") or "").strip()
-    interpretation = str(result.get("interpretation_he") or "").strip()
+    interpretation = ("" if os.getenv("STOCK_SCANNER_PUBLIC_TRANSLATION_ONLY_ENABLED", "false").lower() == "true"
+                      else str(result.get("interpretation_he") or "").strip())
     telegram_post = row.get("source_kind") == "telegram_post"
     if telegram_post:
         title = _telegram_bulletin_text(title)
@@ -1381,10 +1383,10 @@ def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
     once for the full news analyzer instead of silently leaving it translated.
     """
     cutoff = current - timedelta(hours=_int_env("STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS", 168, 24, 720))
-    cur.execute("""SELECT n.id,n.ticker,n.scope,n.signal_id,n.published_at,n.verified_tickers_json,
+    cur.execute("""SELECT n.id,n.ticker,n.scope,n.signal_id,n.published_at,n.verified_tickers_json,n.analysis_status,
             w.enabled watch_enabled,w.created_at watch_created
         FROM scanner_news n LEFT JOIN scanner_news_watchlist w ON w.ticker=n.ticker
-        WHERE n.analysis_status IN ('pending_translation','translated')
+        WHERE n.analysis_status IN ('pending_translation','translated','public_translated')
           AND n.scope IN ('open_position','active_signal','watchlist','market','universe')
           AND (n.scope!='market' OR n.provider IS NOT NULL)""")
     queued = 0
@@ -1392,6 +1394,8 @@ def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
         published = _parse_time(row["published_at"])
         if published < cutoff:
             continue
+        if row['analysis_status'] == 'public_translated' and row['scope']=='market' and not _loads(row['verified_tickers_json'], []):
+            continue  # Do not schedule the same public translation repeatedly.
         if row['scope'] == 'universe':
             verified = _loads(row['verified_tickers_json'], [])
             boundary = os.getenv('TELEGRAM_NEWS_NOT_BEFORE', '').strip()
@@ -1440,13 +1444,40 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
     # the same story concurrently or compare duplicates before the first commits.
     if not NEWS_ANALYSIS_LOCK.acquire(blocking=False):
         return {'analyzed': 0, 'alerts': 0, 'errors': [], 'busy': True}
+    story_token = None
     try:
+        if analyzer is None:
+            from ai_routing import enabled, openrouter_fallback_enabled
+            from news_local_backoff import remaining
+            delay = remaining() if enabled() and not openrouter_fallback_enabled() else 0
+            if delay > 0:
+                # No job claim, attempt increment, source mutation or publication.
+                return {'analyzed': 0, 'alerts': 0, 'errors': [],
+                        'deferred': True, 'retry_after_seconds': delay}
+            from news_local_backoff import begin_story
+            story_token = begin_story()
         from news_events.control import active
         if active():
             from news_events.runtime import analyze_jobs
-            return analyze_jobs(at)
-        return _analyze_news_jobs(limit, analyzer, at)
+            outcome = analyze_jobs(at)
+        else:
+            outcome = _analyze_news_jobs(limit, analyzer, at)
+        if analyzer is None:
+            from news_local_backoff import story_completed, story_incomplete
+            if outcome.get('analyzed',0)>0 and not outcome.get('errors'):
+                story_completed()
+            else:
+                story_incomplete()
+        return outcome
+    except Exception:
+        if analyzer is None:
+            from news_local_backoff import story_incomplete
+            story_incomplete()
+        raise
     finally:
+        if story_token is not None:
+            from news_local_backoff import end_story
+            end_story(story_token)
         NEWS_ANALYSIS_LOCK.release()
 
 
@@ -1526,7 +1557,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
         if result and result.get('_news_version'):
             # Local overlay only: never modify final-review source tables.
             row = {**row, '_news_version': result['_news_version'], 'content_hash': result['_news_version']}
-        if result:
+        if result and not result.get('_public_translation_only'):
             audit(cur, row, result, at=stamp)
         if result and result.get('_error'):
             attempts = int(row['attempts']) + 1
@@ -1551,6 +1582,41 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
             cur.execute("UPDATE scanner_news_jobs SET status=?,attempts=attempts+1,next_attempt_at=?,last_error='missing_result',updated_at=? WHERE id=?",
                         (state, _z(current + timedelta(minutes=5)), stamp, row["job_id"]))
             cur.execute("UPDATE scanner_news SET analysis_status='analysis_error',analysis_error='missing_result' WHERE id=?", (row['id'],))
+            continue
+        if result.get('_public_translation_only'):
+            # Revalidate scope in the write transaction: an item that gained a
+            # ticker, position or signal must go through the trading analyzer.
+            from database import using_postgres
+            lock=' FOR UPDATE' if using_postgres() else ''
+            current_row=cur.execute('''SELECT scope,ticker,signal_id,verified_tickers_json
+                FROM scanner_news WHERE id=?'''+lock,(row['id'],)).fetchone()
+            from news_quality import public_translation_only
+            if not current_row or not public_translation_only(dict(current_row)):
+                cur.execute("UPDATE scanner_news_jobs SET status='retry',next_attempt_at=?,updated_at=? WHERE id=?",
+                            (stamp,stamp,row['job_id']))
+                cur.execute("UPDATE scanner_news SET analysis_status='pending_analysis',updated_at=? WHERE id=?",(stamp,row['id']))
+                errors.append('public_translation_scope_changed')
+                continue
+            duplicate=bool(result.get('duplicate_of'))
+            cur.execute('''UPDATE scanner_news SET title_he=?,summary_he=?,sentiment=NULL,relevance=NULL,
+                impact=NULL,materiality=NULL,thesis_effect=NULL,interpretation_he=NULL,analysis_status=?,
+                analyzed_at=?,analysis_error=NULL,duplicate_of=?,updated_at=? WHERE id=?''',
+                (str(result['title_he'])[:500],str(result['summary_he'])[:1000],
+                 'duplicate_event' if duplicate else 'public_translated',stamp,
+                 result.get('duplicate_of') or None,stamp,row['id']))
+            cur.execute("UPDATE scanner_news_jobs SET status='done',attempts=attempts+1,last_error=NULL,updated_at=? WHERE id=?",(stamp,row['job_id']))
+            analyzed+=1
+            if duplicate:
+                audit(cur,row,result,reason='duplicate',at=stamp)
+            elif not publication_allowed(row):
+                audit(cur,row,result,reason='backlog_blocked',at=stamp)
+            elif row.get('quality_version') != -2:
+                queued=_queue_general_bulletin(cur,row,result,current,stamp,translation_only=True)
+                alerts+=int(queued)
+                if queued:
+                    publication_outcome(cur,row,result,True,stamp)
+                else:
+                    audit(cur,row,result,reason='translation_not_queued',at=stamp)
             continue
         sentiment = result.get("sentiment") if result.get("sentiment") in {"positive", "negative", "mixed", "neutral", "unclear"} else "unclear"
         materiality = result.get("materiality") if result.get("materiality") in {"low", "medium", "high"} else "low"

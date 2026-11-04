@@ -24,6 +24,9 @@ KEEP_ALIVE_SECONDS = 120
 COMPLETION_POLICY = 'bounded_cold_start_v2'
 COLD_REQUEST_SECONDS = 120
 WARM_REQUEST_SECONDS = 45
+# Preserve the strict-news producer's existing output budget. This is a ceiling,
+# not a larger default; context, single-slot admission and deadlines stay fixed.
+PROTOCOL2_MAX_PREDICT = 2400
 
 
 class ContextCapacity(ValueError):
@@ -180,6 +183,7 @@ class Inference:
             load_policy='on_demand', keep_alive_seconds=KEEP_ALIVE_SECONDS,
             completion_policy=COMPLETION_POLICY, supported_completion_protocols=[1, 2],
             completion_timeout_seconds=COLD_REQUEST_SECONDS,
+            protocol2_max_predict=PROTOCOL2_MAX_PREDICT,
             last_request=self.last_request)
 
     def complete(self, payload):
@@ -188,7 +192,8 @@ class Inference:
         if type(payload['protocol']) is not int or payload['protocol'] not in (1, 2) or payload['model'] != MODEL or payload['digest'] != DIGEST:
             raise ValueError('unapproved_model')
         messages, predict = payload['messages'], payload['predict']
-        if not isinstance(predict, int) or isinstance(predict, bool) or not 1 <= predict <= 2048:
+        maximum = PROTOCOL2_MAX_PREDICT if payload['protocol'] == 2 else 2048
+        if not isinstance(predict, int) or isinstance(predict, bool) or not 1 <= predict <= maximum:
             raise ValueError('invalid_predict')
         if (not isinstance(messages, list) or not 1 <= len(messages) <= 16
                 or any(not isinstance(m, dict) or set(m) != {'role','content'}
