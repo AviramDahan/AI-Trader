@@ -1789,7 +1789,12 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             from community_discussions import dispatch
             result = dispatch(row)
         else:
-            result = send_telegram(row["message"], cfg, row["event_type"])
+            from news_direction_routing import enabled as directional_enabled, direction_for_outbox
+            if row['event_type'] == 'stock_news' and directional_enabled():
+                result = send_telegram(row['message'], cfg, row['event_type'],
+                                       stock_direction=direction_for_outbox(row))
+            else:
+                result = send_telegram(row["message"], cfg, row["event_type"])
         conn = get_db_connection(); cur = conn.cursor()
         if result == "sent":
             cur.execute("UPDATE scanner_telegram_outbox SET status='sent',attempts=attempts+1,sent_at=?,last_error=NULL WHERE id=? AND status IN ('sending','community_sending','trump_sending','trump_hebrew_sending','trump_media_sending','trump_bilingual_sending')",

@@ -80,9 +80,12 @@ def prior_report_delivery(cursor, row):
                                  (link['event_id'],)).fetchone()
             if event:
                 body=json.loads(event['body_json'])
-                keys=sorted({k for kind in (*NEWS_TYPES,'company_report')
+                destinations={thread_id_for_event(kind) for kind in (*NEWS_TYPES,'company_report')}
+                destinations.update(thread_id_for_event('stock_news',stock_direction=direction)
+                                    for direction in ('positive','negative'))
+                keys=sorted({k for destination in destinations
                     for k in publication_keys(body,link['version'],
-                        [os.getenv('TELEGRAM_CHAT_ID','').strip(),thread_id_for_event(kind)])})
+                        [os.getenv('TELEGRAM_CHAT_ID','').strip(),destination])})
                 if len(keys)>32:return 'company_report_peer_limit'
                 if keys:
                     peers=[*peers,*cursor.execute('SELECT id,status,last_error FROM scanner_telegram_outbox WHERE id!=? AND dedupe_key IN ('+
