@@ -89,7 +89,7 @@ def has_reported_results(title, excerpt=''):
     if actual_body:return True
     if (PERIOD.search(headline) and re.search(r'\bearnings\b',headline,re.I)
             and ACTUAL.search(text) and has_financial_values(text)):return True
-    if headline.startswith('📊 תוצאות פעילות החברה') and 'התוצאות בפועל' in text and has_financial_values(text):return True
+    if headline.startswith('📊 תוצאות פעילות החברה') and ('התוצאות בפועל' in text or 'נוכחי:' in text) and has_financial_values(text):return True
     if not (PERIOD.search(headline) and METRIC.search(headline)):return False
     if ACTUAL.search(headline):return True
     # Compact wire headlines: SYN 3Q ADJ EPS $2.10, EST $2.00.
@@ -114,7 +114,7 @@ def has_financial_values(title,excerpt=''):
     period+=r'(?:FY|fiscal|fiscal year|full.year|לשנת)\s*20\d{2}|quarter ended.{0,40}20\d{2}'
     if not re.search(period,text,re.I):return False
     field=re.compile(METRIC.pattern+r'|תזרים(?: מזומנים)? מפעילות שוטפת|תזרים מזומנים|מרווח(?: תפעולי)?',re.I)
-    value=re.compile(r'[$€£]\s*-?\d[\d,.]*|\b-?\d[\d,.]*\s*(?:%|[MB]\b|million\b|billion\b|cents?\b|מיליון|מיליארד|דולר|סנט)',re.I)
+    value=re.compile(r'[$€£]\s*-?\d[\d,.]*|\b-?\d[\d,.]*\s*(?:%|[MB]\b|USD\b|EUR\b|GBP\b|million\b|billion\b|cents?\b|מיליון|מיליארד|דולר|אירו|ליש|סנט)',re.I)
     expectation=re.compile(r'\b(?:expected|estimate[sd]?|consensus|forecast|guidance)\b|צפי|ציפיות|תחזית',re.I)
     lines=re.split(r'[\n;]|,(?!\d)|(?<=[.!?])\s+',text)
     expected_section=False
@@ -123,7 +123,7 @@ def has_financial_values(title,excerpt=''):
         if re.search(r'התוצאות בפועל|^\s*actual results',line,re.I):expected_section=False;continue
         if expected_section:continue
         if re.match(r'^\s*\W*(?:expected|forecast|guidance|consensus|צפי|תחזית|ציפיות)(?:\b|ל)',line,re.I):continue
-        if index+1<len(lines) and re.match(r'\s*(?:בפועל|actual)\s*:',lines[index+1],re.I):line+=' '+lines[index+1]
+        if index+1<len(lines) and re.match(r'\s*(?:בפועל|נוכחי|actual|current)\s*:',lines[index+1],re.I):line+=' '+lines[index+1]
         for match in field.finditer(line):
             before=line[max(0,match.start()-35):match.start()]
             if re.search(r'\b(?:expected|estimated|consensus|forecast|guidance)(?:\s+(?:for|of|adjusted|adj|non-gaap|gaap)){0,3}\s*$|'

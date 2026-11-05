@@ -30,6 +30,7 @@ def test_no_results_topic_from_qualitative_expectations_or_presentation_prefix(t
     ('Example reports Q3 results','EPS $2.10; revenue $100 million. Expected EPS $2.00.'),
     ('Example Q3 Earnings','Example reported EPS $2.10 and revenue $100 million.'),
     ('החברה דיווחה על תוצאות הרבעון השלישי','הרווח למניה היה 2.10 דולר, לעומת צפי של 2.00 דולר.'),
+    ('החברה דיווחה על רווחים ברבעון השלישי','רווח למניה של 3.55 אירו, לעומת צפי של 2.80 אירו, ומכירות של 14.44 מיליארד אירו.'),
     ('Example reports FY2026 financial results','Revenue $100 million.'),
     ('Example reports Q3 revenue','Revenue increased 18% year on year.'),
 ])
@@ -52,6 +53,8 @@ def test_dedicated_structured_report_type_keeps_its_topic():
     from news_report_routing import is_company_report
     assert is_company_report('📊 תוצאות פעילות החברה',
         'התוצאות בפועל\nתזרים מפעילות שוטפת\nבפועל: 267.2 מיליון דולר\nתקופת הדיווח: 2026-07-01 עד 2026-09-30')
+    assert is_company_report('📊 תוצאות פעילות החברה',
+        'תקופת הדיווח: 2026-07-01 עד 2026-09-30\nהכנסות\nנוכחי: 50,540,000,000 USD')
 
 
 @pytest.mark.parametrize('title,summary,report',[
