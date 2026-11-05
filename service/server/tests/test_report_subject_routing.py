@@ -25,3 +25,16 @@ def test_price_reaction_or_editorial_stays_outside_results(title):
 def test_results_remain_results_with_secondary_share_reaction(title):
     from news_report_routing import is_company_report
     assert is_company_report(title)
+
+
+def test_real_earnings_fact_remains_eligible_stock_news_without_becoming_a_report():
+    from news_report_routing import is_company_report
+    from news_public_importance import source_importance
+    title='Example Shares Rise Over 8% as Fiscal Q1 Earnings Exceed Forecasts'
+    assert not is_company_report(title)
+    assert source_importance(title)==(True,None)
+
+
+def test_earnings_prediction_does_not_gain_eligibility_from_price_context():
+    from news_public_importance import source_importance
+    assert not source_importance('Example Shares Rise as Q1 Earnings Could Beat Estimates')[0]

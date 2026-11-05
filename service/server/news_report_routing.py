@@ -25,7 +25,7 @@ PREVIEW = re.compile(r'\b(?:will report|to report|scheduled|earnings preview|ear
 MACRO_REVENUE = re.compile(r'\b(?:tax|government|budget) revenue\w*\b|הכנסות\s+(?:המדינה|הממשלה|ממסים)',re.I)
 
 
-def is_company_report(title, excerpt=''):
+def has_reported_results(title, excerpt=''):
     title=title if isinstance(title,str) else ''
     excerpt=excerpt if isinstance(excerpt,str) else ''
     text=CONTROLS.sub('',title+'\n'+excerpt)[:12000]
@@ -87,11 +87,61 @@ def is_company_report(title, excerpt=''):
                     and not (PREVIEW.search(line) and not PAST.search(line))
                     for line in factual)
     if actual_body:return True
+    if (PERIOD.search(headline) and re.search(r'\bearnings\b',headline,re.I)
+            and ACTUAL.search(text) and has_financial_values(text)):return True
+    if headline.startswith('📊 תוצאות פעילות החברה') and 'התוצאות בפועל' in text and has_financial_values(text):return True
     if not (PERIOD.search(headline) and METRIC.search(headline)):return False
     if ACTUAL.search(headline):return True
     # Compact wire headlines: SYN 3Q ADJ EPS $2.10, EST $2.00.
     return bool(re.search(r'\b(?:EPS|EBITDA|REVENUES?|REV|SALES|LOSS PER SHARE|NET PROFIT|OPERATING PROFIT)'
         r'\s*[:$€£]?\s*-?\d',headline,re.I))
+
+
+def results_only_enabled():
+    return os.getenv('TELEGRAM_COMPANY_REPORTS_RESULTS_ONLY_ENABLED','false').lower()=='true'
+
+
+def has_financial_values(title,excerpt=''):
+    """Visible reported values and a stated period, not dates/stock targets.
+
+    This checks presence, not truth or units conversion. Source fidelity and
+    current-version analysis remain the caller's existing authority.
+    """
+    text=CONTROLS.sub('',str(title or '')+'\n'+str(excerpt or ''))[:12000]
+    text=re.split(r'משמעות אפשרית לסוחר\s*\(AI\):|פרשנות AI:',text,maxsplit=1)[0]
+    period=r'\b(?:Q[1-4]|[1-4]Q)\b|\b(?:first|second|third|fourth)[ -]quarter\b|'
+    period+=r'רבעון.{0,15}(?:ראשון|שני|שלישי|רביעי|[1-4])|תקופת הדיווח\s*:\s*20\d{2}|'
+    period+=r'(?:FY|fiscal|fiscal year|full.year|לשנת)\s*20\d{2}|quarter ended.{0,40}20\d{2}'
+    if not re.search(period,text,re.I):return False
+    field=re.compile(METRIC.pattern+r'|תזרים(?: מזומנים)? מפעילות שוטפת|תזרים מזומנים|מרווח(?: תפעולי)?',re.I)
+    value=re.compile(r'[$€£]\s*-?\d[\d,.]*|\b-?\d[\d,.]*\s*(?:%|[MB]\b|million\b|billion\b|cents?\b|מיליון|מיליארד|דולר|סנט)',re.I)
+    expectation=re.compile(r'\b(?:expected|estimate[sd]?|consensus|forecast|guidance)\b|צפי|ציפיות|תחזית',re.I)
+    lines=re.split(r'[\n;]|,(?!\d)|(?<=[.!?])\s+',text)
+    expected_section=False
+    for index,line in enumerate(lines):
+        if re.search(r'ציפיות האנליסטים|^\s*(?:analyst expectations|consensus expectations)',line,re.I):expected_section=True;continue
+        if re.search(r'התוצאות בפועל|^\s*actual results',line,re.I):expected_section=False;continue
+        if expected_section:continue
+        if re.match(r'^\s*\W*(?:expected|forecast|guidance|consensus|צפי|תחזית|ציפיות)(?:\b|ל)',line,re.I):continue
+        if index+1<len(lines) and re.match(r'\s*(?:בפועל|actual)\s*:',lines[index+1],re.I):line+=' '+lines[index+1]
+        for match in field.finditer(line):
+            before=line[max(0,match.start()-35):match.start()]
+            if re.search(r'\b(?:expected|estimated|consensus|forecast|guidance)(?:\s+(?:for|of|adjusted|adj|non-gaap|gaap)){0,3}\s*$|'
+                         r'(?:צפי|תחזית|ציפיות)(?:\s*(?:ל|של))?\s*$|\b(?:previous|prior|last year)\s*$',before,re.I):continue
+            after=line[match.end():match.end()+100]
+            number=value.search(after)
+            if (number and not expectation.search(after[:number.start()])
+                    and not re.search(r'\b(?:shares?|stock|price)\b|מחיר|מניות|מניית',after[:number.start()],re.I)):return True
+            if re.fullmatch(r'EPS|(?:earnings|loss) per share',match[0],re.I):
+                if re.match(r'\s*[:=]?\s*-?\d+\.\d+\b',after):return True
+    return False
+
+
+def is_company_report(title,excerpt=''):
+    if not results_only_enabled():return has_reported_results(title,excerpt)
+    # A historical presentation prefix does not prove that figures exist.
+    title=CONTROLS.sub('',str(title or '')).replace(REPORT_PREFIX,'',1)
+    return has_reported_results(title,excerpt) and has_financial_values(title,excerpt)
 
 
 def report_event(event):
@@ -103,8 +153,51 @@ def report_event(event):
                for source in event.get('sources',[]))
 
 
-def delivery_type(kind, message, *, analyst_update=None):
-    if kind in NEWS_TYPES and is_company_report(message):return 'company_report'
+def report_for_presentation(event,result):
+    return report_event(event) and (not results_only_enabled() or
+        is_company_report(result.get('title_he'),result.get('summary_he','')))
+
+
+def report_for_outbox(row):
+    """Strict mode binds report identity to exact retained source AND payload."""
+    if not results_only_enabled() or row.get('event_type') not in NEWS_TYPES:return None
+    from database import get_db_connection
+    from news_events.control import state
+    try:
+        with get_db_connection() as c:
+            key=row.get('dedupe_key','');control=state(c)
+            if key.startswith('canonical:'):
+                if control['mode']!='canonical':return False
+                link=c.execute('SELECT * FROM ne_outbox WHERE dedupe_key=?',(key,)).fetchone()
+                if (not link or link['epoch']!=control['epoch'] or
+                    {'market_news':'market_news','important_stock_news':'stock_news','portfolio_watchlist':'position_news'}.get(link['topic'])!=row['event_type']):return False
+                event=c.execute('SELECT * FROM ne_events WHERE event_id=?',(link['event_id'],)).fetchone()
+                if not event or event['evidence_version']!=link['version'] or event['status']!='analyzed' or event['reason']:return False
+                result=c.execute("SELECT result_json FROM ne_analysis WHERE event_id=? AND version=? AND status='done'",(link['event_id'],link['version'])).fetchone()
+                return bool(result and report_for_presentation(json.loads(event['body_json']),json.loads(result['result_json'])))
+            p=key.split(':')
+            if (control['mode']!='phase1' or len(p) not in (3,4) or p[0] not in ('market-news','stock-news','news','watchlist-news')
+                    or not p[1].isdigit() or int(p[1])<=0 or not re.fullmatch(r'[0-9a-f]{20}|[0-9a-f]{64}|v1',p[2])):return False
+            family={'market_news':'market-news','stock_news':'stock-news','position_news':'news','watchlist_news':'watchlist-news'}.get(row['event_type'])
+            if p[0]!=family or (family=='market-news' and len(p)!=3) or (family!='market-news' and (len(p)!=4 or not p[3])):return False
+            record=c.execute('SELECT * FROM scanner_news WHERE id=?',(int(p[1]),)).fetchone()
+            if not record:return False
+            record=dict(record);audit=c.execute('SELECT content_version FROM news_publication_audit WHERE news_id=?',(record['id'],)).fetchone()
+            version=audit['content_version'] if audit else record.get('content_hash') or 'v1'
+            if p[2]!=version or record.get('analysis_status') not in ('analyzed','public_translated') or record.get('analysis_error') or record.get('duplicate_of'):return False
+            if record.get('analysis_status')=='analyzed' and record.get('quality_version') not in (2,3):return False
+            if family=='stock-news':
+                selected=p[3].split(',');verified=json.loads(record.get('verified_tickers_json') or 'null')
+                if (not isinstance(verified,list) or any(not isinstance(t,str) or not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,14}',t) for t in verified)
+                        or selected!=sorted(set(selected)) or not set(selected)<=set(verified)):return False
+            facts=json.loads(record.get('source_facts_json') or '{}')
+            return (isinstance(facts,dict) and is_company_report(record.get('title'),facts.get('source_excerpt',''))
+                    and is_company_report(row.get('message')))
+    except (ValueError,TypeError,KeyError):return False
+
+
+def delivery_type(kind, message, *, analyst_update=None, company_report=None):
+    if kind in NEWS_TYPES and (company_report is True or (company_report is None and is_company_report(message))):return 'company_report'
     from news_analyst_routing import BROAD_TYPES, enabled, is_analyst_update
     if kind in BROAD_TYPES and enabled() and (analyst_update is True or
             (analyst_update is None and is_analyst_update(message))):return 'analyst_update'

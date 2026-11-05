@@ -1324,10 +1324,12 @@ def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_onl
         title = _telegram_bulletin_text(title)
         summary = _telegram_bulletin_text(summary)
         interpretation = _telegram_bulletin_text(interpretation)
-    from news_report_routing import is_company_report, REPORT_PREFIX
+    from news_report_routing import is_company_report, REPORT_PREFIX, results_only_enabled
     source_facts = _loads(row.get('source_facts_json'), {})
     source_excerpt = source_facts.get('source_excerpt','') if isinstance(source_facts,dict) else ''
-    report = is_company_report(row.get('title'), source_excerpt) or is_company_report(title, summary)
+    source_report=is_company_report(row.get('title'),source_excerpt)
+    shown_report=is_company_report(title,summary)
+    report = source_report and shown_report if results_only_enabled() else source_report or shown_report
     parts = [(REPORT_PREFIX if report else "📰 ") + title[:350]]
     if (telegram_post or not row.get("headline_only")) and summary and summary != title:
         parts.append(summary[:450])

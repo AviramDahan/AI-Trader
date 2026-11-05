@@ -8,6 +8,8 @@ from test_earnings_news_routing_pg import sender
     ('Broker Adjusts Example PT to $105 From $100','analyst'),
     ('Example wins $200 million supply contract','positive'),
     ('3 stocks to buy before the next rally','cancelled'),
+    ('Example reports Q3 EPS $2.10','reports'),
+    ('Example Q3 Earnings Beat Estimates','positive'),
 ])
 def test_legacy_twenty_hex_version_routes_or_cancels_once(pg,sender,monkeypatch,title,expected):
     from datetime import datetime,timezone
@@ -17,6 +19,7 @@ def test_legacy_twenty_hex_version_routes_or_cancels_once(pg,sender,monkeypatch,
     monkeypatch.setenv('TELEGRAM_DIRECTIONAL_STOCK_NEWS_ENABLED','true')
     monkeypatch.setenv('STOCK_SCANNER_PUBLIC_NEWS_STRICT_QUALITY_ENABLED','true')
     monkeypatch.setenv('TELEGRAM_ANALYST_UPDATES_TOPIC_ENABLED','true')
+    monkeypatch.setenv('TELEGRAM_COMPANY_REPORTS_RESULTS_ONLY_ENABLED','true')
     monkeypatch.setenv('TELEGRAM_ANALYST_UPDATES_THREAD_ID','880')
     monkeypatch.setenv('TELEGRAM_POSITIVE_STOCK_NEWS_THREAD_ID','881')
     monkeypatch.setattr(stock_scanner,'settings',lambda:{'telegram_enabled':True})
@@ -31,12 +34,13 @@ def test_legacy_twenty_hex_version_routes_or_cancels_once(pg,sender,monkeypatch,
             ('fixture',title,at,at,version))
         nid=c.execute('SELECT id FROM scanner_news').fetchone()['id']
         key=f'stock-news:{nid}:{version}:TEST'
-        assert scanner_engine.enqueue_telegram(c.cursor(),key,'stock_news','עדכון חברה חדש',published_at=at)
+        shown=title if expected=='reports' else 'עדכון חברה חדש'
+        assert scanner_engine.enqueue_telegram(c.cursor(),key,'stock_news',shown,published_at=at)
     result=scanner_engine.process_telegram_outbox()
     assert result['sent']==int(expected!='cancelled')
     assert scanner_engine.process_telegram_outbox()['sent']==0
     if expected=='cancelled':assert not sender.post.called
-    else:assert sender.post.call_args.kwargs['data']['message_thread_id']==(880 if expected=='analyst' else 881)
+    else:assert sender.post.call_args.kwargs['data']['message_thread_id']=={'analyst':880,'positive':881,'reports':456}[expected]
     with database.get_db_connection() as c:
         row=dict(c.execute('SELECT * FROM scanner_telegram_outbox WHERE dedupe_key=?',(key,)).fetchone())
         assert row['status']==('cancelled' if expected=='cancelled' else 'sent')

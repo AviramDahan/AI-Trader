@@ -200,8 +200,8 @@ def message(event,result,topic,tickers):
     from news_pipeline import _publication_time_he
     from news_presentation import hide_relay_branding
     from news_source_links import clean_draft, append_source, safe_source_url
-    from news_report_routing import report_event, REPORT_PREFIX
-    report=report_event(event)
+    from news_report_routing import report_for_presentation, REPORT_PREFIX
+    report=report_for_presentation(event,result)
     parts=[(REPORT_PREFIX if report else '📰 ')+hide_relay_branding(clean_draft(result['title_he']))]
     if tickers:parts.append('מניות: '+', '.join(tickers))
     parts.append(hide_relay_branding(clean_draft(result['summary_he'])))
@@ -227,11 +227,12 @@ def general_publication_keys(event, version, topic, result=None):
     from news_direction_routing import enabled, direction_for_result
     direction=direction_for_result(event,result) if enabled() and kind=='stock_news' else None
     from news_analyst_routing import enabled as analyst_enabled, analyst_event
-    if (enabled() or analyst_enabled()) and result:
-        from news_report_routing import delivery_type, report_event
+    if result:
+        from news_report_routing import delivery_type, report_for_presentation, results_only_enabled
+        report=report_for_presentation(event,result)
         kind=delivery_type(kind,(result.get('title_he') or '')+'\n'+(result.get('summary_he') or ''),
-                           analyst_update=analyst_event(event))
-        if report_event(event):
+                           analyst_update=analyst_event(event),company_report=report if results_only_enabled() else None)
+        if report:
             kind='company_report'  # Same original-source report header as message().
     destination=[os.getenv('TELEGRAM_CHAT_ID','').strip(),thread_id_for_event(kind,stock_direction=direction)]
     return publication_keys(event,version,destination)

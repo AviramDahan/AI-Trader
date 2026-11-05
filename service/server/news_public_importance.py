@@ -17,7 +17,7 @@ def enabled():
 def source_importance(title, excerpt=''):
     """Bounded factual source classifier; translated/AI summaries are excluded."""
     from news_analyst_routing import is_analyst_update
-    from news_report_routing import is_company_report
+    from news_report_routing import has_reported_results
     title=title if isinstance(title,str) else ''
     excerpt=excerpt if isinstance(excerpt,str) else ''
     title=re.sub(r'\s+',' ',title).strip()[:2000]
@@ -41,7 +41,12 @@ def source_importance(title, excerpt=''):
     if is_analyst_update(title,excerpt):return True,None
     # A body-only report needs an explicit actual-period/result clause under
     # the report classifier, never a forward-looking disclaimer.
-    if is_company_report(title,excerpt):return True,None
+    if has_reported_results(title,excerpt):return True,None
+    # Eligibility and destination are different decisions. A price-led story
+    # can report an actual earnings fact yet belong in stock news, not Reports.
+    # Only an explicit realized-result clause qualifies, never a prediction.
+    for clause in re.split(r'\b(?:as|after|despite)\b',title,flags=re.I)[1:4]:
+        if has_reported_results(clause):return True,None
     # Explicit developments, not generic launch/partnership marketing or a
     # large percentage in an editorial forecast. No full-article requirement.
     patterns=(

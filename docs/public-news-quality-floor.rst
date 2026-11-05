@@ -41,6 +41,22 @@ No rehash, new identifier, backfill or replay is required.
 Verification and rollout
 ------------------------
 
+``TELEGRAM_COMPANY_REPORTS_RESULTS_ONLY_ENABLED`` defaults false. Under the
+human-approved results-only definition, generic news can enter Reports only
+when the exact original source AND the visible bulletin contain actual financial
+values and a stated report period. Expected values alone, publication dates,
+share-price reactions and qualitative "beat/miss" headlines do not qualify.
+Existing typed company-report producers keep Reports, including their honest
+missing-consensus labels. The weekly calendar stays pinned there. Actual
+earnings facts can remain eligible stock news without being a results bulletin;
+topic selection does not suppress the internal trading/news analysis.
+
+Strict retained dispatch supplies an explicit source-bound report decision so
+old presentation prefixes or model summaries cannot override that decision.
+Canonical presentation and destination-bound keys apply the same rule even
+when the directional and analyst flags are disabled. Changed prepared keys
+cancel without rewrite/replay. No new model call or fabricated number is added.
+
 Tests use synthetic source facts and isolated databases with mocked transports,
 including the real legacy version generator, queue/send, restart, invalid/stale
 versions, personal preservation and translation NULL fields. These do not prove
