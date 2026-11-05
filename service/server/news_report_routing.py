@@ -36,6 +36,17 @@ def is_company_report(title, excerpt=''):
     headline=next((line.split('כותרת:',1)[1] for line in lines if line.startswith('כותרת:')),lines[0])
     if headline.startswith(REPORT_PREFIX):return True
     if '?' in headline:return False  # Editorial question is not a results release.
+    # The topic follows the article's subject. A share-price reaction or an
+    # explanatory metrics article is news, even when earnings explain it.
+    first=headline.split(';',1)[0]
+    financial=re.compile(r'\b(?:earnings|EPS|revenues?|sales|profit|net income|financial results)\b',re.I)
+    share=re.search(r'\b(?:shares|stock)\b',first,re.I)
+    price_action=r'\b(?:ris(?:e[sd]?)|rose|surges?|soars?|falls?|fell|drops?|sinks?|plunges?|jumps?|down|up|declin(?:es?|ed)|little changed)\b'
+    if (share and not financial.search(first[:share.start()])
+            and re.search(price_action,first[share.end():share.end()+65],re.I)):return False
+    move=re.search(price_action+r'.{0,18}\d+(?:\.\d+)?\s*%',first,re.I)
+    if move and not financial.search(first[:move.start()]):return False
+    if re.search(r'\b(?:how|what) key metrics\b|האם.{0,40}כדאי',headline,re.I):return False
     if (re.search(r'\b(?:clinical|trial|election|poll|exam|sports|acquisition|merger|appoints?)\b|'
                   r'תוצאות ניסוי|תוצאות בחירות|מינוי מנכ',headline,re.I)
             and not re.search(r'financial results|תוצאות כספיות',headline,re.I)):return False
@@ -61,7 +72,7 @@ def is_company_report(title, excerpt=''):
         if (re.search(r'\b(?:reports?|announces?|posts?|released)\b',first_clause,re.I)
                 and re.search(r'\bresults\b',first_clause,re.I)):return True
         if (re.search(r'\b(?:earnings|EPS|revenues?|sales|net (?:income|profit)|profit|funds from operations)\b',first_clause,re.I)
-                and re.search(r'\b(?:beats?|miss(?:es)?|surpass(?:es)?|exceeds?|ris(?:e[sd]?)|'
+                and re.search(r'\b(?:beats?|miss(?:es)?|surpass(?:es)?|exceeds?|surges?|ris(?:e[sd]?)|'
                     r'increases?|declines?|falls?|drops?|grew|grows?|flat|up|down)\b',first_clause,re.I)):
             return True
     if PERIOD.search(headline) and ACTUAL.search(headline) and re.search(r'\bearnings\b|רווחים|הפסדים',headline,re.I):return True
