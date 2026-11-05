@@ -220,11 +220,18 @@ def message(event,result,topic,tickers):
     return append_source('\n\n'.join(parts),event['sources'],required_footer='\n\n'.join(footer))
 
 
-def general_publication_keys(event, version, topic):
+def general_publication_keys(event, version, topic, result=None):
     from telegram_topics import thread_id_for_event
     from .general_news import publication_keys
     kind={'market_news':'market_news','portfolio_watchlist':'position_news','important_stock_news':'stock_news'}[topic]
-    destination=[os.getenv('TELEGRAM_CHAT_ID','').strip(),thread_id_for_event(kind)]
+    from news_direction_routing import enabled, direction_for_result
+    direction=direction_for_result(event,result) if enabled() and kind=='stock_news' else None
+    if enabled() and result:
+        from news_report_routing import delivery_type, is_company_report
+        kind=delivery_type(kind,(result.get('title_he') or '')+'\n'+(result.get('summary_he') or ''))
+        if any(is_company_report(s.get('title'),s.get('source_excerpt')) for s in event.get('sources',[])):
+            kind='company_report'  # Same original-source report header as message().
+    destination=[os.getenv('TELEGRAM_CHAT_ID','').strip(),thread_id_for_event(kind,stock_direction=direction)]
     return publication_keys(event,version,destination)
 
 
@@ -246,7 +253,7 @@ def queue_outbox(p,eid,at):
                 c.execute("UPDATE ne_delivery SET status='legacy_receipt' WHERE event_id=? AND version=? AND topic=?",(eid,version,topic));continue
             key='canonical:'+eid+':'+version+':'+topic
             kind={'market_news':'market_news','portfolio_watchlist':'position_news','important_stock_news':'stock_news'}[topic]
-            keys=general_publication_keys(event,version,topic)
+            keys=general_publication_keys(event,version,topic,result)
             if keys:
                 # Unique durable outbox keys, serialized by Store's existing
                 # write transaction. Never retry an unknown/failed prior send
@@ -276,7 +283,7 @@ def delivery_message(outbox):
         if not result:return None
         result=json.loads(result['result_json']);held,watched=membership(c)
         if (outbox['dedupe_key'].startswith('canonical:general-v1:')
-                and outbox['dedupe_key'] not in general_publication_keys(event,link['version'],link['topic'])):
+                and outbox['dedupe_key'] not in general_publication_keys(event,link['version'],link['topic'],result)):
             return None  # Evidence/source/destination changed since preparation.
         routes,reason=route(event,result,held,watched,p.universe,p.policy)
         matching=[tickers for topic,tickers in routes if topic==link['topic']]

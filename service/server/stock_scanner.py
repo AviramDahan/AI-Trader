@@ -1160,7 +1160,7 @@ def _telegram_message(signal: dict[str, Any], event: str = "NEW STRONG SIGNAL") 
     return "\n\n".join(blocks)[:4000]
 
 
-def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = None) -> str:
+def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = None, *, stock_direction: str | None = None) -> str:
     if not cfg.get("telegram_enabled"):
         return "disabled"
     token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN", "").strip(), os.getenv("TELEGRAM_CHAT_ID", "").strip()
@@ -1171,6 +1171,10 @@ def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = No
         from telegram_presentation import telegram_text
         from news_report_routing import delivery_type
         event_type = delivery_type(event_type, message)
+        from news_direction_routing import enabled as directional_enabled
+        if (event_type == 'stock_news' and directional_enabled()
+                and thread_id_for_event(event_type, stock_direction=stock_direction) is None):
+            return json.dumps({'terminal': True, 'reason': 'stock_news_topic_not_configured'})
         if event_type == 'company_report' and thread_id_for_event(event_type) is None:
             return json.dumps({'terminal': True, 'reason': 'company_reports_topic_not_configured'})
         if event_type in {'sec_intelligence', 'trump_truth_post'} and thread_id_for_event(event_type) is None:
@@ -1178,7 +1182,7 @@ def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = No
         session = requests.Session()
         session.trust_env = False
         response = session.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                                data={**destination_fields(chat_id, event_type), "text": telegram_text(with_news_community_link(message, event_type)),
+                                data={**destination_fields(chat_id, event_type, stock_direction=stock_direction), "text": telegram_text(with_news_community_link(message, event_type)),
                                       "disable_web_page_preview": True}, timeout=15)
         response.raise_for_status()
         if event_type == 'trump_truth_post':

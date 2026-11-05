@@ -63,12 +63,17 @@ def with_news_community_link(message: str, event_type: str | None) -> str:
     return message + suffix
 
 
-def thread_id_for_event(event_type: str | None) -> int | None:
+def thread_id_for_event(event_type: str | None, *, stock_direction: str | None = None) -> int | None:
     if event_type == 'community_discussion':
         return None  # General: omit message_thread_id, never trading fallback.
     if not event_type:
         return None
-    if event_type in MARKET_NEWS_EVENT_TYPES or event_type == 'trump_truth_post':
+    from news_direction_routing import enabled
+    if event_type == 'stock_news' and enabled():
+        names = (("TELEGRAM_POSITIVE_STOCK_NEWS_THREAD_ID",) if stock_direction == 'positive' else
+                 ("TELEGRAM_NEGATIVE_STOCK_NEWS_THREAD_ID",) if stock_direction == 'negative' else
+                 ("TELEGRAM_MARKET_NEWS_THREAD_ID", "TELEGRAM_NEWS_THREAD_ID"))
+    elif event_type in MARKET_NEWS_EVENT_TYPES or event_type == 'trump_truth_post':
         names = ("TELEGRAM_MARKET_NEWS_THREAD_ID", "TELEGRAM_NEWS_THREAD_ID")
     elif event_type in COMPANY_REPORT_EVENT_TYPES:
         # A missing report topic must never spill financial results into SEC/General.
@@ -99,9 +104,9 @@ def thread_id_for_event(event_type: str | None) -> int | None:
     return None
 
 
-def destination_fields(chat_id: str, event_type: str | None) -> dict[str, str | int]:
+def destination_fields(chat_id: str, event_type: str | None, *, stock_direction: str | None = None) -> dict[str, str | int]:
     fields: dict[str, str | int] = {"chat_id": chat_id}
-    thread_id = thread_id_for_event(event_type)
+    thread_id = thread_id_for_event(event_type, stock_direction=stock_direction)
     if thread_id is not None:
         fields["message_thread_id"] = thread_id
     return fields
