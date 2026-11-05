@@ -35,6 +35,7 @@ def is_company_report(title, excerpt=''):
     if not lines:return False
     headline=next((line.split('כותרת:',1)[1] for line in lines if line.startswith('כותרת:')),lines[0])
     if headline.startswith(REPORT_PREFIX):return True
+    if '?' in headline:return False  # Editorial question is not a results release.
     if (re.search(r'\b(?:clinical|trial|election|poll|exam|sports|acquisition|merger|appoints?)\b|'
                   r'תוצאות ניסוי|תוצאות בחירות|מינוי מנכ',headline,re.I)
             and not re.search(r'financial results|תוצאות כספיות',headline,re.I)):return False
@@ -50,6 +51,19 @@ def is_company_report(title, excerpt=''):
     if re.search(r'\banalyst\b|price target|מחיר יעד',headline,re.I) and not ACTUAL.search(headline):return False
     if MACRO_REVENUE.search(text):return False
     if RESULTS.search(headline):return True
+    # Compact actual wire results often omit "reports", e.g. Q3 adjusted
+    # earnings/revenue rise. Only an explicit period + financial metric +
+    # realized result verb qualifies; future guidance alone does not.
+    first_clause=headline.split(';',1)[0]
+    future=bool(re.search(r'\b(?:could|might|may|will|would|expected to|expects? to)\b|'
+        r'\b(?:revenue|sales|EPS|earnings)\s+(?:forecast|guidance|outlook)\b',first_clause,re.I))
+    if PERIOD.search(first_clause) and not future:
+        if (re.search(r'\b(?:reports?|announces?|posts?|released)\b',first_clause,re.I)
+                and re.search(r'\bresults\b',first_clause,re.I)):return True
+        if (re.search(r'\b(?:earnings|EPS|revenues?|sales|net (?:income|profit)|profit|funds from operations)\b',first_clause,re.I)
+                and re.search(r'\b(?:beats?|miss(?:es)?|surpass(?:es)?|exceeds?|ris(?:e[sd]?)|'
+                    r'increases?|declines?|falls?|drops?|grew|grows?|flat|up|down)\b',first_clause,re.I)):
+            return True
     if PERIOD.search(headline) and ACTUAL.search(headline) and re.search(r'\bearnings\b|רווחים|הפסדים',headline,re.I):return True
     if (PERIOD.search(headline) and re.search(r'\bearnings\b.{0,30}\b(?:beat(?:s)?|miss(?:es)?)\b.{0,30}'
             r'\b(?:estimates?|expectations?|consensus|forecasts?)\b',headline,re.I)):return True
