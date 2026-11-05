@@ -1160,7 +1160,7 @@ def _telegram_message(signal: dict[str, Any], event: str = "NEW STRONG SIGNAL") 
     return "\n\n".join(blocks)[:4000]
 
 
-def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = None, *, stock_direction: str | None = None) -> str:
+def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = None, *, stock_direction: str | None = None, analyst_update: bool | None = None) -> str:
     if not cfg.get("telegram_enabled"):
         return "disabled"
     token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN", "").strip(), os.getenv("TELEGRAM_CHAT_ID", "").strip()
@@ -1170,7 +1170,9 @@ def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = No
         from telegram_topics import destination_fields, thread_id_for_event, with_news_community_link
         from telegram_presentation import telegram_text
         from news_report_routing import delivery_type
-        event_type = delivery_type(event_type, message)
+        event_type = delivery_type(event_type, message, analyst_update=analyst_update)
+        if event_type == 'analyst_update' and thread_id_for_event(event_type) is None:
+            return json.dumps({'terminal': True, 'reason': 'analyst_topic_not_configured'})
         from news_direction_routing import enabled as directional_enabled
         if (event_type == 'stock_news' and directional_enabled()
                 and thread_id_for_event(event_type, stock_direction=stock_direction) is None):

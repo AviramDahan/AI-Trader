@@ -38,8 +38,11 @@ def public_translation_event(event):
 
 def route(event,result,positions,watchlist,universe,policy):
     """Provider/trust intentionally absent from all topic decisions."""
+    from news_public_importance import enabled, event_publication_check
+    public_allowed,public_reason=event_publication_check(event)
     if result.get('_public_translation_only') is True:
         if public_translation_event(event):
+            if not public_allowed:return [],public_reason
             return [('market_news',[])],None
         return [],'translation_scope_changed'
     if not result.get('related'):return [],'irrelevant'
@@ -49,8 +52,10 @@ def route(event,result,positions,watchlist,universe,policy):
         from .general_news import eligible_event
         if event['event_type'] != 'market' and not eligible_event(event):
             return [],'identity_unverified'
-        if relevance<policy.market_relevance:return [],'below_market_threshold'
+        if not public_allowed:return [],public_reason
+        if relevance<max(policy.market_relevance,.55 if enabled() else 0):return [],'below_market_threshold'
         supplemental_market = (event['event_type']=='market' and materiality=='low'
+            and not enabled()
             and policy.market_low_materiality_relevance is not None
             and relevance>=policy.market_low_materiality_relevance)
         if materiality not in ('medium','high') and not supplemental_market:return [],'low_importance'
@@ -61,9 +66,9 @@ def route(event,result,positions,watchlist,universe,policy):
     personal=tickers&(set(positions)|set(watchlist))
     routes=[('portfolio_watchlist',sorted(personal))] if personal else []
     broad=(tickers&set(universe))-personal
-    if broad and relevance>=policy.stock_relevance:
+    if public_allowed and broad and relevance>=max(policy.stock_relevance,.80 if enabled() else 0):
         routes.append(('important_stock_news',sorted(broad)))
-    return routes,None if routes else 'below_broad_threshold'
+    return routes,None if routes else public_reason or 'below_broad_threshold'
 
 
 class Pipeline:

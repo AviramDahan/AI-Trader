@@ -41,18 +41,49 @@ def is_company_report(title, excerpt=''):
     if re.search(r'\b(?:GDP|CPI|PPI|PCE|import prices|export prices|retail sales|jobless|unemployment)\b|'
                  r'תוצר מקומי|מדד המחירים|מחירי היבוא|מחירי הייצוא|מכירות קמעונאיות',headline,re.I):return False
     if PREVIEW.search(headline) and not PAST.search(headline):return False
+    # Calls/transcripts and future presentation notices are not a fresh result.
+    if re.search(r'\b(?:earnings call transcript|(?:conference|earnings) call highlights|'
+                 r'(?:financial results|earnings) conference(?: call)?)\b',headline,re.I):return False
+    if (re.search(r'\b(?:earnings|EPS)\b',headline,re.I) and
+            re.search(r'\b(?:could|might|may|will|would|expected to|expects? to)\b.{0,60}\b(?:beat|miss)',headline,re.I)):
+        return False
     if re.search(r'\banalyst\b|price target|מחיר יעד',headline,re.I) and not ACTUAL.search(headline):return False
     if MACRO_REVENUE.search(text):return False
-    if RESULTS.search(text):return True
-    if not (PERIOD.search(text) and METRIC.search(text)):return False
-    if ACTUAL.search(text):return True
+    if RESULTS.search(headline):return True
+    if PERIOD.search(headline) and ACTUAL.search(headline) and re.search(r'\bearnings\b|רווחים|הפסדים',headline,re.I):return True
+    if (PERIOD.search(headline) and re.search(r'\bearnings\b.{0,30}\b(?:beat(?:s)?|miss(?:es)?)\b.{0,30}'
+            r'\b(?:estimates?|expectations?|consensus|forecasts?)\b',headline,re.I)):return True
+    # Generic body disclaimers cannot lend financial-results identity to an
+    # unrelated headline. A body-only report needs its own actual period/result
+    # clause; model interpretation was already stripped above.
+    factual=[line for line in lines if not re.search(r'forward.looking|actual (?:financial )?results (?:may|could|might) differ|'
+        r'גורמי סיכון|מידע צופה פני עתיד',line,re.I)]
+    actual_body=any(PERIOD.search(line) and ACTUAL.search(line) and (METRIC.search(line) or RESULTS.search(line))
+                    and not (PREVIEW.search(line) and not PAST.search(line))
+                    for line in factual)
+    if actual_body:return True
+    if not (PERIOD.search(headline) and METRIC.search(headline)):return False
+    if ACTUAL.search(headline):return True
     # Compact wire headlines: SYN 3Q ADJ EPS $2.10, EST $2.00.
     return bool(re.search(r'\b(?:EPS|EBITDA|REVENUES?|REV|SALES|LOSS PER SHARE|NET PROFIT|OPERATING PROFIT)'
-        r'\s*[:$€£]?\s*-?\d',text,re.I))
+        r'\s*[:$€£]?\s*-?\d',headline,re.I))
 
 
-def delivery_type(kind, message):
-    return 'company_report' if kind in NEWS_TYPES and is_company_report(message) else kind
+def report_event(event):
+    """Current original facts only; attached older topics cannot lend identity."""
+    if not isinstance(event,dict) or not isinstance(event.get('title'),str):return False
+    if is_company_report(event['title'],event.get('source_excerpt','')):return True
+    return any(isinstance(source,dict) and source.get('title')==event['title']
+               and is_company_report(source.get('title'),source.get('source_excerpt',''))
+               for source in event.get('sources',[]))
+
+
+def delivery_type(kind, message, *, analyst_update=None):
+    if kind in NEWS_TYPES and is_company_report(message):return 'company_report'
+    from news_analyst_routing import BROAD_TYPES, enabled, is_analyst_update
+    if kind in BROAD_TYPES and enabled() and (analyst_update is True or
+            (analyst_update is None and is_analyst_update(message))):return 'analyst_update'
+    return kind
 
 
 def prior_report_delivery(cursor, row):
@@ -80,7 +111,7 @@ def prior_report_delivery(cursor, row):
                                  (link['event_id'],)).fetchone()
             if event:
                 body=json.loads(event['body_json'])
-                destinations={thread_id_for_event(kind) for kind in (*NEWS_TYPES,'company_report')}
+                destinations={thread_id_for_event(kind) for kind in (*NEWS_TYPES,'company_report','analyst_update')}
                 destinations.update(thread_id_for_event('stock_news',stock_direction=direction)
                                     for direction in ('positive','negative'))
                 keys=sorted({k for destination in destinations
@@ -94,7 +125,7 @@ def prior_report_delivery(cursor, row):
         parts=key.split(':')
         families=('market-news','news','watchlist-news','stock-news')
         if (len(parts)<3 or parts[0] not in families or not parts[1].isdigit()
-                or not re.fullmatch(r'[0-9a-f]{64}|v1',parts[2])):return None
+                or not re.fullmatch(r'[0-9a-f]{20}|[0-9a-f]{64}|v1',parts[2])):return None
         clauses=[];args=[]
         for family in families:
             base=family+':'+parts[1]+':'+parts[2]

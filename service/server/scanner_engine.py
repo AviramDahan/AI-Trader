@@ -1773,6 +1773,24 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
                                         (duplicate,row['id']))
                     report_conn.commit()
                     continue
+        from news_public_importance import outbox_publication_check
+        allowed, publication_reason = outbox_publication_check(row)
+        if not allowed:
+            with get_db_connection() as importance_conn:
+                importance_conn.execute("UPDATE scanner_telegram_outbox SET status='cancelled',last_error=? WHERE id=? AND status='sending'",
+                                        (publication_reason,row['id']))
+                importance_conn.commit()
+            continue
+        from news_analyst_routing import enabled as analyst_enabled, analyst_for_outbox, prior_analyst_delivery, BROAD_TYPES
+        analyst_hint = analyst_for_outbox(row) if analyst_enabled() and row['event_type'] in BROAD_TYPES else False
+        if analyst_hint and delivery_type(row['event_type'],row['message'],analyst_update=analyst_hint)=='analyst_update':
+            with get_db_connection() as analyst_conn:
+                duplicate=prior_analyst_delivery(analyst_conn,row)
+                if duplicate:
+                    analyst_conn.execute("UPDATE scanner_telegram_outbox SET status='cancelled',last_error=? WHERE id=? AND status='sending'",
+                                         (duplicate,row['id']))
+                    analyst_conn.commit()
+                    continue
         if bilingual_dispatch:
             from trump_truth_bilingual import dispatch as dispatch_trump_bilingual
             result = dispatch_trump_bilingual(row, cfg)
@@ -1790,7 +1808,10 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             result = dispatch(row)
         else:
             from news_direction_routing import enabled as directional_enabled, direction_for_outbox
-            if row['event_type'] == 'stock_news' and directional_enabled():
+            if analyst_enabled() and row['event_type'] in BROAD_TYPES:
+                result = send_telegram(row['message'], cfg, row['event_type'],analyst_update=analyst_hint,
+                                       stock_direction=direction_for_outbox(row) if row['event_type']=='stock_news' and directional_enabled() else None)
+            elif row['event_type'] == 'stock_news' and directional_enabled():
                 result = send_telegram(row['message'], cfg, row['event_type'],
                                        stock_direction=direction_for_outbox(row))
             else:

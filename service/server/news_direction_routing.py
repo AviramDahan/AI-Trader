@@ -71,7 +71,7 @@ def direction_for_outbox(outbox):
             if control['mode'] != 'phase1':return None
             parts=key.split(':')
             if (len(parts) != 4 or parts[0] != 'stock-news' or not parts[1].isdigit() or int(parts[1]) <= 0
-                    or not re.fullmatch(r'[0-9a-f]{64}|v1',parts[2])):return None
+                    or not re.fullmatch(r'[0-9a-f]{20}|[0-9a-f]{64}|v1',parts[2])):return None
             tickers=parts[3].split(',')
             selected=_tickers(tickers)
             if not selected or tickers != sorted(selected):return None

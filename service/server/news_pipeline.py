@@ -1282,6 +1282,8 @@ def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_onl
     """General news is separate from trade-impact alerts; never replay old backlog."""
     if os.getenv("STOCK_SCANNER_GENERAL_NEWS_ENABLED", "true").lower() != "true":
         return False
+    from news_public_importance import enabled as strict_public_quality, row_publication_check
+    if not row_publication_check(row)[0]:return False
     title = str(result.get("title_he") or "").strip()
     age = (current - _parse_time(row["published_at"])).total_seconds()
     if (row.get("scope") != "market" or _loads(row.get("verified_tickers_json"), []) or
@@ -1291,8 +1293,14 @@ def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_onl
         return False
     if not translation_only:
         try:
-            if float(result.get("relevance", 0)) < _float_env("STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE", .3, .3, 1):
+            if strict_public_quality():
+                import math
+                raw_relevance=result.get('relevance')
+                if (type(raw_relevance) not in (int,float) or not math.isfinite(raw_relevance)
+                        or not 0<=raw_relevance<=1):return False
+            if float(result.get("relevance", 0)) < max(_float_env("STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE", .3, .3, 1),.55 if strict_public_quality() else 0):
                 return False
+            if strict_public_quality() and result.get('materiality') not in ('medium','high'):return False
         except (TypeError, ValueError):
             return False
     event_filter, values = _same_event_filter("seen", row)
@@ -1616,7 +1624,8 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                 if queued:
                     publication_outcome(cur,row,result,True,stamp)
                 else:
-                    audit(cur,row,result,reason='translation_not_queued',at=stamp)
+                    from news_public_importance import row_publication_check
+                    audit(cur,row,result,reason=row_publication_check(row)[1] or 'translation_not_queued',at=stamp)
             continue
         sentiment = result.get("sentiment") if result.get("sentiment") in {"positive", "negative", "mixed", "neutral", "unclear"} else "unclear"
         materiality = result.get("materiality") if result.get("materiality") in {"low", "medium", "high"} else "low"
@@ -1726,7 +1735,10 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
             # suppresses a distinct later event merely because the ticker was busy.
             cfg = feed_settings()
             version = row.get("content_hash") or "v1"
-            broad_quality = materiality in {"medium", "high"} and relevance >= cfg["broad_alert_min_relevance"]
+            from news_public_importance import enabled as strict_public_quality, row_publication_check
+            broad_quality = (materiality in {"medium", "high"}
+                and relevance >= max(cfg["broad_alert_min_relevance"],.80 if strict_public_quality() else 0)
+                and row_publication_check(row)[0])
             uncovered = sorted(strict_verified - position_tickers - watched_tickers)
             if broad_quality and uncovered and not row.get('_personal_route_only'):
                 allowed: list[str] = []
@@ -1751,6 +1763,10 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                     alerts += int(enqueue_telegram(cur, f"stock-news:{row['id']}:{version}:{','.join(allowed)}",
                                      "stock_news", _stock_broadcast_alert_message(alert_row), published_at=row['published_at']))
 
+        if alerts==alerts_before:
+            from news_public_importance import row_publication_check
+            public_reason=row_publication_check(row)[1]
+            if public_reason:audit(cur,row,result,reason=public_reason,at=stamp)
         publication_outcome(cur, row, result, alerts - alerts_before, stamp)
 
     conn.commit(); conn.close()

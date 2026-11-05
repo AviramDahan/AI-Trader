@@ -200,8 +200,8 @@ def message(event,result,topic,tickers):
     from news_pipeline import _publication_time_he
     from news_presentation import hide_relay_branding
     from news_source_links import clean_draft, append_source, safe_source_url
-    from news_report_routing import is_company_report, REPORT_PREFIX
-    report=any(is_company_report(s.get('title'),s.get('source_excerpt')) for s in event['sources'])
+    from news_report_routing import report_event, REPORT_PREFIX
+    report=report_event(event)
     parts=[(REPORT_PREFIX if report else '📰 ')+hide_relay_branding(clean_draft(result['title_he']))]
     if tickers:parts.append('מניות: '+', '.join(tickers))
     parts.append(hide_relay_branding(clean_draft(result['summary_he'])))
@@ -226,10 +226,12 @@ def general_publication_keys(event, version, topic, result=None):
     kind={'market_news':'market_news','portfolio_watchlist':'position_news','important_stock_news':'stock_news'}[topic]
     from news_direction_routing import enabled, direction_for_result
     direction=direction_for_result(event,result) if enabled() and kind=='stock_news' else None
-    if enabled() and result:
-        from news_report_routing import delivery_type, is_company_report
-        kind=delivery_type(kind,(result.get('title_he') or '')+'\n'+(result.get('summary_he') or ''))
-        if any(is_company_report(s.get('title'),s.get('source_excerpt')) for s in event.get('sources',[])):
+    from news_analyst_routing import enabled as analyst_enabled, analyst_event
+    if (enabled() or analyst_enabled()) and result:
+        from news_report_routing import delivery_type, report_event
+        kind=delivery_type(kind,(result.get('title_he') or '')+'\n'+(result.get('summary_he') or ''),
+                           analyst_update=analyst_event(event))
+        if report_event(event):
             kind='company_report'  # Same original-source report header as message().
     destination=[os.getenv('TELEGRAM_CHAT_ID','').strip(),thread_id_for_event(kind,stock_direction=direction)]
     return publication_keys(event,version,destination)
