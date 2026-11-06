@@ -1184,112 +1184,116 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
                 or not 240 <= local.hour * 60 + local.minute < 1200):
             return
     conn = get_db_connection()
-    cur = conn.cursor()
-    begin_write_transaction(cur)
-    cur.execute("SELECT last_bar_at FROM scanner_price_cursors WHERE ticker=?", (ticker,))
-    cursor_row = cur.fetchone()
-    if cursor_row and bar_at <= parse_time(cursor_row["last_bar_at"]):
-        conn.rollback(); conn.close()
-        return
-    cur.execute("""SELECT o.*,s.ticker,s.company,s.action,s.valid_until AS signal_valid_until
-                   FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
-                   WHERE s.ticker=? AND o.status='pending' ORDER BY o.id""",
-                (ticker,))
-    orders = [dict(row) for row in cur.fetchall()]
-    # V2 cannot consume an incomplete candle, including after restart. Do not
-    # advance the shared ticker cursor past data that must be reconsidered.
-    from single_target_policy import is_single
-    if bar_at + timedelta(minutes=5) > parse_time(now_z()):
-        has_v2 = any(is_single(_loads(o.get('plan_json'), {}).get('target_plan')) or short_policy.is_short(_loads(o.get('plan_json'), {}).get('target_plan')) or 'entry_strategy_execution' in _loads(o.get('plan_json'), {}) for o in orders)
-        cur.execute("SELECT settings_json FROM scanner_trades WHERE ticker=? AND status='open'", (ticker,))
-        has_v2 = has_v2 or any(is_single(_loads(r['settings_json'], {}).get('target_plan')) or short_policy.is_short(_loads(r['settings_json'], {}).get('target_plan')) for r in cur.fetchall())
-        if has_v2:
-            conn.rollback(); conn.close()
+    try:
+        cur = conn.cursor()
+        begin_write_transaction(cur)
+        cur.execute("SELECT last_bar_at FROM scanner_price_cursors WHERE ticker=?", (ticker,))
+        cursor_row = cur.fetchone()
+        if cursor_row and bar_at <= parse_time(cursor_row["last_bar_at"]):
+            conn.rollback()
             return
-    entered_ids: set[int] = set()
-    for order in orders:
-        if extended:
-            # Extended hours enable protective/target exits only, not new
-            # entries or discretionary SELL-order fills.
-            continue
-        order_id = int(order["id"])
-        linked_closes = _linked_close_trades(cur, order) if order['purpose'] == 'close_long' else None
-        if linked_closes == []:
-            _invalidate_close_order(cur, order)
-            continue
-        # Yahoo labels candles by their opening time. The entire candle must
-        # follow order creation; a low reached before creation cannot fill it.
-        try:
-            from entry_window import eligible_from
-            from entry_strategy_execution import validate_order as validate_strategy_order
-            validate_strategy_order(order)
-            eligible = eligible_from(order)
-        except (ValueError, KeyError, TypeError):
-            cur.execute("UPDATE scanner_orders SET status='recovery_uncertain',updated_at=? WHERE id=?", (now_z(), order_id))
-            cur.execute("UPDATE scanner_signals SET status='RECOVERY_UNCERTAIN',updated_at=? WHERE id=?", (now_z(), order['signal_id']))
-            _enqueue_order_execution_update(cur,order_id)
-            continue
-        if bar_at < eligible:
-            continue
-        if parse_time(order["valid_until"]) < parse_time(bar["at"]):
-            cur.execute("UPDATE scanner_orders SET status='expired',updated_at=? WHERE id=?", (now_z(), order_id))
-            cur.execute("UPDATE scanner_signals SET status='EXPIRED',updated_at=? WHERE id=?", (now_z(), order["signal_id"]))
-            _enqueue_order_execution_update(cur,order_id)
-            continue
-        if bar_at + timedelta(minutes=5) > parse_time(order["valid_until"]):
-            # OHLC cannot locate a touch relative to an intrabar expiry.
-            # Do not assume the favourable part occurred before expiration.
-            continue
-        if order['purpose'] == 'entry':
-            from entry_emergency import allows_entry
-            if not allows_entry(cur, bar_at=bar_at, observed_at=now_z()):
-                # Keep expiry/cursors and all open-position/close-long processing
-                # alive. No levels, hold, contract or pending status is rewritten.
+        cur.execute("""SELECT o.*,s.ticker,s.company,s.action,s.valid_until AS signal_valid_until
+                       FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
+                       WHERE s.ticker=? AND o.status='pending' ORDER BY o.id""",
+                    (ticker,))
+        orders = [dict(row) for row in cur.fetchall()]
+        # V2 cannot consume an incomplete candle, including after restart. Do not
+        # advance the shared ticker cursor past data that must be reconsidered.
+        from single_target_policy import is_single
+        if bar_at + timedelta(minutes=5) > parse_time(now_z()):
+            has_v2 = any(is_single(_loads(o.get('plan_json'), {}).get('target_plan')) or short_policy.is_short(_loads(o.get('plan_json'), {}).get('target_plan')) or 'entry_strategy_execution' in _loads(o.get('plan_json'), {}) for o in orders)
+            cur.execute("SELECT settings_json FROM scanner_trades WHERE ticker=? AND status='open'", (ticker,))
+            has_v2 = has_v2 or any(is_single(_loads(r['settings_json'], {}).get('target_plan')) or short_policy.is_short(_loads(r['settings_json'], {}).get('target_plan')) for r in cur.fetchall())
+            if has_v2:
+                conn.rollback()
+                return
+        entered_ids: set[int] = set()
+        for order in orders:
+            if extended:
+                # Extended hours enable protective/target exits only, not new
+                # entries or discretionary SELL-order fills.
                 continue
-        execution = _loads(order.get('plan_json'), {}).get('execution_settings') or lifecycle_settings()
-        slip = execution["slippage_bps"] / 10000
-        if order['purpose'] == 'entry' and order['side'] == 'sell' and bar['high'] >= float(order['limit_price']):
-            fill = max(float(order['limit_price']), bar['open'] * (1 - slip))
-            _create_trade_rows(cur, order, fill, bar['at'])
-            entered_ids.add(int(order['signal_id']))
-        elif order["purpose"] == "entry" and order['side'] == 'buy' and bar["low"] <= float(order["limit_price"]):
-            raw = min(bar["open"], float(order["limit_price"]))
-            fill = min(float(order["limit_price"]), raw * (1 + slip))
-            _create_trade_rows(cur, order, fill, bar["at"])
-            entered_ids.add(int(order["signal_id"]))
-        elif order["purpose"] == "close_long" and bar["high"] >= float(order["limit_price"]):
-            fill = max(float(order["limit_price"]), bar["open"] * (1 - slip))
-            quantity = float(linked_closes[0]['remaining_quantity'])
-            for trade in linked_closes:
-                _close_quantity(cur, trade, float(trade["remaining_quantity"]), fill, "sell", None, bar["at"], _loads(trade["settings_json"], lifecycle_settings()))
-            cur.execute("UPDATE scanner_orders SET status='filled',filled_quantity=?,average_fill_price=?,updated_at=? WHERE id=?",
-                        (quantity, fill, now_z(), order_id))
-            cur.execute("UPDATE scanner_signals SET status='CLOSED',actual_entry=?,updated_at=? WHERE id=?", (fill, now_z(), order["signal_id"]))
-    cur.execute("SELECT * FROM scanner_trades WHERE ticker=? AND status='open' ORDER BY id", (ticker,))
-    for row in cur.fetchall():
-        trade = dict(row)
-        if int(trade["signal_id"]) in entered_ids:
-            # Intrabar order is unknown: permit adverse stop touch, never a
-            # same-candle profit assumption after a limit entry.
-            short = trade.get('side') == 'short'
-            stop_touched = bar['high'] >= float(trade['current_stop']) if short else bar['low'] <= float(trade['current_stop'])
-            if stop_touched:
-                cfg = _loads(trade["settings_json"], lifecycle_settings())
-                _close_quantity(cur, trade, float(trade["remaining_quantity"]),
-                                float(trade["current_stop"]) * (1 + (1 if short else -1) * cfg["slippage_bps"] / 10000),
-                                "stop", None, bar["at"], cfg)
-        elif parse_time(bar["at"]) > parse_time(trade.get("last_bar_at")):
-            _process_trade_bar(cur, trade, bar)
-    store_quote(cur, ticker, float(bar["close"]), (bar_at+timedelta(minutes=5)).isoformat(), "Yahoo completed 5m")
-    cur.execute("SELECT ticker FROM scanner_price_cursors WHERE ticker=?", (ticker,))
-    if cur.fetchone():
-        cur.execute("UPDATE scanner_price_cursors SET last_bar_at=?,status='ok',last_attempt_at=?,last_success_at=?,error=NULL WHERE ticker=?",
-                    (bar["at"], now_z(), now_z(), ticker))
-    else:
-        cur.execute("INSERT INTO scanner_price_cursors(ticker,last_bar_at,status,last_attempt_at,last_success_at) VALUES(?,?,'ok',?,?)",
-                    (ticker, bar["at"], now_z(), now_z()))
-    conn.commit()
-    conn.close()
+            order_id = int(order["id"])
+            linked_closes = _linked_close_trades(cur, order) if order['purpose'] == 'close_long' else None
+            if linked_closes == []:
+                _invalidate_close_order(cur, order)
+                continue
+            # Yahoo labels candles by their opening time. The entire candle must
+            # follow order creation; a low reached before creation cannot fill it.
+            try:
+                from entry_window import eligible_from
+                from entry_strategy_execution import validate_order as validate_strategy_order
+                validate_strategy_order(order)
+                eligible = eligible_from(order)
+            except (ValueError, KeyError, TypeError):
+                cur.execute("UPDATE scanner_orders SET status='recovery_uncertain',updated_at=? WHERE id=?", (now_z(), order_id))
+                cur.execute("UPDATE scanner_signals SET status='RECOVERY_UNCERTAIN',updated_at=? WHERE id=?", (now_z(), order['signal_id']))
+                _enqueue_order_execution_update(cur,order_id)
+                continue
+            if bar_at < eligible:
+                continue
+            if parse_time(order["valid_until"]) < parse_time(bar["at"]):
+                cur.execute("UPDATE scanner_orders SET status='expired',updated_at=? WHERE id=?", (now_z(), order_id))
+                cur.execute("UPDATE scanner_signals SET status='EXPIRED',updated_at=? WHERE id=?", (now_z(), order["signal_id"]))
+                _enqueue_order_execution_update(cur,order_id)
+                continue
+            if bar_at + timedelta(minutes=5) > parse_time(order["valid_until"]):
+                # OHLC cannot locate a touch relative to an intrabar expiry.
+                # Do not assume the favourable part occurred before expiration.
+                continue
+            if order['purpose'] == 'entry':
+                from entry_emergency import allows_entry
+                if not allows_entry(cur, bar_at=bar_at, observed_at=now_z()):
+                    # Keep expiry/cursors and all open-position/close-long processing
+                    # alive. No levels, hold, contract or pending status is rewritten.
+                    continue
+            execution = _loads(order.get('plan_json'), {}).get('execution_settings') or lifecycle_settings()
+            slip = execution["slippage_bps"] / 10000
+            if order['purpose'] == 'entry' and order['side'] == 'sell' and bar['high'] >= float(order['limit_price']):
+                fill = max(float(order['limit_price']), bar['open'] * (1 - slip))
+                _create_trade_rows(cur, order, fill, bar['at'])
+                entered_ids.add(int(order['signal_id']))
+            elif order["purpose"] == "entry" and order['side'] == 'buy' and bar["low"] <= float(order["limit_price"]):
+                raw = min(bar["open"], float(order["limit_price"]))
+                fill = min(float(order["limit_price"]), raw * (1 + slip))
+                _create_trade_rows(cur, order, fill, bar["at"])
+                entered_ids.add(int(order["signal_id"]))
+            elif order["purpose"] == "close_long" and bar["high"] >= float(order["limit_price"]):
+                fill = max(float(order["limit_price"]), bar["open"] * (1 - slip))
+                quantity = float(linked_closes[0]['remaining_quantity'])
+                for trade in linked_closes:
+                    _close_quantity(cur, trade, float(trade["remaining_quantity"]), fill, "sell", None, bar["at"], _loads(trade["settings_json"], lifecycle_settings()))
+                cur.execute("UPDATE scanner_orders SET status='filled',filled_quantity=?,average_fill_price=?,updated_at=? WHERE id=?",
+                            (quantity, fill, now_z(), order_id))
+                cur.execute("UPDATE scanner_signals SET status='CLOSED',actual_entry=?,updated_at=? WHERE id=?", (fill, now_z(), order["signal_id"]))
+        cur.execute("SELECT * FROM scanner_trades WHERE ticker=? AND status='open' ORDER BY id", (ticker,))
+        for row in cur.fetchall():
+            trade = dict(row)
+            if int(trade["signal_id"]) in entered_ids:
+                # Intrabar order is unknown: permit adverse stop touch, never a
+                # same-candle profit assumption after a limit entry.
+                short = trade.get('side') == 'short'
+                stop_touched = bar['high'] >= float(trade['current_stop']) if short else bar['low'] <= float(trade['current_stop'])
+                if stop_touched:
+                    cfg = _loads(trade["settings_json"], lifecycle_settings())
+                    _close_quantity(cur, trade, float(trade["remaining_quantity"]),
+                                    float(trade["current_stop"]) * (1 + (1 if short else -1) * cfg["slippage_bps"] / 10000),
+                                    "stop", None, bar["at"], cfg)
+            elif parse_time(bar["at"]) > parse_time(trade.get("last_bar_at")):
+                _process_trade_bar(cur, trade, bar)
+        store_quote(cur, ticker, float(bar["close"]), (bar_at+timedelta(minutes=5)).isoformat(), "Yahoo completed 5m")
+        cur.execute("SELECT ticker FROM scanner_price_cursors WHERE ticker=?", (ticker,))
+        if cur.fetchone():
+            cur.execute("UPDATE scanner_price_cursors SET last_bar_at=?,status='ok',last_attempt_at=?,last_success_at=?,error=NULL WHERE ticker=?",
+                        (bar["at"], now_z(), now_z(), ticker))
+        else:
+            cur.execute("INSERT INTO scanner_price_cursors(ticker,last_bar_at,status,last_attempt_at,last_success_at) VALUES(?,?,'ok',?,?)",
+                        (ticker, bar["at"], now_z(), now_z()))
+        conn.commit()
+    finally:
+        # Also close on SQL/validation failures: PostgreSQL discards an
+        # uncommitted transaction and releases its transaction-scoped lock.
+        conn.close()
 
 
 def _pending_recovery_check(ticker, bars, observed_at):
