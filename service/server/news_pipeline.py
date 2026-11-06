@@ -1247,6 +1247,17 @@ def _watchlist_alert_message(row: dict[str, Any]) -> str:
 
 
 def _stock_broadcast_alert_message(row: dict[str, Any]) -> str:
+    from news_analyst_routing import enabled as analyst_enabled, is_analyst_update
+    from news_report_routing import is_company_report
+    facts = _loads(row.get('source_facts_json'), {})
+    excerpt = facts.get('source_excerpt', '') if isinstance(facts, dict) else ''
+    if (analyst_enabled() and is_analyst_update(row['title'], excerpt)
+            and not is_company_report(row['title'], excerpt)
+            and (row.get('title_he') or row.get('summary_he'))):
+        from news_analyst_presentation import compact_parts
+        parts = compact_parts(row.get('title_he'), row.get('summary_he'), row['ticker'])
+        parts.append('פורסם: '+_publication_time_he(row['published_at']))
+        return '\n\n'.join(parts)
     impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
     materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
     source_limit = "זמינים כותרת ומטא־דאטה בלבד." if row.get("headline_only") else "זמין תקציר שסופק בפיד; הכתבה המלאה לא נותחה."
@@ -1330,10 +1341,15 @@ def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_onl
     source_report=is_company_report(row.get('title'),source_excerpt)
     shown_report=is_company_report(title,summary)
     report = source_report and shown_report if results_only_enabled() else source_report or shown_report
+    from news_analyst_routing import enabled as analyst_enabled, is_analyst_update
+    compact_analyst = not report and analyst_enabled() and is_analyst_update(row.get('title'),source_excerpt)
     parts = [(REPORT_PREFIX if report else "📰 ") + title[:350]]
     if (telegram_post or not row.get("headline_only")) and summary and summary != title:
         parts.append(summary[:450])
-    if interpretation:
+    if compact_analyst:
+        from news_analyst_presentation import compact_parts
+        parts = compact_parts(title,summary)
+    if interpretation and not compact_analyst:
         parts.append("משמעות אפשרית לסוחר (AI): " + interpretation[:350])
     # General translation/source limitations live in the pinned topic notice.
     # Never remove attribution or uncertainty from the actual reported facts.
@@ -1759,6 +1775,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                             (row["id"], ticker, version, stamp))
                     companies = [_company_for_ticker(cur, ticker) for ticker in allowed]
                     alert_row = {**row, "ticker": ", ".join(allowed), "company": ", ".join(companies),
+                                 "title_he": result.get("title_he"),
                                  "impact": sentiment, "materiality": materiality,
                                  "summary_he": result.get("summary_he"),
                                  "interpretation_he": result.get("interpretation_he")}
