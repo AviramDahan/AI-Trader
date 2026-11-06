@@ -115,7 +115,7 @@ def has_financial_values(title,excerpt=''):
     if not re.search(period,text,re.I):return False
     field=re.compile(METRIC.pattern+r'|תזרים(?: מזומנים)? מפעילות שוטפת|תזרים מזומנים|מרווח(?: תפעולי)?',re.I)
     value=re.compile(r'[$€£]\s*-?\d[\d,.]*|\b-?\d[\d,.]*\s*(?:%|[MB]\b|USD\b|EUR\b|GBP\b|million\b|billion\b|cents?\b|מיליון|מיליארד|דולר|אירו|ליש|סנט)',re.I)
-    expectation=re.compile(r'\b(?:expected|estimate[sd]?|consensus|forecast|guidance)\b|צפי|ציפיות|תחזית|צפוי(?:ה|ים|ות)?|משוער(?:ת)?',re.I)
+    expectation=re.compile(r'\b(?:expect(?:s|ed)?|estimate[sd]?|consensus|forecast|guidance)\b|צפי|ציפיות|תחזית|צפוי(?:ה|ים|ות)?|משוער(?:ת)?',re.I)
     prior=r'\b(?:(?:prior|previous)(?:[ -](?:year|quarter|period))?|last[ -](?:year|quarter)|a year ago)\b|בשנה שעברה|ברבעון הקודם|בתקופה הקודמת|אשתקד'
     comparison=re.compile(r'\b(?:versus|vs\.?|compared (?:with|to)|as expected)\b|לעומת|בהשוואה',re.I)
     lines=re.split(r'[\n;]|,(?!\d)|(?<=[.!?])\s+',text)
@@ -128,7 +128,7 @@ def has_financial_values(title,excerpt=''):
         if index+1<len(lines) and re.match(r'\s*(?:בפועל|נוכחי|actual|current)\s*:',lines[index+1],re.I):line+=' '+lines[index+1]
         for match in field.finditer(line):
             before=line[max(0,match.start()-35):match.start()]
-            if re.search(r'\b(?:expected|estimated|consensus|forecast|guidance)(?:\s+(?:for|of|adjusted|adj|non-gaap|gaap)){0,3}\s*$|'
+            if re.search(r'\b(?:expect(?:s|ed)?|estimated|consensus|forecast|guidance)(?:\s+(?:for|of|adjusted|adj|non-gaap|gaap)){0,3}\s*$|'
                          r'(?:צפי|תחזית|ציפיות|צפוי|משוער)(?:\s*(?:ל|של))?\s*$|(?:'+prior+r')\s*[:\-]?\s*$',before,re.I):continue
             after=line[match.end():match.end()+100]
             number=value.search(after)

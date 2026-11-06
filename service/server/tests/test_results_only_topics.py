@@ -179,3 +179,14 @@ def test_explicit_previous_quarter_or_year_ago_is_not_current(body):
 def test_current_value_survives_previous_quarter_comparison():
     from news_report_routing import is_company_report
     assert is_company_report('Example Q3 financial results','Revenue $100 million versus $90 million last quarter.')
+
+
+@pytest.mark.parametrize('body',['Analysts expect revenue of $100 million.','Analysts expect EPS $2.10.'])
+def test_present_analyst_expectation_is_not_a_reported_result(body):
+    from news_report_routing import is_company_report
+    assert not is_company_report('Example Q3 financial results',body)
+
+
+def test_actual_eps_beating_analyst_expectations_stays_actual():
+    from news_report_routing import is_company_report
+    assert is_company_report('Example Q3 financial results','EPS $2.10 beats analyst expectations.')
