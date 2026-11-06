@@ -115,7 +115,9 @@ def has_financial_values(title,excerpt=''):
     if not re.search(period,text,re.I):return False
     field=re.compile(METRIC.pattern+r'|תזרים(?: מזומנים)? מפעילות שוטפת|תזרים מזומנים|מרווח(?: תפעולי)?',re.I)
     value=re.compile(r'[$€£]\s*-?\d[\d,.]*|\b-?\d[\d,.]*\s*(?:%|[MB]\b|USD\b|EUR\b|GBP\b|million\b|billion\b|cents?\b|מיליון|מיליארד|דולר|אירו|ליש|סנט)',re.I)
-    expectation=re.compile(r'\b(?:expected|estimate[sd]?|consensus|forecast|guidance)\b|צפי|ציפיות|תחזית',re.I)
+    expectation=re.compile(r'\b(?:expected|estimate[sd]?|consensus|forecast|guidance)\b|צפי|ציפיות|תחזית|צפוי(?:ה|ים|ות)?|משוער(?:ת)?',re.I)
+    prior=r'\b(?:(?:prior|previous)(?:[ -](?:year|quarter|period))?|last[ -](?:year|quarter)|a year ago)\b|בשנה שעברה|ברבעון הקודם|בתקופה הקודמת|אשתקד'
+    comparison=re.compile(r'\b(?:versus|vs\.?|compared (?:with|to)|as expected)\b|לעומת|בהשוואה',re.I)
     lines=re.split(r'[\n;]|,(?!\d)|(?<=[.!?])\s+',text)
     expected_section=False
     for index,line in enumerate(lines):
@@ -127,13 +129,25 @@ def has_financial_values(title,excerpt=''):
         for match in field.finditer(line):
             before=line[max(0,match.start()-35):match.start()]
             if re.search(r'\b(?:expected|estimated|consensus|forecast|guidance)(?:\s+(?:for|of|adjusted|adj|non-gaap|gaap)){0,3}\s*$|'
-                         r'(?:צפי|תחזית|ציפיות)(?:\s*(?:ל|של))?\s*$|\b(?:previous|prior|last year)\s*$',before,re.I):continue
+                         r'(?:צפי|תחזית|ציפיות|צפוי|משוער)(?:\s*(?:ל|של))?\s*$|(?:'+prior+r')\s*[:\-]?\s*$',before,re.I):continue
             after=line[match.end():match.end()+100]
             number=value.search(after)
-            if (number and not expectation.search(after[:number.start()])
-                    and not re.search(r'\b(?:shares?|stock|price)\b|מחיר|מניות|מניית',after[:number.start()],re.I)):return True
-            if re.fullmatch(r'EPS|(?:earnings|loss) per share',match[0],re.I):
-                if re.match(r'\s*[:=]?\s*-?\d+\.\d+\b',after):return True
+            if not number and re.fullmatch(r'EPS|(?:earnings|loss) per share',match[0],re.I):
+                number=re.match(r'\s*[:=]?\s*-?\d+\.\d+\b',after)
+            if not number:continue
+            between=after[:number.start()]
+            # Qualifiers after the amount matter too. Stop at an explicit
+            # comparison so another period/consensus value cannot relabel the
+            # current result ("EPS 2.10 versus expected EPS 2.00").
+            suffix=comparison.split(after[number.end():],maxsplit=1)[0]
+            next_field=field.search(suffix)
+            if next_field:suffix=suffix[:next_field.start()]
+            if expectation.search(between) or expectation.search(suffix) or re.search(prior,between,re.I):continue
+            percent_change=('%' in number[0]
+                and re.search(r'\b(?:increas\w*|decreas\w*|grew|grows?|rose|ris\w*|fell|falls?|declin\w*)\b|על[וה]|ירד|גדל',between,re.I)
+                and re.match(r'\s*(?:from|over)\s+(?:the\s+)?(?:'+prior+r')',suffix,re.I))
+            if re.search(prior,suffix,re.I) and not percent_change:continue
+            if not re.search(r'\b(?:shares?|stock|price)\b|מחיר|מניות|מניית',between,re.I):return True
     return False
 
 

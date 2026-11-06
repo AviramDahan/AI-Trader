@@ -135,3 +135,47 @@ def test_canonical_keys_bind_report_even_with_other_routing_flags_off(monkeypatc
     result={'title_he':'תוצאות הרבעון השלישי','summary_he':'הרווח למניה היה 2.10 דולר.'}
     general_publication_keys(event,'a'*64,'market_news',result)
     assert seen==[['fixture',456]]
+
+
+@pytest.mark.parametrize('body',[
+    'Revenue $100 million forecast.',
+    'Revenue of $100 million was expected.',
+    'Prior-year revenue $100 million.',
+    'Revenue $100 million in the prior year.',
+    'הכנסות בשנה שעברה: 100 מיליון דולר.',
+    'רווח למניה צפוי של 2.10 דולר.',
+    'EPS 2.10 forecast.',
+])
+def test_only_forecast_or_prior_context_cannot_supply_current_results(body):
+    from news_report_routing import is_company_report
+    assert not is_company_report('Example Q3 financial results',body)
+
+
+@pytest.mark.parametrize('body',[
+    'Revenue was $100 million; expected revenue was $110 million.',
+    'EPS $2.10 versus expected EPS $2.00.',
+    'Revenue $100 million, prior-year $90 million.',
+    'Revenue $100 million versus $90 million in the prior year.',
+    'Revenue increased 18% from the prior year.',
+])
+def test_actual_value_keeps_separate_consensus_and_prior_comparison(body):
+    from news_report_routing import is_company_report
+    assert is_company_report('Example Q3 financial results',body)
+
+
+@pytest.mark.parametrize('body',[
+    'Revenue $100 million last quarter.',
+    'Revenue $100 million a year ago.',
+    'Last-quarter revenue $100 million.',
+    'A year ago revenue $100 million.',
+    'Revenue increased 18% last quarter.',
+    'Revenue increased 18% in the prior year.',
+])
+def test_explicit_previous_quarter_or_year_ago_is_not_current(body):
+    from news_report_routing import is_company_report
+    assert not is_company_report('Example Q3 financial results',body)
+
+
+def test_current_value_survives_previous_quarter_comparison():
+    from news_report_routing import is_company_report
+    assert is_company_report('Example Q3 financial results','Revenue $100 million versus $90 million last quarter.')
