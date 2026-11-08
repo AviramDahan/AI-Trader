@@ -220,15 +220,18 @@ def prepare(limit=1,at=None,completion=None):
         cur.execute('UPDATE scanner_telegram_outbox SET status=? WHERE status=? AND next_attempt_at<=?',(PENDING,WORKING,stamp))
         from trump_truth_media import PENDING as MEDIA_PENDING,WORKING as MEDIA_WORKING,READY as MEDIA_READY
         from trump_truth_bilingual import PENDING as BPENDING,WORKING as BWORKING,READY as BREADY
+        from trump_telegram_album import PENDING as APENDING,WORKING as AWORKING,READY as AREADY
         if enabled():
             cur.execute('UPDATE scanner_telegram_outbox SET status=? WHERE status=? AND next_attempt_at<=?',(MEDIA_PENDING,MEDIA_WORKING,stamp))
         cur.execute('UPDATE scanner_telegram_outbox SET status=? WHERE status=? AND next_attempt_at<=?',(BPENDING,BWORKING,stamp))
-        query='SELECT * FROM scanner_telegram_outbox WHERE event_type=? AND status IN (?,?,?) AND next_attempt_at<=? ORDER BY id LIMIT 1'
+        cur.execute('UPDATE scanner_telegram_outbox SET status=? WHERE status=? AND next_attempt_at<=?',(APENDING,AWORKING,stamp))
+        query='SELECT * FROM scanner_telegram_outbox WHERE event_type=? AND status IN (?,?,?,?) AND next_attempt_at<=? ORDER BY id LIMIT 1'
         if using_postgres():query+=' FOR UPDATE SKIP LOCKED'
-        found=cur.execute(query,('trump_truth_post',PENDING,MEDIA_PENDING if enabled() else PENDING,BPENDING,stamp)).fetchone()
+        found=cur.execute(query,('trump_truth_post',PENDING,MEDIA_PENDING if enabled() else PENDING,BPENDING,APENDING,stamp)).fetchone()
         if not found:return {'prepared':0,'deferred':0}
         row=dict(found)
-        pending,working,ready=((BPENDING,BWORKING,BREADY) if row['status']==BPENDING else
+        pending,working,ready=((APENDING,AWORKING,AREADY) if row['status']==APENDING else
+            (BPENDING,BWORKING,BREADY) if row['status']==BPENDING else
             (MEDIA_PENDING,MEDIA_WORKING,MEDIA_READY) if row['status']==MEDIA_PENDING else (PENDING,WORKING,READY))
         cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=? WHERE id=? AND status=?',(working,lease,row['id'],pending))
         c.commit()
@@ -238,7 +241,7 @@ def prepare(limit=1,at=None,completion=None):
         return {'prepared':0,'deferred':0}
     from trump_telegram_channel import is_item
     channel=is_item(envelope['item'])
-    if channel and completion is None:
+    if channel and source_text(envelope['item']) and completion is None:
         # Busy/cold-admissibility health does not spend a generation attempt.
         # A race after this check still uses the existing bounded attempt rules.
         from ai_routing import enabled as local_enabled,ready as local_ready
