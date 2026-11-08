@@ -5,10 +5,12 @@ objects, not only retained files. No decryption key belongs on the source server
 """
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 import re
 import subprocess
+import stat
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -19,6 +21,8 @@ import recovery_state
 
 
 MAX_LOCK_WAIT_SECONDS = 900
+STARTUP_CHECKPOINT_MAX_AGE = 1800
+HEALTH_MARKER = Path('/tmp/backup-ok')
 
 
 class BackupBusy(BlockingIOError):
@@ -57,6 +61,96 @@ def prune(repo):
     for kind,count in (('hourly',24),('daily',7),('weekly',4)):
         for path in sorted((repo/kind).glob('*.json.gz.age'),reverse=True)[count:]:
             path.unlink()
+
+
+def policy_digest():
+    return hashlib.sha256(json.dumps(recovery_state.runtime_policy(), sort_keys=True,
+                                    separators=(',', ':')).encode()).hexdigest()
+
+
+def resume_predeploy_checkpoint():
+    """Reuse only a recent, same-build completed predeploy; never replace one.
+
+    The mandatory --once release job still exports, encrypts, archives and pushes
+    in full. This avoids doing that same work again when its daemon restarts.
+    The old capture time remains authoritative; no status/snapshot is rewritten.
+    """
+    repo = Path(os.getenv('RECOVERY_WORKDIR', '/backup/repository'))
+    status_path = repo.parent / 'status.json'
+    try:
+        if not (repo / '.git').is_dir():
+            return False
+        with (repo.parent / 'backup.lock').open('a') as lock:
+            acquire_backup_lock(lock)
+            info = status_path.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 32768:
+                return False
+            status = json.loads(status_path.read_text())
+            proof = status['startup_checkpoint']
+            managed = status['managed_request']
+            sha = os.getenv('BUILD_SHA', '')
+            request = proof['request_id']
+            commit = proof['remote_commit']
+            if (type(proof['version']) is not int or proof['version'] != 1 or
+                    type(managed['version']) is not int or managed['version'] != 1 or
+                    not re.fullmatch('[0-9a-f]{40}', sha) or
+                    proof['build_sha'] != sha or managed['build_sha'] != sha or
+                    not re.fullmatch('[0-9a-f]{32}', request) or managed['request_id'] != request or
+                    managed['predeploy'] is not True or managed['remote_commit'] != commit or
+                    not re.fullmatch('[0-9a-f]{40}', commit) or
+                    not re.fullmatch('[0-9a-f]{64}', status['snapshot_id']) or
+                    not re.fullmatch('[0-9a-f]{64}', proof['cipher_sha256']) or
+                    type(proof['cipher_bytes']) is not int or
+                    not 0 < proof['cipher_bytes'] <= 16 * 1024 * 1024 or
+                    status['encrypted_bytes'] != proof['cipher_bytes'] or
+                    proof['runtime_policy_sha256'] != policy_digest()):
+                return False
+            captured, started, finished = (datetime.fromisoformat(value).timestamp()
+                if datetime.fromisoformat(value).utcoffset() is not None else float('nan')
+                for value in (status['success_at'], managed['started_at'], managed['finished_at']))
+            def fresh():
+                now = time.time()
+                return (0 <= now - captured <= STARTUP_CHECKPOINT_MAX_AGE and
+                        started <= captured <= finished <= now)
+            if not fresh():
+                return False
+            slug = os.environ['RECOVERY_GITHUB_REPO']
+            if requests.get('https://api.github.com/repos/' + slug, timeout=20).status_code != 404:
+                return False
+            os.environ['GIT_SSH_COMMAND'] = 'ssh -i /run/secrets/recovery_deploy_key -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/run/secrets/github_known_hosts'
+            if command('git', 'remote', 'get-url', 'origin', cwd=repo).decode().strip() != 'git@github.com:' + slug + '.git':
+                return False
+            if command('git', 'rev-parse', 'HEAD', cwd=repo).decode().strip() != commit:
+                return False
+            remote = command('git', 'ls-remote', 'origin', 'refs/heads/main', cwd=repo).decode().split()
+            if remote != [commit, 'refs/heads/main']:
+                return False
+            blob = commit + ':predeploy/latest.json.gz.age'
+            if int(command('git', 'cat-file', '-s', blob, cwd=repo)) != proof['cipher_bytes']:
+                return False
+            cipher = command('git', 'show', blob, cwd=repo)
+            if (len(cipher) != proof['cipher_bytes'] or not cipher.startswith(b'age-encryption.org/v1') or
+                    hashlib.sha256(cipher).hexdigest() != proof['cipher_sha256']):
+                return False
+            # Remote verification can consume time. Never renew the old proof
+            # just because it was fresh before those calls.
+            if not fresh():
+                return False
+            descriptor, temporary = tempfile.mkstemp(prefix='.backup-ok-', dir=HEALTH_MARKER.parent)
+            try:
+                os.close(descriptor)
+                os.utime(temporary, (captured, captured))
+                if not fresh():
+                    return False
+                os.replace(temporary, HEALTH_MARKER)
+                return True
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+    except BackupBusy:
+        raise
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, requests.RequestException):
+        return False
 
 
 def backup(predeploy=False, *, lock_wait_seconds=0, request_id=None):
@@ -142,6 +236,11 @@ def backup(predeploy=False, *, lock_wait_seconds=0, request_id=None):
                 'started_at': started_at.isoformat(),
                 'finished_at': datetime.now(timezone.utc).isoformat(),
                 'remote_commit': commit}
+            if predeploy:
+                status['startup_checkpoint'] = {'version': 1, 'build_sha': build_sha,
+                    'request_id': request_id, 'remote_commit': commit,
+                    'cipher_sha256': hashlib.sha256(encrypted).hexdigest(),
+                    'cipher_bytes': len(encrypted), 'runtime_policy_sha256': policy_digest()}
         # Readers never observe half a proof. This contains metadata only,
         # never a plaintext recovery snapshot or a credential.
         descriptor, temporary = tempfile.mkstemp(prefix='.status-', suffix='.next', dir=repo.parent)
@@ -150,7 +249,7 @@ def backup(predeploy=False, *, lock_wait_seconds=0, request_id=None):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, repo.parent/'status.json')
-        Path('/tmp/backup-ok').touch()
+        HEALTH_MARKER.touch()
         from scanner_engine import set_service_status
         set_service_status('backup','ok','Encrypted off-server recovery state verified',success=True)
         print(json.dumps(status),flush=True)
@@ -168,6 +267,21 @@ def main():
         parser.error('lock wait must be between 0 and 900 seconds')
     if args.request_id is not None and not re.fullmatch('[0-9a-f]{32}', args.request_id):
         parser.error('request id must be 32 lowercase hexadecimal characters')
+    if not (args.once or args.predeploy or args.request_id):
+        try:
+            if resume_predeploy_checkpoint():
+                print(json.dumps({'backup': 'resumed_verified_predeploy',
+                                  'new_snapshot_created': False}), flush=True)
+                now = time.time()
+                # A cross-hour restart must not extend the existing one-hour
+                # capture interval by waiting for another UTC boundary.
+                time.sleep(max(1, min(3600 - now % 3600,
+                                     HEALTH_MARKER.stat().st_mtime + 3600 - now)))
+        except Exception as exc:
+            # An unavailable proof never grants startup health or skips the
+            # regular backup. Its normal lock/retry path remains authoritative.
+            print(json.dumps({'backup': 'startup_checkpoint_unavailable',
+                              'error_type': type(exc).__name__}), flush=True)
     while True:
         try:
             backup(args.predeploy, lock_wait_seconds=args.lock_wait_seconds,
