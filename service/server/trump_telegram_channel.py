@@ -56,6 +56,8 @@ def valid_item(item,current,*,active=True):
             and (not active or instant(current)-instant(item['relay_published_at'])<=timedelta(hours=24))
             and type(item['text_excerpt']) is str and clean_excerpt(item['text_excerpt'],max_units=2400)==item['text_excerpt']
             and type(item['has_media']) is bool
+            and ('telegram_grouped_id' not in item or (type(item['telegram_grouped_id']) is int
+                and 0 < item['telegram_grouped_id'] < 2**63 and item['has_media']))
             and (bool(item['text_excerpt']) or item['has_media'])
             and ('media' not in item or (item['has_media'] and valid_descriptor(item,current))))
     except (ValueError,TypeError,KeyError,AttributeError,UnicodeError):
@@ -84,6 +86,9 @@ def extract(message,current):
         if max(len(text.encode('utf-16-le')),len(cleaned.encode('utf-16-le')))//2>2400:
             return None,'source_text_bound'
         media=bool(getattr(message,'photo',None) or getattr(message,'document',None))
+        grouped=getattr(message,'grouped_id',None)
+        if grouped is not None and (type(grouped) is not int or not 0<grouped<2**63 or not media):
+            return None,'album_identity'
         if not cleaned and not media:return None,'relay_format'
         item=dict(source_kind=KIND,provider='telegram_channels',relay_channel=CHANNEL,
             relay_channel_id=CHANNEL_ID,relay_message_id=message.id,
@@ -91,6 +96,7 @@ def extract(message,current):
             relay_published_at=stamp.isoformat(),observed_at=instant(current).isoformat(),
             original_published_at=None,source_verification='channel_only',activation=boundary,
             text_excerpt=cleaned,has_media=media,is_repost=False,publication_policy=POLICY)
+        if grouped is not None:item['telegram_grouped_id']=grouped
         from trump_truth_media import enabled as media_enabled,describe
         if media_enabled() and media:item['media']=describe(message,item)
         return item,None

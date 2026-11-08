@@ -234,6 +234,19 @@ def ingest(items, at=None):
             if not valid_item(item, current):
                 result['rejected_invalid'] += 1
                 continue
+            if 'telegram_grouped_id' in item:
+                from trump_telegram_album import ingest_album,enabled as album_enabled
+                if not album_enabled() or 'album_ref' not in item:
+                    result['rejected_invalid']+=1
+                    continue  # A live/page-split member is never a standalone post.
+                added=ingest_album(cur,item,current)
+                result['inserted']+=int(added);result['sources']+=int(added)
+                result['duplicates']+=int(not added)
+                continue
+            if (selected() and item['has_media'] and not item['text_excerpt'] and
+                item.get('media',{}).get('status')!='available'):
+                result['rejected_invalid']+=1
+                continue  # Never queue an empty media placeholder.
             envelope = dict(item=item, fence=fence(cur, item))
             from trump_truth_translation import enabled as hebrew_enabled
             if hebrew_enabled():envelope['presentation']='hebrew_v1'
@@ -318,8 +331,14 @@ def checked_envelope(row,at=None):
         elif not new and bilingual_requested():return None  # No old queued one-language fallback.
         if 'media_version' in envelope:
             from trump_truth_media import VERSION as media_version,enabled as media_enabled
-            if envelope['media_version']!=media_version or not media_enabled():return None
-        if row['event_type'] != EVENT or row['dedupe_key'] != PREFIX+item['truth_post_id']:
+            from trump_telegram_album import VERSION as album_version,checked_manifest,album_key
+            if not media_enabled() or envelope['media_version'] not in (media_version,album_version):return None
+            if envelope['media_version']==album_version:
+                checked_manifest(row,envelope,at or datetime.now(timezone.utc))
+        is_album=envelope.get('media_version')=='trump_telegram_album_v1'
+        expected_key=album_key(item) if is_album else PREFIX+item['truth_post_id']
+        if ('telegram_grouped_id' in item)!=is_album:return None
+        if row['event_type'] != EVENT or row['dedupe_key'] != expected_key:
             return None
         if not valid_item(item, at or datetime.now(timezone.utc)):
             return None
@@ -327,7 +346,7 @@ def checked_envelope(row,at=None):
             if envelope['fence'] != fence(conn.cursor(), item):
                 return None
         return envelope
-    except (AttributeError, KeyError, TypeError, ValueError, UnicodeError):
+    except (AttributeError, KeyError, TypeError, ValueError, UnicodeError, OSError, RecursionError):
         return None
 
 
@@ -348,6 +367,9 @@ def delivery_message(row,at=None,*,media_attached=False):
     if envelope.get('presentation')=='hebrew_v1':
         hebrew=presentation(row,envelope,at)
         if hebrew is None:return None
+        from trump_telegram_channel import is_item
+        if is_item(envelope['item']) and hebrew['status']=='media_only' and not media_attached:
+            return None  # Display helpers may render history; sending needs the file.
     elif hebrew_enabled():return None  # Never replay/translate old queued posts.
     message=render(envelope['item'],hebrew,media_attached=media_attached)
     if message is None:return None

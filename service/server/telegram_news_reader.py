@@ -68,8 +68,22 @@ async def telegram_news_stream_loop():
             async def on_message(event):
                 from trump_truth_posts import source_channel_id
                 CHANNEL_ID=source_channel_id()
+                from trump_telegram_channel import CHANNEL_ID as NEW_ID, CHANNEL as NEW_CHANNEL
+                peer=getattr(getattr(event.message,'peer_id',None),'channel_id',None)
+                group=getattr(event.message,'grouped_id',None)
+                # Revocation precedes readiness: a reconnect must not ignore an
+                # observed edit of an already queued album while catch-up starts.
+                if (peer==NEW_ID and allowed.get(peer)==NEW_CHANNEL and type(group) is int
+                    and 0<group<2**63 and isinstance(event,events.MessageEdited.Event)):
+                    from trump_telegram_album import invalidate_group
+                    await asyncio.to_thread(invalidate_group,event.message,datetime.now(timezone.utc))
                 if getattr(getattr(event.message, 'peer_id', None), 'channel_id', None) == CHANNEL_ID and not trump_ready:
                     return  # Catch-up owns the first persisted activation cursor.
+                if getattr(getattr(event.message,'peer_id',None),'channel_id',None)==NEW_ID:
+                    if getattr(event.message,'grouped_id',None) is not None:
+                        return  # Existing catch-up alone owns bounded album assembly.
+                    if getattr(event.message,'photo',None) or getattr(event.message,'document',None):
+                        return  # Do not spend capture budget twice via live+catch-up.
                 item = stream_item(event.message, allowed, datetime.now(timezone.utc))
                 if item:
                     try:
@@ -183,10 +197,30 @@ async def collect(client, state, current, names):
             last_id = cursor
             rejected = {}
             for message in messages:
-                last_id = max(last_id, int(message.id))
+                if special and message.id<=last_id:continue  # Album already assembled in this page.
+                if not special:last_id=max(last_id,int(message.id))
                 if not special and not cursor and message.date < current - timedelta(hours=1):
                     continue
                 if special:
+                    from database import get_db_connection
+                    from trump_truth_posts import PREFIX
+                    known=None
+                    if name=='real_donaldjtrump' and (getattr(message,'grouped_id',None) is not None or
+                        getattr(message,'photo',None) or getattr(message,'document',None)):
+                        with get_db_connection() as lookup:
+                            known=lookup.execute('SELECT id FROM scanner_telegram_outbox WHERE dedupe_key=?',
+                                (PREFIX+'tg:1462338131:'+str(message.id),)).fetchone()
+                    if known:
+                        last_id=max(last_id,int(message.id));continue
+                    from trump_telegram_channel import selected as channel_selected
+                    if channel_selected() and getattr(message,'grouped_id',None) is not None:
+                        from trump_telegram_album import collect_album
+                        item,reason,group_last=await collect_album(client,entity,message,current)
+                        if reason:
+                            rejected[reason]=rejected.get(reason,0)+1;errors.append(name+':'+reason)
+                            break  # Hold cursor BEFORE this incomplete group.
+                        output.append(item);last_id=group_last
+                        continue
                     item, reason = extract(message, current)
                     if reason:
                         rejected[reason] = rejected.get(reason, 0) + 1
@@ -196,9 +230,24 @@ async def collect(client, state, current, names):
                     item = message_item(message, name, current)
                 if item:
                     if special:
+                        # Durable per-member/standalone claims precede capture
+                        # so catch-up never reacquires an already queued file.
+                        from database import get_db_connection
+                        from trump_truth_posts import PREFIX
+                        known=None
+                        if item['has_media']:
+                            with get_db_connection() as lookup:
+                                known=lookup.execute('SELECT id FROM scanner_telegram_outbox WHERE dedupe_key=?',
+                                    (PREFIX+item['truth_post_id'],)).fetchone()
+                        if known:
+                            last_id=max(last_id,int(message.id));continue
                         from trump_truth_media import capture
                         item=await capture(client,message,item,current)
+                        if (channel_selected() and item['has_media'] and
+                            item.get('media',{}).get('status')!='available'):
+                            errors.append(name+':media_deferred');break
                     output.append(item)
+                last_id=max(last_id,int(message.id))
             checkpoints[name] = {'last_id':last_id, 'last_success_at':current.isoformat()}
             if special:
                 checkpoints[name].update(trump_activation=activation(), rejected=rejected,
