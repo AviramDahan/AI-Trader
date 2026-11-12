@@ -209,6 +209,20 @@ def _headline_verifies_ticker(ticker: str, company: str, title: str) -> bool:
     return False
 
 
+def _notification_subject(row, ticker, company):
+    """Require headline evidence for a displayed ticker on strict news routes."""
+    from news_public_importance import source_importance
+
+    title = row.get("title") or ""
+    _, reason = source_importance(title)
+    if reason == "public_quality_opinion_or_promotion":
+        return False
+    # An example or comparison following the actual event is not the subject.
+    main = re.split(r';\s+|\b(?:unlike|versus|compared (?:with|to)|in contrast to|when)\b',
+                    title, maxsplit=1, flags=re.I)[0]
+    return _headline_verifies_ticker(ticker, company, main)
+
+
 def _sha(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -1233,15 +1247,18 @@ def _news_alert_message(row: dict[str, Any]) -> str:
 
 def _watchlist_alert_message(row: dict[str, Any]) -> str:
     from news_evidence import source_limit as describe_source
-    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
+    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת",
+              "neutral": "ניטרלית", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
     materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
     company_line = f"\nחברה: {row['company']}" if row.get("company") else ""
     source_limit = describe_source(row)
+    interpretation = (() if row.get("headline_only") else
+                      (f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",))
     return "\n\n".join(("AI-Trader — חדשות חשובות מרשימת המעקב | ללא עסקה וללא תלות בפוזיציה",
                          f"סימול: {row['ticker']}{company_line}\nהשפעה אפשרית: {impact}\nמהותיות אפשרית: {materiality}",
                          f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}\n{source_limit}",
                          f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
-                         f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",
+                         *interpretation,
                          f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
                          "המניה נמצאת ברשימת מעקב חדשות בלבד. לא נוצרו סיגנל או עסקה."))[:4000]
 
@@ -1258,14 +1275,17 @@ def _stock_broadcast_alert_message(row: dict[str, Any]) -> str:
         parts = compact_parts(row.get('title_he'), row.get('summary_he'), row['ticker'])
         parts.append('פורסם: '+_publication_time_he(row['published_at']))
         return '\n\n'.join(parts)
-    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
+    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת",
+              "neutral": "ניטרלית", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
     materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
     source_limit = "זמינים כותרת ומטא־דאטה בלבד." if row.get("headline_only") else "זמין תקציר שסופק בפיד; הכתבה המלאה לא נותחה."
+    interpretation = (() if row.get("headline_only") else
+                      (f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",))
     return "\n\n".join(("AI-Trader — חדשות מניות חשובות מהסורק | ללא עסקה",
                          f"סימולים: {row['ticker']}\nחברות: {row.get('company') or 'לא זמין'}\nהשפעה אפשרית: {impact}\nמהותיות: {materiality}",
                          f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}\n{source_limit}",
                          f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
-                         f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",
+                         *interpretation,
                          f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
                          "הידיעה עברה סינון מחמיר של הסורק. היא אינה סיגנל ואינה יוצרת עסקה."))[:4000]
 
@@ -1286,6 +1306,7 @@ def _telegram_bulletin_text(text: str) -> str:
     text = re.sub(r'\s*\|\s*FJ\b', '', text, flags=re.I)
     text = re.sub(r'(?:המידע|הדיווח|הידיעה)\s+(?:פורסם|פורסמה)\s+בערוץ\s+(?:Telegram|טלגרם)\s+@[A-Za-z0-9_]+\s*[.]?', '', text, flags=re.I)
     text = re.sub(r'(?<!\w)@[A-Za-z0-9_]+', '', text)
+    text = re.sub(r'(?m)^\s*\(\s*\)\s*$', '', text)
     return re.sub(r'[ \t]{2,}', ' ', text).strip()
 
 
@@ -1314,6 +1335,16 @@ def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_onl
             if strict_public_quality() and result.get('materiality') not in ('medium','high'):return False
         except (TypeError, ValueError):
             return False
+    macro_figures = ()
+    if strict_public_quality() and row.get("provider") == "telegram_channels":
+        from news_macro_bulletins import releases, unpublished_figures
+        facts = _loads(row.get("source_facts_json"), {})
+        source_excerpt = facts.get("source_excerpt", "") if isinstance(facts, dict) else ""
+        macro_figures = releases(row.get("title"), source_excerpt)
+        if macro_figures:
+            macro_figures = unpublished_figures(cur, row, macro_figures, _parse_time(row["published_at"]))
+            if not macro_figures:
+                return False
     event_filter, values = _same_event_filter("seen", row)
     cur.execute(f"""SELECT 1 FROM scanner_news_broadcast_alerts a
         JOIN scanner_news seen ON seen.id=a.news_id
@@ -1326,6 +1357,12 @@ def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_onl
         ON CONFLICT(news_id,channel,ticker,event_version) DO NOTHING""", (row["id"], version, stamp))
     if not cur.rowcount:
         return False
+    if macro_figures:
+        from news_macro_bulletins import render
+        from scanner_engine import enqueue_telegram
+        message = render(macro_figures) + f"\n\nפורסם: {_publication_time_he(row['published_at'])}"
+        return enqueue_telegram(cur, f"market-news:{row['id']}:{version}", "market_news",
+                                message, published_at=row["published_at"])
     # Keep source facts and trader-oriented interpretation visibly separate.
     summary = str(result.get("summary_he") or "").strip()
     interpretation = ("" if os.getenv("STOCK_SCANNER_PUBLIC_TRANSLATION_ONLY_ENABLED", "false").lower() == "true"
@@ -1344,6 +1381,10 @@ def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_onl
     from news_analyst_routing import enabled as analyst_enabled, is_analyst_update
     compact_analyst = not report and analyst_enabled() and is_analyst_update(row.get('title'),source_excerpt)
     parts = [(REPORT_PREFIX if report else "📰 ") + title[:350]]
+    if (telegram_post or not row.get("headline_only")) and summary:
+        leading = title.rstrip('.!?')
+        if leading:
+            summary = re.sub(r'^'+re.escape(leading)+r'(?:[.!?])?(?:\s*\n|\s*$)', '', summary, count=1).strip()
     if (telegram_post or not row.get("headline_only")) and summary and summary != title:
         parts.append(summary[:450])
     if compact_analyst:
@@ -1729,6 +1770,10 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                 placeholders = ",".join("?" for _ in watchlist_tickers)
                 cur.execute(f"SELECT ticker,company FROM scanner_news_watchlist WHERE enabled=1 AND ticker IN ({placeholders})", tuple(sorted(watchlist_tickers)))
                 watched = [dict(value) for value in cur.fetchall()]
+                from news_public_importance import enabled as strict_watchlist_quality
+                if strict_watchlist_quality():
+                    watched = [value for value in watched
+                               if _notification_subject(row, value["ticker"], value["company"] or "")]
                 watched_tickers = {str(value["ticker"]).upper() for value in watched}
                 for watched_row in watched:
                     ticker = watched_row["ticker"]
@@ -1761,6 +1806,8 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
             if broad_quality and uncovered and not row.get('_personal_route_only'):
                 allowed: list[str] = []
                 for ticker in uncovered:
+                    if strict_public_quality() and not _notification_subject(row, ticker, _company_for_ticker(cur, ticker)):
+                        continue
                     cur.execute(f"""SELECT 1 FROM scanner_news_broadcast_alerts a
                         JOIN scanner_news seen ON seen.id=a.news_id
                         WHERE a.channel='stock' AND a.ticker=? AND ({event_filter}) LIMIT 1""",

@@ -1040,7 +1040,7 @@ def _material_public_fact(job: dict, evidence: dict, conn) -> str | None:
         # It is an uncalibrated anti-noise control, not an edge claim.
         if value < 1_000_000 and len(owner_groups) < 2:
             return None
-        return ("דווחו עסקאות רכישה P/acquired במניות רגילות שאינן נגזרות. "
+        return ("בעלי עניין דיווחו על רכישת מניות רגילות. "
                 "אופי הביצוע אינו מאומת כעסקה בשוק הפתוח; אין בכך לבדו המלצת קנייה.")
     if evidence.get("kind") != "financial":
         return None
