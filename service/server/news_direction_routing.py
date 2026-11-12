@@ -36,6 +36,9 @@ def direction_for_result(event, result):
     """Canonical completed analysis only; callers must verify version/status."""
     if not isinstance(event,dict):return None
     tickers=_tickers(event.get('tickers'))
+    from news_public_importance import enabled as strict_public_quality
+    if strict_public_quality() and len(tickers) != 1:
+        return None
     identities=event.get('company_identity')
     if not tickers or not isinstance(identities,list) or not identities:return None
     if any(not isinstance(identity,dict) for identity in identities):return None
@@ -75,6 +78,8 @@ def direction_for_outbox(outbox):
             tickers=parts[3].split(',')
             selected=_tickers(tickers)
             if not selected or tickers != sorted(selected):return None
+            from news_public_importance import enabled as strict_public_quality
+            if strict_public_quality() and len(selected) != 1:return None
             record=c.execute('SELECT * FROM scanner_news WHERE id=?',(int(parts[1]),)).fetchone()
             if not record:return None
             record=dict(record)

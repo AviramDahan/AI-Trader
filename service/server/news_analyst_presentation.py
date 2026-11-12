@@ -4,6 +4,13 @@ import re
 from news_analyst_routing import CONTROLS
 
 
+def _clear_target_comparison(text):
+    if not re.search(r'מחיר(?:י)?\s+ה?יעד|יעד\s+(?:המחיר|מחיר)', text):
+        return text
+    return re.sub(r'(\d[\d,.]*\s+דולר)\s+מתוך\s+(\d[\d,.]*\s+דולר)',
+                  r'\1 (לעומת \2 קודם)', text)
+
+
 def compact_parts(title, summary, tickers=''):
     """Keep the headline and complementary translated facts verbatim.
 
@@ -16,7 +23,7 @@ def compact_parts(title, summary, tickers=''):
     summary = CONTROLS.sub('', str(summary or '')).strip()
     if not title:
         title, summary = summary, ''
-    parts = ['📊 '+title]
+    parts = ['📊 '+_clear_target_comparison(title)]
     if tickers:
         parts.append('מניות: '+tickers)
     if summary == title:
@@ -26,5 +33,5 @@ def compact_parts(title, summary, tickers=''):
         # Do not split abbreviations, compare bags of words or normalize numbers.
         summary = re.sub(r'^'+re.escape(title.rstrip('.!?'))+r'[.!?](?:\s+|$)', '', summary, count=1)
     if summary:
-        parts.append(summary)
+        parts.append(_clear_target_comparison(summary))
     return parts

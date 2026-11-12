@@ -53,6 +53,13 @@ def has_reported_results(title, excerpt=''):
     if re.search(r'\b(?:GDP|CPI|PPI|PCE|import prices|export prices|retail sales|jobless|unemployment)\b|'
                  r'תוצר מקומי|מדד המחירים|מחירי היבוא|מחירי הייצוא|מכירות קמעונאיות',headline,re.I):return False
     if PREVIEW.search(headline) and not PAST.search(headline):return False
+    # Wire headlines may express a forecast as "sees [company] 4Q revenue
+    # up 70%". The later period/metric/up tokens do not make it an actual.
+    forecast_clause = headline.split(';', 1)[0]
+    forecast = re.search(r'\b(?:sees?|projects?|forecasts?|expects?|anticipates?|predicts?)\b', forecast_clause, re.I)
+    if (forecast and not ACTUAL.search(forecast_clause[:forecast.start()])
+            and PERIOD.search(forecast_clause) and METRIC.search(forecast_clause[forecast.end():])):
+        return False
     # Calls/transcripts and future presentation notices are not a fresh result.
     if re.search(r'\b(?:earnings call transcript|(?:conference|earnings) call highlights|'
                  r'(?:financial results|earnings) conference(?: call)?)\b',headline,re.I):return False
