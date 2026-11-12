@@ -1661,31 +1661,37 @@ def _claim_telegram_outbox(limit: int = 20, lease_seconds: int = 300) -> list[di
     cur.execute("""UPDATE scanner_telegram_outbox
         SET status='retry',next_attempt_at=?,last_error='stale_dispatch_lease_recovered'
         WHERE status='sending' AND next_attempt_at<=?""", (stamp, stamp))
+    cur.execute("""UPDATE scanner_telegram_outbox SET status='failed',
+        last_error='sec_activity_delivery_unknown_manual_review'
+        WHERE status='sec_topic_sending' AND next_attempt_at<=?""", (stamp,))
     if using_postgres():
         cur.execute("""WITH due AS (
             SELECT id FROM scanner_telegram_outbox
-            WHERE (status IN ('pending','retry','community_pending','trump_pending','trump_retry') OR (event_type='trump_truth_post' AND status IN ('trump_hebrew_ready','trump_hebrew_retry','trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry','trump_album_ready','trump_album_retry'))) AND next_attempt_at<=?
+            WHERE (status IN ('pending','retry','community_pending','trump_pending','trump_retry','sec_topic_pending') OR (event_type='trump_truth_post' AND status IN ('trump_hebrew_ready','trump_hebrew_retry','trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry','trump_album_ready','trump_album_retry'))) AND next_attempt_at<=?
             ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED)
-            UPDATE scanner_telegram_outbox o SET status=CASE WHEN o.status IN ('trump_album_ready','trump_album_retry') THEN 'trump_album_sending' WHEN o.status IN ('trump_bilingual_ready','trump_bilingual_retry') THEN 'trump_bilingual_sending' WHEN o.status IN ('trump_media_ready','trump_media_retry') THEN 'trump_media_sending' WHEN o.status IN ('trump_hebrew_ready','trump_hebrew_retry') THEN 'trump_hebrew_sending' WHEN o.event_type='community_discussion' THEN 'community_sending' WHEN o.event_type='trump_truth_post' THEN 'trump_sending' ELSE 'sending' END,next_attempt_at=?,last_error=NULL
+            UPDATE scanner_telegram_outbox o SET status=CASE WHEN o.status='sec_topic_pending' THEN 'sec_topic_sending' WHEN o.status IN ('trump_album_ready','trump_album_retry') THEN 'trump_album_sending' WHEN o.status IN ('trump_bilingual_ready','trump_bilingual_retry') THEN 'trump_bilingual_sending' WHEN o.status IN ('trump_media_ready','trump_media_retry') THEN 'trump_media_sending' WHEN o.status IN ('trump_hebrew_ready','trump_hebrew_retry') THEN 'trump_hebrew_sending' WHEN o.event_type='community_discussion' THEN 'community_sending' WHEN o.event_type='trump_truth_post' THEN 'trump_sending' ELSE 'sending' END,next_attempt_at=?,last_error=NULL
             FROM due WHERE o.id=due.id RETURNING o.*""", (stamp, limit, lease_until))
         rows = [dict(row) for row in cur.fetchall()]
         conn.commit(); conn.close()
         return rows
     cur.execute("""SELECT * FROM scanner_telegram_outbox
-        WHERE (status IN ('pending','retry','community_pending','trump_pending','trump_retry') OR (event_type='trump_truth_post' AND status IN ('trump_hebrew_ready','trump_hebrew_retry','trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry','trump_album_ready','trump_album_retry'))) AND next_attempt_at<=?
+        WHERE (status IN ('pending','retry','community_pending','trump_pending','trump_retry','sec_topic_pending') OR (event_type='trump_truth_post' AND status IN ('trump_hebrew_ready','trump_hebrew_retry','trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry','trump_album_ready','trump_album_retry'))) AND next_attempt_at<=?
         ORDER BY id LIMIT ?""", (stamp, limit))
     rows = [dict(row) for row in cur.fetchall()]
     if rows:
         placeholders = ",".join("?" for _ in rows)
         cur.execute(f"""UPDATE scanner_telegram_outbox
-            SET status=CASE WHEN status IN ('trump_album_ready','trump_album_retry') THEN 'trump_album_sending' WHEN status IN ('trump_bilingual_ready','trump_bilingual_retry') THEN 'trump_bilingual_sending' WHEN status IN ('trump_media_ready','trump_media_retry') THEN 'trump_media_sending' WHEN status IN ('trump_hebrew_ready','trump_hebrew_retry') THEN 'trump_hebrew_sending' WHEN event_type='community_discussion' THEN 'community_sending' WHEN event_type='trump_truth_post' THEN 'trump_sending' ELSE 'sending' END,next_attempt_at=?,last_error=NULL
-            WHERE id IN ({placeholders}) AND status IN ('pending','retry','community_pending','trump_pending','trump_retry','trump_hebrew_ready','trump_hebrew_retry','trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry','trump_album_ready','trump_album_retry')""",
+            SET status=CASE WHEN status='sec_topic_pending' THEN 'sec_topic_sending' WHEN status IN ('trump_album_ready','trump_album_retry') THEN 'trump_album_sending' WHEN status IN ('trump_bilingual_ready','trump_bilingual_retry') THEN 'trump_bilingual_sending' WHEN status IN ('trump_media_ready','trump_media_retry') THEN 'trump_media_sending' WHEN status IN ('trump_hebrew_ready','trump_hebrew_retry') THEN 'trump_hebrew_sending' WHEN event_type='community_discussion' THEN 'community_sending' WHEN event_type='trump_truth_post' THEN 'trump_sending' ELSE 'sending' END,next_attempt_at=?,last_error=NULL
+            WHERE id IN ({placeholders}) AND status IN ('pending','retry','community_pending','trump_pending','trump_retry','trump_hebrew_ready','trump_hebrew_retry','trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry','trump_album_ready','trump_album_retry','sec_topic_pending')""",
                     (lease_until, *(row["id"] for row in rows)))
         # RETURNING on PostgreSQL already returns the durable claimed state.
         # Keep the new media contract identical on SQLite without changing the
         # historical caller-visible states for unrelated notification types.
         for row in rows:
-            if row['status'] in ('trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry','trump_album_ready','trump_album_retry'):
+            if row['status'] == 'sec_topic_pending':
+                row['status'] = 'sec_topic_sending'
+                row['next_attempt_at'] = lease_until
+            elif row['status'] in ('trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry','trump_album_ready','trump_album_retry'):
                 row['status'] = ('trump_album_sending' if row['status'].startswith('trump_album_') else
                     'trump_bilingual_sending' if row['status'].startswith('trump_bilingual_') else 'trump_media_sending')
                 row['next_attempt_at'] = lease_until
@@ -1700,6 +1706,21 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
     portfolio_changed = False
     for row in sorted(rows, key=lambda item: item['id']):
         cfg = settings()
+        if row['status'] == 'sec_topic_sending':
+            from sec_activity_topics import deliver
+            result = deliver(row, cfg, datetime.now(UTC), send_telegram)
+            delivered = result == 'sent'
+            with get_db_connection() as activity_conn:
+                activity_conn.execute("""UPDATE scanner_telegram_outbox
+                    SET status=?,attempts=attempts+1,sent_at=?,last_error=?
+                    WHERE id=? AND status='sec_topic_sending' AND next_attempt_at=?""",
+                    ('sent' if delivered else 'failed', now_z() if delivered else None,
+                     None if delivered else 'sec_activity_delivery_failed_or_unverified',
+                     row['id'], row['next_attempt_at']))
+                activity_conn.commit()
+            sent += int(delivered)
+            failed += int(not delivered)
+            continue
         if row['event_type'] == 'sec_intelligence' and row['dedupe_key'].startswith('sec-intelligence:'):
             # Old unsent financial notices retain their durable key/receipt but
             # use the new destination. Never guess the category from body text.

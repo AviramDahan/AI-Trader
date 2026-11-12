@@ -15,6 +15,7 @@ from html.parser import HTMLParser
 from xml.etree import ElementTree as ET
 
 from database import get_db_connection
+from sec_activity_topics import BENEFICIAL_FORMS
 from sec_transport import fetch
 
 POLICY = "sec-intelligence-v1"
@@ -301,7 +302,7 @@ def parse_8k_exhibit(raw: bytes) -> dict:
 def _source_url(cik: str, accession: str, document: str) -> str:
     if not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession):
         raise ValueError("invalid_accession")
-    if not re.fullmatch(r"(?:xsl[A-Za-z0-9]+/)?[A-Za-z0-9_.-]{1,180}", document):
+    if not re.fullmatch(r"(?:xsl[A-Za-z0-9_]+/)?[A-Za-z0-9_.-]{1,180}", document):
         raise ValueError("invalid_sec_document_name")
     return f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/{document}"
 
@@ -317,8 +318,8 @@ def _document_url(job: dict) -> str:
     expected = _source_url(job['issuer_cik'], job['accession'], document)
     if job['source_url'] != expected:
         raise ValueError('sec_source_metadata_mismatch')
-    if job['form'] in {'4', '4/A'} and re.fullmatch(
-            r'xsl[A-Za-z0-9]+/[A-Za-z0-9_.-]{1,180}\.xml', document):
+    if job['form'] in ({'4', '4/A'} | BENEFICIAL_FORMS) and re.fullmatch(
+            r'xsl[A-Za-z0-9_]+/[A-Za-z0-9_.-]{1,180}\.xml', document):
         return _source_url(job['issuer_cik'], job['accession'], document.split('/', 1)[1])
     return expected
 
@@ -414,9 +415,13 @@ def _queue_filing(row: dict, cik: str, symbols: list[str], snapshot_id: str,
                   seen: datetime, budget: list[int]) -> bool:
     accession = str(row.get("accessionNumber") or "")
     form = str(row.get("form") or "").upper()
-    if form not in FORMS or not symbols or not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession):
+    if form not in (FORMS | BENEFICIAL_FORMS) or not symbols or not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession):
         return False
     accepted = row.get("acceptanceDateTime")
+    if form in BENEFICIAL_FORMS:
+        from sec_activity_topics import destination
+        if destination('ownership_activity', accepted, seen) is None:
+            return False
     error = None
     try:
         accepted_at = _z(_time(accepted))
@@ -627,6 +632,11 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
 def _filing_evidence(job: dict, raw: bytes, at: datetime) -> tuple[dict, list[dict]]:
     form = job["form"]
     accession, cik = job["accession"], job["issuer_cik"]
+    if form in BENEFICIAL_FORMS:
+        from sec_activity_topics import parse_beneficial_ownership
+        return {"kind": "beneficial_ownership", "accession": accession, "issuer_cik": cik,
+                "source_url": job["source_url"], "document_sha256": hashlib.sha256(raw).hexdigest(),
+                "holdings": parse_beneficial_ownership(raw, form, cik)}, []
     if form in {"4", "4/A"}:
         actual_url = job["source_url"]
         try:
@@ -674,11 +684,14 @@ def _filing_evidence(job: dict, raw: bytes, at: datetime) -> tuple[dict, list[di
         facts = json.loads(facts_raw)
         if str(facts.get("cik", "")).zfill(10) != cik:
             raise ValueError("xbrl_issuer_mismatch")
+        from sec_activity_topics import reported_buyback
+        buyback = reported_buyback(facts, job)
         return {"kind": "financial", "accession": accession, "issuer_cik": cik,
                 "source_url": job["source_url"],
                 "document_sha256": hashlib.sha256(raw).hexdigest(),
                 "companyfacts_sha256": hashlib.sha256(facts_raw).hexdigest(),
-                "comparisons": companyfacts_comparisons(facts, accession, job["accepted_at"])}, []
+                "comparisons": companyfacts_comparisons(facts, accession, job["accepted_at"]),
+                **({"buyback_cash": buyback} if buyback else {})}, []
     if form in {"8-K", "8-K/A"}:
         excerpt = parse_8k_exhibit(raw)
         listing, _ = fetch(_source_url(cik, accession, "index.json"), _user_agent(), max_bytes=500_000)
@@ -709,6 +722,7 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
     filings = [dict(r) for r in conn.execute("""SELECT accession,form,accepted_at,processed_at,
             source_url,evidence_json FROM si_filing_jobs WHERE issuer_cik=? AND status='processed'
             AND superseded_by IS NULL AND accepted_at>=? AND processed_at<=?
+            AND form NOT IN ('SCHEDULE 13D','SCHEDULE 13D/A','SCHEDULE 13G','SCHEDULE 13G/A')
             ORDER BY accepted_at DESC LIMIT 300""", (cik, start, _z(at)))]
     transactions = [dict(r) for r in conn.execute("""SELECT event_id,accession,transaction_key,
             category,body_json FROM si_transactions WHERE issuer_cik=? AND effective_available_at<=?
@@ -1217,9 +1231,15 @@ def process_jobs(now: datetime | None = None, limit: int = 2) -> dict:
                                 tx["category"] = "purchase"
                                 conn.execute("UPDATE si_transactions SET category=?,body_json=? WHERE event_id=?",
                                              ("purchase", _json(tx), tx["event_id"]))
-                _update_snapshots(job["issuer_cik"], json.loads(job["tickers_json"]),
-                                  job["universe_snapshot_id"], processed_at, conn)
-                _enqueue_material_public_alert(job, evidence, processed_at, conn)
+                from sec_activity_topics import destination, enqueue
+                if job['form'] not in BENEFICIAL_FORMS:
+                    _update_snapshots(job["issuer_cik"], json.loads(job["tickers_json"]),
+                                      job["universe_snapshot_id"], processed_at, conn)
+                enqueue(job, evidence, transactions, processed_at, conn)
+                ownership_routed = evidence.get('kind') == 'ownership' and job['form'] == '4' and destination(
+                    'ownership_activity', job['accepted_at'], processed_at) is not None
+                if not ownership_routed and job['form'] not in BENEFICIAL_FORMS:
+                    _enqueue_material_public_alert(job, evidence, processed_at, conn)
                 _advance_processing_cursor(conn, job['issuer_cik'], now)
                 conn.commit()
             processed += 1
