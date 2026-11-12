@@ -27,7 +27,8 @@ def schedule_xml(form):
         cik = f'<issuerCik>{CIK}</issuerCik>'
         persons = ('<coverPageHeaderReportingPersonDetails><reportingPersonName>Example Fund</reportingPersonName>'
                    '<classPercent>6.25</classPercent></coverPageHeaderReportingPersonDetails>')
-    return (f'<edgarSubmission xmlns="http://www.sec.gov/edgar/schedule{family}">'
+    namespace_suffix = '13D' if family == '13d' else '13g'
+    return (f'<edgarSubmission xmlns="http://www.sec.gov/edgar/schedule{namespace_suffix}">'
             f'<headerData><submissionType>{form}</submissionType></headerData>'
             f'<formData><coverPageHeader>{event}<issuerInfo>{cik}</issuerInfo>'
             f'<securitiesClassTitle>Class A Common Stock</securitiesClassTitle></coverPageHeader>'
@@ -42,6 +43,16 @@ def test_beneficial_forms_identify_subject_and_never_infer_trade(form):
     assert parsed['persons'] == [{'name': 'Example Fund', 'percent': '6.25'}]
     with pytest.raises(ValueError, match='issuer_cik_mismatch'):
         activity.parse_beneficial_ownership(data, form, '0000000001')
+
+
+def test_schedule_13g_percentage_accepts_reported_value_with_explanation():
+    form = 'SCHEDULE 13G'
+    raw = schedule_xml(form)
+    explained = raw.replace(b'6.25</classPercent>', b'6.3% (approximately 6.28%) - Based on the cover page.</classPercent>')
+    assert activity.parse_beneficial_ownership(explained, form, CIK)['persons'][0]['percent'] == '6.3'
+    ambiguous = raw.replace(b'6.25</classPercent>', b'6.3% of class A and 8.9% of class B</classPercent>')
+    with pytest.raises(ValueError, match='ownership_percent_not_available'):
+        activity.parse_beneficial_ownership(ambiguous, form, CIK)
 
 
 def buyback_payload(rows):

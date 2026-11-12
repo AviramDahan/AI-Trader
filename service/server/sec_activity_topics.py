@@ -28,15 +28,30 @@ def _label(value, limit=120):
     return ' '.join(''.join(c for c in str(value or '') if not unicodedata.category(c).startswith('C')).split())[:limit]
 
 
+def _reported_percent(value):
+    value = (value or '').strip()
+    percent = _number(value)
+    if percent is None:
+        # EDGAR 13G allows explanatory text in this field. Accept the leading
+        # value only when the rest does not introduce a second holding.
+        match = re.fullmatch(
+            r'(\d{1,3}(?:\.\d{1,10})?)\s*%(?:\s*\(approximately\s+\d{1,3}(?:\.\d{1,10})?%\))?[^%]*',
+            value, re.I)
+        percent = _number(match[1]) if match else None
+    return percent if percent is not None and percent <= 100 else None
+
+
 def parse_beneficial_ownership(raw, form, issuer_cik):
     if (form not in BENEFICIAL_FORMS or len(raw) > 2_000_000 or b'\x00' in raw
             or re.search(br'<!\s*(?:DOCTYPE|ENTITY)\b', raw, re.I)):
         raise ValueError('invalid_beneficial_ownership_xml')
     family = form.split()[-1].split('/')[0].lower()
-    namespace = '{http://www.sec.gov/edgar/schedule' + family + '}'
     root = ET.fromstring(raw)
-    if root.tag != namespace + 'edgarSubmission':
+    namespace, separator, root_name = root.tag.rpartition('}')
+    if (not separator or root_name != 'edgarSubmission'
+            or namespace.lower() != '{http://www.sec.gov/edgar/schedule' + family):
         raise ValueError('unexpected_beneficial_ownership_root')
+    namespace += separator
     for node in root.iter():
         if node.tag.startswith(namespace):
             node.tag = node.tag[len(namespace):]
@@ -56,8 +71,8 @@ def parse_beneficial_ownership(raw, form, issuer_cik):
     persons = []
     for person in root.findall(path):
         name = _label(person.findtext('reportingPersonName'))
-        percent = _number(person.findtext(percent_field))
-        if name and percent is not None and percent <= 100:
+        percent = _reported_percent(person.findtext(percent_field))
+        if name and percent is not None:
             item = {'name': name, 'percent': _display_number(percent)}
             if item not in persons:
                 persons.append(item)
