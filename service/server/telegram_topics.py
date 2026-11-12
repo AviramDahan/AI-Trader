@@ -11,6 +11,11 @@ MARKET_NEWS_EVENT_TYPES = {"market_news"}
 SEC_INTELLIGENCE_EVENT_TYPES = {"sec_intelligence"}
 COMPANY_REPORT_EVENT_TYPES = {"company_report"}
 ANALYST_EVENT_TYPES = {"analyst_update"}
+SEC_ACTIVITY_THREADS = {
+    "ownership_activity": "TELEGRAM_OWNERSHIP_ACTIVITY_THREAD_ID",
+    "buyback_activity": "TELEGRAM_BUYBACK_ACTIVITY_THREAD_ID",
+}
+SEC_ACTIVITY_EVENT_TYPES = frozenset(SEC_ACTIVITY_THREADS)
 PERSONAL_NEWS_EVENT_TYPES = {"position_news", "watchlist_news", "watchlist_news_correction"}
 STOCK_NEWS_EVENT_TYPES = {
     "position_news", "watchlist_news", "watchlist_news_correction", "stock_news", "correction", "news_status",
@@ -22,7 +27,7 @@ PORTFOLIO_EVENT_TYPES = {"portfolio_status"}
 
 def with_news_community_link(message: str, event_type: str | None) -> str:
     """Append the server-configured join link to all news, never trade alerts."""
-    if event_type not in MARKET_NEWS_EVENT_TYPES | STOCK_NEWS_EVENT_TYPES | SEC_INTELLIGENCE_EVENT_TYPES | COMPANY_REPORT_EVENT_TYPES | ANALYST_EVENT_TYPES:
+    if event_type not in MARKET_NEWS_EVENT_TYPES | STOCK_NEWS_EVENT_TYPES | SEC_INTELLIGENCE_EVENT_TYPES | COMPANY_REPORT_EVENT_TYPES | ANALYST_EVENT_TYPES | SEC_ACTIVITY_EVENT_TYPES:
         return message
     link = os.getenv("TELEGRAM_COMMUNITY_URL", "").strip()
     # Presentation only: stored evidence/URLs and all eligibility stay intact.
@@ -78,6 +83,8 @@ def thread_id_for_event(event_type: str | None, *, stock_direction: str | None =
         names = ("TELEGRAM_MARKET_NEWS_THREAD_ID", "TELEGRAM_NEWS_THREAD_ID")
     elif event_type in ANALYST_EVENT_TYPES:
         names = ("TELEGRAM_ANALYST_UPDATES_THREAD_ID",)
+    elif event_type in SEC_ACTIVITY_THREADS:
+        names = (SEC_ACTIVITY_THREADS[event_type],)
     elif event_type in COMPANY_REPORT_EVENT_TYPES:
         # A missing report topic must never spill financial results into SEC/General.
         names = ("TELEGRAM_COMPANY_REPORTS_THREAD_ID",)
@@ -100,7 +107,7 @@ def thread_id_for_event(event_type: str | None, *, stock_direction: str | None =
         value = os.getenv(name, "").strip()
         try:
             thread_id = int(value)
-            if thread_id > 0:
+            if thread_id > (1 if event_type in SEC_ACTIVITY_EVENT_TYPES else 0):
                 return thread_id
         except (TypeError, ValueError):
             continue
