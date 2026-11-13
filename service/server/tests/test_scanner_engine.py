@@ -550,7 +550,7 @@ class ScannerEngineTests(unittest.TestCase):
         self.assertTrue(any("פעולה: קנייה" in message for message in messages))
         self.assertTrue(any("אירוע: כניסה בוצעה" in message for message in messages))
         entry_message = next(message for message in messages if "אירוע: כניסה בוצעה" in message)
-        self.assertIn('100%', entry_message)
+        self.assertIn('מחיר ביצוע: 100.00', entry_message)
         self.assertNotIn('$', entry_message)
         self.assertNotIn('כמות', entry_message)
         signal_message = next(message for message in messages if 'סיגנל חדש, ממתין לכניסה' in message)
