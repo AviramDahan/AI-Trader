@@ -28,8 +28,11 @@ def factual_title(event):
     if not event.get('tickers') and event['event_type'] != 'market':return False
     title=event.get('title','')
     from .macro_rules import factual_macro_title
+    from .editorial import macro_release
+    structured_release=(not event.get('tickers') and event['event_type']=='market' and
+        any(macro_release(s) for s in event.get('sources',[]) if s.get('title')==title))
     if opinion(title) or not (FACT.search(title) or
-            (event['event_type']=='market' and factual_macro_title(title))):return False
+            (event['event_type']=='market' and (factual_macro_title(title) or structured_release))):return False
     for source in event.get('sources',[]):
         if source.get('rights')!='approved' or not source.get('publisher'):continue
         # A different observation cannot lend its approval to this headline.

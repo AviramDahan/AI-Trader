@@ -798,9 +798,12 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         news_pipeline.ingest_items([self.item('existing_market')], self.clock)
         def analyze(rows):
             return [dict(id=r['id'], related=True, title_he='נתוני הכלכלה פורסמו',
-                         summary_he='תקציר', sentiment='neutral', materiality='medium', relevance=.8) for r in rows]
+                         summary_he='תקציר', interpretation_he='יש לעקוב אחר פרסום ההחלטה בפועל.',
+                         sentiment='neutral', materiality='medium', relevance=.8) for r in rows]
         result = news_pipeline.analyze_news_jobs(analyzer=analyze, at=self.clock)
         self.assertEqual(result['alerts'], 1)
+        bulletin = self.rows("SELECT message FROM scanner_telegram_outbox WHERE event_type='market_news'")[0]['message']
+        self.assertIn('משמעות אפשרית לסוחר (AI): יש לעקוב אחר פרסום ההחלטה בפועל.', bulletin)
         conn = database.get_db_connection()
         conn.execute("UPDATE scanner_news_jobs SET status='pending'")
         conn.commit(); conn.close()

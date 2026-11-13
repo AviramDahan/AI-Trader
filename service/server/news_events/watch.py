@@ -21,10 +21,12 @@ def coverage_summary(providers, provider_health):
     states = {r['provider']: r['status'] for r in providers}
     states.update({k: v.get('status', 'unknown') for k, v in provider_health.items()
                    if not k.startswith('evidence:')})
+    if not states or all(status in inactive for status in states.values()):
+        return 'חדשות קנוניות: לא אומתה פעילות מקורות; אין להסיק מכך תקינות פרסום'
     affected = sorted(k for k, status in states.items() if status not in healthy | inactive)
     if affected:
-        return 'חדשות קנוניות: הצינור תקין; כיסוי מקורות חלקי\nמקורות דורשים טיפול: ' + ', '.join(affected)
-    return 'חדשות קנוניות: הצינור תקין; המקורות הפעילים תקינים'
+        return 'חדשות קנוניות: כיסוי מקורות חלקי; חיבורי המקורות דורשים בדיקה\nמקורות דורשים טיפול: ' + ', '.join(affected)
+    return 'חדשות קנוניות: חיבורי המקורות הפעילים תקינים; תפוקת הפרסום נמדדת בנפרד'
 
 
 def fail_back(reason,current):
@@ -53,6 +55,12 @@ def check(at=None):
     from .store import Store
     from .reporting import health_report
     data=health_report(Store(connect,production=True),current)
+    from .funnel_health import snapshot as funnel_snapshot, summary as funnel_summary, unavailable
+    try:
+        with connect() as c:
+            data['funnel'] = funnel_snapshot(c,current,control.get('not_before'))
+    except Exception:
+        data['funnel'] = unavailable()
     with connect() as c:
         monitor=c.execute("SELECT status,last_success_at,last_attempt_at,detail FROM scanner_service_status WHERE component='monitor'").fetchone()
         prices=c.execute("SELECT status,last_success_at,last_attempt_at,detail FROM scanner_service_status WHERE component='prices'").fetchone()
@@ -93,6 +101,7 @@ def check(at=None):
         enqueue(summary_key(current),
             'AI-Trader Admin\n'+coverage_summary(providers,data['provider_health'])+'\nאירועים: '+str(data['canonical_events'])+
             '; גרסאות מקורות: '+str(data['source_versions'])+'; תור: '+str(data['queue_size'])+
+            '\n'+funnel_summary(data['funnel'])+
             '\nעלות חדשות מתועדת מאז ההפעלה: $'+str(round(data['known_cost'],6))+
             '\nספקים: '+', '.join(r['provider']+'='+r['status'] for r in providers)+
             '\nספקים חדשים: '+', '.join(k+'='+v.get('status','unknown') for k,v in data['provider_health'].items() if not k.startswith('evidence:')))

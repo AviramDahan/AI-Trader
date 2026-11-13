@@ -33,6 +33,7 @@ CHUNK_BYTES = 1024 * 1024
 MAX_ROW_BYTES = 1024 * 1024
 MAX_CHUNKS = 4096
 MAX_MANIFEST_BYTES = 2 * 1024 * 1024
+SECRET_ENV_NAME = re.compile(r'TOKEN|PASSWORD|SECRET|API_KEY')
 
 
 def history_days():
@@ -68,10 +69,16 @@ def row_valid(table, row):
     if len(raw) > MAX_ROW_BYTES:
         raise ValueError('sec_archive_row_too_large')
     from recovery_state import SECRET_PATTERN
-    if SECRET_PATTERN.search(raw.decode()):
+    text = raw.decode()
+    if SECRET_PATTERN.search(text):
         raise ValueError('secret_pattern_in_sec_archive')
-    for name, value in os.environ.items():
-        if any(part in name for part in ('TOKEN', 'PASSWORD', 'SECRET', 'API_KEY')) and len(value) > 15 and value in raw.decode():
+    # Keep the live per-row guard (including secret rotation between rows), but
+    # avoid decoding unrelated environment values for every retained SEC row.
+    for name in os.environ:
+        if not SECRET_ENV_NAME.search(name):
+            continue
+        value = os.environ[name]
+        if len(value) > 15 and value in text:
             raise ValueError('environment_secret_in_sec_archive')
     if any(not isinstance(row[key], str) or not row[key] for key in KEYS[table]):
         raise ValueError('sec_archive_identity_invalid')

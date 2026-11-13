@@ -98,7 +98,9 @@ class IdentityResolver:
                 basis=corroborate(source,ticker,name,cik)
                 if basis:result.append({'ticker':ticker,'company':name,'cik':cik,'basis':basis})
                 continue
-            explicit=bool(re.search(r'(?:\$|NASDAQ\s*:\s*|NYSE\s*:\s*)'+re.escape(ticker)+r'(?![A-Z0-9])',body))
+            # The whole identifier must end here, including lowercase/Unicode
+            # letters and underscores; a ticker prefix is not company evidence.
+            explicit=bool(re.search(r'(?:\$|NASDAQ\s*:\s*|NYSE\s*:\s*)'+re.escape(ticker)+r'(?!\w)',body))
             # A bare common word (e.g. "Apple" or "A") is not a legal-company
             # identity. Keep short-name discovery as a hint, never auto-verify.
             named=bool(len(name.split())>=2 and re.search(r'(?<!\w)'+re.escape(name)+r'(?!\w)',body,re.I))
@@ -157,6 +159,10 @@ def anchors(source, identities):
     """No same-ticker/day or headline-similarity merges. Exact evidence only."""
     identity=','.join(sorted(v['ticker'] for v in identities)) or 'market'
     refs=[]
+    if not identities:
+        from .editorial import macro_release
+        release=macro_release(source.data())
+        if release:refs.append(release[0])
     for url in (source.url,*source.event_refs):
         try: url=canonical_url(url)
         except ValueError: continue

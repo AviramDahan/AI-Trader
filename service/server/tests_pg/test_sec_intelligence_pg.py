@@ -176,6 +176,7 @@ def test_postgres_sec_publication_is_atomic_and_once_per_accession(pg, monkeypat
     monkeypatch.setenv("SEC_INTELLIGENCE_MODE", "paper")
     monkeypatch.setenv("STOCK_SCANNER_TELEGRAM_ENABLED", "true")
     monkeypatch.setenv("TELEGRAM_SEC_INTELLIGENCE_THREAD_ID", "345")
+    monkeypatch.setenv("TELEGRAM_COMPANY_REPORTS_THREAD_ID", "346")
     monkeypatch.setenv("SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE", si._z(now-timedelta(hours=1)))
     monkeypatch.setenv("NEWS_SEC_USER_AGENT", "Isolated Test Operator test@example.com")
     uid, _ = si.save_universe({"AAPL": {"company": "Apple Inc.", "indexes": ["sp500"]}},
@@ -186,7 +187,8 @@ def test_postgres_sec_publication_is_atomic_and_once_per_accession(pg, monkeypat
     assert si._queue_filing(row, "0000320193", ["AAPL"], uid, now, [10])
     fact = {"metric": "revenue", "namespace": "us-gaap", "tag": "Revenues", "unit": "USD",
             "start": "2026-07-01", "end": "2026-09-30", "value": 120,
-            "previous": {"value": 100}, "change_pct": 20, "reason": "comparable_prior"}
+            "previous": {"value": 100, "start": "2025-07-01", "end": "2025-09-30"},
+            "change_pct": 20, "reason": "comparable_prior"}
     monkeypatch.setattr(si, "fetch", lambda *_a, **_k: (b"synthetic", {}))
     monkeypatch.setattr(si, "_filing_evidence", lambda *_a, **_k: (
         {"kind": "financial", "document_sha256": "synthetic", "comparisons": [fact]}, []))

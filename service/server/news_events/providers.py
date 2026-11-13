@@ -16,6 +16,7 @@ from .model import Source, canonical_url, timestamp, text, event_type, fingerpri
 
 DNS_POOL=ThreadPoolExecutor(max_workers=3,thread_name_prefix='phase2-provider-dns')
 DNS_SLOTS=threading.BoundedSemaphore(3)
+PRNEWSWIRE_RSS_ENDPOINT='https://www.prnewswire.com/rss/news-releases-list.rss'
 
 
 def resolve_public(host):
@@ -270,7 +271,7 @@ def registry(configs,existing=None,transport_factory=None,tipranks_contract=None
 DEFAULT_CONFIGS=[
     Config('investing','https://www.investing.com/rss/news.rss','Investing.com','established financial media'),
     Config('globenewswire','https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies','GlobeNewswire','press_release'),
-    Config('prnewswire','https://www.prnewswire.com/rss/news-releases-list.rss','PR Newswire','press_release'),
+    Config('prnewswire',PRNEWSWIRE_RSS_ENDPOINT,'PR Newswire','press_release'),
     Config('benzinga','https://api.benzinga.com/api/v2/news','Benzinga','established financial media',
            removals_endpoint='https://api.benzinga.com/api/v2/news-removed'),
     Config('tipranks','','TipRanks','established financial media'),

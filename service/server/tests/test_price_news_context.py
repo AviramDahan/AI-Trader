@@ -59,6 +59,17 @@ def enrich(candidate):
     return scanner.enrich_and_rank_candidates([candidate], {}, scanner.settings())
 
 
+def test_optional_news_does_not_extend_to_newer_intraday_contract(monkeypatch):
+    from test_entry_intraday import DECISION, confirmed_case
+
+    sid = 'VCP_BASE_CONTRACTION'
+    _, _, _, _, record = confirmed_case(sid)
+    candidate = dict(technical_direction='BUY', entry_discovery=entry_discovery.attribution([record], DECISION))
+    monkeypatch.setenv(entry_discovery.FLAGS[sid], 'true')
+    cfg = dict(price_news_context_enabled=True, **{entry_discovery.FLAGS[sid]: True})
+    assert policy.route_ids(candidate, cfg) == []
+
+
 @pytest.mark.parametrize('sid', PRICE_IDS)
 def test_each_price_route_can_reach_real_pending_then_fill_and_exit_without_article(db, clock, monkeypatch, sid):
     candidate, review, session, price = setup_price(monkeypatch, clock, sid)

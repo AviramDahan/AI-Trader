@@ -15,6 +15,8 @@ import math
 from entry_window import build as build_window, instant, eligible_from
 
 VERSION = 'independent_entry_execution_v1'
+INTRADAY_VERSION = 'independent_entry_execution_intraday_v1'
+VERSIONS = (VERSION, INTRADAY_VERSION)
 KEY = 'entry_strategy_execution'
 OBSERVATION_KEY = 'last_strategy_entry_block'
 PRICE_REASONS = frozenset({'strategy_fill_below_support', 'strategy_fill_above_chase',
@@ -100,7 +102,8 @@ def _build(discovery, *, created_at, valid_until, limit_price, quote_at,
         ids.append(record['strategy_id'])
     if not ids:
         raise ValueError('entry_strategy_no_valid_admission_branch')
-    saved = dict(version=VERSION, created_at=created.isoformat(), valid_until=expires.isoformat(),
+    version = INTRADAY_VERSION if package['version'] == 'entry_discovery_intraday_v1' else VERSION
+    saved = dict(version=version, created_at=created.isoformat(), valid_until=expires.isoformat(),
         quote_at=quote.isoformat(), limit_price=float(limit_price),
         audit_digest=_digest(package), admitted_ids=ids,
         branches=branches_from_discovery(package, ids))
@@ -131,7 +134,7 @@ def validate_association(discovery, saved):
         package = validate_attribution(discovery)
         if BASELINE in package['strategy_ids'] or not isinstance(saved, dict):
             raise ValueError(INVALID)
-        if saved.get('version') != VERSION:
+        if saved.get('version') not in VERSIONS:
             raise ValueError(UNSUPPORTED)
         if set(saved) != {'version', 'created_at', 'valid_until', 'quote_at', 'limit_price',
                           'audit_digest', 'admitted_ids', 'branches'}:
@@ -208,7 +211,7 @@ def validate_order(order, contract=None, *, signal=None):
 
 def validate_fill(saved, price):
     """Actual price vs frozen OR rules only; the original target plan still gates."""
-    if not isinstance(saved, dict) or saved.get('version') != VERSION:
+    if not isinstance(saved, dict) or saved.get('version') not in VERSIONS:
         raise ValueError(UNSUPPORTED)
     if not _finite(price) or price <= 0 or not isinstance(saved.get('branches'), list) or not saved['branches']:
         raise ValueError(INVALID)
@@ -268,7 +271,7 @@ def public_wait(order):
     try:
         contract = json.loads(order.get('plan_json') or '{}')
         if validate_order(order, contract) and contract.get(OBSERVATION_KEY):
-            return dict(contract[OBSERVATION_KEY], version=VERSION)
+            return dict(contract[OBSERVATION_KEY], version=contract[KEY]['version'])
     except (ValueError, KeyError, TypeError, AttributeError):
         pass
     return None

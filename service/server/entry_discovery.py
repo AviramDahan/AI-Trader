@@ -14,6 +14,7 @@ import os
 from collections import deque
 
 VERSION = 'entry_discovery_v1'
+INTRADAY_VERSION = 'entry_discovery_intraday_v1'
 COMPONENT_VERSION = 'entry_discovery_component_v1'
 BASELINE = 'BASELINE'
 FLAGS = {
@@ -76,9 +77,12 @@ def attribution(records, decision_at, *, calculation_at=None):
     ids = [record.get('strategy_id') for record in records]
     if len(ids) != len(set(ids)) or set(ids) - ({BASELINE} | set(FLAGS)):
         raise ValueError('discovery_invalid_attribution_ids')
-    payload = dict(version=VERSION, primary_strategy_id=ids[0], strategy_ids=ids,
+    intraday = any(r.get('version') == 'independent_entry_discovery_intraday_v1' for r in records)
+    payload = dict(version=INTRADAY_VERSION if intraday else VERSION, primary_strategy_id=ids[0], strategy_ids=ids,
                    detected_at=instant(decision_at).isoformat(), detections=records)
     if calculation_at is not None:
+        if intraday:
+            raise ValueError('intraday_component_not_executable')
         payload.update(version=COMPONENT_VERSION, calculation_at=instant(calculation_at).isoformat())
     return validate_attribution(payload, allow_component=calculation_at is not None)
 
@@ -92,7 +96,7 @@ def validate_attribution(value, *, allow_component=False):
             keys.add('calculation_at')
         if not isinstance(value, dict) or set(value) != keys:
             raise ValueError()
-        if value['version'] != VERSION and not (component and allow_component):
+        if value['version'] not in (VERSION, INTRADAY_VERSION) and not (component and allow_component):
             raise ValueError()
         ids, records = value['strategy_ids'], value['detections']
         if (not isinstance(ids, list) or not 1 <= len(ids) <= 6 or len(ids) != len(set(ids)) or
@@ -124,8 +128,14 @@ def validate_attribution(value, *, allow_component=False):
                 raise ValueError()
             if key != BASELINE:
                 from entry_strategies import VERSION as detector_version
-                if record['direction'] != 'BUY' or record['version'] != detector_version:
+                is_intraday = record['version'] == 'independent_entry_discovery_intraday_v1'
+                if (record['direction'] != 'BUY' or
+                        (record['version'] != detector_version and not is_intraday) or
+                        (is_intraday and value['version'] != INTRADAY_VERSION)):
                     raise ValueError()
+                if is_intraday:
+                    from entry_intraday import validate_record
+                    validate_record(record)
                 effective = instant(times['effective_available_at'])
                 if not (instant(times['source_data_at']) <= effective <= record_decision and
                         instant(times['source_observed_at']) <= effective and
@@ -142,6 +152,9 @@ def validate_attribution(value, *, allow_component=False):
             if len(_canonical(record)) > 4096:
                 raise ValueError()
         encoded = _canonical(value)
+        if value['version'] == INTRADAY_VERSION and not any(
+                r.get('version') == 'independent_entry_discovery_intraday_v1' for r in records):
+            raise ValueError()
         if len(encoded) > MAX_BYTES:
             raise ValueError()
         return json.loads(encoded)
@@ -153,6 +166,8 @@ def strategy_ids(candidate):
     value = candidate.get('entry_discovery')
     if value:
         return validate_attribution(value, allow_component=True)['strategy_ids']
+    if candidate.get('_intraday_provisional'):
+        return candidate.get('strategy_ids') or []
     return candidate.get('strategy_ids') or [BASELINE]
 
 
@@ -172,6 +187,10 @@ def discover_candidates(histories, universe, cfg, *, decision_at, context=None,
     if calculation > decision:
         raise ValueError('component_calculation_after_observation')
     ids = enabled_ids(cfg)
+    intraday_on = False
+    if ids:
+        from entry_intraday import enabled as intraday_enabled
+        intraday_on = intraday_enabled(cfg)
     output, observations = [], []
     for ticker in sorted(universe):
         member = universe[ticker]
@@ -199,6 +218,17 @@ def discover_candidates(histories, universe, cfg, *, decision_at, context=None,
             observation['strategy_results'] = results
         else:
             results = {}
+        setup_results = {}
+        if intraday_on:
+            from entry_intraday import prepare_setups, ROUTES
+            requested = [key for key in ids if key in ROUTES and results.get(key, {}).get('state') != 'DETECTED']
+            try:
+                setup_results = prepare_setups(detector_frame, decision_at=decision,
+                    source_observed_at=observed, enabled_ids=requested, context=detail)
+            except (ValueError, TypeError, KeyError, OverflowError):
+                setup_results = {key: dict(strategy_id=key, state='UNKNOWN',
+                    reasons=['intraday_setup_source_unavailable']) for key in requested}
+            observation['intraday_setup_results'] = setup_results
         if frame is None:
             observation['common_reasons'].append('common_history_unavailable')
             observations.append(observation)
@@ -215,6 +245,8 @@ def discover_candidates(histories, universe, cfg, *, decision_at, context=None,
             observations.append(observation)
             continue
         hits = [results[key] for key in ids if results.get(key, {}).get('state') == 'DETECTED']
+        pending = {key: value for key, value in setup_results.items()
+                   if value.get('state') == 'FORMING' and value.get('reasons') == ['intraday_confirmation_pending']}
         selected = []
         if include_baseline and baseline:
             original_observed = baseline.get('history_fetched_at')
@@ -222,9 +254,10 @@ def discover_candidates(histories, universe, cfg, *, decision_at, context=None,
                 selected.append(_baseline_evidence(baseline, decision, original_observed))
             elif ids:
                 observation['common_reasons'].append('baseline_source_clock_unavailable')
-        if baseline and baseline['technical_direction'] != 'BUY' and include_baseline and hits:
+        if baseline and baseline['technical_direction'] != 'BUY' and include_baseline and (hits or pending):
             observation['common_reasons'].append('opposing_baseline_direction')
             hits = []
+            pending = {}
         selected.extend(hits)
         if not selected:
             # A source-clock gap must not silently disable the otherwise valid
@@ -235,6 +268,9 @@ def discover_candidates(histories, universe, cfg, *, decision_at, context=None,
                     observations.append(observation)
                     continue
                 candidate = dict(baseline)
+            elif pending:
+                candidate = dict(common, technical_direction='BUY', technical_score=common['baseline_buy_score'],
+                                 strategy_ids=[], _intraday_provisional=True)
             else:
                 observations.append(observation)
                 continue
@@ -248,6 +284,9 @@ def discover_candidates(histories, universe, cfg, *, decision_at, context=None,
                              strategy_id=package['primary_strategy_id'],
                              discovery_score=max(record['score'] for record in selected))
         candidate.update(indexes=member.get('indexes', []), market_cap=member.get('market_cap'))
+        if pending:
+            candidate['_intraday_setups'] = copy.deepcopy(pending)
+            observation['pending_intraday_setup_ids'] = list(pending)
         observation['candidate_strategy_ids'] = strategy_ids(candidate)
         output.append(candidate)
         observations.append(observation)
@@ -272,14 +311,18 @@ def rank_candidates(candidates, *, cursor=0):
                     row.get('discovery_score', float(row.get('technical_score', 0)) / 7)))
         return (float(value), float(row.get('technical_score', 0)),
                 float(row.get('average_dollar_volume', 0)), row['ticker'])
+    def selection_ids(row):
+        # Non-executable setup queues participate in the SAME global shortlist,
+        # but are never added to actual attribution until confirmation succeeds.
+        return set(strategy_ids(row)) | set(row.get('_intraday_setups', {}))
     order = [BASELINE, *FLAGS]
-    available = {key for row in by_ticker.values() for key in strategy_ids(row)}
+    available = {key for row in by_ticker.values() for key in selection_ids(row)}
     order = [key for key in order if key in available]
     if not order:
         return []
     offset = cursor % len(order)
     order = order[offset:] + order[:offset]
-    queues = {key: deque(sorted([row for row in by_ticker.values() if key in strategy_ids(row)],
+    queues = {key: deque(sorted([row for row in by_ticker.values() if key in selection_ids(row)],
                                key=score, reverse=True)) for key in order}
     emitted, output = set(), []
     while any(queues.values()):
@@ -294,12 +337,66 @@ def rank_candidates(candidates, *, cursor=0):
     return output
 
 
+class IntradayConfirmationError(ValueError):
+    """Fixed failure code plus bounded non-executable diagnostic records."""
+    def __init__(self, results):
+        super().__init__('intraday_confirmation_not_valid')
+        self.results = results
+
+
+def needs_intraday_volume(candidate, evidence, *, price, quote_at, decision_at):
+    """Cheap setup/price eligibility only. Caller owns acquisition/cache quotas."""
+    pending = candidate.get('_intraday_setups') or {}
+    if not pending:
+        return False
+    from entry_intraday import eligible_for_volume
+    return any(eligible_for_volume(setup, evidence, price=price, quote_at=quote_at,
+               decision_at=decision_at) for setup in pending.values())
+
+
+def confirm_intraday_candidate(candidate, evidence, *, price, quote_at, decision_at):
+    """Promote only actual confirmed records; keep valid Baseline/daily OR paths.
+
+    Only the pre-AI hook calls this. Post-AI admission rechecks the exact frozen
+    confirmed package, never recalculates setup levels or chooses another bar.
+    """
+    pending = candidate.get('_intraday_setups') or {}
+    if not pending:
+        return candidate
+    from entry_intraday import confirm_setup
+    prior = candidate.get('entry_discovery')
+    records = list(validate_attribution(prior)['detections']) if prior else []
+    actual_ids = {record['strategy_id'] for record in records}
+    results = {key: confirm_setup(setup, evidence, price=price, quote_at=quote_at,
+               decision_at=decision_at) for key, setup in pending.items() if key not in actual_ids}
+    confirmed = [value for value in results.values() if value['state'] == 'DETECTED']
+    if not records and not confirmed and candidate.get('_intraday_provisional'):
+        raise IntradayConfirmationError(results)
+    result = dict(candidate)
+    result.pop('_intraday_setups', None)
+    result.pop('_intraday_provisional', None)
+    result['_intraday_confirmation_results'] = results
+    # A valid unchanged Baseline may lack source-clock provenance. Do not
+    # manufacture its identity or relabel it an independent-only order.
+    if not prior and not candidate.get('_intraday_provisional'):
+        return result
+    if not confirmed:
+        return result
+    records += confirmed
+    package = attribution(records, decision_at)
+    result.update(entry_discovery=package, strategy_ids=package['strategy_ids'],
+                  strategy_id=package['primary_strategy_id'], _intraday_confirmation_results=results)
+    return result
+
+
 def validate_candidate_trigger(candidate, price, quote_at, decision_at, *, allowed_ids=None):
     """Check the current quote against a frozen discovery, never move levels.
 
     OR remains OR: a valid baseline or another still-valid trigger is sufficient.
     Retained orders are governed exclusively by the original execution contract.
     """
+    if candidate.get('_intraday_provisional'):
+        raise ValueError('intraday_confirmation_not_valid')
     package = candidate.get('entry_discovery')
     if package is None:
         return None
@@ -334,8 +431,26 @@ def review_projection(value):
 
 def observation_summary(observation):
     """Small journal projection; no OHLCV, prompts or unbounded source payload."""
-    return {key: copy.deepcopy(observation[key]) for key in
-            ('ticker', 'baseline_detected', 'common_reasons', 'candidate_strategy_ids')} | {
-        'strategy_results': {key: {field: copy.deepcopy(record[field]) for field in
+    def project(record):
+        result = {field: copy.deepcopy(record[field]) for field in
             ('strategy_id', 'version', 'state', 'score', 'sourcehash', 'reasons', 'source_times', 'trigger')
-            if field in record} for key, record in observation['strategy_results'].items()}}
+            if field in record}
+        failure = (record.get('features') or {}).get('input_failure')
+        if failure is not None:
+            from entry_input_diagnostics import validate_metadata
+            try:
+                result['features'] = {'input_failure': validate_metadata(failure)}
+            except (ValueError, TypeError, KeyError, OverflowError):
+                # Optional diagnostics cannot inject arbitrary source values
+                # or alter the original UNKNOWN trading outcome.
+                pass
+        return result
+    result = {key: copy.deepcopy(observation[key]) for key in
+            ('ticker', 'baseline_detected', 'common_reasons', 'candidate_strategy_ids')}
+    result['strategy_results'] = {key: project(record) for key, record in observation['strategy_results'].items()}
+    for field in ('intraday_setup_results', 'intraday_confirmation_results'):
+        if field in observation:
+            result[field] = {key: project(record) for key, record in observation[field].items()}
+    if 'pending_intraday_setup_ids' in observation:
+        result['pending_intraday_setup_ids'] = list(observation['pending_intraday_setup_ids'])
+    return result

@@ -42,6 +42,7 @@ def isolated(monkeypatch):
     monkeypatch.setattr(ai_provider.requests, 'post', denied)
     monkeypatch.setenv('AI_TRADER_CLOUD', 'true')
     monkeypatch.setenv('AI_INFERENCE_MODE', 'ollama_first')
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED', 'true')
     monkeypatch.setenv('OPENROUTER_NEWS_MODEL', 'synthetic-paid-model')
     monkeypatch.setenv('OPENROUTER_API_KEY', 'synthetic-only')
     monkeypatch.setattr(ai_routing, 'ready', lambda: True)
@@ -198,7 +199,7 @@ def test_canonical_terminal_paths_keep_three_or_four_requests_and_numeric_calls(
     def fake_relay(method, path, payload=None, **kwargs):
         if path == '/health':
             return {'context_policy': ai_routing.CONTEXT_POLICY, 'context_length': 8192}
-        assert method == 'POST' and path == '/completion' and kwargs['timeout'] == 50
+        assert method == 'POST' and path == '/completion' and 0 < kwargs['timeout'] <= 50
         generated.append(payload)
         return next(iterator)
     relay.side_effect = fake_relay

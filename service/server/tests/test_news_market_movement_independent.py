@@ -164,7 +164,7 @@ def result(**changes):
     return dict(dict(related=True, title_he='מדד המניות נסוג ברקע חולשה במניות',
         summary_he='לפי הכותרת הסינתטית מדד המניות נסוג ברקע חולשה במניות.',
         interpretation_he='זהו תיאור של תנועה מדווחת ולא המלצת מסחר.',
-        sentiment='negative', materiality='low', relevance=.4), **changes)
+        sentiment='negative', materiality='medium', relevance=.4), **changes)
 
 
 def review(**changes):

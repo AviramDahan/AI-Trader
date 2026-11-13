@@ -27,7 +27,7 @@ def request(g, content):
 
 
 def ready_gateway():
-    g=gateway(); engine=g.Inference();engine.loaded=True;engine.at=time.monotonic()
+    g=gateway(); engine=g.Inference();engine.loaded=True;engine.available=True;engine.at=time.monotonic()
     tags={'models':[{'name':g.MODEL,'digest':g.DIGEST}]}
     engine.http=Mock(side_effect=[tags,native({'ok':True}),tags])
     return g,engine
@@ -54,16 +54,15 @@ def test_upstream_context_capacity_releases_slot_without_marking_gateway_offline
     assert engine.health()['ready'] and not engine.slot.locked()
 
 
-def test_existing_loaded_model_still_gets_guarded_first_warmup():
+def test_existing_loaded_model_is_observed_without_first_warmup():
     g=gateway();engine=g.Inference()
     tags={'models':[{'name':g.MODEL,'digest':g.DIGEST}]}
     models={'models':[{'name':g.MODEL,'digest':g.DIGEST,'context_length':8192}]}
-    engine.http=Mock(side_effect=[tags,{'version':'0.34.4'},models,{'done':True},models])
+    engine.http=Mock(side_effect=[tags,{'version':'0.34.4'},models])
     engine.refresh()
-    warm=engine.http.call_args_list[3]
-    assert warm.args[:2]==('POST','/api/chat') and warm.args[2]['messages']==[]
-    assert warm.args[2]['truncate'] is False and warm.args[2]['shift'] is False
-    assert warm.kwargs['timeout']==90 and engine.health()['ready']
+    assert len(engine.http.call_args_list)==3
+    assert all(call.args[0]=='GET' for call in engine.http.call_args_list)
+    assert engine.health()['ready'] and engine.health()['model_loaded']
     assert engine.health()['context_policy']==routing.CONTEXT_POLICY
 
 
@@ -103,20 +102,18 @@ def test_other_or_inconsistent_wrapped_errors_are_not_capacity(change):
 
 def test_wrapped_native_error_traverses_real_gateway_http(monkeypatch):
     import threading
-    g=gateway();engine=g.Inference();engine.loaded=True;engine.at=time.monotonic()
-    response=Mock(status_code=400)
-    response.iter_content.return_value=[json.dumps({'error':json.dumps({'error':wrapped_capacity()})}).encode()]
-    response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False)
-    session=Mock();session.request.return_value=response
-    session.__enter__=Mock(return_value=session);session.__exit__=Mock(return_value=False)
-    monkeypatch.setattr(g.requests,'Session',lambda:session)
+    g=gateway();engine=g.Inference();engine.loaded=True;engine.available=True;engine.at=time.monotonic()
+    response=Mock(status=400)
+    response.read.return_value=json.dumps({'error':json.dumps({'error':wrapped_capacity()})}).encode()
+    conn=Mock();conn.getresponse.return_value=response
+    monkeypatch.setattr(g.http.client,'HTTPConnection',lambda *a,**k:conn)
     original=engine.http
     engine.http=lambda method,path,payload=None,**kw: (
         {'models':[{'name':g.MODEL,'digest':g.DIGEST}]} if path=='/api/tags'
         else original(method,path,payload,**kw))
     server=g.BoundedServer(('127.0.0.1',0),g.handler(engine))
     thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
-    # Direct Session construction avoids the isolated upstream mock above.
+    # The real loopback HTTP client is independent of the upstream double.
     try:
         with requests.sessions.Session() as client:
             client.trust_env=False
@@ -130,17 +127,18 @@ def test_wrapped_native_error_traverses_real_gateway_http(monkeypatch):
 
 def test_upstream_http_error_is_bounded_and_safely_classified(monkeypatch):
     g=gateway();engine=g.Inference()
-    response=Mock(status_code=400)
-    response.iter_content.return_value=[b'{"error":"the input length exceeds the context length"}']
-    response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False)
-    session=Mock();session.request.return_value=response
-    session.__enter__=Mock(return_value=session);session.__exit__=Mock(return_value=False)
-    monkeypatch.setattr(g.requests,'Session',lambda:session)
+    response=Mock(status=400)
+    response.read.return_value=b'{"error":"the input length exceeds the context length"}'
+    conn=Mock();conn.getresponse.return_value=response
+    factory=Mock(return_value=conn)
+    monkeypatch.setattr(g.http.client,'HTTPConnection',factory)
     with pytest.raises(g.ContextCapacity,match='local_context_capacity'):
         engine.http('POST','/api/chat',{},timeout=1)
-    assert session.trust_env is False
-    assert session.request.call_args.kwargs['allow_redirects'] is False
-    response.iter_content.return_value=[b'x'*(g.MAX_BYTES+1)]
+    assert factory.call_args.args==('127.0.0.1',11434)
+    assert conn.request.call_args.args[:2]==('POST','/api/chat')
+    response.read.assert_called_with(g.MAX_BYTES+1)
+    assert conn.close.call_count==response.close.call_count==1
+    response.read.return_value=b'x'*(g.MAX_BYTES+1)
     with pytest.raises(ValueError,match='response_limit'):engine.http('POST','/api/chat',{})
 
 
@@ -271,7 +269,13 @@ def test_large_local_review_reaches_real_pending_entry_exit_without_paid_call(db
     decision=dict(DECISION,action='BUY',confidence=.91,news_relevance=.9,news_sentiment=.3,
                   entry_price_relation='equal',entry_price_concern='none')
     tags={'models':[{'name':g.MODEL,'digest':g.DIGEST}]}
-    local.http=Mock(side_effect=[tags,native(decision),tags])
+    def upstream(method,path,payload=None,**kwargs):
+        if path=='/api/tags':return tags
+        if path=='/api/version':return {'version':'0.40.7'}
+        if path=='/api/ps':return {'models':[{'name':g.MODEL,'digest':g.DIGEST,'context_length':8192}]}
+        assert (method,path)==('POST','/api/chat')
+        return native(decision)
+    local.http=Mock(side_effect=upstream)
     def relay(method,path,payload=None,**kwargs):
         if path=='/health':return local.health()
         calls.append(payload)

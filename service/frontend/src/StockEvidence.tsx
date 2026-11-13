@@ -5,6 +5,7 @@ import { reasonDefinition, reasonTitle } from './activityReasons'
 import { ActivityExplanation } from './BlockerExplanation'
 import { linkedItemOrders } from './activityExplanation'
 import { targetFacts, targetReasonCode } from './targetDiagnostics'
+import { RetainedDiscovery } from './RetainedDiscovery'
 import './stockEvidence.css'
 
 type Levels = { plan?: Row; entry: unknown; stop: unknown; activeTarget: unknown; rr: unknown }
@@ -54,6 +55,11 @@ export function StockEvidence({item:i,levels,he,records,onClose,stale=false}: {i
   const t=(a:string,b:string)=>he?a:b
   const r=i.record,s=i.signal,trade=i.trade,o=i.outcome
   const checks=rows(r?.target_checks),reviews=rows(r?.reviews),orders=linkedItemOrders(i),ai=r?.ai_decision,sec=r?.sec_decision
+  const candidateOnly = !s && !trade
+  const attempted = reviews.some(v => (finite(v.attempts) ?? 0) > 0)
+  const aiSummary = ai ? named(actionNames,ai.action,he) : attempted ? t('נשמרו ניסיונות סקירה','Review attempts retained') :
+    reviews.length && reviews.every(v=>v.result==='early_skip' && finite(v.attempts)===0) ? t('לא הגיע לבדיקת AI','Stopped before AI review') :
+    t('ביצוע סקירת AI לא אומת','AI review execution not verified')
   const closing=orders.some(v=>v.purpose==='close_long')
   const closeState=!!i.reason && ['close_order_invalid','close_order_expired','close_recovery_uncertain'].includes(i.reason)
   const signalStatus=closeState?reasonTitle(i.reason,he):named(signalNames,s?.status,he)
@@ -78,15 +84,18 @@ export function StockEvidence({item:i,levels,he,records,onClose,stale=false}: {i
     <header><div><span className="system-eyebrow">{t('הסבר וראיות','EXPLANATION & EVIDENCE')}</span><h3><bdi>{i.ticker}</bdi></h3><p><bdi>{i.company || t('שם החברה לא נשמר','Company name not retained')}</bdi></p></div><button type="button" onClick={onClose}>{t('סגירה','Close')}</button></header>
     <div className={`evidence-status state-${i.state}`}><strong>{status}</strong><ActivityExplanation item={i} he={he}/>{s?.status==='ENTRY_POLICY_REJECTED' && <p className="evidence-warning">{t('סיבת פסילת הכניסה','Entry rejection reason')}: {entryRejectionLabel(entryReason,he)}</p>}<p>{explanation}</p><small>{t('עדכון מתועד','Retained update')}: {at(i.at)} · {t('שעון ישראל','Israel time')}</small></div>
     {stale && <p className="evidence-warning">{t('העדכון מתעכב או אינו טרי. מוצג מידע שנשמר, לא פעילות חדשה.','Refresh delayed or stale. Retained information, not new activity.')}</p>}
-    <section className="evidence-block"><h4>{t('כניסה, הגנה ויעד','Entry, protection & target')}</h4><dl className="evidence-grid">
+    {candidateOnly&&<RetainedDiscovery checks={checks} he={he}/>}
+    {candidateOnly ? <section className="evidence-block"><h4>{t('בדיקת מבנה, לא תוכנית ביצוע','Structure check, not an execution plan')}</h4>
+      <p>{t('לא נוצרה תוכנית כניסה מאושרת. רמות שנבדקו וסיבות הפסילה מופיעות בבדיקת היעדים; הן אינן הוראת כניסה או רמות של פוזיציה פעילה.','No approved entry plan was created. Checked levels and rejection reasons remain in target evidence; they are not entry instructions or active position levels.')}</p>
+    </section> : <section className="evidence-block"><h4>{t('כניסה, הגנה ויעד','Entry, protection & target')}</h4><dl className="evidence-grid">
       {field(t(trade?'כניסה שנשמרה':'כניסה / מחיר ייחוס',trade?'Retained entry':'Entry / reference'),num(entry))}
-      {field(t('סטופ נוכחי / שנבדק','Current / checked stop'),num(stop))}
+      {field(t(trade?'סטופ נוכחי':'סטופ בתוכנית שנשמרה',trade?'Current stop':'Retained plan stop'),num(stop))}
       {field(t('יעד פעיל','Active target'),num(activeTarget))}{field(t('יחס סיכוי־סיכון שנשמר','Retained reward/risk'),num(rr,'R'))}
     </dl><p className="evidence-note">{t('RR ברוטו: היחס שנשמר בתוכנית, לפני עלויות. אין כאן חישוב מחדש לפי מחיר חי.','Gross RR: the saved plan ratio before costs, not recalculated using a live quote.')}</p>
       {policy==='single_breakout_v1' && <p className="evidence-note">{t('יעד יחיד מוקרן של לפחות 2R, לא התנגדות מאומתת. מחיר הכניסה חייב להישאר מעל שיא 20 הסשנים שהושלמו ולשמור את הסטופ וה-RR.','One projected target of at least 2R, not confirmed resistance. Entry must remain above the completed 20-session high and preserve stop and RR.')}</p>}
       {s?.entry_eligible_from && <p className="evidence-note">{t('תחילת חלון כניסה בנר מלא','Full-candle entry eligibility starts')}: {at(s.entry_eligible_from)}. {t('זכאות אינה ביצוע.','Eligibility is not execution.')}</p>}
       {activeTarget==null && activeTargetIndexes(trade||s||{}).length>0 && <dl className="evidence-grid">{activeTargetIndexes(trade||s||{}).map(n=>field(t(`יעד פעיל ${n}`,`Active target ${n}`),num((trade||s||{})[`tp${n}`])))}</dl>}
-    </section>
+    </section>}
     {why && <details className="evidence-other evidence-thesis"><summary>{t('למה הסיגנל נבחר?','Why was the signal selected?')}</summary><p dir="auto">{String(why).slice(0,2400)}</p><p className="evidence-note">{t('הסבר שנשמר בזמן ההחלטה, לא המלצה חדשה.','Explanation retained at decision time, not a new recommendation.')}</p></details>}
     {o && <section className="evidence-block"><h4>{t('תוצאה עד עכשיו','Outcome so far')}</h4><dl className="evidence-grid">
       {field(t('ממומש נטו','Realized net'),<>{num(o.realized_net_pct,'%')}<small>{num(o.realized_net_r,'R')}</small></>)}
@@ -112,7 +121,7 @@ export function StockEvidence({item:i,levels,he,records,onClose,stale=false}: {i
           {c.evidence_gap && <p className="evidence-warning">{t('חסרות ראיות מבנה — אין להסיק שהבדיקה הושלמה.','Structure evidence is incomplete; do not infer a completed check.')}</p>}
         </article>))}
         {available.evidence && section('evidence',sec?t('נשמר ניתוח דיווחים','Filing analysis retained'):t('נשמרה חסימה בשלב הראיות','Evidence-stage block retained'),<>{i.station==='evidence'&&i.reason&&<p className="evidence-warning">{evidenceReason(i.reason,he)}</p>}{sec&&<><dl className="evidence-grid">{field(t('מצב שימוש בדיווחים','Filing mode'),sec.mode==='paper'?t('משתתף בבחירה','Used in selection'):sec.mode==='shadow'?t('מחקר בלבד — אינו משנה בחירה','Research only — does not change selection'):sec.mode==='off'?t('כבוי','Off'):t('לא ידוע','Unknown'))}{field(t('שינוי דירוג','Rank adjustment'),num(sec.sec_adjustment))}{field(t('דירוג בסיס','Baseline rank'),num(sec.baseline_rank_score))}{field(t('דירוג משופר','Enhanced rank'),num(sec.enhanced_rank_score))}{field(t('זמן החלטת הדיווחים','Filing decision time'),at(sec.decided_at))}</dl>{sec.rejection_reason&&<p>{evidenceReason(sec.rejection_reason,he)}</p>}</>}<p className="evidence-note">{t('רשומת SEC אינה לבדה הוכחה שעבר סף הראיות. פירוט מעבר סף החדשות אינו זמין כאן.','A SEC record alone does not prove the evidence gate passed. News-gate detail is unavailable here.')}</p></>)}
-        {available.ai && section('ai',ai?named(actionNames,ai.action,he):t('נשמרו ניסיונות סקירה','Review attempts retained'),<>
+        {available.ai && section('ai',aiSummary,<>
           {ai&&<dl className="evidence-grid">{field(t('החלטת המודל','Model decision'),named(actionNames,ai.action,he))}{field(t('ציון מודל לא מכויל','Uncalibrated model score'),num(ai.confidence))}{field(t('רלוונטיות שנשמרה','Retained relevance'),num(ai.news_relevance))}
             {finite(ai.confidence_threshold)!=null&&field(t('סף ציון שנשמר בבדיקה','Retained score threshold'),num(ai.confidence_threshold))}
             {finite(ai.relevance_threshold)!=null&&field(t('סף רלוונטיות שנשמר','Retained relevance threshold'),num(ai.relevance_threshold))}

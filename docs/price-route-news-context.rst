@@ -10,8 +10,9 @@ the flag, make model calls or create experimental Production transactions.
 Ordinary deployment, encrypted-backup/compatible-Bridge verification and a
 separate release/activation decision are required before running the policy.
 
-When enabled, only enabled BUY detections from VCP/Base Contraction, Stockbee
+When enabled, only enabled daily BUY detections from VCP/Base Contraction, Stockbee
 Momentum Burst, Trend Pullback Reclaim and Relative Strength Leader qualify.
+The separately versioned intraday contracts keep their existing article requirement.
 Baseline-only, PEAD and SHORT retain the existing mandatory-evidence gate.
 The existing scanner, AI, ranking quotas, RR, entry plans, risk, exposure,
 pending-order execution, emergency entry pause and TP/SL remain authoritative.

@@ -1,0 +1,22 @@
+.truth-news { margin-block: 1rem 1.6rem; padding: clamp(.75rem, 2vw, 1.25rem); border: 1px solid #63728b66; border-radius: 16px; min-width: 0; }
+.truth-news h3 { margin-block: 0 .6rem; }
+.truth-news-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,340px),1fr)); gap: 1rem; margin-block: 1rem; }
+.truth-news-card { border: 1px solid #63728b66; background: #17203355; border-radius: 12px; padding: 1rem; min-width: 0; overflow-wrap: anywhere; }
+.truth-news-card header { display: flex; align-items: baseline; flex-wrap: wrap; gap: .5rem; }
+.truth-news-card h4 { margin-block: 0 .5rem; }
+.truth-news-body, .truth-news-original { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+.truth-news-body { font-size: 1.05rem; }
+.truth-news-language { border-block-start: 1px solid #63728b44; padding-block-start: .65rem; margin-block: .75rem; }
+.truth-news-language h5 { margin: 0 0 .35rem; font-size: .88rem; }
+.truth-news-language-note { display: block; }
+.truth-news-status, .truth-news-card small, .truth-news-card footer { color: var(--text-secondary, #c1cbdc); line-height: 1.65; }
+.truth-news-media { display: block; width: 100%; max-height: 520px; object-fit: contain; background: #0b1220; border-radius: 8px; margin-block: .75rem; }
+.truth-news-card details { margin-block: .75rem; }
+.truth-news-card summary { cursor: pointer; }
+.truth-news-card dl { font-size: .78rem; margin: .6rem 0; }
+.truth-news-card dl>div { display: flex; flex-wrap: wrap; gap: .3rem .7rem; }
+.truth-news-card dd { margin: 0; direction: ltr; }
+.truth-news-card nav { display: flex; flex-wrap: wrap; gap: .65rem 1rem; }
+.truth-news-card a { text-decoration: underline; text-underline-offset: .18em; }
+.truth-news button { margin-block-start: .75rem; min-height: 44px; padding: .5rem 1rem; }
+@media (max-width: 600px) { .truth-news-grid { grid-template-columns: minmax(0,1fr); } .truth-news-card { padding: .8rem; } .truth-news-card nav a { min-height: 44px; display: inline-flex; align-items: center; } }

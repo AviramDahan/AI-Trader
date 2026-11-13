@@ -9,6 +9,13 @@ from urllib.parse import urlsplit
 
 MARKET_NEWS_EVENT_TYPES = {"market_news"}
 SEC_INTELLIGENCE_EVENT_TYPES = {"sec_intelligence"}
+COMPANY_REPORT_EVENT_TYPES = {"company_report"}
+ANALYST_EVENT_TYPES = {"analyst_update"}
+SEC_ACTIVITY_THREADS = {
+    "ownership_activity": "TELEGRAM_OWNERSHIP_ACTIVITY_THREAD_ID",
+    "buyback_activity": "TELEGRAM_BUYBACK_ACTIVITY_THREAD_ID",
+}
+SEC_ACTIVITY_EVENT_TYPES = frozenset(SEC_ACTIVITY_THREADS)
 PERSONAL_NEWS_EVENT_TYPES = {"position_news", "watchlist_news", "watchlist_news_correction"}
 STOCK_NEWS_EVENT_TYPES = {
     "position_news", "watchlist_news", "watchlist_news_correction", "stock_news", "correction", "news_status",
@@ -20,11 +27,12 @@ PORTFOLIO_EVENT_TYPES = {"portfolio_status"}
 
 def with_news_community_link(message: str, event_type: str | None) -> str:
     """Append the server-configured join link to all news, never trade alerts."""
-    if event_type not in MARKET_NEWS_EVENT_TYPES | STOCK_NEWS_EVENT_TYPES | SEC_INTELLIGENCE_EVENT_TYPES:
+    if event_type not in MARKET_NEWS_EVENT_TYPES | STOCK_NEWS_EVENT_TYPES | SEC_INTELLIGENCE_EVENT_TYPES | COMPANY_REPORT_EVENT_TYPES | ANALYST_EVENT_TYPES | SEC_ACTIVITY_EVENT_TYPES:
         return message
     link = os.getenv("TELEGRAM_COMMUNITY_URL", "").strip()
     # Presentation only: stored evidence/URLs and all eligibility stay intact.
     # Apply at send-time too, so already-queued news follows the same preference.
+    source_metadata = re.compile(r'^\s*(?:מקור|Source|מפרסם מקורי|קישור ישיר|קישור)\s*:', re.I)
     def public_link(match):
         url = match.group(0)
         if url == link or urlsplit(url).hostname in {'creativecommons.org', 'www.creativecommons.org'}:
@@ -32,37 +40,54 @@ def with_news_community_link(message: str, event_type: str | None) -> str:
         return ''
     lines = []
     for line in message.splitlines():
+        if source_metadata.match(line):
+            continue
         cleaned = re.sub(r'https?://[^\s<>]+', public_link, line)
         if cleaned != line:
             cleaned = cleaned.rstrip(' :')
-            if cleaned in {'מקור', 'Source'}:
-                cleaned = ''
         lines.append(cleaned)
     from news_presentation import hide_relay_branding
     message = hide_relay_branding('\n'.join(lines))
     message = re.sub(r'\n{3,}', '\n\n', message).strip()
     parsed = urlsplit(link)
-    if (len(link) > 512 or parsed.scheme != "https" or parsed.netloc != "t.me" or
+    valid = not (len(link) > 512 or parsed.scheme != "https" or parsed.netloc != "t.me" or
             not parsed.path.strip('/') or parsed.path.startswith('/c/') or
-            any(char.isspace() for char in link)):
-        return message
+            any(char.isspace() for char in link))
     footer = "📣 להצטרפות לקהילת AI-Trader:\n" + link
-    if message.endswith(footer):
+    if valid and message.endswith(footer):
+        message = message[:-len(footer)].rstrip()
+    tails = [footer] if valid else []
+    if not tails:
         return message
-    # Telegram measures the 4096-character limit in UTF-16 units.
-    suffix = "\n\n" + footer
-    budget = 4096 - len(suffix.encode('utf-16-le')) // 2
-    body = message.encode('utf-16-le')[:budget * 2].decode('utf-16-le', errors='ignore').rstrip()
-    return body + suffix
+    suffix = '\n\n' + '\n\n'.join(tails)
+    # Budget AFTER bidi isolates, not before: mixed Hebrew/Latin expands on
+    # the actual wire. Preserve the CTA even for a long invite URL.
+    from telegram_presentation import telegram_text, utf16_length
+    if utf16_length(telegram_text(message + suffix, limit=100_000)) > 4096:
+        budget = 4096 - utf16_length(telegram_text(suffix, limit=100_000))
+        message = telegram_text(message, limit=budget).rstrip()
+    return message + suffix
 
 
-def thread_id_for_event(event_type: str | None) -> int | None:
+def thread_id_for_event(event_type: str | None, *, stock_direction: str | None = None) -> int | None:
     if event_type == 'community_discussion':
         return None  # General: omit message_thread_id, never trading fallback.
     if not event_type:
         return None
-    if event_type in MARKET_NEWS_EVENT_TYPES:
+    from news_direction_routing import enabled
+    if event_type == 'stock_news' and enabled():
+        names = (("TELEGRAM_POSITIVE_STOCK_NEWS_THREAD_ID",) if stock_direction == 'positive' else
+                 ("TELEGRAM_NEGATIVE_STOCK_NEWS_THREAD_ID",) if stock_direction == 'negative' else
+                 ("TELEGRAM_MARKET_NEWS_THREAD_ID", "TELEGRAM_NEWS_THREAD_ID"))
+    elif event_type in MARKET_NEWS_EVENT_TYPES or event_type == 'trump_truth_post':
         names = ("TELEGRAM_MARKET_NEWS_THREAD_ID", "TELEGRAM_NEWS_THREAD_ID")
+    elif event_type in ANALYST_EVENT_TYPES:
+        names = ("TELEGRAM_ANALYST_UPDATES_THREAD_ID",)
+    elif event_type in SEC_ACTIVITY_THREADS:
+        names = (SEC_ACTIVITY_THREADS[event_type],)
+    elif event_type in COMPANY_REPORT_EVENT_TYPES:
+        # A missing report topic must never spill financial results into SEC/General.
+        names = ("TELEGRAM_COMPANY_REPORTS_THREAD_ID",)
     elif event_type in SEC_INTELLIGENCE_EVENT_TYPES:
         # Never fall back to General or another public topic for SEC research.
         names = ("TELEGRAM_SEC_INTELLIGENCE_THREAD_ID",)
@@ -82,16 +107,16 @@ def thread_id_for_event(event_type: str | None) -> int | None:
         value = os.getenv(name, "").strip()
         try:
             thread_id = int(value)
-            if thread_id > 0:
+            if thread_id > (1 if event_type in SEC_ACTIVITY_EVENT_TYPES else 0):
                 return thread_id
         except (TypeError, ValueError):
             continue
     return None
 
 
-def destination_fields(chat_id: str, event_type: str | None) -> dict[str, str | int]:
+def destination_fields(chat_id: str, event_type: str | None, *, stock_direction: str | None = None) -> dict[str, str | int]:
     fields: dict[str, str | int] = {"chat_id": chat_id}
-    thread_id = thread_id_for_event(event_type)
+    thread_id = thread_id_for_event(event_type, stock_direction=stock_direction)
     if thread_id is not None:
         fields["message_thread_id"] = thread_id
     return fields

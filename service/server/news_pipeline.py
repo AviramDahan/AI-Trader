@@ -209,6 +209,20 @@ def _headline_verifies_ticker(ticker: str, company: str, title: str) -> bool:
     return False
 
 
+def _notification_subject(row, ticker, company):
+    """Require headline evidence for a displayed ticker on strict news routes."""
+    from news_public_importance import source_importance
+
+    title = row.get("title") or ""
+    _, reason = source_importance(title)
+    if reason == "public_quality_opinion_or_promotion":
+        return False
+    # An example or comparison following the actual event is not the subject.
+    main = re.split(r';\s+|\b(?:unlike|versus|compared (?:with|to)|in contrast to|when)\b',
+                    title, maxsplit=1, flags=re.I)[0]
+    return _headline_verifies_ticker(ticker, company, main)
+
+
 def _sha(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -782,6 +796,26 @@ def _scope_context(tickers: list[str], published_at: str) -> tuple[str, int | No
 
 
 def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dict[str, int]:
+    # Human-requested all-topic Trump notifications are not financial news AI
+    # jobs, scanner evidence or a relevance/materiality exception for other feeds.
+    from trump_truth_posts import KIND, ingest as ingest_trump
+    from trump_telegram_channel import KIND as CHANNEL_KIND
+    special = [item for item in items if item.get('source_kind') in {KIND,CHANNEL_KIND}]
+    if special:
+        # Genuine media is observed AFTER the existing reader's bounded
+        # download, not at its pre-fetch cycle clock. Preserve actual clocks;
+        # future/unbound packets still fail valid_item against this real clock.
+        # _now is injectable for deterministic offline fixtures. Ordinary news
+        # ingestion and old text-only relay snapshots retain their original at.
+        observed_at = _now() if any(isinstance(x.get('media'),dict) and
+            x['media'].get('status')=='available' for x in special) else at
+        counts = ingest_trump(special, observed_at)
+        ordinary = [item for item in items if item.get('source_kind') not in {KIND,CHANNEL_KIND}]
+        if ordinary:
+            regular = ingest_items(ordinary, at)
+            for key in counts:
+                counts[key] += regular.get(key, 0)
+        return counts
     from news_events.control import active
     if active():
         from news_events.runtime import ingest_items as canonical_ingest
@@ -1213,28 +1247,45 @@ def _news_alert_message(row: dict[str, Any]) -> str:
 
 def _watchlist_alert_message(row: dict[str, Any]) -> str:
     from news_evidence import source_limit as describe_source
-    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
+    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת",
+              "neutral": "ניטרלית", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
     materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
     company_line = f"\nחברה: {row['company']}" if row.get("company") else ""
     source_limit = describe_source(row)
+    interpretation = (() if row.get("headline_only") else
+                      (f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",))
     return "\n\n".join(("AI-Trader — חדשות חשובות מרשימת המעקב | ללא עסקה וללא תלות בפוזיציה",
                          f"סימול: {row['ticker']}{company_line}\nהשפעה אפשרית: {impact}\nמהותיות אפשרית: {materiality}",
                          f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}\n{source_limit}",
                          f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
-                         f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",
+                         *interpretation,
                          f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
                          "המניה נמצאת ברשימת מעקב חדשות בלבד. לא נוצרו סיגנל או עסקה."))[:4000]
 
 
 def _stock_broadcast_alert_message(row: dict[str, Any]) -> str:
-    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
+    from news_analyst_routing import enabled as analyst_enabled, is_analyst_update
+    from news_report_routing import is_company_report
+    facts = _loads(row.get('source_facts_json'), {})
+    excerpt = facts.get('source_excerpt', '') if isinstance(facts, dict) else ''
+    if (analyst_enabled() and is_analyst_update(row['title'], excerpt)
+            and not is_company_report(row['title'], excerpt)
+            and (row.get('title_he') or row.get('summary_he'))):
+        from news_analyst_presentation import compact_parts
+        parts = compact_parts(row.get('title_he'), row.get('summary_he'), row['ticker'])
+        parts.append('פורסם: '+_publication_time_he(row['published_at']))
+        return '\n\n'.join(parts)
+    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת",
+              "neutral": "ניטרלית", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
     materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
     source_limit = "זמינים כותרת ומטא־דאטה בלבד." if row.get("headline_only") else "זמין תקציר שסופק בפיד; הכתבה המלאה לא נותחה."
+    interpretation = (() if row.get("headline_only") else
+                      (f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",))
     return "\n\n".join(("AI-Trader — חדשות מניות חשובות מהסורק | ללא עסקה",
                          f"סימולים: {row['ticker']}\nחברות: {row.get('company') or 'לא זמין'}\nהשפעה אפשרית: {impact}\nמהותיות: {materiality}",
                          f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}\n{source_limit}",
                          f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
-                         f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",
+                         *interpretation,
                          f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
                          "הידיעה עברה סינון מחמיר של הסורק. היא אינה סיגנל ואינה יוצרת עסקה."))[:4000]
 
@@ -1255,25 +1306,45 @@ def _telegram_bulletin_text(text: str) -> str:
     text = re.sub(r'\s*\|\s*FJ\b', '', text, flags=re.I)
     text = re.sub(r'(?:המידע|הדיווח|הידיעה)\s+(?:פורסם|פורסמה)\s+בערוץ\s+(?:Telegram|טלגרם)\s+@[A-Za-z0-9_]+\s*[.]?', '', text, flags=re.I)
     text = re.sub(r'(?<!\w)@[A-Za-z0-9_]+', '', text)
+    text = re.sub(r'(?m)^\s*\(\s*\)\s*$', '', text)
     return re.sub(r'[ \t]{2,}', ' ', text).strip()
 
 
-def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
+def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_only=False) -> bool:
     """General news is separate from trade-impact alerts; never replay old backlog."""
     if os.getenv("STOCK_SCANNER_GENERAL_NEWS_ENABLED", "true").lower() != "true":
         return False
+    from news_public_importance import enabled as strict_public_quality, row_publication_check
+    if not row_publication_check(row)[0]:return False
     title = str(result.get("title_he") or "").strip()
     age = (current - _parse_time(row["published_at"])).total_seconds()
     if (row.get("scope") != "market" or _loads(row.get("verified_tickers_json"), []) or
-            row.get("provider") not in PROVIDERS or result.get("related") is not True or
+            row.get("provider") not in PROVIDERS or (not translation_only and result.get("related") is not True) or
             not re.search(r"[\u0590-\u05ff]", title) or
             not 0 <= age <= _int_env("STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS", 6, 1, 24) * 3600):
         return False
-    try:
-        if float(result.get("relevance", 0)) < _float_env("STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE", .3, .3, 1):
+    if not translation_only:
+        try:
+            if strict_public_quality():
+                import math
+                raw_relevance=result.get('relevance')
+                if (type(raw_relevance) not in (int,float) or not math.isfinite(raw_relevance)
+                        or not 0<=raw_relevance<=1):return False
+            if float(result.get("relevance", 0)) < max(_float_env("STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE", .3, .3, 1),.55 if strict_public_quality() else 0):
+                return False
+            if strict_public_quality() and result.get('materiality') not in ('medium','high'):return False
+        except (TypeError, ValueError):
             return False
-    except (TypeError, ValueError):
-        return False
+    macro_figures = ()
+    if strict_public_quality() and row.get("provider") == "telegram_channels":
+        from news_macro_bulletins import releases, unpublished_figures
+        facts = _loads(row.get("source_facts_json"), {})
+        source_excerpt = facts.get("source_excerpt", "") if isinstance(facts, dict) else ""
+        macro_figures = releases(row.get("title"), source_excerpt)
+        if macro_figures:
+            macro_figures = unpublished_figures(cur, row, macro_figures, _parse_time(row["published_at"]))
+            if not macro_figures:
+                return False
     event_filter, values = _same_event_filter("seen", row)
     cur.execute(f"""SELECT 1 FROM scanner_news_broadcast_alerts a
         JOIN scanner_news seen ON seen.id=a.news_id
@@ -1286,15 +1357,41 @@ def _queue_general_bulletin(cur, row, result, current, stamp) -> bool:
         ON CONFLICT(news_id,channel,ticker,event_version) DO NOTHING""", (row["id"], version, stamp))
     if not cur.rowcount:
         return False
-    # Short source translation, not an investment recommendation or AI opinion.
+    if macro_figures:
+        from news_macro_bulletins import render
+        from scanner_engine import enqueue_telegram
+        message = render(macro_figures) + f"\n\nפורסם: {_publication_time_he(row['published_at'])}"
+        return enqueue_telegram(cur, f"market-news:{row['id']}:{version}", "market_news",
+                                message, published_at=row["published_at"])
+    # Keep source facts and trader-oriented interpretation visibly separate.
     summary = str(result.get("summary_he") or "").strip()
+    interpretation = ("" if os.getenv("STOCK_SCANNER_PUBLIC_TRANSLATION_ONLY_ENABLED", "false").lower() == "true"
+                      else str(result.get("interpretation_he") or "").strip())
     telegram_post = row.get("source_kind") == "telegram_post"
     if telegram_post:
         title = _telegram_bulletin_text(title)
         summary = _telegram_bulletin_text(summary)
-    parts = ["📰 " + title[:350]]
+        interpretation = _telegram_bulletin_text(interpretation)
+    from news_report_routing import is_company_report, REPORT_PREFIX, results_only_enabled
+    source_facts = _loads(row.get('source_facts_json'), {})
+    source_excerpt = source_facts.get('source_excerpt','') if isinstance(source_facts,dict) else ''
+    source_report=is_company_report(row.get('title'),source_excerpt)
+    shown_report=is_company_report(title,summary)
+    report = source_report and shown_report if results_only_enabled() else source_report or shown_report
+    from news_analyst_routing import enabled as analyst_enabled, is_analyst_update
+    compact_analyst = not report and analyst_enabled() and is_analyst_update(row.get('title'),source_excerpt)
+    parts = [(REPORT_PREFIX if report else "📰 ") + title[:350]]
+    if (telegram_post or not row.get("headline_only")) and summary:
+        leading = title.rstrip('.!?')
+        if leading:
+            summary = re.sub(r'^'+re.escape(leading)+r'(?:[.!?])?(?:\s*\n|\s*$)', '', summary, count=1).strip()
     if (telegram_post or not row.get("headline_only")) and summary and summary != title:
         parts.append(summary[:450])
+    if compact_analyst:
+        from news_analyst_presentation import compact_parts
+        parts = compact_parts(title,summary)
+    if interpretation and not compact_analyst:
+        parts.append("משמעות אפשרית לסוחר (AI): " + interpretation[:350])
     # General translation/source limitations live in the pinned topic notice.
     # Never remove attribution or uncertainty from the actual reported facts.
     if telegram_post:
@@ -1353,10 +1450,10 @@ def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
     once for the full news analyzer instead of silently leaving it translated.
     """
     cutoff = current - timedelta(hours=_int_env("STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS", 168, 24, 720))
-    cur.execute("""SELECT n.id,n.ticker,n.scope,n.signal_id,n.published_at,n.verified_tickers_json,
+    cur.execute("""SELECT n.id,n.ticker,n.scope,n.signal_id,n.published_at,n.verified_tickers_json,n.analysis_status,
             w.enabled watch_enabled,w.created_at watch_created
         FROM scanner_news n LEFT JOIN scanner_news_watchlist w ON w.ticker=n.ticker
-        WHERE n.analysis_status IN ('pending_translation','translated')
+        WHERE n.analysis_status IN ('pending_translation','translated','public_translated')
           AND n.scope IN ('open_position','active_signal','watchlist','market','universe')
           AND (n.scope!='market' OR n.provider IS NOT NULL)""")
     queued = 0
@@ -1364,6 +1461,8 @@ def _queue_legacy_priority_news(cur, current: datetime, stamp: str) -> int:
         published = _parse_time(row["published_at"])
         if published < cutoff:
             continue
+        if row['analysis_status'] == 'public_translated' and row['scope']=='market' and not _loads(row['verified_tickers_json'], []):
+            continue  # Do not schedule the same public translation repeatedly.
         if row['scope'] == 'universe':
             verified = _loads(row['verified_tickers_json'], [])
             boundary = os.getenv('TELEGRAM_NEWS_NOT_BEFORE', '').strip()
@@ -1412,13 +1511,40 @@ def analyze_news_jobs(limit: int | None = None, analyzer: Callable[[list[dict[st
     # the same story concurrently or compare duplicates before the first commits.
     if not NEWS_ANALYSIS_LOCK.acquire(blocking=False):
         return {'analyzed': 0, 'alerts': 0, 'errors': [], 'busy': True}
+    story_token = None
     try:
+        if analyzer is None:
+            from ai_routing import enabled, openrouter_fallback_enabled
+            from news_local_backoff import remaining
+            delay = remaining() if enabled() and not openrouter_fallback_enabled() else 0
+            if delay > 0:
+                # No job claim, attempt increment, source mutation or publication.
+                return {'analyzed': 0, 'alerts': 0, 'errors': [],
+                        'deferred': True, 'retry_after_seconds': delay}
+            from news_local_backoff import begin_story
+            story_token = begin_story()
         from news_events.control import active
         if active():
             from news_events.runtime import analyze_jobs
-            return analyze_jobs(at)
-        return _analyze_news_jobs(limit, analyzer, at)
+            outcome = analyze_jobs(at)
+        else:
+            outcome = _analyze_news_jobs(limit, analyzer, at)
+        if analyzer is None:
+            from news_local_backoff import story_completed, story_incomplete
+            if outcome.get('analyzed',0)>0 and not outcome.get('errors'):
+                story_completed()
+            else:
+                story_incomplete()
+        return outcome
+    except Exception:
+        if analyzer is None:
+            from news_local_backoff import story_incomplete
+            story_incomplete()
+        raise
     finally:
+        if story_token is not None:
+            from news_local_backoff import end_story
+            end_story(story_token)
         NEWS_ANALYSIS_LOCK.release()
 
 
@@ -1498,7 +1624,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
         if result and result.get('_news_version'):
             # Local overlay only: never modify final-review source tables.
             row = {**row, '_news_version': result['_news_version'], 'content_hash': result['_news_version']}
-        if result:
+        if result and not result.get('_public_translation_only'):
             audit(cur, row, result, at=stamp)
         if result and result.get('_error'):
             attempts = int(row['attempts']) + 1
@@ -1523,6 +1649,42 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
             cur.execute("UPDATE scanner_news_jobs SET status=?,attempts=attempts+1,next_attempt_at=?,last_error='missing_result',updated_at=? WHERE id=?",
                         (state, _z(current + timedelta(minutes=5)), stamp, row["job_id"]))
             cur.execute("UPDATE scanner_news SET analysis_status='analysis_error',analysis_error='missing_result' WHERE id=?", (row['id'],))
+            continue
+        if result.get('_public_translation_only'):
+            # Revalidate scope in the write transaction: an item that gained a
+            # ticker, position or signal must go through the trading analyzer.
+            from database import using_postgres
+            lock=' FOR UPDATE' if using_postgres() else ''
+            current_row=cur.execute('''SELECT scope,ticker,signal_id,verified_tickers_json
+                FROM scanner_news WHERE id=?'''+lock,(row['id'],)).fetchone()
+            from news_quality import public_translation_only
+            if not current_row or not public_translation_only(dict(current_row)):
+                cur.execute("UPDATE scanner_news_jobs SET status='retry',next_attempt_at=?,updated_at=? WHERE id=?",
+                            (stamp,stamp,row['job_id']))
+                cur.execute("UPDATE scanner_news SET analysis_status='pending_analysis',updated_at=? WHERE id=?",(stamp,row['id']))
+                errors.append('public_translation_scope_changed')
+                continue
+            duplicate=bool(result.get('duplicate_of'))
+            cur.execute('''UPDATE scanner_news SET title_he=?,summary_he=?,sentiment=NULL,relevance=NULL,
+                impact=NULL,materiality=NULL,thesis_effect=NULL,interpretation_he=NULL,analysis_status=?,
+                analyzed_at=?,analysis_error=NULL,duplicate_of=?,updated_at=? WHERE id=?''',
+                (str(result['title_he'])[:500],str(result['summary_he'])[:1000],
+                 'duplicate_event' if duplicate else 'public_translated',stamp,
+                 result.get('duplicate_of') or None,stamp,row['id']))
+            cur.execute("UPDATE scanner_news_jobs SET status='done',attempts=attempts+1,last_error=NULL,updated_at=? WHERE id=?",(stamp,row['job_id']))
+            analyzed+=1
+            if duplicate:
+                audit(cur,row,result,reason='duplicate',at=stamp)
+            elif not publication_allowed(row):
+                audit(cur,row,result,reason='backlog_blocked',at=stamp)
+            elif row.get('quality_version') != -2:
+                queued=_queue_general_bulletin(cur,row,result,current,stamp,translation_only=True)
+                alerts+=int(queued)
+                if queued:
+                    publication_outcome(cur,row,result,True,stamp)
+                else:
+                    from news_public_importance import row_publication_check
+                    audit(cur,row,result,reason=row_publication_check(row)[1] or 'translation_not_queued',at=stamp)
             continue
         sentiment = result.get("sentiment") if result.get("sentiment") in {"positive", "negative", "mixed", "neutral", "unclear"} else "unclear"
         materiality = result.get("materiality") if result.get("materiality") in {"low", "medium", "high"} else "low"
@@ -1608,6 +1770,10 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                 placeholders = ",".join("?" for _ in watchlist_tickers)
                 cur.execute(f"SELECT ticker,company FROM scanner_news_watchlist WHERE enabled=1 AND ticker IN ({placeholders})", tuple(sorted(watchlist_tickers)))
                 watched = [dict(value) for value in cur.fetchall()]
+                from news_public_importance import enabled as strict_watchlist_quality
+                if strict_watchlist_quality():
+                    watched = [value for value in watched
+                               if _notification_subject(row, value["ticker"], value["company"] or "")]
                 watched_tickers = {str(value["ticker"]).upper() for value in watched}
                 for watched_row in watched:
                     ticker = watched_row["ticker"]
@@ -1632,11 +1798,16 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
             # suppresses a distinct later event merely because the ticker was busy.
             cfg = feed_settings()
             version = row.get("content_hash") or "v1"
-            broad_quality = materiality in {"medium", "high"} and relevance >= cfg["broad_alert_min_relevance"]
+            from news_public_importance import enabled as strict_public_quality, row_publication_check
+            broad_quality = (materiality in {"medium", "high"}
+                and relevance >= max(cfg["broad_alert_min_relevance"],.80 if strict_public_quality() else 0)
+                and row_publication_check(row)[0])
             uncovered = sorted(strict_verified - position_tickers - watched_tickers)
             if broad_quality and uncovered and not row.get('_personal_route_only'):
                 allowed: list[str] = []
                 for ticker in uncovered:
+                    if strict_public_quality() and not _notification_subject(row, ticker, _company_for_ticker(cur, ticker)):
+                        continue
                     cur.execute(f"""SELECT 1 FROM scanner_news_broadcast_alerts a
                         JOIN scanner_news seen ON seen.id=a.news_id
                         WHERE a.channel='stock' AND a.ticker=? AND ({event_filter}) LIMIT 1""",
@@ -1651,12 +1822,17 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
                             (row["id"], ticker, version, stamp))
                     companies = [_company_for_ticker(cur, ticker) for ticker in allowed]
                     alert_row = {**row, "ticker": ", ".join(allowed), "company": ", ".join(companies),
+                                 "title_he": result.get("title_he"),
                                  "impact": sentiment, "materiality": materiality,
                                  "summary_he": result.get("summary_he"),
                                  "interpretation_he": result.get("interpretation_he")}
                     alerts += int(enqueue_telegram(cur, f"stock-news:{row['id']}:{version}:{','.join(allowed)}",
                                      "stock_news", _stock_broadcast_alert_message(alert_row), published_at=row['published_at']))
 
+        if alerts==alerts_before:
+            from news_public_importance import row_publication_check
+            public_reason=row_publication_check(row)[1]
+            if public_reason:audit(cur,row,result,reason=public_reason,at=stamp)
         publication_outcome(cur, row, result, alerts - alerts_before, stamp)
 
     conn.commit(); conn.close()

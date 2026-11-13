@@ -305,12 +305,14 @@ def produce(*, connect=None, catalog=None, transport=None, clock=None, enabled=N
 
     Every network operation is outside transactions; 90-second job claims recover
     after interruption. One global producer lease prevents duplicate downloads.
-    No long scanner/monitor transaction, and no access when OFF/bridge.
+    No long scanner/monitor transaction, and no access when OFF/bridge. The
+    optional collection-only flag never enables PEAD discovery or admission.
     """
     from entry_discovery_capabilities import creation_allowed
     import os
     if enabled is None:
-        enabled = os.getenv('STOCK_SCANNER_PEAD_ENABLED', 'false').lower() == 'true'
+        enabled = (os.getenv('STOCK_SCANNER_PEAD_ENABLED', 'false').lower() == 'true' or
+            os.getenv('STOCK_SCANNER_PEAD_RELEASE_COLLECTION_ENABLED', 'false').lower() == 'true')
     if not enabled or not creation_allowed():
         return dict(status='off', processed=0)
     from database import get_db_connection

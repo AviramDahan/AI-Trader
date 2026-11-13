@@ -38,6 +38,7 @@ def client(monkeypatch):
     monkeypatch.setattr('ai_budget.acquire_request_slot', forbidden)
     monkeypatch.setattr('news_forensics.capture', forbidden)
     monkeypatch.setenv('AI_INFERENCE_MODE', 'ollama_first')
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED', 'true')
     monkeypatch.setenv('AI_TRADER_CLOUD', 'true')
     monkeypatch.setenv('OPENROUTER_API_KEY', 'synthetic-only')
     monkeypatch.setenv('OPENROUTER_NEWS_MODEL', 'synthetic-paid-never-called')

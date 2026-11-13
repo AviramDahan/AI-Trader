@@ -5,8 +5,8 @@ No path kills/removes a valid backup. Named no-restart jobs survive observers
 and can be rejoined, including by a later protected activation operation.
 """
 import argparse
-from contextlib import contextmanager
-from datetime import datetime, timezone
+from contextlib import contextmanager, redirect_stdout
+from datetime import datetime, timedelta, timezone
 import fcntl
 import hashlib
 import json
@@ -48,6 +48,13 @@ BACKUP_WAIT_MAX = 1800
 BACKUP_LOCK_WAIT = 900
 BACKUP_PROOF_MAX_AGE = 1800
 LABEL = 'ai-trader.managed-backup'
+COMPATIBLE_CERTIFICATE = 'compatible-rollback-v1.json'
+COMPATIBLE_PHASES = ('identity_bridge', 'identity_candidate', 'old_seed', 'candidate_preserve_v1',
+    'candidate_intraday', 'bridge_creation_blocked', 'bridge_pending', 'bridge_restart',
+    'candidate_emergency', 'bridge_emergency', 'old_reader_refused10', 'bridge_restore10',
+    'bridge_restored_exits', 'bridge_resume', 'bridge_expiry', 'bridge_final')
+COMPATIBLE_PROOFS = {'source-proof.json', 'ordered-proof.json', 'results.jsonl',
+    'rollback-artifact.json', 'candidate-artifact.json', 'images.json'}
 _cancelled = False
 _child = None
 PHASES = {'STARTED', 'BUILDING', 'PREDEPLOY_PENDING', 'PREDEPLOY_VERIFIED',
@@ -335,7 +342,7 @@ def managed_backup(sha, image, request_id, wait_seconds):
         raise ValueError('managed_backup_proof_identity_mismatch')
     if not re.fullmatch('[0-9a-f]{64}', proof.get('snapshot_id', '')) or not re.fullmatch('[0-9a-f]{40}', managed.get('remote_commit', '')):
         raise ValueError('managed_backup_remote_proof_invalid')
-    if type(proof.get('recovery_format')) is not int or not 1 <= proof['recovery_format'] <= 9:
+    if type(proof.get('recovery_format')) is not int or not 1 <= proof['recovery_format'] <= 10:
         raise ValueError('managed_backup_recovery_format_invalid')
     start, finish = aware(managed['started_at']), aware(managed['finished_at'])
     now = datetime.now(timezone.utc)
@@ -397,22 +404,313 @@ def stop_backup_idle(wait_seconds):
         os.close(descriptor)
 
 
-def check_rollback(sha, old, new):
+def canonical_identity(value):
+    identity.validate_identity(value)
+    return {key: value[key] for key in identity.FIELDS}
+
+
+def sha256_value(value):
+    if type(value) is not str or not re.fullmatch('[0-9a-f]{64}', value):
+        raise ValueError('compatible_proof_digest_invalid')
+    return value
+
+
+def strict_json(raw):
+    def pairs(values):
+        result = {}
+        for key, value in values:
+            if key in result: raise ValueError('compatible_duplicate_json_key')
+            result[key] = value
+        return result
+    def invalid(value):
+        raise ValueError('compatible_nonfinite_json')
+    return json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid)
+
+
+@contextmanager
+def protected_stream(path, maximum):
+    """Read exact protected bytes once; no symlink, unbounded file or TOCTOU."""
+    path = Path(path)
+    if not path.is_relative_to(ROOT): raise ValueError('compatible_path_outside_root')
+    for parent in (path.parent, *path.parent.parents):
+        if not parent.is_relative_to(ROOT): break
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError('compatible_parent_unprotected')
+    before = path.lstat()
+    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    with os.fdopen(fd, 'rb') as stream:
+        opened = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or
+                stat.S_IMODE(opened.st_mode) != 0o600 or not 0 < opened.st_size <= maximum or
+                (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)):
+            raise ValueError('compatible_file_unprotected_or_bound')
+        yield stream
+        after, linked = os.fstat(stream.fileno()), path.lstat()
+        keys = ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns', 'st_mode', 'st_uid')
+        if any(getattr(opened, key) != getattr(after, key) or getattr(opened, key) != getattr(linked, key) for key in keys):
+            raise ValueError('compatible_file_changed_during_read')
+
+
+def protected_bytes(path, maximum):
+    with protected_stream(path, maximum) as stream:
+        value = stream.read(maximum+1)
+        if len(value) != os.fstat(stream.fileno()).st_size: raise ValueError('compatible_file_bound')
+        return value
+
+
+def protected_digest(path, maximum):
+    with protected_stream(path, maximum) as stream:
+        result, size = hashlib.sha256(), 0
+        while True:
+            block = stream.read(65536)
+            if not block: break
+            size += len(block)
+            if size > maximum: raise ValueError('compatible_file_bound')
+            result.update(block)
+        return result.hexdigest(), size
+
+
+def repository_tree(sha):
+    exact_sha(sha)
+    request = urllib.request.Request(f'https://api.github.com/repos/{REPO}/git/commits/{sha}',
+        headers={'User-Agent': 'AI-Trader-compatible-rollback-gate'})
+    with urllib.request.urlopen(request, timeout=15) as response:
+        raw = response.read(65537)
+    if len(raw) > 65536: raise ValueError('compatible_source_response_bound')
+    data = strict_json(raw)
+    if data.get('sha') != sha: raise ValueError('compatible_repository_sha_mismatch')
+    return exact_sha(data.get('tree', {}).get('sha'))
+
+
+def paused_entry_proof():
+    """One bounded read-only settings observation; never initializes workers."""
+    code = '''import json,hashlib
+from database import get_db_connection
+import entry_emergency
+with get_db_connection() as c:
+ c.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+ c.execute("SET LOCAL statement_timeout='5s'")
+ c.execute("SET LOCAL lock_timeout='2s'")
+ c.execute("SET LOCAL idle_in_transaction_session_timeout='10s'")
+ assert c.execute('SHOW transaction_read_only').fetchone()['transaction_read_only']=='on'
+ assert c.execute('SHOW transaction_isolation').fetchone()['transaction_isolation']=='repeatable read'
+ value=entry_emergency.snapshot(c.cursor())
+ assert value['paused'] is True and type(value['revision']) is int and value['revision']>0
+ raw=json.dumps(value,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
+ print(json.dumps(dict(revision=value['revision'],updated_at=value['updated_at'],control_sha256=hashlib.sha256(raw).hexdigest())))
+'''
+    return strict_json(run(['docker', 'exec', '-e', 'PYTHONDONTWRITEBYTECODE=1', '-e',
+        'PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=2000',
+        'ai-trader-cloud-api-1', 'python', '-c', code], 20))
+
+
+def binary_capabilities(image, *, immutable=False):
+    code = ('import json,os,entry_discovery_capabilities as c; '
+        'print(json.dumps({"build_sha":os.environ["BUILD_SHA"],"capabilities":c.capabilities()}))')
+    if immutable:
+        code = ('import json,os,pathlib,entry_discovery_capabilities as c; '
+            'p=pathlib.Path(c.__file__); '
+            'assert os.geteuid()==10001 and p.stat().st_uid==p.parent.stat().st_uid==0 and '
+            'p.stat().st_mode&0o222==0 and not os.access(p.parent,os.W_OK); '
+            'print(json.dumps({"build_sha":os.environ["BUILD_SHA"],"capabilities":c.capabilities(),'
+            '"immutable_file_and_parent_verified":True}))')
+    return strict_json(run(['docker', 'run', '--platform', identity.PLATFORM, '--pull=never', '--rm', '--network', 'none', '--read-only',
+        '--cpus', '0.25', '--memory', '128m', '--memory-swap', '128m', '--pids-limit', '64',
+        '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+        '--entrypoint', 'python', exact_image(image), '-c', code], 60))
+
+
+def _validate_compatible_certificate(sha, old, new=None):
+    """Explicit format10 transition, not a relaxation of actual-old rollback."""
+    exact_sha(sha); exact_image(old)
+    actual_old = canonical_identity(image_identity(old))
+    for role in ('api', 'scanner', 'monitor', 'telegram', 'backup'):
+        verify_role(role, old, actual_old['build_sha'])
+    raw = protected_bytes(ROOT / COMPATIBLE_CERTIFICATE, 32768)
+    value = strict_json(raw)
+    keys = {'version', 'candidate_sha', 'artifact_build_sha', 'source_tree', 'verified_at', 'expires_at',
+        'actual_old_identity', 'runtime_sha256', 'marker_sha256', 'identity_module_sha256',
+        'bridge_identity', 'candidate_identity', 'bridge_archive', 'candidate_archive',
+        'probe_sha256', 'fixtures_sha256', 'target_proof_sha256', 'proof', 'capabilities', 'entry_pause', 'proof_files'}
+    if (type(value) is not dict or set(value) != keys or type(value['version']) is not int or value['version'] != 1
+            or value['candidate_sha'] != sha or value['artifact_build_sha'] != sha
+            or value['proof'] != 'TARGET_ISOLATED16_FORMAT10_PHASES_PASS'):
+        raise ValueError('compatible_certificate_shape_or_source_invalid')
+    verified, expires = aware(value['verified_at']), aware(value['expires_at'])
+    now = datetime.now(timezone.utc)
+    if (verified > now or now-verified > timedelta(hours=6) or not timedelta(0) < expires-verified <= timedelta(hours=6)
+            or expires-now < timedelta(hours=2)):
+        raise ValueError('compatible_certificate_expired_or_future')
+    if value['source_tree'] != repository_tree(sha):
+        raise ValueError('compatible_candidate_tree_mismatch')
+    if (set(value['actual_old_identity']) != identity.FIELDS or
+            canonical_identity(value['actual_old_identity']) != actual_old):
+        raise ValueError('compatible_actual_old_identity_changed')
+    for key in ('bridge_identity', 'candidate_identity'):
+        expected = value[key]
+        if set(expected) != identity.FIELDS or canonical_identity(expected) != expected or expected['build_sha'] != sha:
+            raise ValueError('compatible_identity_shape_invalid')
+        if canonical_identity(image_identity(expected['runnable_ref'], sha)) != expected:
+            raise ValueError('compatible_loaded_image_changed')
+    if value['bridge_identity']['runnable_ref'] in (old, value['candidate_identity']['runnable_ref']):
+        raise ValueError('compatible_distinct_bridge_required')
+    if new is not None and new != value['candidate_identity']['runnable_ref']:
+        raise ValueError('compatible_candidate_image_changed')
+    for key, path in (('runtime_sha256', ROOT/'runtime.env'), ('marker_sha256', ROOT/'last-release')):
+        if protected_digest(path, 65536)[0] != sha256_value(value[key]):
+            raise ValueError('compatible_runtime_or_marker_changed')
+    if sha256_value(value['identity_module_sha256']) != hashlib.sha256(_identity_raw).hexdigest():
+        raise ValueError('compatible_identity_module_changed')
+    pause = value['entry_pause']
+    if (type(pause) is not dict or set(pause) != {'revision', 'updated_at', 'control_sha256'}
+            or type(pause['revision']) is not int or pause['revision'] <= 0):
+        raise ValueError('compatible_entry_pause_invalid')
+    aware(pause['updated_at']); sha256_value(pause['control_sha256'])
+    if paused_entry_proof() != pause: raise ValueError('compatible_entry_pause_changed')
+    folder = ROOT / 'entry-intraday-rollback-v1' / sha
+    for role in ('bridge', 'candidate'):
+        archive = value[role+'_archive']
+        if (type(archive) is not dict or set(archive) != {'filename', 'sha256', 'bytes', 'config_digest'}
+                or archive['filename'] not in (f'entry-intraday-{role}-tested.tar.gz', f'entry-intraday-{role}-tested.tar.xz')
+                or type(archive['bytes']) is not int or not 0 < archive['bytes'] <= 250*1024*1024
+                or archive['config_digest'] != value[role+'_identity']['config_digest']):
+            raise ValueError('compatible_archive_shape_invalid')
+        if protected_digest(folder/archive['filename'], 250*1024*1024) != (sha256_value(archive['sha256']), archive['bytes']):
+            raise ValueError('compatible_archive_hash_changed')
+    proof_files = value['proof_files']
+    if type(proof_files) is not dict or set(proof_files) != COMPATIBLE_PROOFS:
+        raise ValueError('compatible_proof_files_invalid')
+    documents = {}
+    for name in sorted(COMPATIBLE_PROOFS):
+        content = protected_bytes(folder/name, 65536)
+        if hashlib.sha256(content).hexdigest() != sha256_value(proof_files[name]):
+            raise ValueError('compatible_proof_file_changed')
+        documents[name] = ([strict_json(line) for line in content.decode().splitlines()]
+                           if name == 'results.jsonl' else strict_json(content))
+    source, ordered = documents['source-proof.json'], documents['ordered-proof.json']
+    if (source.get('source_commit') != sha or source.get('source_tree') != value['source_tree']
+            or ordered.get('source_commit') != sha or ordered.get('actual_pass_count') != 16
+            or ordered.get('recovery_format') != 10 or ordered.get('phases') != list(COMPATIBLE_PHASES)
+            or source.get('file_sha256', {}).get('scripts/entry_intraday_compatibility_probe.py') != sha256_value(value['probe_sha256'])):
+        raise ValueError('compatible_ci_source_or_order_invalid')
+    def phases(values, strict=False):
+        if type(values) is not list or [r.get('phase') for r in values] != list(COMPATIBLE_PHASES):
+            raise ValueError('compatible_phase_order_invalid')
+        for row in values:
+            if strict and set(row) != {'phase', 'status', 'build_sha', 'probe_sha256'}:
+                raise ValueError('compatible_target_phase_shape_invalid')
+            expected = actual_old['build_sha'] if row['phase'] in ('old_seed', 'old_reader_refused10') else sha
+            if row.get('status') != 'PASS' or row.get('build_sha') != expected or row.get('probe_sha256') != value['probe_sha256']:
+                raise ValueError('compatible_phase_source_invalid')
+    phases(documents['results.jsonl'])
+    images = documents['images.json']
+    if type(images) is not list or len(images) != 3 or {r.get('role') for r in images} != {'old', 'bridge', 'candidate'}:
+        raise ValueError('compatible_ci_images_invalid')
+    for role in ('bridge', 'candidate'):
+        image = next(row for row in images if row['role'] == role)
+        artifact = documents['rollback-artifact.json' if role == 'bridge' else 'candidate-artifact.json']
+        archive = value[role+'_archive']
+        if (image.get('build_sha') != sha or image.get('config_digest') != archive['config_digest']
+                or artifact.get('source_commit') != sha or artifact.get('archive_sha256') != archive['sha256']
+                or artifact.get('archive_bytes') != archive['bytes'] or artifact.get('retained_filename') != archive['filename']
+                or artifact.get('verified_loaded_image_id') != image.get('image_id')
+                or artifact.get('loaded_capability_verified') is not True
+                or artifact.get('status') != f'TESTED_FORMAT10_{role.upper()}_ARCHIVE_RETAINED_ONE_DAY'):
+            raise ValueError('compatible_ci_archive_identity_invalid')
+    target_raw = protected_bytes(folder/'target-proof.json', 65536)
+    if hashlib.sha256(target_raw).hexdigest() != sha256_value(value['target_proof_sha256']):
+        raise ValueError('compatible_target_proof_changed')
+    target = strict_json(target_raw)
+    target_keys = {'version', 'candidate_sha', 'source_tree', 'actual_old_identity', 'bridge_identity',
+        'candidate_identity', 'runtime_sha256', 'marker_sha256', 'identity_module_sha256',
+        'probe_sha256', 'fixtures_sha256', 'entry_pause', 'phases'}
+    if (type(target) is not dict or set(target) != target_keys or type(target['version']) is not int or target['version'] != 1
+            or any(json.dumps(target[key], sort_keys=True, allow_nan=False) !=
+                   json.dumps(value[key], sort_keys=True, allow_nan=False) for key in target_keys-{'version', 'phases'})):
+        raise ValueError('compatible_target_binding_invalid')
+    phases(target['phases'], strict=True)
+    if protected_digest(folder/'fixtures.tar.gz', 16*1024*1024)[0] != sha256_value(value['fixtures_sha256']):
+        raise ValueError('compatible_fixtures_changed')
+    bridge = binary_capabilities(value['bridge_identity']['runnable_ref'], immutable=True)
+    candidate = binary_capabilities(value['candidate_identity']['runnable_ref'], immutable=True)
+    expected_caps = dict(build_role='bridge', independent_creation=False, snapshot_formats=list(range(1, 11)),
+        audit_version='entry_discovery_intraday_v1', audit_versions=['entry_discovery_v1', 'entry_discovery_intraday_v1'],
+        execution_version='independent_entry_execution_intraday_v1',
+        execution_versions=['independent_entry_execution_v1', 'independent_entry_execution_intraday_v1'],
+        emergency_entry_version='paper_entry_emergency_v1')
+    for observed, expected in ((bridge, expected_caps), (candidate, dict(expected_caps, build_role='candidate', independent_creation=True))):
+        if (observed.get('build_sha') != sha or observed.get('immutable_file_and_parent_verified') is not True
+                or json.dumps(observed.get('capabilities'), sort_keys=True, allow_nan=False) != json.dumps(expected, sort_keys=True)):
+            raise ValueError('compatible_binary_capability_mismatch')
+    if json.dumps(value['capabilities'], sort_keys=True, allow_nan=False) != json.dumps(expected_caps, sort_keys=True):
+        raise ValueError('compatible_certificate_capabilities_invalid')
+    return dict(value, certificate_sha256=hashlib.sha256(raw).hexdigest())
+
+
+def validate_compatible_certificate(sha, old, new=None):
+    try:
+        return _validate_compatible_certificate(sha, old, new)
+    except (TypeError, KeyError, AttributeError, OverflowError, UnicodeError, RecursionError):
+        raise ValueError('compatible_certificate_shape_invalid') from None
+
+
+def compatible_candidate(sha, old):
+    exact_sha(sha); exact_image(old)
+    path = ROOT / COMPATIBLE_CERTIFICATE
+    if not path.exists() and not path.is_symlink(): return '-'
+    return validate_compatible_certificate(sha, old)['candidate_identity']['runnable_ref']
+
+
+def freeze_rollback(sha, request_id, old, new, selected, certificate=None):
+    if not re.fullmatch('[0-9a-f]{32}', request_id or ''): raise ValueError('invalid_rollback_attempt')
+    path = ROOT/'deployment-attempt.json'
+    value = strict_json(protected_bytes(path, 32768))
+    if (value.get('sha') != sha or value.get('attempt_id') != request_id or value.get('old_image') != old
+            or value.get('new_image') != new or value.get('phase') not in ('BUILDING', 'PREDEPLOY_PENDING')):
+        raise ValueError('rollback_selection_attempt_mismatch')
+    fields = dict(rollback_image=selected['runnable_ref'], rollback_identity=selected,
+        rollback_mode='CERTIFIED_FORMAT10_BRIDGE' if certificate else 'ACTUAL_PREVIOUS',
+        rollback_certificate_sha256=certificate['certificate_sha256'] if certificate else None,
+        observed_old_identity=canonical_identity(image_identity(old)))
+    if certificate:
+        fields.update(entry_pause=certificate['entry_pause'], runtime_sha256=certificate['runtime_sha256'],
+                      marker_sha256=certificate['marker_sha256'])
+    if any(key in value and value[key] != item for key, item in fields.items()):
+        raise ValueError('rollback_selection_changed')
+    value.update(fields)
+    atomic_json(path, value)
+
+
+def verify_rollback_selection(sha, old, new, request_id):
+    """Recheck pause/runtime at the writer boundary after a long safe backup."""
+    value = strict_json(protected_bytes(ROOT/'deployment-attempt.json', 32768))
+    if (value.get('sha') != exact_sha(sha) or value.get('attempt_id') != request_id
+            or value.get('old_image') != exact_image(old) or value.get('new_image') != exact_image(new)
+            or value.get('phase') != 'DRAIN_PENDING' or value.get('rollback_mode') != 'CERTIFIED_FORMAT10_BRIDGE'):
+        raise ValueError('rollback_writer_boundary_attempt_invalid')
+    for role in ('api', 'scanner', 'monitor', 'telegram', 'backup'):
+        verify_role(role, old, value['observed_old_identity']['build_sha'], healthy=role != 'backup')
+    if (paused_entry_proof() != value.get('entry_pause') or
+            protected_digest(ROOT/'runtime.env',65536)[0] != value.get('runtime_sha256') or
+            protected_digest(ROOT/'last-release',65536)[0] != value.get('marker_sha256')):
+        raise ValueError('rollback_writer_boundary_pause_or_runtime_changed')
+    if canonical_identity(image_identity(value['rollback_image'])) != value.get('rollback_identity'):
+        raise ValueError('rollback_writer_boundary_image_changed')
+    emit('FROZEN_ROLLBACK_WRITER_BOUNDARY_VERIFIED', build_sha=sha, observed_old_image=old,
+         rollback_image=value['rollback_image'], entry_paused=True)
+
+
+def check_rollback(sha, old, new, request_id=None):
     """Schema equality is not entry/backup compatibility; probe real binaries."""
     exact_sha(sha)
     results = []
-    code = ('import json,os,entry_discovery_capabilities as c; '
-        'print(json.dumps({"build_sha":os.environ["BUILD_SHA"],"capabilities":c.capabilities()}))')
     for image in (exact_image(old), exact_image(new)):
         image_proof = image_identity(image)
         if image == old:
             for role in ('api', 'scanner', 'monitor', 'telegram', 'backup'):
                 verify_role(role, old)
-        output = run(['docker', 'run', '--platform', identity.PLATFORM, '--pull=never', '--rm', '--network', 'none', '--read-only',
-            '--cpus', '0.25', '--memory', '128m', '--memory-swap', '128m', '--pids-limit', '64',
-            '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
-            '--entrypoint', 'python', image, '-c', code], 60)
-        value = json.loads(output)
+        value = binary_capabilities(image)
         if value.get('build_sha') != image_proof['build_sha']:
             raise ValueError('rollback_embedded_source_mismatch')
         caps = value['capabilities']
@@ -426,9 +724,20 @@ def check_rollback(sha, old, new):
     a, b = previous['capabilities'], candidate['capabilities']
     keys = ('audit_version', 'execution_version', 'emergency_entry_version')
     if not set(a['snapshot_formats']).issuperset(b['snapshot_formats']) or any(not b.get(k) or a.get(k) != b[k] for k in keys):
-        raise ValueError('actual_previous_image_not_compatible_with_candidate')
+        if not (ROOT/COMPATIBLE_CERTIFICATE).exists() and not (ROOT/COMPATIBLE_CERTIFICATE).is_symlink():
+            raise ValueError('actual_previous_image_not_compatible_with_candidate')
+        certificate = validate_compatible_certificate(sha, old, new)
+        selected = certificate['bridge_identity']
+        if not request_id: raise ValueError('certified_rollback_requires_durable_attempt')
+        freeze_rollback(sha, request_id, old, new, selected, certificate)
+        emit('CERTIFIED_ROLLBACK_TARGET_VERIFIED', observed_old_image=old, new_image=new,
+             rollback_image=selected['runnable_ref'], build_sha=sha)
+        return selected['runnable_ref']
+    if request_id:
+        freeze_rollback(sha, request_id, old, new, canonical_identity(image_identity(old)))
     emit('ROLLBACK_BINARY_CAPABILITIES_VERIFIED', old_image=old, new_image=new,
         old_build_sha=previous['build_sha'], build_sha=sha, capabilities=a)
+    return old
 
 
 def journal_begin(sha, old):
@@ -553,7 +862,7 @@ def review_close_prewriter(sha, attempt_id, old):
         archive=archive.name, archive_sha256=hashlib.sha256(raw).hexdigest(), old_identity=proof)
 
 
-def completed(sha):
+def completed(sha, *, allow_committing=False):
     path = ROOT / 'last-release'
     if not path.exists():
         return False
@@ -561,6 +870,13 @@ def completed(sha):
     if len(values) < 2 or values[0] != sha:
         return False
     image = exact_image(values[1])
+    journal = ROOT/'deployment-attempt.json'
+    if not journal.exists(): return False
+    value = strict_json(protected_bytes(journal, 32768))
+    phases = ('COMPLETE', 'COMMITTING') if allow_committing else ('COMPLETE',)
+    if (value.get('sha') != sha or value.get('phase') not in phases
+            or value.get('new_image') != image or value.get('rollback_image') == image):
+        return False
     if not healthy_roles(sha, image):
         return False
     marker = run(['docker', 'exec', 'ai-trader-cloud-api-1', 'python', '-c',
@@ -577,17 +893,78 @@ def commit_release(sha, image, old, attempt_id):
         raise ValueError('release_commit_attempt_mismatch')
     if not healthy_roles(sha, image):
         raise ValueError('release_commit_roles_not_ready')
+    rollback = value.get('rollback_image', old)
+    if rollback != old:
+        if value.get('rollback_mode') != 'CERTIFIED_FORMAT10_BRIDGE':
+            raise ValueError('release_commit_rollback_mode_invalid')
+        certificate = ROOT/COMPATIBLE_CERTIFICATE
+        # Consume exactly this reviewed certificate under the existing release
+        # lock. A later release cannot silently reuse another attempt's pin.
+        directory = ROOT/'entry-intraday-rollback-v1'/sha
+        for parent in (directory, *directory.parents):
+            if not parent.is_relative_to(ROOT): break
+            info = parent.lstat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise ValueError('compatible_consumed_parent_unprotected')
+        archive = directory/f'consumed-{attempt_id}.json'
+        if archive.exists() or archive.is_symlink():
+            # Atomic rename may have committed immediately before a remote
+            # marker/client failure. Rejoin ONLY the exact frozen attempt copy.
+            if certificate.exists() or certificate.is_symlink():
+                raise ValueError('compatible_consumed_archive_conflict')
+            raw = protected_bytes(archive, 32768)
+        else:
+            raw = protected_bytes(certificate, 32768)
+        if hashlib.sha256(raw).hexdigest() != value.get('rollback_certificate_sha256'):
+            raise ValueError('release_commit_certificate_changed')
+        if not archive.exists(): os.rename(certificate, archive)
     code = ('import os,sys,tempfile; from pathlib import Path; '
         'p=Path("/app/.runtime/deployed-release"); '
         'fd,t=tempfile.mkstemp(prefix=".deployed-release-",dir=p.parent); '
         'f=os.fdopen(fd,"w"); f.write(sys.argv[1]); f.flush(); os.fsync(f.fileno()); '
         'f.close(); os.replace(t,p); d=os.open(p.parent,os.O_RDONLY); os.fsync(d); os.close(d)')
     run(['docker', 'exec', 'ai-trader-cloud-api-1', 'python', '-c', code, sha], 30)
-    atomic(ROOT / 'last-release', (sha + '\n' + image + '\n' + old + '\n').encode())
-    if not completed(sha):
+    marker = sha + '\n' + image + '\n' + rollback + '\n'
+    if rollback != old: marker += old + '\n'  # observed old is not the supported rollback image
+    atomic(ROOT / 'last-release', marker.encode())
+    if not completed(sha, allow_committing=True):
         raise ValueError('release_commit_not_verified')
     journal_update(sha, attempt_id, 'COMPLETE', image)
+    if not completed(sha): raise ValueError('release_complete_journal_not_verified')
     emit('VERIFIED_COMPLETE', build_sha=sha, image_id=image)
+
+
+def record_bridge_rollback(sha, image, old, attempt_id):
+    """Truthful failure marker; never marks a Bridge as a completed candidate."""
+    value = strict_json(protected_bytes(ROOT/'deployment-attempt.json', 32768))
+    if (value.get('sha') != exact_sha(sha) or value.get('attempt_id') != attempt_id
+            or value.get('phase') != 'ROLLING_BACK' or value.get('old_image') != exact_image(old)
+            or value.get('rollback_mode') != 'CERTIFIED_FORMAT10_BRIDGE'
+            or value.get('rollback_image') != exact_image(image)):
+        raise ValueError('bridge_rollback_attempt_mismatch')
+    frozen = value['rollback_identity']
+    if canonical_identity(image_identity(image, frozen['build_sha'])) != frozen:
+        raise ValueError('bridge_rollback_identity_changed')
+    if not healthy_roles(frozen['build_sha'], image): raise ValueError('bridge_rollback_not_ready')
+    # Do not reapply certificate expiry: this is the already-needed, frozen
+    # supported rollback. It must remain available after a long forward failure.
+    pause = paused_entry_proof()
+    expected_pause = value.get('entry_pause')
+    if expected_pause is not None and pause != expected_pause:
+        raise ValueError('bridge_rollback_entry_pause_changed')
+    marker = 'ROLLBACK_BRIDGE:' + frozen['build_sha'] + ':' + image
+    code = ('import os,sys,tempfile; from pathlib import Path; '
+        'p=Path("/app/.runtime/deployed-release"); '
+        'fd,t=tempfile.mkstemp(prefix=".deployed-release-",dir=p.parent); '
+        'f=os.fdopen(fd,"w"); f.write(sys.argv[1]); f.flush(); os.fsync(f.fileno()); '
+        'f.close(); os.replace(t,p); d=os.open(p.parent,os.O_RDONLY); os.fsync(d); os.close(d); print(p.read_text())')
+    if run(['docker', 'exec', 'ai-trader-cloud-api-1', 'python', '-c', code, marker], 30).decode().strip() != marker:
+        raise ValueError('bridge_rollback_marker_not_verified')
+    atomic_json(ROOT/'last-rollback.json', dict(version=1, candidate_sha=sha,
+        attempt_id=attempt_id, observed_old_image=old, rollback_identity=frozen,
+        state='SUPPORTED_BRIDGE_NOT_COMPLETED_CANDIDATE', observed_at=utc(), entry_pause=pause))
+    emit('SUPPORTED_BRIDGE_ROLLBACK_VERIFIED', candidate_sha=sha, rollback_image=image,
+         observed_old_image=old, candidate_release_complete=False)
 
 
 def launch_deploy(sha, descriptor):
@@ -662,6 +1039,9 @@ def main(argv=None):
     modes.add_argument('--journal-update', action='store_true')
     modes.add_argument('--commit-release', action='store_true')
     modes.add_argument('--check-rollback', action='store_true')
+    modes.add_argument('--compatible-candidate', action='store_true')
+    modes.add_argument('--record-bridge-rollback', action='store_true')
+    modes.add_argument('--verify-rollback-selection', action='store_true')
     modes.add_argument('--resolve-running', action='store_true')
     modes.add_argument('--verify-role', action='store_true')
     modes.add_argument('--review-close-prewriter', action='store_true')
@@ -691,7 +1071,20 @@ def main(argv=None):
             elif args.commit_release:
                 commit_release(args.sha, args.image, args.old_image, args.request_id)
             elif args.check_rollback:
-                check_rollback(args.sha, args.image, args.new_image)
+                if args.print_ref:
+                    with redirect_stdout(sys.stderr):
+                        selected = check_rollback(args.sha, args.image, args.new_image, args.request_id)
+                    print(selected)
+                else:
+                    check_rollback(args.sha, args.image, args.new_image, args.request_id)
+            elif args.compatible_candidate:
+                selected = compatible_candidate(args.sha, args.image)
+                if args.print_ref: print(selected)
+                else: emit('COMPATIBLE_CANDIDATE_VERIFIED', image_id=selected)
+            elif args.record_bridge_rollback:
+                record_bridge_rollback(args.sha, args.image, args.old_image, args.request_id)
+            elif args.verify_rollback_selection:
+                verify_rollback_selection(args.sha, args.old_image, args.image, args.request_id)
             elif args.resolve_running:
                 value = runtime_identity(inspect('container', 'ai-trader-cloud-' + (args.role or 'api') + '-1'))
                 if args.print_ref: print(value['runnable_ref'])

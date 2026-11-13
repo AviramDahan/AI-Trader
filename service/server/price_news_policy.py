@@ -45,12 +45,14 @@ def route_ids(candidate, cfg):
     if cfg.get('price_news_context_enabled') is not True or candidate.get('technical_direction') != 'BUY':
         return []
     from entry_discovery import validate_attribution, enabled_ids
+    from entry_strategies import VERSION as DAILY_VERSION
     package = candidate.get('entry_discovery')
     if package is None:
         return []
     package = validate_attribution(package)
     allowed = set(enabled_ids(cfg)) & ROUTES
-    return [key for key in package['strategy_ids'] if key in allowed]
+    return [record['strategy_id'] for record in package['detections']
+            if record['strategy_id'] in allowed and record['version'] == DAILY_VERSION]
 
 
 def attach(candidate, ids, news, *, yahoo_ok, canonical_ok):

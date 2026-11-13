@@ -13,7 +13,8 @@ def personal_delivery_message(event):
     versa). A pending notice is never promoted to the broad-news tier here:
     that tier has its own stricter filters. Sent messages/history are untouched.
     """
-    from news_pipeline import _news_alert_message, _watchlist_alert_message
+    from news_pipeline import _news_alert_message, _notification_subject, _watchlist_alert_message
+    from news_public_importance import enabled as strict_news_quality
     parts = event['dedupe_key'].split(':')
     conn = get_db_connection()
     try:
@@ -41,6 +42,9 @@ def personal_delivery_message(event):
         watched = {r['ticker']: r['company'] for r in conn.execute(f"""
             SELECT ticker,company FROM scanner_news_watchlist
             WHERE enabled=1 AND ticker IN ({placeholders})""", params)}
+        if strict_news_quality():
+            watched = {ticker: company for ticker, company in watched.items()
+                       if _notification_subject(dict(news), ticker, company or "")}
         active = {**watched, **held}
         if not active:
             return None

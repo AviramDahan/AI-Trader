@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { API_ORIGIN } from './appShared'
+import { createReadPoller } from './readPoller'
 
 type Row = Record<string, any>
 const names: Record<string, [string, string]> = {
@@ -15,33 +16,24 @@ const title = (key: string, he: boolean) => names[key]?.[he ? 0 : 1] || key
 const number = (value: unknown, suffix = '') => value != null && Number.isFinite(Number(value))
   ? `${Number(value).toFixed(2)}${suffix}` : null
 
-export function StrategyPerformance({ he }: { he: boolean }) {
-  const [hours, setHours] = useState(48)
+export function StrategyPerformance({ he, hours: selectedHours, setHours: selectHours }: { he: boolean; hours?:number; setHours?:(hours:number)=>void }) {
+  const [ownHours, setOwnHours] = useState(48)
+  const hours=selectedHours??ownHours, setHours=selectHours??setOwnHours
   const [data, setData] = useState<Row | null>(null)
   const [error, setError] = useState(false)
   useEffect(() => {
-    let active = true, inFlight = false
-    const controller = new AbortController()
     setData(null)
     setError(false)
-    const refresh = async () => {
-      if (inFlight) return
-      inFlight = true
-      try {
-        const response = await fetch(`${API_ORIGIN}/api/scanner/strategy-performance?hours=${hours}`, {
-          cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]),
-        })
-        if (!response.ok) throw new Error('unavailable')
-        const result = await response.json()
+    const poller=createReadPoller<Row>({
+      url:`${API_ORIGIN}/api/scanner/strategy-performance?hours=${hours}`,intervalMs:60000,
+      onData:result=>{
         if (result?.version !== 1 || !Array.isArray(result.strategy_rows) ||
             !Array.isArray(result.exact_set_groups) || !result.overall || !result.coverage) throw new Error('invalid-response')
-        if (active) { setData(result); setError(false) }
-      } catch { if (active) setError(true) }
-      finally { inFlight = false }
-    }
-    void refresh()
-    const timer = window.setInterval(() => void refresh(), 60000)
-    return () => { active = false; controller.abort(); window.clearInterval(timer) }
+        setData(result);setError(false)
+      },onError:()=>setError(true),
+    })
+    poller.start()
+    return ()=>poller.stop()
   }, [hours])
   return <StrategyPerformanceView he={he} data={data} error={error} hours={hours} setHours={setHours} />
 }
@@ -107,12 +99,15 @@ export function StrategyPerformanceView({ he, data, error = false, hours = 48, s
       <p className="strategy-performance-time">{t('חלון סיגנלים וסגירות', 'Signal and closure window')}: <bdi>{stamp(data.window_since)}</bdi> · <bdi>{stamp(data.as_of)}</bdi></p>
       <p className="strategy-performance-explanation">{t('פתוחות ופקודות ממתינות הן המצב הנוכחי השמור, גם אם נוצרו לפני החלון. עסקה נספרת פעם אחת; מספר מימושים אינו מספר עסקאות.', 'Open positions and pending orders show current retained state, including older entries. Each trade counts once; fills are not separate trades.')}</p>
       {data.coverage?.status === 'PARTIAL' && <p className="strategy-performance-warning">{t('המדגם או ייחוס המקור אינם מלאים. “לא ידוע” אינו אפס; לא משחזרים החלטות חסרות.', 'Sample or source attribution is incomplete. Unknown is not zero; missing decisions are not reconstructed.')}</p>}
+      <CoverageNotes coverage={data.coverage} he={he}/>
+      <p className="strategy-performance-explanation">{t('מסלולי האיתור פועלים במקביל: מספיק זיהוי במסלול אחד כדי ליצור מועמדת. אחר כך חלות בקרות החדשות, AI, סיכון וביצוע המשותפות. מועמדת אינה סיגנל מאושר או פוזיציה.','Discovery routes run in parallel: one route can nominate a candidate. Shared news, AI, risk and execution controls still apply. A candidate is not an approved signal or a position.')}</p>
       <div className="strategy-performance-overall"><h3>{t('סך הכול, ללא כפילות בין מסלולים', 'Overall, without duplicate route attribution')}</h3><Counts row={data.overall || {}} he={he} /></div>
       <p className="strategy-performance-warning">{t('אותה מניה יכולה להתאים לכמה מסלולים. הכרטיסים הבאים חופפים ואין לחבר את המספרים או התשואות שלהם. ממוצע נטו לעסקה אינו תשואת תיק.', 'One candidate may match several routes. The cards below overlap: do not add their counts or returns. Mean trade net return is not portfolio return.')}</p>
       <div className="strategy-performance-grid">{(data.strategy_rows || []).map((row: Row) => <article className="strategy-performance-card" key={row.strategy_id}>
         <header><h3>{title(row.strategy_id, he)}</h3><span className={`strategy-performance-badge ${row.enabled === true ? 'configured' : ''}`}>
           {row.strategy_id === 'UNATTRIBUTED' ? t('מקור לא מאומת', 'Unverified source') : row.enabled === true ? t('גילוי מוגדר כמופעל', 'Discovery configured on') : row.enabled === false ? t('גילוי מוגדר ככבוי', 'Discovery configured off') : t('הגדרה לא ידועה', 'Configuration unknown')}</span></header>
         <Counts row={row} he={he} />
+        {row.strategy_id!=='BASELINE'&&row.strategy_id!=='UNATTRIBUTED'&&<p className="strategy-performance-explanation">{t('תצפיות זיהוי שנשמרו, לא מניות ייחודיות','Retained detection observations, not unique stocks')}: {row.detector_states && Object.keys(row.detector_states).length ? Object.entries(row.detector_states).filter(([,value])=>typeof value==='number'&&Number.isInteger(value)&&value>=0).map(([state,value])=>`${({DETECTED:t('אותרה תצורה','Detected'),FORMING:t('בהתהוות','Forming'),REJECTED:t('לא התאימה לתבנית','No pattern match'),UNKNOWN:t('נתונים חסרים','Missing data')} as Record<string,string>)[state]||t('מצב נוסף','Other state')}: ${value}`).join(' · ') : t('אין תצפית שמורה במדגם','No retained observation in sample')}</p>}
         <details><summary>{t('תוצאות נטו ואיכות הראיות', 'Net outcomes and evidence quality')}</summary><Metrics row={row} he={he} /></details>
       </article>)}</div>
       <p className="strategy-performance-explanation">{t('התג מתאר הגדרת גילוי בלבד, לא אישור לפתוח פוזיציה. עצירת כניסות ובקרות המסחר נבדקות בנפרד.', 'Badges describe discovery configuration only, not permission to open a position. Entry pause and trading gates are separate controls.')}</p>
@@ -128,4 +123,22 @@ export function StrategyPerformanceView({ he, data, error = false, hours = 48, s
       </details>
     </>}
   </section>
+}
+
+function CoverageNotes({coverage,he}:{coverage:Row;he:boolean}) {
+  const t=(a:string,b:string)=>he?a:b
+  const gaps:Record<string,[string,string]>={
+    signal_attribution_unavailable:['חסר ייחוס מסלול בסיגנלים','Signal route attribution missing'],
+    entry_order_attribution_unavailable_or_mismatch:['ייחוס פקודות כניסה חסר או אינו תואם','Entry order attribution missing or mismatched'],
+    trade_entry_attribution_unavailable_or_mismatch:['ייחוס הכניסה לעסקאות חסר או אינו תואם; אין לשייך אותן בדיעבד למסלול חדש','Trade entry attribution missing or mismatched; never assign old trades to a new route retrospectively'],
+    trade_fill_history_unverified:['היסטוריית ביצועים ועמלות אינה מאומתת במלואה','Fill and fee history is not fully verified'],
+    discovery_observation_unavailable:['תיעוד הזיהוי חלקי','Detection evidence incomplete'],
+  }
+  const issues=Object.entries(coverage?.evidence_gaps||{}).filter(([,n])=>typeof n==='number'&&n>0)
+  return <details className="strategy-performance-coverage"><summary>{t('מה מכוסה ומה חסר במדדים?','What is covered and missing?')}</summary>
+    <p>{t('חוסר בייחוס של רשומה אחת עלול להפוך את ספירות המסלולים ללא ידועות גם כשסך הכול מאומת. אפס עסקאות סגורות אינו שיעור הצלחה של 0%.','One unattributed record can make route counts unknown even when overall totals are known. Zero closed trades is not a 0% win rate.')}</p>
+    {coverage?.clipped?.length>0&&<p>{t('מדגם הרשומות מוגבל; אין להסיק שכיסוי החלון מלא.','The record sample is capped; full window coverage is not established.')}</p>}
+    {!!issues.length&&<ul>{issues.map(([code,n])=><li key={code}>{gaps[code]?.[he?0:1]||t('פער תיעוד נוסף','Additional evidence gap')}: <bdi>{String(n)}</bdi></li>)}</ul>}
+    <p>{t('חברות היסטורית ב־shortlist ותחרות על מכסת AI אינן משוחזרות; אין להציג שיעורי מעבר שלא נשמרו.','Historical shortlist membership and AI quota competition are not reconstructed; unstored conversion rates are not available.')}</p>
+  </details>
 }

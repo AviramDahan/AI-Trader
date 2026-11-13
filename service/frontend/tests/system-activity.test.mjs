@@ -323,7 +323,7 @@ check(plain.includes('אין מניות במדגם') === false) // all eight fix
 const flow=(props={})=>renderToStaticMarkup(createElement(StationFlow,{he:true,items,station:'all',selected:null,select:()=>{},changed:new Set(),stale:false,onDetails:()=>{},...props}))
 check(flow({items:[]}).includes('אין מניות במדגם'))
 const repeated=flow({items:[items[0],{...items[0],id:'repeat'}]})
-check(repeated.includes('system-flow-count"><bdi>1</bdi><small>מניות'))
+check(/system-flow-count"[^>]*><bdi>1<\/bdi><small>מניות/.test(repeated))
 equal((repeated.match(/class="system-flow-record"/g)||[]).length,2) // keep both evidence entries
 equal((flow({station:'order'}).match(/class="system-flow-station /g)||[]).length,1)
 check(!flow({station:'order'}).includes('HOTL'))

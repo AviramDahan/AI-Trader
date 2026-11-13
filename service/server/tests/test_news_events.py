@@ -430,7 +430,7 @@ def test_source_neutral_portfolio_and_important_stock_routing(env,provider):
 def test_market_wide_without_ticker(env):
     p,s,_=env
     eid=p.ingest(source(title='Federal Reserve interest rates',source_excerpt='The Federal Reserve announced its latest interest rate decision at a public scheduled press conference today.',event_type='market',event_refs=()),NOW)
-    p.analyze(eid,lambda e:Analysis({**RESULT,'sentiment':'neutral','materiality':'low'}),NOW)
+    p.analyze(eid,lambda e:Analysis({**RESULT,'sentiment':'neutral','materiality':'medium'}),NOW)
     assert p.deliver_preview(eid,NOW)[0]['topic']=='market_news'
 
 
