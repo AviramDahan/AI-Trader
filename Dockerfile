@@ -1,6 +1,6 @@
 FROM python:3.11-slim-trixie
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 MPLBACKEND=Agg MPLCONFIGDIR=/tmp/matplotlib
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata fonts-dejavu-core fonts-noto-core postgresql-client age rclone git openssh-client \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata fonts-dejavu-core fonts-noto-core postgresql-client age git openssh-client \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 10001 trader && useradd -m -u 10001 -g trader trader
 WORKDIR /app
