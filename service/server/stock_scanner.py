@@ -1454,6 +1454,11 @@ def run_scan() -> dict[str, Any]:
                 try:
                     candidate = confirm_intraday_candidate(candidate, getattr(quote, 'evidence', {}),
                         price=quote[0], quote_at=quote[1], decision_at=datetime.now(timezone.utc))
+                    if candidate.get('news_context'):
+                        # Intraday confirmation can add observed branches, but
+                        # cannot extend the daily-only news exception to them.
+                        candidate['news_context'] = dict(candidate['news_context'],
+                            observed_strategy_ids=list(candidate['entry_discovery']['strategy_ids']))
                     confirmation = candidate.get('_intraday_confirmation_results', {})
                 except IntradayConfirmationError as exc:
                     for row in discovery_observations:
