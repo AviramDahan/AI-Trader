@@ -1,6 +1,6 @@
 """Filing-backed Telegram notices for ownership and issuer repurchases."""
 from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 import json
 import os
 import re
@@ -8,6 +8,7 @@ import unicodedata
 from xml.etree import ElementTree as ET
 from zoneinfo import ZoneInfo
 
+from telegram_presentation import telegram_text, utf16_length
 from telegram_topics import SEC_ACTIVITY_EVENT_TYPES, thread_id_for_event
 
 
@@ -142,6 +143,55 @@ def _display_number(value):
     return rendered.rstrip('0').rstrip('.') if '.' in rendered else rendered
 
 
+OFFICER_TITLES = {
+    'ceo': 'מנכ״ל (CEO)',
+    'chief executive officer': 'מנכ״ל (CEO)',
+    'cfo': 'סמנכ״ל כספים (CFO)',
+    'chief financial officer': 'סמנכ״ל כספים (CFO)',
+    'coo': 'סמנכ״ל תפעול (COO)',
+    'chief operating officer': 'סמנכ״ל תפעול (COO)',
+    'cto': 'סמנכ״ל טכנולוגיה (CTO)',
+    'chief technology officer': 'סמנכ״ל טכנולוגיה (CTO)',
+    'president': 'נשיא החברה',
+}
+
+
+def _owner_description(owner):
+    roles = []
+    if owner.get('officer') is True:
+        title = _label(owner.get('officer_title'), 60)
+        roles.append(OFFICER_TITLES.get(title.casefold(), title) or 'נושא משרה')
+    if owner.get('director') is True:
+        roles.append('חבר דירקטוריון')
+    if owner.get('ten_percent') is True:
+        roles.append('בעל החזקה מעל 10%')
+    if other := _label(owner.get('other_relationship'), 60):
+        roles.append(other)
+    role = _label(', '.join(roles), 110) if roles else 'תפקיד לא צוין בדיווח'
+    return f'{_label(owner.get("name"), 90)} · {role}'
+
+
+def _purchase_size(tx, quantity):
+    """Share of the direct post-trade holding reported for this row."""
+    post_shares = _number(tx.get('post_shares'))
+    if (len(tx.get('owners', [])) != 1 or tx.get('ownership') != 'D'
+            or not post_shares or post_shares < quantity):
+        return 'גודל רכישה לא זמין'
+    tiers = ((1, 'קטנה מאוד'), (5, 'קטנה'), (15, 'בינונית'), (30, 'גדולה'))
+    with localcontext() as context:
+        context.prec = 60
+        numerator = quantity * 100
+        score, label = next(((i, label) for i, (cutoff, label) in enumerate(tiers, 1)
+                             if numerator < post_shares * cutoff), (5, 'גדולה מאוד'))
+        percent = numerator / post_shares
+        shown = _display_number(percent.quantize(Decimal('.01')))
+        if percent < Decimal('.01'):
+            shown = 'פחות מ־0.01'
+        elif Decimal(shown.replace(',', '')) != percent:
+            shown = f'כ־{shown}'
+    return f'גודל רכישה {score}/5 · {label} · {shown}% מההחזקה הישירה המדווחת לאחר העסקה'
+
+
 def _insider_text(transactions, accepted):
     selected = {}
     for tx in transactions:
@@ -158,20 +208,40 @@ def _insider_text(transactions, accepted):
             continue
         if not quantity or traded > accepted:
             continue
-        names = tuple(_label(o.get('name')) for o in tx.get('owners', [])[:3])
-        if not any(names):
+        if not any(_label(owner.get('name')) for owner in tx.get('owners', [])):
             continue
         key = (tuple(sorted(o['cik'] for o in tx['owners'])), traded, tx['security'], code, quantity, price)
-        selected.setdefault(key, (names, tx.get('plan_10b5_1')))
+        selected.setdefault(key, tx)
     lines = []
-    for key, (names, plan) in selected.items():
+    for key, tx in selected.items():
         _, traded, _, code, quantity, price = key
         action = 'רכישה' if code == 'P' else 'מכירה'
-        qualifier = ' · תוכנית 10b5-1 דווחה' if plan is True else ''
-        price_text = f' במחיר {_display_number(price)} ליחידה' if price else ''
-        lines.append(f'• {action} · {traded.isoformat()} · {", ".join(filter(None, names))}\n'
-                     f'  {_display_number(quantity)} מניות{price_text}{qualifier}')
-    return '\n'.join(lines[:5] + ([f'ועוד {len(lines)-5} עסקאות מדווחות'] if len(lines) > 5 else []))
+        owners = [_owner_description(o) for o in tx['owners'] if _label(o.get('name'))]
+        owner_line = '\n'.join(owners[:3])
+        if len(tx['owners']) > 1:
+            owner_line = 'מדווחים במשותף\n' + owner_line
+            if len(owners) > 3:
+                owner_line += f'\nועוד {len(owners) - 3} מדווחים'
+        qualifier = ' · תוכנית 10b5-1 דווחה' if tx.get('plan_10b5_1') is True else ''
+        price_text = f' × {_display_number(price)} למניה' if price else ''
+        line = f'• {action} · {traded.isoformat()}{qualifier}\n{owner_line}\n{_display_number(quantity)} מניות{price_text}'
+        if price:
+            with localcontext() as context:
+                context.prec = 60
+                line += f' · שווי לפי המחיר המדווח {_display_number(quantity * price)} במטבע הדיווח'
+        if code == 'P':
+            line += '\n' + _purchase_size(tx, quantity)
+        lines.append(line)
+    shown = []
+    for line in lines[:5]:
+        # Leave room for the company name, filing timestamp and omission count.
+        if utf16_length(telegram_text('\n\n'.join([*shown, line]), limit=100_000)) > 3500:
+            break
+        shown.append(line)
+    remaining = len(lines) - len(shown)
+    if remaining:
+        shown.append(f'ועוד {remaining} עסקאות מדווחות')
+    return '\n\n'.join(shown)
 
 
 def enqueue(job, evidence, transactions, now, conn):

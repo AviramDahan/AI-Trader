@@ -110,10 +110,16 @@ def _owner_ids(root) -> list[dict]:
         cik = _text(node, "reportingOwnerId/rptOwnerCik")
         if cik.isdigit():
             relation = node.find("reportingOwnerRelationship")
-            owners.append({"cik": cik.zfill(10), "name": _text(node, "reportingOwnerId/rptOwnerName")[:120],
-                           "director": _text(relation, "isDirector") == "1" if relation is not None else False,
-                           "officer": _text(relation, "isOfficer") == "1" if relation is not None else False,
-                           "ten_percent": _text(relation, "isTenPercentOwner") == "1" if relation is not None else False})
+            owner = {"cik": cik.zfill(10), "name": _text(node, "reportingOwnerId/rptOwnerName")[:120]}
+            for key, field in (("director", "isDirector"), ("officer", "isOfficer"),
+                               ("ten_percent", "isTenPercentOwner")):
+                owner[key] = relation is not None and _text(relation, field).lower() in {"1", "true"}
+            if relation is not None:
+                if owner["officer"] and (title := _text(relation, "officerTitle")):
+                    owner["officer_title"] = title[:120]
+                if _text(relation, "isOther").lower() in {"1", "true"} and (other := _text(relation, "otherText")):
+                    owner["other_relationship"] = other[:120]
+            owners.append(owner)
     return owners
 
 

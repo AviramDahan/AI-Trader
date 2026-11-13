@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
@@ -55,6 +55,65 @@ def test_schedule_13g_percentage_accepts_reported_value_with_explanation():
         activity.parse_beneficial_ownership(ambiguous, form, CIK)
 
 
+def _parsed_purchase(relation, post_shares='100', *, owners=('0000000042',), price='12.50'):
+    raw = ownership_xml(owners=owners, price=price)
+    raw = raw.replace(b'</reportingOwnerId>', (
+        '</reportingOwnerId><reportingOwnerRelationship>' + relation +
+        '</reportingOwnerRelationship>').encode(), 1)
+    raw = raw.replace(b'</nonDerivativeTransaction>', (
+        '<postTransactionAmounts><sharesOwnedFollowingTransaction><value>' + post_shares +
+        '</value></sharesOwnedFollowingTransaction></postTransactionAmounts>'
+        '<ownershipNature><directOrIndirectOwnership><value>D</value></directOrIndirectOwnership>'
+        '</ownershipNature></nonDerivativeTransaction>').encode())
+    return si.parse_form4(raw, ACCESSION, CIK)['transactions'][0]
+
+
+def test_insider_notice_shows_officer_title_and_buy_size():
+    tx = _parsed_purchase('<isOfficer>true</isOfficer><officerTitle>Chief Financial Officer</officerTitle>'
+                          '<isDirector>1</isDirector>')
+    notice = activity._insider_text([tx], date(2026, 10, 9))
+    assert 'Owner · סמנכ״ל כספים (CFO), חבר דירקטוריון' in notice
+    assert 'שווי לפי המחיר המדווח 125' in notice
+    assert 'גודל רכישה 3/5 · בינונית' in notice
+    assert '10% מההחזקה הישירה המדווחת לאחר העסקה' in notice
+
+
+@pytest.mark.parametrize('post_shares,score', [('1001', 1), ('1000', 2), ('200', 3),
+                                             ('100', 3), ('66', 4), ('30', 5), ('10', 5)])
+def test_buy_size_boundaries(post_shares, score):
+    tx = _parsed_purchase('<isTenPercentOwner>true</isTenPercentOwner>', post_shares)
+    notice = activity._insider_text([tx], date(2026, 10, 9))
+    assert 'בעל החזקה מעל 10%' in notice
+    assert f'גודל רכישה {score}/5' in notice
+
+
+@pytest.mark.parametrize('change', ['joint', 'indirect', 'missing_post', 'inconsistent_post'])
+def test_purchase_without_verifiable_individual_direct_holdings_is_not_scored(change):
+    owners = ('0000000042', '0000000043') if change == 'joint' else ('0000000042',)
+    post = {'missing_post': '', 'inconsistent_post': '9'}.get(change, '100')
+    tx = _parsed_purchase('<isOther>1</isOther><otherText>Trustee</otherText>', post, owners=owners)
+    if change == 'indirect':
+        tx['ownership'] = 'I'
+    notice = activity._insider_text([tx], date(2026, 10, 9))
+    assert 'Trustee' in notice
+    assert 'גודל רכישה לא זמין' in notice
+    if change == 'joint':
+        assert 'מדווחים במשותף' in notice
+
+
+def test_bounded_notice_keeps_complete_transactions_and_counts_omissions():
+    from telegram_presentation import telegram_text, utf16_length
+    relation = '<isOfficer>1</isOfficer><officerTitle>' + 'א' * 60 + '</officerTitle>'
+    tx = _parsed_purchase(relation, owners=('0000000042', '0000000043', '0000000044'))
+    tx['owners'] = [{**owner, 'name': '🔹' * 90, 'officer': True, 'officer_title': 'א' * 60}
+                    for owner in tx['owners']]
+    notice = activity._insider_text([{**tx, 'shares': i} for i in range(1, 7)], date(2026, 10, 9))
+    visible = notice.count('גודל רכישה לא זמין')
+    assert 0 < visible < 5
+    assert f'ועוד {6 - visible} עסקאות מדווחות' in notice
+    assert utf16_length(telegram_text(notice, limit=100_000)) < 3600
+
+
 def buyback_payload(rows):
     return {'cik': 320193, 'facts': {'us-gaap': {
         'PaymentsForRepurchaseOfCommonStock': {'units': {'USD': rows}}}}}
@@ -89,6 +148,18 @@ def enable(monkeypatch, now):
     monkeypatch.setattr(stock_scanner, 'settings', lambda: {'telegram_enabled': True})
 
 
+def _purchase_xml(traded):
+    raw = ownership_xml(date=traded, period=traded)
+    return raw.replace(b'</reportingOwnerId>',
+        b'</reportingOwnerId><reportingOwnerRelationship><isOfficer>true</isOfficer>'
+        b'<officerTitle>CEO</officerTitle></reportingOwnerRelationship>').replace(
+        b'</nonDerivativeTransaction>',
+        b'<postTransactionAmounts><sharesOwnedFollowingTransaction><value>100</value>'
+        b'</sharesOwnedFollowingTransaction></postTransactionAmounts>'
+        b'<ownershipNature><directOrIndirectOwnership><value>D</value></directOrIndirectOwnership>'
+        b'</ownershipNature></nonDerivativeTransaction>')
+
+
 def seed_filing(monkeypatch, form):
     now = datetime.now(timezone.utc)
     enable(monkeypatch, now)
@@ -106,7 +177,7 @@ def seed_filing(monkeypatch, form):
             return schedule_xml(form), {}
         if form == '4':
             traded = (now - timedelta(days=1)).date().isoformat()
-            return ownership_xml(code='S', side='D', date=traded, period=traded), {}
+            return _purchase_xml(traded), {}
         if 'companyfacts' in url:
             end = (now - timedelta(days=20)).date()
             rows = [buyback_row(start=(end - timedelta(days=90)).isoformat(), end=end.isoformat())]
@@ -133,6 +204,10 @@ def test_filing_to_topic_ack_and_no_repeat(isolated, monkeypatch, form, thread):
     assert scanner_engine.process_telegram_outbox()['sent'] == 1
     wire = session.post.call_args.kwargs['data']
     assert wire['message_thread_id'] == thread
+    if form == '4':
+        text = wire['text'].translate(dict.fromkeys(map(ord, '\u200f\u2066\u2069')))
+        assert 'Owner · מנכ״ל (CEO)' in text
+        assert 'גודל רכישה 3/5' in text
     assert scanner_engine.process_telegram_outbox()['sent'] == 0
     session.post.assert_called_once()
 
