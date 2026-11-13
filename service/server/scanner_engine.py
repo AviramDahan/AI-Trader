@@ -361,6 +361,8 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
     from paper_execution_presentation import israel_time, signal_state_lines
     from telegram_presentation import telegram_text
     execution = signal_state_lines(signal)
+    reason = ' '.join(str(signal.get('reason_he') or signal.get('reason') or '').split())
+    reason_lines = ['סיבה: ' + reason] if reason and len(reason) <= 300 else []
     plan = signal.get('target_plan') or _loads(signal.get('technical_json'), {}).get('target_plan')
     if is_single(plan):
         # Preserve editorial context without invented fallbacks. Bound each
@@ -368,7 +370,7 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
         def bounded(value, size):
             return str(value).strip().encode('utf-16-le')[:size * 2].decode('utf-16-le', errors='ignore') if value is not None else ''
         news = _loads(signal.get('news_json'), []) if isinstance(signal.get('news_json'), str) else signal.get('news') or []
-        titles = [bounded(item.get('title_he') or item.get('title'), 300) for item in news[:3] if isinstance(item, dict)]
+        titles = [str(item.get('title_he') or item.get('title') or '').strip() for item in news[:1] if isinstance(item, dict)]
         confidence = signal.get('confidence')
         confidence_text = f'{confidence:.0%}' if isinstance(confidence, (int, float)) and math.isfinite(confidence) else 'לא זמין'
         action = {'BUY':'קנייה', 'SELL':'מכירה', 'HOLD':'החזקה'}.get(signal.get('action'), 'לא זמין')
@@ -379,33 +381,30 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
             f"כניסה מתוכננת: {ltr(format(signal['planned_entry'], '.2f'))}", f"סטופ: {ltr(format(plan['stop'], '.2f'))}",
             f"יעד פעיל — 100%: {ltr(format(plan['active_target'], '.2f'))}", f"RR מתוכנן ברוטו: {ltr(format(plan['rr'][0], '.2f') + 'R')}",
             f"תוקף פקודת הכניסה: {israel_time(signal.get('valid_until'))}", f"מדיניות: {ltr(plan['policy_version'])}",
-            'מצב ההתראה הוא בזמן יצירת הסיגנל, לא הוכחה למצב ביצוע מאוחר יותר.', 'השוואת STAGED: לא זמינה',
             f'ציון מודל לא־מכויל: {ltr(confidence_text)}',
-            'סיבה:\n' + (bounded(signal.get('reason_he') or signal.get('reason'), 900) or 'לא זמין'),
-            'חדשות רלוונטיות:\n' + ('\n'.join('• ' + t for t in titles if t) or 'לא זמין')]
+            *reason_lines,
+            *('חדשות: ' + title for title in titles if 0 < len(title) <= 300)]
         if plan.get('target_kind') == 'projected_2r_not_confirmed_resistance':
             lines.insert(len(execution)+8, 'היעד מוקרן; אינו אזור התנגדות מאומת. פריצה מעל שיא 20 סשנים שהושלמו.')
         if signal.get('entry_eligible_from'):
             lines.insert(len(execution)+5, f"תחילת חלון הכניסה: {israel_time(signal['entry_eligible_from'])}")
         sec_block = _signal_sec_telegram_block(signal)
-        return telegram_text('\n\n'.join([*(_telegram_rtl(line) for line in lines), *([sec_block] if sec_block else [])]),limit=4000)
-    reason = str(signal.get("reason_he") or "הסיבה נבדקה על ידי הסורק.").strip()
-    reason = "\n\n".join(part.strip() for part in re.split(r"(?<=[.!?])\s+", reason) if part.strip())
+        return telegram_text('\n'.join([*(_telegram_rtl(line) for line in lines), *([sec_block] if sec_block else [])]),limit=4000)
     news = _loads(signal.get("news_json"), []) if isinstance(signal.get("news_json"), str) else signal.get("news") or []
-    titles = [str(item.get("title_he") or item.get("title") or "").strip() for item in news[:3]]
-    news_text = "\n\n".join(f"• {title}" for title in titles if title) or "אין"
+    titles = [str(item.get("title_he") or item.get("title") or "").strip() for item in news[:1]]
+    news_lines = ['חדשות: ' + title for title in titles if 0 < len(title) <= 300]
     action = {"BUY": "קנייה", "SELL": "מכירה", "HOLD": "החזקה", "SHORT": "פתיחת שורט מדומה"}.get(signal["action"], signal["action"])
     if signal['action'] == 'SHORT':
-        text = '\n\n'.join(_telegram_rtl(line) for line in [
+        text = '\n'.join(_telegram_rtl(line) for line in [
             'AI-Trader · מסחר מדומה בלבד', *execution, f"סימול: {_telegram_ltr(str(signal['ticker'])[:32])}",
             f"חברה: {str(signal.get('company') or '')[:100]}", f'פעולה: {action}',
             f"כניסה מתוכננת: {signal['planned_entry']:.2f}", f"סטופ: {signal['original_stop']:.2f}",
             f"יעד פעיל TP2 — 100%: {signal['tp2']:.2f}",
             f"RR מתוכנן ברוטו: {(signal['planned_entry']-signal['tp2'])/(signal['original_stop']-signal['planned_entry']):.2f}R",
             f"תוקף פקודת הכניסה: {israel_time(signal['valid_until'])}", f'מדיניות: {short_policy.VERSION}',
-            'מצב ההתראה הוא בזמן יצירת הסיגנל. אין מודל השאלת מניות או עלויות השאלה.',
+            'שורט דמו ללא עלויות השאלה.',
             f"ציון מודל לא־מכויל: {signal['confidence']:.0%}",
-            'סיבה:\n' + reason[:450], 'חדשות רלוונטיות:\n' + news_text[:450]])
+            *reason_lines, *news_lines])
         sec_block = _signal_sec_telegram_block(signal)
         return telegram_text(text + ('\n\n' + sec_block if sec_block else ''),limit=4000)
     prices = {
@@ -435,8 +434,8 @@ def _signal_telegram_message(signal: dict[str, Any]) -> str:
             _telegram_rtl(f"ציון מודל לא־מכויל: {_telegram_ltr(confidence)}"),
             _telegram_rtl(f"תוקף פקודת הדמה: {israel_time(signal['valid_until'])}"),
         )),
-        _telegram_rtl(f"סיבה:\n{reason}"),
-        _telegram_rtl(f"חדשות רלוונטיות:\n{news_text}"),
+        *(_telegram_rtl(line) for line in reason_lines),
+        *(_telegram_rtl(line) for line in news_lines),
     ])
     sec_block = _signal_sec_telegram_block(signal)
     return telegram_text(text + ('\n\n' + sec_block if sec_block else ''),limit=4000)
@@ -466,7 +465,7 @@ def _enqueue_order_execution_update(cur, order_id: int) -> None:
     lines = order_update_lines(row['status'], row['action'], reason, price_wait=price_wait)
     if not lines:
         return  # Pending and filled already have their own signal/entry alerts.
-    text = '\n\n'.join(['AI-Trader · מסחר מדומה בלבד',
+    text = '\n'.join(['AI-Trader · מסחר מדומה בלבד',
         'סימול: ' + str(row['ticker'])[:32], *lines,
         'זמן העדכון: ' + israel_time(row['updated_at'])])
     # One waiting notice per order, not per price/candle/reason. Entry/expiry
@@ -781,10 +780,10 @@ def _fill_message(trade: dict[str, Any], event: str, quantity: float, remaining:
     if net is not None:
         lines.append(f"תשואה סופית נטו על הפוזיציה: {_action_percent(net, entry * original, signed=True)}")
     if trade.get('side') == 'short':
-        lines.insert(3, 'כיוון: Short — ירידת מחיר מועילה לפוזיציה; תוצאת המחיר לפני עמלות ועלויות השאלה שאינן מדומות.')
+        lines.insert(3, 'Short · שינוי מחיר לפני עמלות וללא עלות השאלה.')
     if trade.get("legacy_position_id"):
-        lines.append("עסקת Legacy בניהול מכאן והלאה; עלויות הכניסה ההיסטוריות אינן מאומתות. אינה נכללת בסטטיסטיקה המאומתת.")
-    return "\n\n".join(lines)
+        lines.append("Legacy · עלות כניסה לא מאומתת. מחוץ לסטטיסטיקה המאומתת.")
+    return "\n".join(lines)
 
 
 def _insert_fill(cur, trade: dict[str, Any], fill_type: str, target_index: int | None,
@@ -861,7 +860,7 @@ def _advance_stop(cur, trade: dict[str, Any], target_index: int, settings: dict[
                                   f"סימול: {trade['ticker']}",
                                   f"סטופ קודם ביחס לכניסה: {_action_percent(previous - float(trade['entry_price']), float(trade['entry_price']), signed=True)}",
                                   f"סטופ חדש ביחס לכניסה: {_action_percent(proposed - float(trade['entry_price']), float(trade['entry_price']), signed=True)}",
-                                  "הסטופ החדש יחול מהנר הבא ואינו מבטיח הימנעות מהפסד לאחר עלויות."])
+                                  "בתוקף מהנר הבא."])
         enqueue_telegram(cur, f"stop:{trade['id']}:{target_index}", "stop_change", message)
 
 
@@ -1144,10 +1143,10 @@ def _create_trade_rows(cur, order: dict[str, Any], fill_price: float, bar_at: st
         cur.execute("UPDATE scanner_news_schedule SET next_due_at=?,status='due' WHERE ticker=?", (now_z(), signal["ticker"]))
     else:
         cur.execute("INSERT INTO scanner_news_schedule(ticker,next_due_at,status) VALUES(?,?,'due')", (signal["ticker"], now_z()))
-    trade_stub = dict(signal, entry_price=fill_price)
-    message = "\n\n".join(["AI-Trader · מסחר מדומה בלבד", "אירוע: כניסה בוצעה",
-                              'מצב: פוזיציית דמה פעילה, לאחר ביצוע כניסה',
-                              f"סימול: {signal['ticker']}" + ('\nכיוון: Short' if short else ''), "פוזיציה נפתחה: 100%",
+    message = "\n".join(["AI-Trader · מסחר מדומה בלבד", "אירוע: כניסה בוצעה",
+                              'פוזיציית דמה פעילה',
+                              f"סימול: {signal['ticker']}" + (' · Short' if short else ''),
+                              f"מחיר ביצוע: {fill_price:.2f}",
                               f"סטופ ביחס לכניסה: {_action_percent(float(signal['original_stop']) - fill_price, fill_price, signed=True)}",
                               f"אסטרטגיית יציאה פעילה: {'יעד יחיד' if active == 'single' else 'מימוש מדורג'}"])
     enqueue_telegram(cur, f"entry:{signal['id']}", "entry", message)

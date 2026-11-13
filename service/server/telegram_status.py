@@ -107,9 +107,9 @@ def portfolio_status_message() -> str:
 
     blocks = [
         f"💼 תיק דמו ראשי — {SCANNER_DISPLAY_NAME_HE}",
-        "⚠️ מסחר מדומה בלבד. אין כאן פקודות ברוקר או כסף אמיתי.",
+        "מסחר מדומה",
         f"תשואת החשבון המאומת נטו: {_ltr(_account_pct(net / float(account['initial_cash']) * 100)) if float(account['initial_cash']) > 0 else 'לא זמינה'}",
-        "כוללת רווח/הפסד סגור ופתוח ועמלות, ביחס לכל ההון ההתחלתי — כולל המזומן.",
+        "כולל פוזיציות פתוחות ועמלות, ביחס להון ההתחלתי.",
         f"סה״כ פוזיציות בתיק הראשי: {len(trades)} | מאומתות חשבונאית: {len(managed)} | Legacy: {len(legacy)}",
     ]
     def position_lines(rows: list[dict], start: int = 1) -> list[str]:
@@ -124,8 +124,7 @@ def portfolio_status_message() -> str:
             lines.append(
                 f"{number}. {trade['ticker']}{' · Short' if trade.get('side') == 'short' else ''}\n"
                 f"{'תוצאת Short ברוטו מהכניסה' if trade.get('side') == 'short' else 'שינוי מהכניסה'}: {_ltr(_pct(change))}\n"
-                f"סטופ: {_ltr(_pct(stop_change))} | {target_name}: {_ltr(_pct(target_change))}\n"
-                "היעד והסטופ באחוזים ביחס למחיר הכניסה."
+                f"מהכניסה · סטופ: {_ltr(_pct(stop_change))} | {target_name}: {_ltr(_pct(target_change))}\n"
             )
         return lines
 
@@ -142,7 +141,7 @@ def portfolio_status_message() -> str:
             percent = (float(trade['realized_pnl']) - float(trade['fees'])) / cost * 100 if cost > 0 else None
             closed_lines.append(f"{trade['ticker']}: {_ltr(_pct(percent)) if percent is not None else 'לא זמין'}")
         blocks.append('עסקאות מאומתות שנסגרו לאחרונה — נטו ביחס לעלות הכניסה:\n' + '\n'.join(closed_lines))
-    blocks.append(f"עודכן: {updated} (שעון ישראל)\nהמחירים מגיעים מ־Yahoo ועשויים להיות מושהים.")
+    blocks.append(f"עודכן: {updated} (שעון ישראל)\nהמחירים עשויים להיות מושהים.")
     return "\n\n".join(blocks)[:4096]
 
 
@@ -173,32 +172,22 @@ def news_scope_status_message() -> str:
     updated = datetime.now(ISRAEL).strftime("%d/%m/%Y %H:%M:%S")
     return "\n\n".join((
         "🏢 חדשות מניות — היקף המעקב",
-        "הטופיק אינו מוגבל לפוזיציות. הוא מכסה רשימת מעקב, סיגנלים פעילים ומועמדים מתחלפים מהסורק.",
+        "המעקב אינו מוגבל לפוזיציות.",
         f"רשימת מעקב קבועה:\n{watched_text}",
         f"פוזיציות פתוחות:\n{positions_text}",
         f"סיגנלים פעילים:\n{signals_text}",
         f"מועמדי סורק זמינים למעקב מתחלף: {candidate_count}",
-        ("ללא ספאם: חדשות watchlist/פוזיציות דורשות רלוונטיות של לפחות "
-         f"{minimum:.0%}; חדשות משאר מועמדי הסורק דורשות מהותיות גבוהה וסף מחמיר של {broad_minimum:.0%}. "
-         "אין מכסה לפי מניה: כל אירוע חדש ומהותי נשלח, ואותו אירוע/גרסה לא נשלחים פעמיים."),
-        "בכל התראה יוצגו הסימול, שם החברה, המפרסם, זמן הפרסום, הקישור והפרדה בין עובדות המקור לפרשנות AI.",
+        f"סף רלוונטיות: מעקב ותיק {minimum:.0%} · סורק {broad_minimum:.0%}. אין מכסה לפי מניה.",
         f"עודכן: {updated} (שעון ישראל)",
     ))[:4096]
 
 
 def market_news_status_message() -> str:
-    try:
-        relevance = max(.80, min(1.0, float(os.getenv("STOCK_SCANNER_TELEGRAM_BROAD_NEWS_MIN_RELEVANCE", ".80"))))
-    except ValueError:
-        relevance = .80
     updated = datetime.now(ISRAEL).strftime("%d/%m/%Y %H:%M:%S")
     return "\n\n".join((
         "📰 חדשות שוק — סינון מחמיר",
-        "כאן נשלחים רק אירועי מאקרו מהותיים ממקורות רשמיים כגון Federal Reserve ו־BLS.",
-        (f"מניעת ספאם: מהותיות גבוהה, רלוונטיות של לפחות {relevance:.0%}, מקור רשמי ומניעת כפילות. "
-         "אין מכסה קשיחה שעלולה להסתיר אירוע חשוב מאוחר יותר."),
-        "חדשות שוק אחרות נשארות בדשבורד ואינן נשלחות אוטומטית ל־Telegram.",
-        "המידע אינו סיגנל מסחר ואינו יוצר עסקה.",
+        "עדכוני מאקרו ושוק שעברו סינון.",
+        "חשיבות ונימוק מופיעים בגוף הידיעה כשיש בסיס לקבוע אותם.",
         f"עודכן: {updated} (שעון ישראל)",
     ))
 
@@ -255,13 +244,10 @@ def signals_status_messages() -> list[str]:
                 _rtl(f"סימול: {_ltr(trade['ticker'])}{legacy}"),
                 _rtl(f"חברה: {_ltr(trade['company'])}"),
                 _rtl("פעולה: שורט מדומה" if trade.get('side') == 'short' else "פעולה: קנייה"),
-                _rtl(f"כניסה: {_ltr(entry_text)}"),
-                _rtl(f"מחיר נוכחי: {_ltr(current_text)}"),
+                _rtl(f"כניסה: {_ltr(entry_text)} · נוכחי: {_ltr(current_text)}"),
                 _rtl(return_text),
-                _rtl(f"סטופ: {_ltr(stop_text)}"),
-                _rtl(f"יעד: {_ltr(target_text)}"),
-                _rtl(f"ציון מודל לא־מכויל: {_ltr(confidence_text)}"),
-                _rtl(f"טווח זמן: {horizon}"),
+                _rtl(f"סטופ: {_ltr(stop_text)} · יעד: {_ltr(target_text)}"),
+                _rtl(f"ציון מודל לא־מכויל: {_ltr(confidence_text)} · טווח זמן: {horizon}"),
             ))
         )
     updated = datetime.now(ISRAEL).strftime("%d/%m/%Y %H:%M:%S")
@@ -287,8 +273,8 @@ def signals_status_messages() -> list[str]:
         message = "\n\n".join(value for value in (
             _rtl('📡 פוזיציות דמה פעילות'),
             page_label,
-            _rtl("⚠️ מסחר מדומה בלבד. זו תמונת מצב, לא המלצה או פקודת מסחר."),
-            _rtl('כאן מוצגות רק פוזיציות שנפתחה בהן כניסה. פקודות ממתינות אינן פוזיציות פעילות.'),
+            _rtl("מסחר מדומה"),
+            _rtl('פקודות ממתינות אינן פוזיציות פעילות.'),
             _rtl(f"סה״כ פוזיציות פתוחות: {_ltr(len(trades))}"),
             separator.join(chunk),
             _rtl(f"עודכן: {_ltr(updated)} (שעון ישראל)"),

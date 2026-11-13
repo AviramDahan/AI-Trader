@@ -59,7 +59,7 @@ def personal_delivery_message(event):
             return _watchlist_alert_message(row)
         message = _news_alert_message(row)
         if set(watched) - set(held):
-            message = message.replace('חדשות מהותיות לפוזיציה פתוחה', 'חדשות מהותיות לתיק ולרשימת המעקב', 1)
+            message = message.replace('חדשות לפוזיציה פתוחה', 'חדשות לתיק ולמעקב', 1)
         return message
     finally:
         conn.close()

@@ -18,7 +18,8 @@ def test_financial_results_get_separate_outbox_and_readable_shared_period(isolat
     assert len(rows) == 1 and rows[0]['event_type'] == 'sec_intelligence'
     body = rows[0]['message']
     assert 'תוצאות פעילות החברה' in body and 'דיווח SEC מהותי' not in body
-    assert 'מה זה אומר:' in body and 'לא לתחזיות האנליסטים' in body
+    assert 'מול התקופה המקבילה' in body and 'ציפיות האנליסטים\nלא זמין' in body
+    assert 'מה זה אומר:' not in body and 'מעל הצפי' not in body
 
 
 def test_company_topic_has_no_sec_news_general_fallback(monkeypatch):

@@ -60,6 +60,7 @@ def test_new_source_success_dedupe_restart_keeps_only_hebrew(db,selected):
     assert 'המחיר הוא 100 דולר.' in text and 'The price' not in text
     assert 'Truth Social' not in text and item['truth_url'] not in text
     assert 'מקור:' not in text and 'שיוך לחשבון רשמי לא אומת' in text
+    assert text.splitlines()[1].startswith('חשיבות לא נקבעה')
 
 
 def test_new_source_long_media_caption_omits_source_link(selected):

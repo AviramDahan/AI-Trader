@@ -11,6 +11,18 @@ def _clear_target_comparison(text):
                   r'\1 (לעומת \2 קודם)', text)
 
 
+def complementary_text(title, summary):
+    """Remove a duplicate leading headline while preserving all added facts."""
+    summary = CONTROLS.sub('', str(summary or '')).strip()
+    title = CONTROLS.sub('', str(title or '')).strip()
+    if not title or not summary:
+        return summary
+    normalized_title = ' '.join(title.split()).rstrip('.!?')
+    if ' '.join(summary.split()).rstrip('.!?') == normalized_title:
+        return ''
+    return re.sub(r'^'+re.escape(title.rstrip('.!?'))+r'[.!?](?:\s+|$)', '', summary, count=1)
+
+
 def compact_parts(title, summary, tickers=''):
     """Keep the headline and complementary translated facts verbatim.
 
@@ -26,12 +38,7 @@ def compact_parts(title, summary, tickers=''):
     parts = ['📊 '+_clear_target_comparison(title)]
     if tickers:
         parts.append('מניות: '+tickers)
-    if summary == title:
-        summary = ''
-    elif title:
-        # Remove only an exact full headline followed by sentence punctuation.
-        # Do not split abbreviations, compare bags of words or normalize numbers.
-        summary = re.sub(r'^'+re.escape(title.rstrip('.!?'))+r'[.!?](?:\s+|$)', '', summary, count=1)
+    summary = complementary_text(title, summary)
     if summary:
         parts.append(_clear_target_comparison(summary))
     return parts

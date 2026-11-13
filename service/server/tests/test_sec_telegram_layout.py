@@ -102,3 +102,5 @@ def test_actual_enqueue_labels_acceptance_not_delivery_clock(isolated,monkeypatc
     assert 'נקלט ב־SEC:' in rows[0]['message'] and 'דווח:' not in rows[0]['message']
     assert 'נשלח:' not in rows[0]['message']
     assert '\nבפועל:' in rows[0]['message']
+    assert 'חשיבות בינונית' in rows[0]['message'].splitlines()[1]
+    assert 'מול התקופה המקבילה' in rows[0]['message'].splitlines()[1]

@@ -1105,7 +1105,7 @@ def _company_report_text(text: str) -> str:
     output = ['\n'.join(periods[0])] if shared else []
     # This SEC comparison producer has no analyst-consensus input. Prior-year
     # values are actual results, never estimates. Do not invent EPS or surprise.
-    output.append('🔮 ציפיות האנליסטים\nלא זמין — אין נתון צפי מאומת לדיווח זה.')
+    output.append('🔮 ציפיות האנליסטים\nלא זמין')
     output.append('📋 התוצאות בפועל')
     meanings = set(_PUBLIC_MEANING.values())
     for lines in facts:
@@ -1115,8 +1115,6 @@ def _company_report_text(text: str) -> str:
             lambda match: _public_compact_usd(match[1].replace(',', '')), '\n'.join(kept))
         compact = compact.replace('נוכחי:', 'בפועל:').replace('קודם:', 'בתקופה המקבילה:')
         output.append(compact)
-    output.append('מה זה אומר: זו השוואה לתקופה המקבילה בשנה הקודמת, לא לתחזיות האנליסטים. '
-                  'הנתונים לבדם אינם מסבירים את הגורם לשינוי או את תגובת המניה.')
     return '\n\n'.join(output)
 
 
@@ -1164,6 +1162,15 @@ def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn
     message = (f"{heading}{correction}\n\n"
                f"חברה: {company}\nסימול: {', '.join(tickers[:3])}\n\n{fact}\n\n"
                f"נקלט ב־SEC: {local_time} (שעון ישראל)")
+    from news_notice_importance import SEC_IMPORTANCE, add_importance
+    priority = SEC_IMPORTANCE[event_type]
+    if event_type == 'company_report':
+        # These metric/change lines came from the structured SEC comparison.
+        lines = next((block.splitlines() for block in fact.split('\n\n') if block.startswith('• ')), [])
+        change = next((line.removeprefix('שינוי: ') for line in lines if line.startswith('שינוי: ')), '')
+        if change:
+            priority = f'חשיבות בינונית · {lines[0][2:]} — {change} מול התקופה המקבילה'
+    message = add_importance(message, priority)
     return enqueue_telegram(conn.cursor(), f"sec-intelligence:{job['accession']}",
                             # Keep the durable event contract readable by the
                             # existing recovery/rollback binary. Dispatch derives

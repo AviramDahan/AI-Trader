@@ -317,17 +317,34 @@ def test_old_queued_source_is_cancelled_without_model_or_replay_after_switch(db,
     assert posts.valid_item(old, AT, active=False)
 
 
-def test_utf16_bidi_expansion_blocks_rather_than_clips_accepted_hebrew(db, monkeypatch):
+@pytest.mark.parametrize('force_overflow', [False, True])
+def test_utf16_bidi_expansion_sends_whole_text_or_blocks(db, monkeypatch, force_overflow):
     import scanner_engine, stock_scanner, trump_truth_translation as h
     posts.ingest([extracted(message('1 '*800))], AT)
     hebrew = ('א1 '*800).strip()
     def callback(system, payload, schema):
         return {'text_he': hebrew} if 'text_he' in schema['properties'] else approved(system, payload, schema)
     assert h.prepare(at=AT, completion=callback)['prepared'] == 1
-    assert posts.delivery_message(rows(db)[0], AT) is None
-    sender = Mock(); monkeypatch.setattr(stock_scanner, 'send_telegram', sender)
-    assert scanner_engine.process_telegram_outbox()['sent'] == 0
-    sender.assert_not_called()
+    if force_overflow:
+        render = posts.render
+        def oversized(*args, **kwargs):
+            text = render(*args, **kwargs)
+            return text + '\n' + 'א' * 100 if text is not None else None
+        monkeypatch.setattr(posts, 'render', oversized)
+    rendered = posts.delivery_message(rows(db)[0], AT)
+    if force_overflow:
+        assert rendered is None
+    else:
+        from telegram_presentation import telegram_text, utf16_length
+        assert hebrew in rendered and '…' not in rendered
+        assert utf16_length(telegram_text(rendered, limit=16384)) <= 4096
+    sender = Mock(return_value='sent')
+    monkeypatch.setattr(stock_scanner, 'send_telegram', sender)
+    assert scanner_engine.process_telegram_outbox()['sent'] == int(not force_overflow)
+    if force_overflow:
+        sender.assert_not_called()
+    else:
+        assert hebrew in sender.call_args.args[0]
 
 
 def test_actual_sender_keeps_hebrew_without_source_url_and_news_destination(db, monkeypatch):

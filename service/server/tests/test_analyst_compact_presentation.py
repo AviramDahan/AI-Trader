@@ -92,9 +92,11 @@ def test_legacy_stock_bulletin_is_short_and_routes_to_same_analyst_topic(monkeyp
     assert dispatch.post.call_args.kwargs['data']['message_thread_id']==880
 
 
-def test_non_analyst_stock_bulletin_keeps_existing_template(monkeypatch):
+def test_non_analyst_stock_bulletin_uses_short_news_format(monkeypatch):
     from news_pipeline import _stock_broadcast_alert_message
     monkeypatch.setenv('TELEGRAM_ANALYST_UPDATES_TOPIC_ENABLED','true')
     row={**legacy_row(),'title':'Synthetic opens new factory'}
     text=_stock_broadcast_alert_message(row)
-    assert INTERPRETATION in text and 'מהותיות' in text
+    assert INTERPRETATION not in text and 'מהותיות' not in text
+    assert 'חשיבות' in text and 'סימול: SYN' in text
+    assert 'שוק תחרותי' in text and 'פורסם:' in text

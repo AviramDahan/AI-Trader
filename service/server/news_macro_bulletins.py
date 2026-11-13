@@ -98,8 +98,11 @@ def unpublished_figures(cur, row, facts, published_at):
         if isinstance(source, dict):
             facts_in_source = releases(prior["title"], source.get("source_excerpt"))
             for fact in facts_in_source:
-                if prior["message"].startswith(tuple(f"📰 {name} · " for name in COUNTRIES.values())):
-                    if render((fact,)) not in prior["message"]:
+                message = prior["message"]
+                if message.startswith(tuple(f"📰 {name} · " for name in COUNTRIES.values())):
+                    # Presentation may add a priority line under the heading.
+                    body = '\n'.join(line for line in message.splitlines() if not line.startswith('חשיבות '))
+                    if render((fact,)) not in body:
                         continue  # The previous notice may have contained only the new figures.
                 seen.append(fact)
     return tuple(fact for fact in facts if not any(fact.same_figure(item) for item in seen))
