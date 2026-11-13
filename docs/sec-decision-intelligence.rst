@@ -24,6 +24,25 @@ are bounded, and XML DTD/entities are rejected. An operator User-Agent with a
 real contact email is mandatory. EdgarTools is not required; SEC XML/XBRL
 definitions and original filing references are authoritative.
 
+Telegram ownership notices
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Form 4 purchase and sale notices show each reporting owner's name and filed
+relationship to the issuer, including a filed officer title when available.
+Joint filers are shown together. The notice does not attribute a transaction
+to a particular joint filer. Schedule 13D/G notices show a reported holding.
+
+For a purchase with a single reporting owner and a reported direct holding
+after the transaction, size is the row's purchased shares divided by that
+holding. The presentation scale is 1/5 below 1%, 2/5 from 1% to below 5%,
+3/5 from 5% to below 15%, 4/5 from 15% to below 30%, and 5/5 from 30%.
+Missing or inconsistent holdings, joint filings and indirect holdings have
+no size score. The reported price times the number of shares is shown
+separately in the reported currency when a positive price is present.
+The scale is editorial and describes size relative to the reported position.
+Existing trade decisions, routing and deduplication continue to use their
+own rules.
+
 Operational initial-catch-up correction
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
