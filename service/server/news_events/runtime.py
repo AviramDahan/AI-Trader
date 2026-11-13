@@ -206,21 +206,24 @@ def message(event,result,topic,tickers,*,policy=None):
     from news_analyst_routing import enabled as analyst_enabled, analyst_event
     compact_analyst = (not report and topic in ('market_news','important_stock_news')
                       and analyst_enabled() and analyst_event(event))
-    parts=[(REPORT_PREFIX if report else '📰 ')+hide_relay_branding(clean_draft(result['title_he']))]
+    from news_analyst_presentation import compact_parts, complementary_text
+    title = hide_relay_branding(clean_draft(result['title_he']))
+    summary = hide_relay_branding(clean_draft(result['summary_he']))
+    parts=[(REPORT_PREFIX if report else '📰 ')+title]
     from .engine import market_brief_event
     brief = topic == 'market_news' and policy is not None and market_brief_event(event,result,policy)
     if brief:
-        parts = ['📰 עדכון שוק קצר', hide_relay_branding(clean_draft(result['title_he']))]
+        parts = ['📰 עדכון שוק קצר', title]
     if tickers:parts.append('מניות: '+', '.join(tickers))
-    parts.append(hide_relay_branding(clean_draft(result['summary_he'])))
+    if detail := complementary_text(title, summary):
+        parts.append(detail)
     if compact_analyst:
-        from news_analyst_presentation import compact_parts
-        parts = compact_parts(hide_relay_branding(clean_draft(result['title_he'])),
-                              hide_relay_branding(clean_draft(result['summary_he'])), ', '.join(tickers))
+        parts = compact_parts(title, summary, ', '.join(tickers))
     interpretation = hide_relay_branding(clean_draft(result.get('interpretation_he') or ''))
     if topic == 'market_news' and os.getenv('STOCK_SCANNER_PUBLIC_TRANSLATION_ONLY_ENABLED','false').lower() == 'true':
         interpretation = ''
-    if interpretation and not compact_analyst and not brief:parts.append('משמעות אפשרית לסוחר (AI): '+interpretation)
+    if 0 < len(interpretation) <= 220 and not compact_analyst and not brief:
+        parts.append('משמעות אפשרית לסוחר (AI): '+interpretation)
     # Ingestion provenance stays in storage. Retain required licensed credits.
     credits=[clean_draft(s['publisher']) for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')]
     footer=[]

@@ -104,7 +104,7 @@ def send_entry_chart(trade_id):
                    f"כניסה בפועל: ${trade['entry_price']:.2f}\nסטופ מקורי: ${trade['original_stop']:.2f}\n"
                    + "\n".join(f"TP{i}: ${trade[f'tp{i}']:.2f}" for i in (1,2,3))
                    + ("\n\nיעד פעיל יחיד: TP2. ‏TP1 ו־TP3 מסומנים להשוואת Shadow בלבד." if trade["strategy"] == "single" else "\n\nאסטרטגיה פעילה: מימוש מדורג.")
-                   + "\nהנרות לפני הכניסה; המשולש מסמן ביצוע מדומה. נתוני Yahoo עשויים להיות מושהים.")
+                   + "\nהמשולש מסמן את הכניסה. המחירים עשויים להיות מושהים.")
         session = requests.Session(); session.trust_env = False
         response = session.post(f"https://api.telegram.org/bot{token}/sendPhoto",
             data={**destination_fields(chat, "entry_chart"), "caption":telegram_text(caption, limit=1024)},

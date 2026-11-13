@@ -1099,7 +1099,7 @@ def _company_report_text(text: str) -> str:
     output = ['\n'.join(periods[0])] if shared else []
     # This SEC comparison producer has no analyst-consensus input. Prior-year
     # values are actual results, never estimates. Do not invent EPS or surprise.
-    output.append('🔮 ציפיות האנליסטים\nלא זמין — אין נתון צפי מאומת לדיווח זה.')
+    output.append('🔮 ציפיות האנליסטים\nלא זמין')
     output.append('📋 התוצאות בפועל')
     meanings = set(_PUBLIC_MEANING.values())
     for lines in facts:
@@ -1109,8 +1109,6 @@ def _company_report_text(text: str) -> str:
             lambda match: _public_compact_usd(match[1].replace(',', '')), '\n'.join(kept))
         compact = compact.replace('נוכחי:', 'בפועל:').replace('קודם:', 'בתקופה המקבילה:')
         output.append(compact)
-    output.append('מה זה אומר: זו השוואה לתקופה המקבילה בשנה הקודמת, לא לתחזיות האנליסטים. '
-                  'הנתונים לבדם אינם מסבירים את הגורם לשינוי או את תגובת המניה.')
     return '\n\n'.join(output)
 
 

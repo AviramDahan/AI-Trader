@@ -284,11 +284,11 @@ def render(item,hebrew=None,*,media_attached=False):
     if is_item(item):
         if not hebrew or hebrew['status'] not in ('translated','media_only'):return None
         body=(hebrew['text_he'] if hebrew['status']=='translated' else
-              'פוסט מדיה ללא טקסט. אין תמלול או תיאור מומצא של המדיה.')
+              'מדיה ללא טקסט. אין תמלול.')
         from news_notice_importance import TRUMP_IMPORTANCE, add_importance
         from telegram_presentation import telegram_text, utf16_length
         message = ('📣 עדכון המיוחס לטראמפ\n\n'+body+
-            '\n\nתרגום AI; התוכן והשיוך לחשבון רשמי לא אומתו.\nזמן הדיווח: '+
+            '\n\nתרגום AI · שיוך לחשבון רשמי לא אומת\nדווח: '+
             instant(item['relay_published_at']).strftime('%d.%m.%Y %H:%M UTC'))
         limit = 1024 if media_attached and utf16_length(telegram_text(message, limit=100_000)) <= 1024 else 4096
         return add_importance(message, TRUMP_IMPORTANCE, limit=limit)

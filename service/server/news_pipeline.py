@@ -1240,38 +1240,42 @@ def _notice_importance(message, row, *, report=False, analyst=False):
         facts['title'], facts['source_excerpt'], report=report, analyst=analyst))
 
 
+def _compact_stock_notice(row, *, heading, personal=False):
+    from news_analyst_presentation import complementary_text
+    from news_report_routing import is_company_report
+    from news_quality import source_facts
+
+    original = str(row.get('title') or '').strip()
+    facts = source_facts(row)
+    report = is_company_report(facts['title'], facts['source_excerpt'])
+    title = original if report and original else str(row.get('title_he') or original or 'עדכון').strip()
+    summary = complementary_text(title, row.get('summary_he'))
+    if len(summary) > 550 and not report:
+        summary = ''  # Keep the whole headline instead of clipping a qualifier.
+    direction = {'positive': 'חיובית', 'negative': 'שלילית', 'mixed': 'מעורבת',
+                 'neutral': 'ניטרלית'}.get(row.get('impact'))
+    subject = f"סימול: {row['ticker']} · {heading}"
+    if direction:
+        subject += f' · השפעה אפשרית {direction}'
+    lines = [subject, f'כותרת: {title}']
+    if summary:
+        lines.append(summary)
+    if row.get('headline_only'):
+        lines.append('כותרת בלבד')
+    elif personal and (interpretation := str(row.get('interpretation_he') or '').strip()):
+        interpretation = re.sub(r'^פרשנות AI(?: זהירה)?:\s*', '', interpretation)
+        if interpretation != summary and len(interpretation) <= 220:
+            lines.append(f'פרשנות AI: {interpretation}')
+    lines.append(f"פורסם: {_publication_time_he(row['published_at'])}")
+    return _notice_importance('\n'.join(lines), row)
+
+
 def _news_alert_message(row: dict[str, Any]) -> str:
-    from news_evidence import source_limit as describe_source
-    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "neutral": "ניטרלית", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
-    materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
-    company_line = f"\nחברה: {row['company']}" if row.get("company") else ""
-    source_limit = describe_source(row)
-    message = "\n\n".join(("AI-Trader — חדשות מהותיות לפוזיציה פתוחה | מסחר מדומה בלבד",
-                         f"סימול: {row['ticker']}{company_line}\nהשפעה אפשרית: {impact}\nמהותיות לפי ניתוח AI: {materiality}",
-                         f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}\n{source_limit}",
-                         f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
-                         f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",
-                         f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}"))[:4000]
-    return _notice_importance(message, row)
+    return _compact_stock_notice(row, heading='חדשות לפוזיציה פתוחה', personal=True)
 
 
 def _watchlist_alert_message(row: dict[str, Any]) -> str:
-    from news_evidence import source_limit as describe_source
-    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת",
-              "neutral": "ניטרלית", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
-    materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
-    company_line = f"\nחברה: {row['company']}" if row.get("company") else ""
-    source_limit = describe_source(row)
-    interpretation = (() if row.get("headline_only") else
-                      (f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",))
-    message = "\n\n".join(("AI-Trader — חדשות חשובות מרשימת המעקב | ללא עסקה וללא תלות בפוזיציה",
-                         f"סימול: {row['ticker']}{company_line}\nהשפעה אפשרית: {impact}\nמהותיות לפי ניתוח AI: {materiality}",
-                         f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}\n{source_limit}",
-                         f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
-                         *interpretation,
-                         f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
-                         "המניה נמצאת ברשימת מעקב חדשות בלבד. לא נוצרו סיגנל או עסקה."))[:4000]
-    return _notice_importance(message, row)
+    return _compact_stock_notice(row, heading='רשימת המעקב · ללא עסקה', personal=True)
 
 
 def _stock_broadcast_alert_message(row: dict[str, Any]) -> str:
@@ -1285,21 +1289,8 @@ def _stock_broadcast_alert_message(row: dict[str, Any]) -> str:
         from news_analyst_presentation import compact_parts
         parts = compact_parts(row.get('title_he'), row.get('summary_he'), row['ticker'])
         parts.append('פורסם: '+_publication_time_he(row['published_at']))
-        return _notice_importance('\n\n'.join(parts), row, analyst=True)
-    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת",
-              "neutral": "ניטרלית", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
-    materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
-    source_limit = "זמינים כותרת ומטא־דאטה בלבד." if row.get("headline_only") else "זמין תקציר שסופק בפיד; הכתבה המלאה לא נותחה."
-    interpretation = (() if row.get("headline_only") else
-                      (f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",))
-    message = "\n\n".join(("AI-Trader — חדשות מניות חשובות מהסורק | ללא עסקה",
-                         f"סימולים: {row['ticker']}\nחברות: {row.get('company') or 'לא זמין'}\nהשפעה אפשרית: {impact}\nמהותיות לפי ניתוח AI: {materiality}",
-                         f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}\n{source_limit}",
-                         f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
-                         *interpretation,
-                         f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
-                         "הידיעה עברה סינון מחמיר של הסורק. היא אינה סיגנל ואינה יוצרת עסקה."))[:4000]
-    return _notice_importance(message, row)
+        return _notice_importance('\n'.join(parts), row, analyst=True)
+    return _compact_stock_notice(row, heading='ידיעה שאינה סיגנל')
 
 
 def _market_broadcast_alert_message(row: dict[str, Any]) -> str:
@@ -1405,8 +1396,8 @@ def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_onl
     if compact_analyst:
         from news_analyst_presentation import compact_parts
         parts = compact_parts(title,summary)
-    if interpretation and not compact_analyst:
-        parts.append("משמעות אפשרית לסוחר (AI): " + interpretation[:350])
+    if interpretation and not compact_analyst and len(interpretation) <= 220:
+        parts.append("משמעות אפשרית לסוחר (AI): " + interpretation)
     # General translation/source limitations live in the pinned topic notice.
     # Never remove attribution or uncertainty from the actual reported facts.
     if telegram_post:

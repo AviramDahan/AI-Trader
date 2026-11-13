@@ -154,11 +154,11 @@ class TelegramStatusTests(unittest.TestCase):
         self.assertIn('2. MSFT', text)
         self.assertNotIn('$', text)
 
-    def test_market_news_card_documents_official_sources_without_a_hard_cap(self):
+    def test_market_news_card_explains_importance_briefly(self):
         message = telegram_status.market_news_status_message()
-        self.assertIn("Federal Reserve", message)
-        self.assertIn("BLS", message)
-        self.assertIn("אין מכסה קשיחה", message)
+        self.assertIn("חשיבות ונימוק", message)
+        self.assertIn("עודכן:", message)
+        self.assertLess(len(message), 200)
 
     def test_signals_status_uses_next_unfilled_staged_target(self):
         trade_id = self._seed_open_trade(strategy="staged")

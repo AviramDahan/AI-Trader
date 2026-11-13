@@ -197,7 +197,7 @@ def enqueue(job, evidence, transactions, now, conn):
         from sec_intelligence import _public_compact_usd
         fact = evidence['buyback_cash']
         heading = '🔄 Buyback · תשלומים שבוצעו'
-        details = (f'תשלומים לרכישת מניות רגילות עצמיות · {_public_compact_usd(fact["usd_paid"])}\n'
+        details = (f'רכישה עצמית של מניות רגילות · {_public_compact_usd(fact["usd_paid"])}\n'
                    f'תקופת הדיווח {fact["start"]} עד {fact["end"]} · {job["form"]}')
     else:
         return False
@@ -211,7 +211,7 @@ def enqueue(job, evidence, transactions, now, conn):
         return False
     company = _label(members[tickers[0]].get('company'))
     stamp = accepted.astimezone(ZoneInfo('Asia/Jerusalem')).strftime('%d/%m/%Y %H:%M')
-    message = f'{heading}\n\n{company} · {", ".join(tickers[:3])}\n\n{details}\n\nדווח ל־SEC ב־{stamp} (שעון ישראל)'
+    message = f'{heading}\n{company} · {", ".join(tickers[:3])}\n\n{details}\nדווח ל־SEC ב־{stamp} (שעון ישראל)'
     from news_notice_importance import SEC_IMPORTANCE, add_importance
     message = add_importance(message, SEC_IMPORTANCE[event_type])
     payload = json.dumps({'version': 1, 'thread': thread, 'accepted_at': job['accepted_at'], 'text': message})

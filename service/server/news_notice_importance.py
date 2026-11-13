@@ -69,7 +69,7 @@ EVENTS = (
      r'\bfiles? for (?:chapter 11|bankruptcy)\b'),
     ('בינונית', 'החברה דיווחה על אירוע סייבר',
      r'\b(?:reports?|discloses?|confirms?)\b.{0,38}\b(?:data breach|cyberattack)\b'),
-    ('לא נקבעה', 'פורסם נתון כלכלי. הפער מול הצפי טרם נקבע',
+    ('לא נקבעה', 'נתון מאקרו ללא צפי בר־השוואה',
      r'\b(?:CPI|PPI|PCE|GDP|payrolls?|jobless claims|unemployment|retail sales)\b.{0,95}\d'),
     ('נמוכה', 'הידיעה מתארת בעיקר תנועת מחיר',
      r'^(?:(?:the )?(?:S&P 500|Nasdaq|Dow|oil|gold|Treasury yields?)|[\w. -]{1,40} (?:shares|stock))\s+'
@@ -102,13 +102,13 @@ def news_importance(title, excerpt='', *, report=False, analyst=False):
 
     title = _headline(title)
     if report:
-        return _line('בינונית', 'פורסמו תוצאות בפועל. בדקו את הצפי וההשוואה בהודעה')
+        return _line('בינונית', 'פורסמו תוצאות בפועל')
     if analyst:
         return analyst_importance(title, excerpt)
     if (not title or '?' in title or re.search(
             r'\b(?:could|might|may|would|rumou?rs?|reportedly|preview|denies?|false|not|expected|expects? to|if)\b'
             r'|ייתכן|שמועה|לקראת', title, re.I)):
-        return _line('לא נקבעה', 'לא הוצג שינוי מהותי שאפשר לסווג מהמידע הקיים')
+        return _line('לא נקבעה', 'לא הוצג אירוע מהותי ברור')
     if reported_rate_decision(title) or re.fullmatch(
             r'(?:Fed|Federal Reserve|ECB) (?:holds|keeps|raises|cuts) interest rates (?:at|to) [+-]?\d+(?:\.\d+)?%', title, re.I):
         return _line('גבוהה', 'החלטת ריבית של בנק מרכזי')
@@ -121,7 +121,7 @@ def news_importance(title, excerpt='', *, report=False, analyst=False):
         return _line('נמוכה', 'עדכון על תנועת השוק')
     if has_reported_results(title, excerpt) and has_financial_values(title, excerpt):
         return _line('בינונית', 'פורסמו תוצאות כספיות לתקופה מוגדרת')
-    return _line('לא נקבעה', 'לא הוצג שינוי מהותי שאפשר לסווג מהמידע הקיים')
+    return _line('לא נקבעה', 'לא הוצג אירוע מהותי ברור')
 
 
 def add_importance(message, annotation, *, limit=3500):

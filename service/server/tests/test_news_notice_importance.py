@@ -50,7 +50,7 @@ def test_annotation_keeps_heading_and_budget():
 @pytest.mark.parametrize(('title', 'expected'), [
     ('Spain CPI (Y/Y) Oct: 4.9% (est 4.9%; prev 4.9%)', 'ללא הפתעה'),
     ('FRENCH CPI MOM NSA ACTUAL 3.4% (FORECAST 3.2%, PREVIOUS 3.4%) $MACRO', '0.2 נקודות אחוז מעל הצפי'),
-    ('SWISS PPI MOM ACTUAL 0.9% (FORECAST -, PREVIOUS 0.3%) $MACRO', 'הפער מול הצפי טרם נקבע'),
+    ('SWISS PPI MOM ACTUAL 0.9% (FORECAST -, PREVIOUS 0.3%) $MACRO', 'ללא צפי בר־השוואה'),
     ('France PPI report could surprise as it did in 2025', 'לא נקבעה'),
 ])
 def test_verified_format_is_required_for_forecast_comparison(title, expected):
@@ -89,3 +89,18 @@ def test_activity_topics_keep_heading_and_queue_contract(monkeypatch):
     envelope = json.loads(packed)
     assert kind == 'buyback_activity' and envelope['thread'] == 42
     assert 'תשלום בפועל' in envelope['text'].splitlines()[1]
+
+
+@pytest.mark.parametrize('render', ['_news_alert_message', '_watchlist_alert_message', '_stock_broadcast_alert_message'])
+def test_stock_notices_keep_facts_without_repeating_the_headline(render):
+    import news_pipeline
+
+    row = dict(ticker='SYN', title='Example raises full-year revenue guidance',
+               title_he='החברה העלתה תחזית', summary_he='החברה העלתה תחזית. התחזית החדשה היא 20 מיליון דולר.',
+               published_at='2026-11-13T10:15:00Z', impact='positive', headline_only=True,
+               interpretation_he='טקסט פרשנות שלא שייך להודעת כותרת')
+    notice = getattr(news_pipeline, render)(row)
+    assert notice.count(row['title_he']) == 1
+    assert 'חשיבות גבוהה' in notice and '20 מיליון דולר' in notice and 'SYN' in notice
+    assert 'כותרת בלבד' in notice and row['interpretation_he'] not in notice
+    assert len(notice) < 330
