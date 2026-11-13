@@ -17,6 +17,10 @@ def end_story(token):
     _live_stage.reset(token)
 
 
+def in_story():
+    return _live_stage.get() is not None
+
+
 def failed():
     global _until,_streak
     if _live_stage.get() is None:
