@@ -1158,6 +1158,15 @@ def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn
     message = (f"{heading}{correction}\n\n"
                f"חברה: {company}\nסימול: {', '.join(tickers[:3])}\n\n{fact}\n\n"
                f"נקלט ב־SEC: {local_time} (שעון ישראל)")
+    from news_notice_importance import SEC_IMPORTANCE, add_importance
+    priority = SEC_IMPORTANCE[event_type]
+    if event_type == 'company_report':
+        # These metric/change lines came from the structured SEC comparison.
+        lines = next((block.splitlines() for block in fact.split('\n\n') if block.startswith('• ')), [])
+        change = next((line.removeprefix('שינוי: ') for line in lines if line.startswith('שינוי: ')), '')
+        if change:
+            priority = f'חשיבות בינונית · {lines[0][2:]} — {change} מול התקופה המקבילה'
+    message = add_importance(message, priority)
     return enqueue_telegram(conn.cursor(), f"sec-intelligence:{job['accession']}",
                             # Keep the durable event contract readable by the
                             # existing recovery/rollback binary. Dispatch derives

@@ -80,7 +80,8 @@ def test_brief_render_keeps_whole_reviewed_context_and_sanitized_source(env):
     p,s,_=env
     eid=p.ingest(market(url='https://example.invalid/news/12345?token=secret&utm_source=tracking&id=7'),NOW)
     event=s.event(eid)['body'];rendered=message(event,low(),'market_news',[],policy=Policy(market_briefs_enabled=True))
-    assert rendered.lstrip('\u200f').startswith('📰 עדכון שוק קצר\n\n')
+    assert rendered.splitlines()[0].lstrip('\u200f') == '📰 עדכון שוק קצר'
+    assert rendered.splitlines()[1].lstrip('\u200f').startswith('חשיבות נמוכה')
     assert low()['title_he'] in rendered and low()['summary_he'] in rendered
     assert 'מקור:' not in rendered and 'https://' not in rendered
     assert 'secret' not in rendered and 'utm_' not in rendered

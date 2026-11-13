@@ -229,7 +229,13 @@ def message(event,result,topic,tickers,*,policy=None):
               for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')}
     if licenses:footer.append('תרגום/תקציר AI · '+ '; '.join(sorted(licenses)))
     footer.append('פורסם: '+_publication_time_he(event['published_at']))
-    return append_source('\n\n'.join(parts),event['sources'],required_footer='\n\n'.join(footer))
+    from news_notice_importance import add_importance, news_importance
+    from telegram_presentation import telegram_text, utf16_length
+    priority = news_importance(event.get('title'), event.get('source_excerpt',''), report=report, analyst=compact_analyst)
+    footer_text = '\n\n'.join(footer)
+    budget = 3500 - utf16_length(telegram_text('\n\n' + footer_text, limit=100_000))
+    return append_source(add_importance('\n\n'.join(parts), priority, limit=budget),
+                         event['sources'], required_footer=footer_text)
 
 
 def general_publication_keys(event, version, topic, result=None):

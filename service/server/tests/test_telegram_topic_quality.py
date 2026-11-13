@@ -115,5 +115,6 @@ def test_macro_bulletin_enqueues_only_new_figures_across_relays(isolated_pipelin
             conn.commit()
     notices = case.rows("SELECT message FROM scanner_telegram_outbox ORDER BY id")
     assert len(notices) == 2
+    assert all("חשיבות נמוכה · ללא הפתעה" in notice["message"] for notice in notices)
     assert "חודשי" in notices[0]["message"] and "שנתי" not in notices[0]["message"]
     assert "שנתי" in notices[1]["message"] and "חודשי" not in notices[1]["message"]

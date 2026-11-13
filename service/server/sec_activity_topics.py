@@ -212,6 +212,8 @@ def enqueue(job, evidence, transactions, now, conn):
     company = _label(members[tickers[0]].get('company'))
     stamp = accepted.astimezone(ZoneInfo('Asia/Jerusalem')).strftime('%d/%m/%Y %H:%M')
     message = f'{heading}\n\n{company} · {", ".join(tickers[:3])}\n\n{details}\n\nדווח ל־SEC ב־{stamp} (שעון ישראל)'
+    from news_notice_importance import SEC_IMPORTANCE, add_importance
+    message = add_importance(message, SEC_IMPORTANCE[event_type])
     payload = json.dumps({'version': 1, 'thread': thread, 'accepted_at': job['accepted_at'], 'text': message})
     if event_type == 'buyback_activity':
         # A later filing can repeat the same reported period and amount.

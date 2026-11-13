@@ -1231,18 +1231,28 @@ def _default_analyzer(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return output
 
 
+def _notice_importance(message, row, *, report=False, analyst=False):
+    from news_notice_importance import add_importance, news_importance
+    from news_quality import source_facts
+
+    facts = source_facts(row)
+    return add_importance(message, news_importance(
+        facts['title'], facts['source_excerpt'], report=report, analyst=analyst))
+
+
 def _news_alert_message(row: dict[str, Any]) -> str:
     from news_evidence import source_limit as describe_source
-    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
+    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "neutral": "ניטרלית", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
     materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
     company_line = f"\nחברה: {row['company']}" if row.get("company") else ""
     source_limit = describe_source(row)
-    return "\n\n".join(("AI-Trader — חדשות מהותיות לפוזיציה פתוחה | מסחר מדומה בלבד",
-                         f"סימול: {row['ticker']}{company_line}\nהשפעה אפשרית: {impact}\nמהותיות אפשרית: {materiality}",
+    message = "\n\n".join(("AI-Trader — חדשות מהותיות לפוזיציה פתוחה | מסחר מדומה בלבד",
+                         f"סימול: {row['ticker']}{company_line}\nהשפעה אפשרית: {impact}\nמהותיות לפי ניתוח AI: {materiality}",
                          f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}\n{source_limit}",
                          f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
                          f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",
                          f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}"))[:4000]
+    return _notice_importance(message, row)
 
 
 def _watchlist_alert_message(row: dict[str, Any]) -> str:
@@ -1254,13 +1264,14 @@ def _watchlist_alert_message(row: dict[str, Any]) -> str:
     source_limit = describe_source(row)
     interpretation = (() if row.get("headline_only") else
                       (f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",))
-    return "\n\n".join(("AI-Trader — חדשות חשובות מרשימת המעקב | ללא עסקה וללא תלות בפוזיציה",
-                         f"סימול: {row['ticker']}{company_line}\nהשפעה אפשרית: {impact}\nמהותיות אפשרית: {materiality}",
+    message = "\n\n".join(("AI-Trader — חדשות חשובות מרשימת המעקב | ללא עסקה וללא תלות בפוזיציה",
+                         f"סימול: {row['ticker']}{company_line}\nהשפעה אפשרית: {impact}\nמהותיות לפי ניתוח AI: {materiality}",
                          f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}\n{source_limit}",
                          f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
                          *interpretation,
                          f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
                          "המניה נמצאת ברשימת מעקב חדשות בלבד. לא נוצרו סיגנל או עסקה."))[:4000]
+    return _notice_importance(message, row)
 
 
 def _stock_broadcast_alert_message(row: dict[str, Any]) -> str:
@@ -1274,31 +1285,33 @@ def _stock_broadcast_alert_message(row: dict[str, Any]) -> str:
         from news_analyst_presentation import compact_parts
         parts = compact_parts(row.get('title_he'), row.get('summary_he'), row['ticker'])
         parts.append('פורסם: '+_publication_time_he(row['published_at']))
-        return '\n\n'.join(parts)
+        return _notice_importance('\n\n'.join(parts), row, analyst=True)
     impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת",
               "neutral": "ניטרלית", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
     materiality = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה"}.get(row["materiality"], row["materiality"])
     source_limit = "זמינים כותרת ומטא־דאטה בלבד." if row.get("headline_only") else "זמין תקציר שסופק בפיד; הכתבה המלאה לא נותחה."
     interpretation = (() if row.get("headline_only") else
                       (f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",))
-    return "\n\n".join(("AI-Trader — חדשות מניות חשובות מהסורק | ללא עסקה",
-                         f"סימולים: {row['ticker']}\nחברות: {row.get('company') or 'לא זמין'}\nהשפעה אפשרית: {impact}\nמהותיות: {materiality}",
+    message = "\n\n".join(("AI-Trader — חדשות מניות חשובות מהסורק | ללא עסקה",
+                         f"סימולים: {row['ticker']}\nחברות: {row.get('company') or 'לא זמין'}\nהשפעה אפשרית: {impact}\nמהותיות לפי ניתוח AI: {materiality}",
                          f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}\n{source_limit}",
                          f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
                          *interpretation,
                          f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
                          "הידיעה עברה סינון מחמיר של הסורק. היא אינה סיגנל ואינה יוצרת עסקה."))[:4000]
+    return _notice_importance(message, row)
 
 
 def _market_broadcast_alert_message(row: dict[str, Any]) -> str:
-    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
-    return "\n\n".join(("AI-Trader — חדשות שוק מהותיות",
-                         f"השפעה אפשרית: {impact}\nמהותיות: גבוהה",
+    impact = {"positive": "חיובית", "negative": "שלילית", "mixed": "מעורבת", "neutral": "ניטרלית", "unclear": "לא ברורה"}.get(row["impact"], row["impact"])
+    message = "\n\n".join(("AI-Trader — חדשות שוק",
+                         f"השפעה אפשרית: {impact}",
                          f"מידע מהמקור:\nכותרת: {row['title']}\nזמן פרסום: {_publication_time_he(row['published_at'])}",
                          f"תקציר בעברית שנוצר ב־AI:\n{row.get('summary_he') or 'לא נוצר תקציר.'}",
                          f"פרשנות AI:\n{row.get('interpretation_he') or 'קיימת אי־ודאות.'}",
                          f"מפרסם מקורי: {row.get('original_publisher') or row['publisher']}\nקישור ישיר: {row['url']}",
                          "עדכון שוק בלבד — לא נוצרו סיגנל או עסקה."))[:4000]
+    return _notice_importance(message, row)
 
 
 def _telegram_bulletin_text(text: str) -> str:
@@ -1360,7 +1373,9 @@ def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_onl
     if macro_figures:
         from news_macro_bulletins import render
         from scanner_engine import enqueue_telegram
-        message = render(macro_figures) + f"\n\nפורסם: {_publication_time_he(row['published_at'])}"
+        from news_notice_importance import add_importance, macro_importance
+        annotation = macro_importance((fact.values[0], fact.values[1]) for fact in macro_figures)
+        message = add_importance(render(macro_figures), annotation, limit=3420) + f"\n\nפורסם: {_publication_time_he(row['published_at'])}"
         return enqueue_telegram(cur, f"market-news:{row['id']}:{version}", "market_news",
                                 message, published_at=row["published_at"])
     # Keep source facts and trader-oriented interpretation visibly separate.
@@ -1404,7 +1419,8 @@ def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_onl
         parts.insert(0, f"{row.get('original_publisher') or row['publisher']}\n{row['url']}")
         parts.append("CC BY 3.0 · כותרת בתרגום אוטומטי\nhttps://creativecommons.org/licenses/by/3.0/")
     from scanner_engine import enqueue_telegram
-    return enqueue_telegram(cur, f"market-news:{row['id']}:{version}", "market_news", "\n\n".join(parts), published_at=row['published_at'])
+    message = _notice_importance("\n\n".join(parts), row, report=report, analyst=compact_analyst)
+    return enqueue_telegram(cur, f"market-news:{row['id']}:{version}", "market_news", message, published_at=row['published_at'])
 
 
 def _company_for_ticker(cur, ticker: str) -> str:

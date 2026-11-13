@@ -263,7 +263,10 @@ def test_existing_medium_and_company_outputs_are_unchanged(monkeypatch):
         SimpleNamespace(_publication_time_he=lambda value: "SYNTHETIC_TIME"))
     from telegram_presentation import telegram_text
     medium = result(materiality="medium")
-    assert runtime.message(event(), medium, "market_news", []) == telegram_text(
+    rendered = runtime.message(event(), medium, "market_news", [])
+    lines = rendered.splitlines()
+    assert lines[1].lstrip('\u200f').startswith('חשיבות נמוכה')
+    assert "\n".join([lines[0], *lines[2:]]) == telegram_text(
         "📰 " + medium["title_he"] + "\n\n" + medium["summary_he"] + "\n\nמשמעות אפשרית לסוחר (AI): " + medium["interpretation_he"]) + "\n\nפורסם: SYNTHETIC_TIME"
     company = event()
     company.update(tickers=["FIX"], company_identity=[{"ticker": "FIX"}], event_type="earnings")
