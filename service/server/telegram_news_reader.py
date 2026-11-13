@@ -48,7 +48,8 @@ async def telegram_news_stream_loop():
                 raise ValueError('Reader login expired')
             allowed = {}
             for name in names:
-                from trump_truth_posts import CHANNEL, valid_entity
+                from trump_truth_posts import source_channel, valid_entity
+                CHANNEL=source_channel()
                 try:
                     entity = await client.get_entity(name)
                     if name == CHANNEL and not valid_entity(entity):
@@ -65,13 +66,28 @@ async def telegram_news_stream_loop():
 
             trump_ready = False
             async def on_message(event):
-                from trump_truth_posts import CHANNEL_ID
+                from trump_truth_posts import source_channel_id
+                CHANNEL_ID=source_channel_id()
+                from trump_telegram_channel import CHANNEL_ID as NEW_ID, CHANNEL as NEW_CHANNEL
+                peer=getattr(getattr(event.message,'peer_id',None),'channel_id',None)
+                group=getattr(event.message,'grouped_id',None)
+                # Revocation precedes readiness: a reconnect must not ignore an
+                # observed edit of an already queued album while catch-up starts.
+                if (peer==NEW_ID and allowed.get(peer)==NEW_CHANNEL and type(group) is int
+                    and 0<group<2**63 and isinstance(event,events.MessageEdited.Event)):
+                    from trump_telegram_album import invalidate_group
+                    await asyncio.to_thread(invalidate_group,event.message,datetime.now(timezone.utc))
                 if getattr(getattr(event.message, 'peer_id', None), 'channel_id', None) == CHANNEL_ID and not trump_ready:
                     return  # Catch-up owns the first persisted activation cursor.
+                if getattr(getattr(event.message,'peer_id',None),'channel_id',None)==NEW_ID:
+                    if getattr(event.message,'grouped_id',None) is not None:
+                        return  # Existing catch-up alone owns bounded album assembly.
+                    if getattr(event.message,'photo',None) or getattr(event.message,'document',None):
+                        return  # Do not spend capture budget twice via live+catch-up.
                 item = stream_item(event.message, allowed, datetime.now(timezone.utc))
                 if item:
                     try:
-                        if item.get('source_kind')=='trump_truth_relay_v1':
+                        if item.get('source_kind') in {'trump_truth_relay_v1','trump_telegram_channel_v1'}:
                             from trump_truth_media import capture
                             item=await capture(client,event.message,item,datetime.now(timezone.utc))
                         await asyncio.to_thread(ingest_items, [item])
@@ -90,7 +106,8 @@ async def telegram_news_stream_loop():
                 result = await asyncio.wait_for(collect(client,state,current,names),timeout=60)
                 cycle = await asyncio.to_thread(run_feed_cycle, {'telegram_channels':lambda *_: result}, current, True)
                 if isinstance(cycle, dict) and cycle.get('providers', {}).get('telegram_channels', {}).get('status') in {'ok', 'no_new', 'degraded'}:
-                    from trump_truth_posts import CHANNEL, activation, enabled
+                    from trump_truth_posts import source_channel, activation, enabled
+                    CHANNEL=source_channel()
                     checkpoint = result.get('checkpoint', {}).get('channels', {}).get(CHANNEL, {})
                     try:
                         trump_ready = enabled() and checkpoint.get('trump_activation') == activation()
@@ -113,10 +130,12 @@ async def telegram_news_stream_loop():
 def channel_names():
     names = list(dict.fromkeys(x.strip().lstrip('@').lower() for x in
                               os.getenv('TELEGRAM_NEWS_SOURCE_CHANNELS', '').split(',') if x.strip()))
-    from trump_truth_posts import CHANNEL, enabled
+    from trump_truth_posts import source_channel, enabled,CHANNEL as OLD
+    from trump_telegram_channel import CHANNEL as NEW
+    CHANNEL=source_channel()
     # At most five ordinary sources, plus this one fixed, separately approved
     # source. It is never accepted as a generic economically-filtered relay.
-    names = [name for name in names if name != CHANNEL]
+    names = [name for name in names if name not in {OLD,NEW}]
     if len(names) > 5 or any(not re.fullmatch(r'[a-z][a-z0-9_]{4,31}', x) for x in names):
         raise ValueError('Configure 1-5 public broadcast usernames')
     if enabled():
@@ -127,9 +146,10 @@ def channel_names():
 
 
 def message_item(message, username, current):
-    from trump_truth_posts import CHANNEL, CHANNEL_ID, extract
-    if username.lower() == CHANNEL or getattr(getattr(message, 'peer_id', None), 'channel_id', None) == CHANNEL_ID:
-        return extract(message, current)[0] if username.lower() == CHANNEL else None
+    from trump_truth_posts import source_channel,extract,CHANNEL as OLD,CHANNEL_ID as OLD_ID
+    from trump_telegram_channel import CHANNEL as NEW,CHANNEL_ID as NEW_ID
+    if username.lower() in {OLD,NEW} or getattr(getattr(message, 'peer_id', None), 'channel_id', None) in {OLD_ID,NEW_ID}:
+        return extract(message,current)[0] if username.lower()==source_channel() else None
     text = (getattr(message, 'message', None) or '').strip()
     published = getattr(message, 'date', None)
     if not text or not published or getattr(message, 'action', None):
@@ -156,7 +176,8 @@ async def collect(client, state, current, names):
             entity = await client.get_entity(name)
             if not getattr(entity, 'broadcast', False) or not getattr(entity, 'username', None):
                 raise ValueError('Not a public broadcast channel')
-            from trump_truth_posts import CHANNEL, enabled, activation, valid_entity, extract
+            from trump_truth_posts import source_channel, enabled, activation, valid_entity, extract
+            CHANNEL=source_channel()
             special = name == CHANNEL
             if special and (not enabled() or not valid_entity(entity)):
                 raise ValueError('Trump relay disabled or identity changed')
@@ -176,10 +197,30 @@ async def collect(client, state, current, names):
             last_id = cursor
             rejected = {}
             for message in messages:
-                last_id = max(last_id, int(message.id))
+                if special and message.id<=last_id:continue  # Album already assembled in this page.
+                if not special:last_id=max(last_id,int(message.id))
                 if not special and not cursor and message.date < current - timedelta(hours=1):
                     continue
                 if special:
+                    from database import get_db_connection
+                    from trump_truth_posts import PREFIX
+                    known=None
+                    if name=='real_donaldjtrump' and (getattr(message,'grouped_id',None) is not None or
+                        getattr(message,'photo',None) or getattr(message,'document',None)):
+                        with get_db_connection() as lookup:
+                            known=lookup.execute('SELECT id FROM scanner_telegram_outbox WHERE dedupe_key=?',
+                                (PREFIX+'tg:1462338131:'+str(message.id),)).fetchone()
+                    if known:
+                        last_id=max(last_id,int(message.id));continue
+                    from trump_telegram_channel import selected as channel_selected
+                    if channel_selected() and getattr(message,'grouped_id',None) is not None:
+                        from trump_telegram_album import collect_album
+                        item,reason,group_last=await collect_album(client,entity,message,current)
+                        if reason:
+                            rejected[reason]=rejected.get(reason,0)+1;errors.append(name+':'+reason)
+                            break  # Hold cursor BEFORE this incomplete group.
+                        output.append(item);last_id=group_last
+                        continue
                     item, reason = extract(message, current)
                     if reason:
                         rejected[reason] = rejected.get(reason, 0) + 1
@@ -189,9 +230,24 @@ async def collect(client, state, current, names):
                     item = message_item(message, name, current)
                 if item:
                     if special:
+                        # Durable per-member/standalone claims precede capture
+                        # so catch-up never reacquires an already queued file.
+                        from database import get_db_connection
+                        from trump_truth_posts import PREFIX
+                        known=None
+                        if item['has_media']:
+                            with get_db_connection() as lookup:
+                                known=lookup.execute('SELECT id FROM scanner_telegram_outbox WHERE dedupe_key=?',
+                                    (PREFIX+item['truth_post_id'],)).fetchone()
+                        if known:
+                            last_id=max(last_id,int(message.id));continue
                         from trump_truth_media import capture
                         item=await capture(client,message,item,current)
+                        if (channel_selected() and item['has_media'] and
+                            item.get('media',{}).get('status')!='available'):
+                            errors.append(name+':media_deferred');break
                     output.append(item)
+                last_id=max(last_id,int(message.id))
             checkpoints[name] = {'last_id':last_id, 'last_success_at':current.isoformat()}
             if special:
                 checkpoints[name].update(trump_activation=activation(), rejected=rejected,

@@ -1160,23 +1160,42 @@ def _telegram_message(signal: dict[str, Any], event: str = "NEW STRONG SIGNAL") 
     return "\n\n".join(blocks)[:4000]
 
 
-def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = None) -> str:
+def send_telegram(message: str, cfg: dict[str, Any], event_type: str | None = None, *, stock_direction: str | None = None, analyst_update: bool | None = None, company_report: bool | None = None) -> str:
     if not cfg.get("telegram_enabled"):
         return "disabled"
     token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN", "").strip(), os.getenv("TELEGRAM_CHAT_ID", "").strip()
     if not token or not chat_id:
         return "missing_credentials"
     try:
-        from telegram_topics import destination_fields, thread_id_for_event, with_news_community_link
+        from telegram_topics import SEC_ACTIVITY_EVENT_TYPES, destination_fields, thread_id_for_event, with_news_community_link
         from telegram_presentation import telegram_text
+        from news_report_routing import delivery_type
+        event_type = delivery_type(event_type, message, analyst_update=analyst_update,company_report=company_report)
+        if event_type == 'analyst_update' and thread_id_for_event(event_type) is None:
+            return json.dumps({'terminal': True, 'reason': 'analyst_topic_not_configured'})
+        if event_type in SEC_ACTIVITY_EVENT_TYPES and thread_id_for_event(event_type) is None:
+            return json.dumps({'terminal': True, 'reason': 'sec_activity_topic_not_configured'})
+        from news_direction_routing import enabled as directional_enabled
+        if (event_type == 'stock_news' and directional_enabled()
+                and thread_id_for_event(event_type, stock_direction=stock_direction) is None):
+            return json.dumps({'terminal': True, 'reason': 'stock_news_topic_not_configured'})
+        if event_type == 'company_report' and thread_id_for_event(event_type) is None:
+            return json.dumps({'terminal': True, 'reason': 'company_reports_topic_not_configured'})
         if event_type in {'sec_intelligence', 'trump_truth_post'} and thread_id_for_event(event_type) is None:
             return json.dumps({'terminal': True, 'reason': 'sec_topic_not_configured' if event_type == 'sec_intelligence' else 'trump_truth_news_topic_not_configured'})
         session = requests.Session()
         session.trust_env = False
         response = session.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                                data={**destination_fields(chat_id, event_type), "text": telegram_text(with_news_community_link(message, event_type)),
+                                data={**destination_fields(chat_id, event_type, stock_direction=stock_direction), "text": telegram_text(with_news_community_link(message, event_type)),
                                       "disable_web_page_preview": True}, timeout=15)
         response.raise_for_status()
+        if event_type in SEC_ACTIVITY_EVENT_TYPES:
+            receipt = response.json()
+            result = receipt.get('result', {}) if isinstance(receipt, dict) and receipt.get('ok') is True else {}
+            if (not isinstance(result, dict) or type(result.get('message_id')) is not int
+                    or result['message_id'] <= 0 or (result.get('chat') or {}).get('id') != int(chat_id)
+                    or result.get('message_thread_id') != thread_id_for_event(event_type)):
+                return json.dumps({'terminal': True, 'reason': 'sec_activity_delivery_unverified'})
         if event_type == 'trump_truth_post':
             receipt = response.json()
             if (not isinstance(receipt, dict) or receipt.get('ok') is not True

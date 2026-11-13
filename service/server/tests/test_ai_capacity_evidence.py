@@ -34,17 +34,18 @@ def native_error():
     return {'error': json.dumps({'error': detail})}
 
 
+def mock_native_http(monkeypatch, gateway_module, payload):
+    response = Mock(status=400)
+    response.read.return_value = json.dumps(payload).encode()
+    connection = Mock()
+    connection.getresponse.return_value = response
+    monkeypatch.setattr(gateway_module.http.client, 'HTTPConnection', lambda *a, **k: connection)
+    return connection
+
+
 def test_validated_native_counts_survive_gateway_without_raw_error(monkeypatch):
     g = gateway()
-    response = Mock(status_code=400)
-    response.iter_content.return_value = [json.dumps(native_error()).encode()]
-    response.__enter__ = Mock(return_value=response)
-    response.__exit__ = Mock(return_value=False)
-    session = Mock()
-    session.request.return_value = response
-    session.__enter__ = Mock(return_value=session)
-    session.__exit__ = Mock(return_value=False)
-    monkeypatch.setattr(g.requests, 'Session', lambda: session)
+    mock_native_http(monkeypatch, g, native_error())
     with pytest.raises(g.ContextCapacity) as caught:
         g.Inference().http('POST', '/api/chat', {}, timeout=1)
     assert getattr(caught.value, 'local_capacity', None) == NATIVE
@@ -102,14 +103,14 @@ def test_legacy_upper_bound_is_identified_as_units_not_measured_tokens(monkeypat
     dict(NATIVE, prompt_tokens=True), dict(NATIVE, prompt_tokens=8192), dict(NATIVE, prompt_tokens=-1),
     dict(NATIVE, prompt_tokens=10_000_001), dict(NATIVE, prompt_tokens=93917.0),
     dict(NATIVE, context_tokens=16384), dict(NATIVE, requested_output_tokens=0),
-    dict(NATIVE, requested_output_tokens=True), dict(NATIVE, requested_output_tokens=2049),
+    dict(NATIVE, requested_output_tokens=True), dict(NATIVE, requested_output_tokens=2401),
     dict(NATIVE, raw_prompt='PRIVATE_SENTINEL'), dict(NATIVE, source='unknown')])
 def test_capacity_schema_strict_and_identical_in_standalone_gateway(value):
     assert routing.safe_local_capacity(value) == gateway().safe_local_capacity(value) == {}
 
 
 @pytest.mark.parametrize('value', [NATIVE,
-    dict(NATIVE, requested_output_tokens=450),
+    dict(NATIVE, requested_output_tokens=450), dict(NATIVE, requested_output_tokens=2400),
     {'version': 1, 'source': 'native_capacity_unspecified', 'context_tokens': 8192},
     {'version': 1, 'source': 'legacy_guard_upper_bound', 'context_tokens': 8192, 'legacy_guard_units': 10000},
     {'version': 1, 'source': 'gateway_request_bytes', 'request_bytes': 131073, 'request_byte_limit': 131072}])
@@ -191,16 +192,9 @@ def test_real_mocked_gateway_handler_header_relay_and_final_consumer(fixture, mo
     g = gateway()
     engine = g.Inference()
     engine.loaded = True
+    engine.available = True
     engine.at = time.monotonic()
-    upstream = Mock(status_code=400)
-    upstream.iter_content.return_value = [json.dumps(native_error()).encode()]
-    upstream.__enter__ = Mock(return_value=upstream)
-    upstream.__exit__ = Mock(return_value=False)
-    session = Mock()
-    session.request.return_value = upstream
-    session.__enter__ = Mock(return_value=session)
-    session.__exit__ = Mock(return_value=False)
-    monkeypatch.setattr(g.requests, 'Session', lambda: session)
+    upstream = mock_native_http(monkeypatch, g, native_error())
     actual_http = engine.http
     engine.http = lambda method, path, payload=None, **kw: (
         {'models': [{'name': g.MODEL, 'digest': g.DIGEST}]} if path == '/api/tags'
@@ -236,7 +230,9 @@ def test_real_mocked_gateway_handler_header_relay_and_final_consumer(fixture, mo
 
     monkeypatch.setattr(routing, 'UnixHTTP', lambda *a, **k: Connection())
     monkeypatch.setattr(routing, 'relay', lambda method, path, payload=None, **kw:
-        engine.health() if path == '/health' else REAL_RELAY(method, path, payload, **kw))
+        {'protocol': 1, 'ready': True, 'model': g.MODEL, 'digest': g.DIGEST, 'capacity': 1,
+         'context_policy': g.CONTEXT_POLICY, 'context_length': g.CONTEXT}
+        if path == '/health' else REAL_RELAY(method, path, payload, **kw))
     paid.side_effect = None
     paid.return_value = cloud(DECISION)
     messages = [{'role': 'system', 'content': 'No missing facts.'},
@@ -252,8 +248,8 @@ def test_real_mocked_gateway_handler_header_relay_and_final_consumer(fixture, mo
     assert outputs[0][0] == b'{"reason": "local_context_capacity"}'  # old reader's exact JSON body
     assert len(outputs[0][1][g.CAPACITY_HEADER]) <= 512
     assert 'local_capacity' not in trace['attempts'][1]
-    assert messages == before == session.request.call_args.kwargs['json']['messages']
-    sent = session.request.call_args.kwargs['json']
+    sent = json.loads(upstream.request.call_args.args[2])
+    assert messages == before == sent['messages']
     assert sent['options'] == {'temperature': 0, 'num_ctx': 8192, 'num_predict': 450}
     assert sent['truncate'] is False and sent['shift'] is False
     assert paid.call_args.kwargs['json']['messages'] == before

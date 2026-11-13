@@ -13,7 +13,8 @@ MAX_LIMIT = 20
 SCAN_LIMIT = 61
 HISTORY_DAYS = 7
 MAX_RESPONSE_BYTES = 262144
-POST_ID = re.compile(r'[1-9][0-9]{15,19}', re.ASCII)
+POST_ID = re.compile(r'(?:[1-9][0-9]{15,19}|tg:1462338131:[1-9][0-9]{0,9})', re.ASCII)
+TELEGRAM_KIND = 'trump_telegram_channel_v1'
 
 
 def _json(raw, bound):
@@ -44,7 +45,12 @@ def historic_envelope(row, at):
             return None
         post = item['truth_post_id']
         if (type(post) is not str or not POST_ID.fullmatch(post)
-            or row['dedupe_key'] != t.PREFIX+post
+            or row['dedupe_key'] != t.PREFIX+post):
+            return None
+        if item.get('source_kind') == TELEGRAM_KIND:
+            if value['presentation'] != 'hebrew_v1' or not t.valid_item(item, at, active=False):
+                return None
+        elif (not re.fullmatch(r'[1-9][0-9]{15,19}', post, re.ASCII)
             or item['source_kind'] != t.KIND or item['provider'] != 'telegram_channels'
             or item['relay_channel'] != t.CHANNEL or type(item['relay_channel_id']) is not int
             or item['relay_channel_id'] != t.CHANNEL_ID
@@ -92,6 +98,21 @@ def publication_proven(row, envelope, conn=None, at=None):
         return False
 
 
+def _published_cache_allowed(row, envelope, raw):
+    """New channel publications are Hebrew-only; old archive semantics stay frozen."""
+    if envelope['item']['source_kind'] != TELEGRAM_KIND:
+        return True
+    import trump_truth_translation as h
+    from jsonschema.exceptions import ValidationError
+    try:
+        cache = h.checked_cache(row, envelope, _json(raw, 8192))
+        if h.source_text(envelope['item']):
+            return cache['status'] == 'translated'
+        return cache['status'] == 'media_only' and envelope['item']['has_media'] is True
+    except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError, ValidationError):
+        return False
+
+
 def _projection(row, envelope, cache, at, conn):
     import trump_truth_posts as t
     import trump_truth_translation as h
@@ -128,10 +149,12 @@ def _projection(row, envelope, cache, at, conn):
         pass
     except (ValueError, TypeError, KeyError, OSError):
         media = {'status':'unavailable','kind':None}
-    return dict(id='trump-truth:'+item['truth_post_id'], source_kind=t.KIND,
-        source_verification='relay_only', publication_policy=t.ORIGINAL_POLICY,
+    channel_url = (item['truth_url'] if item['source_kind'] == TELEGRAM_KIND else
+                   'https://t.me/'+item['relay_channel']+'/'+str(item['relay_message_id']))
+    return dict(id='trump-truth:'+item['truth_post_id'], source_kind=item['source_kind'],
+        source_verification=item['source_verification'], publication_policy=item['publication_policy'],
         truth_post_id=item['truth_post_id'], truth_url=item['truth_url'],
-        relay_url='https://t.me/'+t.CHANNEL+'/'+str(item['relay_message_id']),
+        relay_url=channel_url,
         source_excerpt=h.source_text(item), translation_status=status, text_he=text,
         relay_published_at=t.instant(item['relay_published_at']).isoformat(),
         observed_at=t.instant(item['observed_at']).isoformat(), original_published_at=None,
@@ -175,9 +198,14 @@ def report(conn, *, now=None, limit=MAX_LIMIT, before=None):
         key = row['dedupe_key']
         if type(key) is str and key.startswith(PREFIX) and POST_ID.fullmatch(key[len(PREFIX):]): last=key[len(PREFIX):]
         envelope = historic_envelope(row, at)
+        raw_cache = caches.get('trump_truth_hebrew_v1:'+str(row['id']))
         if (envelope is None or not original_policy_allows(envelope['item'])
-            or not publication_proven(row, envelope, conn=conn, at=at)): excluded += 1; continue
-        items.append(_projection(row, envelope, caches.get('trump_truth_hebrew_v1:'+str(row['id'])), at, conn))
+            or not publication_proven(row, envelope, conn=conn, at=at)
+            or not _published_cache_allowed(row, envelope, raw_cache)): excluded += 1; continue
+        projected = _projection(row, envelope, raw_cache, at, conn)
+        if envelope['item']['source_kind'] == TELEGRAM_KIND and projected['translation_status'] not in ('translated','media_only'):
+            excluded += 1; continue  # Never replace a whole Hebrew publication with an English fallback.
+        items.append(projected)
         if len(items) == limit:
             exhausted = index == len(rows)-1
             break
@@ -185,7 +213,10 @@ def report(conn, *, now=None, limit=MAX_LIMIT, before=None):
     result = dict(version=VERSION, generated_at=at.isoformat(), status='READY', items=items,
         next_cursor=last if more else None,
         coverage=dict(status='BOUNDED_RETAINED_ARCHIVE', history_days=HISTORY_DAYS,
-            publication_policy=ORIGINAL_POLICY, authorship='RELAY_CLAIM_NOT_PRIMARY_VERIFICATION',
+            publication_policy=(next(iter({item['publication_policy'] for item in items})) if len({item['publication_policy'] for item in items}) == 1 else
+                                'VERSIONED_SOURCE_POLICY' if items else ORIGINAL_POLICY),
+            publication_policies=[ORIGINAL_POLICY,'telegram_channel_original_v1'],
+            authorship='SOURCE_CHANNEL_NOT_PRIMARY_VERIFICATION' if any(item['source_kind'] == TELEGRAM_KIND for item in items) else 'RELAY_CLAIM_NOT_PRIMARY_VERIFICATION',
             scanned=min(len(bounded),len(items)+excluded), excluded=excluded, scan_limit=SCAN_LIMIT-1,
             history_is_not_live_dispatch=True, original_publication_time='NOT_VERIFIED',
             delivery='STORED_SENT_STATUS_NOT_PHONE_RECEIPT', missing_cache='NOT_RETAINED_NOT_RECONSTRUCTED'))

@@ -15,6 +15,7 @@ from html.parser import HTMLParser
 from xml.etree import ElementTree as ET
 
 from database import get_db_connection
+from sec_activity_topics import BENEFICIAL_FORMS
 from sec_transport import fetch
 
 POLICY = "sec-intelligence-v1"
@@ -301,7 +302,7 @@ def parse_8k_exhibit(raw: bytes) -> dict:
 def _source_url(cik: str, accession: str, document: str) -> str:
     if not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession):
         raise ValueError("invalid_accession")
-    if not re.fullmatch(r"(?:xsl[A-Za-z0-9]+/)?[A-Za-z0-9_.-]{1,180}", document):
+    if not re.fullmatch(r"(?:xsl[A-Za-z0-9_]+/)?[A-Za-z0-9_.-]{1,180}", document):
         raise ValueError("invalid_sec_document_name")
     return f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/{document}"
 
@@ -317,8 +318,8 @@ def _document_url(job: dict) -> str:
     expected = _source_url(job['issuer_cik'], job['accession'], document)
     if job['source_url'] != expected:
         raise ValueError('sec_source_metadata_mismatch')
-    if job['form'] in {'4', '4/A'} and re.fullmatch(
-            r'xsl[A-Za-z0-9]+/[A-Za-z0-9_.-]{1,180}\.xml', document):
+    if job['form'] in ({'4', '4/A'} | BENEFICIAL_FORMS) and re.fullmatch(
+            r'xsl[A-Za-z0-9_]+/[A-Za-z0-9_.-]{1,180}\.xml', document):
         return _source_url(job['issuer_cik'], job['accession'], document.split('/', 1)[1])
     return expected
 
@@ -414,9 +415,13 @@ def _queue_filing(row: dict, cik: str, symbols: list[str], snapshot_id: str,
                   seen: datetime, budget: list[int]) -> bool:
     accession = str(row.get("accessionNumber") or "")
     form = str(row.get("form") or "").upper()
-    if form not in FORMS or not symbols or not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession):
+    if form not in (FORMS | BENEFICIAL_FORMS) or not symbols or not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession):
         return False
     accepted = row.get("acceptanceDateTime")
+    if form in BENEFICIAL_FORMS:
+        from sec_activity_topics import destination
+        if destination('ownership_activity', accepted, seen) is None:
+            return False
     error = None
     try:
         accepted_at = _z(_time(accepted))
@@ -627,6 +632,11 @@ def discover_cycle(now: datetime | None = None, *, universe=None, mapping=None) 
 def _filing_evidence(job: dict, raw: bytes, at: datetime) -> tuple[dict, list[dict]]:
     form = job["form"]
     accession, cik = job["accession"], job["issuer_cik"]
+    if form in BENEFICIAL_FORMS:
+        from sec_activity_topics import parse_beneficial_ownership
+        return {"kind": "beneficial_ownership", "accession": accession, "issuer_cik": cik,
+                "source_url": job["source_url"], "document_sha256": hashlib.sha256(raw).hexdigest(),
+                "holdings": parse_beneficial_ownership(raw, form, cik)}, []
     if form in {"4", "4/A"}:
         actual_url = job["source_url"]
         try:
@@ -674,11 +684,14 @@ def _filing_evidence(job: dict, raw: bytes, at: datetime) -> tuple[dict, list[di
         facts = json.loads(facts_raw)
         if str(facts.get("cik", "")).zfill(10) != cik:
             raise ValueError("xbrl_issuer_mismatch")
+        from sec_activity_topics import reported_buyback
+        buyback = reported_buyback(facts, job)
         return {"kind": "financial", "accession": accession, "issuer_cik": cik,
                 "source_url": job["source_url"],
                 "document_sha256": hashlib.sha256(raw).hexdigest(),
                 "companyfacts_sha256": hashlib.sha256(facts_raw).hexdigest(),
-                "comparisons": companyfacts_comparisons(facts, accession, job["accepted_at"])}, []
+                "comparisons": companyfacts_comparisons(facts, accession, job["accepted_at"]),
+                **({"buyback_cash": buyback} if buyback else {})}, []
     if form in {"8-K", "8-K/A"}:
         excerpt = parse_8k_exhibit(raw)
         listing, _ = fetch(_source_url(cik, accession, "index.json"), _user_agent(), max_bytes=500_000)
@@ -709,6 +722,7 @@ def _update_snapshots(cik: str, tickers: list[str], universe_snapshot_id: str,
     filings = [dict(r) for r in conn.execute("""SELECT accession,form,accepted_at,processed_at,
             source_url,evidence_json FROM si_filing_jobs WHERE issuer_cik=? AND status='processed'
             AND superseded_by IS NULL AND accepted_at>=? AND processed_at<=?
+            AND form NOT IN ('SCHEDULE 13D','SCHEDULE 13D/A','SCHEDULE 13G','SCHEDULE 13G/A')
             ORDER BY accepted_at DESC LIMIT 300""", (cik, start, _z(at)))]
     transactions = [dict(r) for r in conn.execute("""SELECT event_id,accession,transaction_key,
             category,body_json FROM si_transactions WHERE issuer_cik=? AND effective_available_at<=?
@@ -988,23 +1002,27 @@ def _public_financial_text(job, evidence):
             if (balance and balance["end"] == cash_flow["end"] and
                     balance["previous"]["end"] == cash_flow["previous"]["end"] and len(selected) < 3):
                 selected.append(balance)
-    lines = []
+    blocks = []
     for fact in selected:
         previous, metric = fact["previous"], fact["metric"]
         unit = "%" if metric == "operating_margin" else " USD"
         current_value, prior_value = _public_number(fact["value"])+unit, _public_number(previous["value"])+unit
         if metric in _PUBLIC_BALANCES:
-            values = f"{current_value} ליום {fact['end']}, לעומת {prior_value} ליום {previous['end']}"
+            current_period = f"ליום {fact['end']}"
+            prior_period = f"בהשוואה ליום {previous['end']}"
         else:
-            values = (f"{current_value} בתקופה {fact['start']}–{fact['end']}, "
-                      f"לעומת {prior_value} בתקופה {previous['start']}–{previous['end']}")
+            current_period = f"תקופת הדיווח: {fact['start']} עד {fact['end']}"
+            prior_period = f"תקופת ההשוואה: {previous['start']} עד {previous['end']}"
         delta = fact["change_pp"] if metric == "operating_margin" else fact["change_pct"]
         change_unit = " נקודות אחוז" if metric == "operating_margin" else "%"
         direction = "עלייה" if delta > 0 else "ירידה"
-        lines.append(f"• {_PUBLIC_METRICS[metric]}: {values}; {direction} של {abs(delta):.1f}{change_unit}. "
-                     + _PUBLIC_MEANING[metric])
-    lines.append("אלו נתונים חשבונאיים לתקופות שצוינו; הם אינם מסבירים לבדם את הגורם לשינוי ואינם תחזית או המלצת מסחר.")
-    return "\n".join(lines)
+        blocks.append("\n".join((f"• {_PUBLIC_METRICS[metric]}",
+            f"נוכחי: {current_value}", current_period,
+            f"קודם: {prior_value}", prior_period,
+            f"שינוי: {direction} של כ־{abs(delta):.1f}{change_unit}",
+            _PUBLIC_MEANING[metric])))
+    blocks.append("אלו נתונים חשבונאיים לתקופות שצוינו; הם אינם מסבירים לבדם את הגורם לשינוי ואינם תחזית או המלצת מסחר.")
+    return "\n\n".join(blocks)
 
 
 def _material_public_fact(job: dict, evidence: dict, conn) -> str | None:
@@ -1036,11 +1054,64 @@ def _material_public_fact(job: dict, evidence: dict, conn) -> str | None:
         # It is an uncalibrated anti-noise control, not an edge claim.
         if value < 1_000_000 and len(owner_groups) < 2:
             return None
-        return ("דווחו עסקאות רכישה P/acquired במניות רגילות שאינן נגזרות. "
+        return ("בעלי עניין דיווחו על רכישת מניות רגילות. "
                 "אופי הביצוע אינו מאומת כעסקה בשוק הפתוח; אין בכך לבדו המלצת קנייה.")
     if evidence.get("kind") != "financial":
         return None
     return _public_financial_text(job, evidence)
+
+
+def _public_compact_usd(value) -> str:
+    """Presentation only; preserve signs and mark lossy scaling as approximate."""
+    from decimal import Decimal, ROUND_HALF_UP, localcontext
+    amount = Decimal(str(value))
+    if not amount.is_finite():
+        raise ValueError('public_nonfinite_amount')
+    if amount.is_zero(): amount = abs(amount)
+    units = ((Decimal('1000000000'), 'מיליארד דולר'),
+             (Decimal('1000000'), 'מיליון דולר'),
+             (Decimal('1000'), 'אלף דולר'), (Decimal('1'), 'דולר'))
+    index = next(i for i, (scale, _) in enumerate(units) if abs(amount) >= scale or scale == 1)
+    with localcontext() as context:
+        context.prec = max(32, len(amount.as_tuple().digits) + abs(amount.adjusted()) + 12)
+        scale, label = units[index]
+        shown = (amount / scale).quantize(Decimal('.01'), rounding=ROUND_HALF_UP) if scale > 1 else amount
+        if abs(shown) >= 1000 and 0 < index < 3:
+            scale, label = units[index-1]
+            shown = (amount / scale).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
+        approximate = shown * scale != amount
+        number = format(shown, 'f')
+        if '.' in number: number = number.rstrip('0').rstrip('.')
+    return ('כ־' if approximate else '') + number + ' ' + label
+
+
+def _company_report_text(text: str) -> str:
+    """Separated expectations/results with compact display of retained amounts.
+
+    Repeated identical period labels are shared above the metrics. Mixed periods
+    remain attached to each metric; fiscal quarter numbers are never guessed.
+    """
+    blocks = text.split('\n\n')
+    facts = [block.splitlines() for block in blocks if block.startswith('• ')]
+    periods = [tuple(line for line in lines if line.startswith(
+        ('תקופת הדיווח:', 'תקופת ההשוואה:', 'ליום ', 'בהשוואה ליום '))) for lines in facts]
+    shared = bool(periods and periods[0] and all(p == periods[0] for p in periods))
+    output = ['\n'.join(periods[0])] if shared else []
+    # This SEC comparison producer has no analyst-consensus input. Prior-year
+    # values are actual results, never estimates. Do not invent EPS or surprise.
+    output.append('🔮 ציפיות האנליסטים\nלא זמין — אין נתון צפי מאומת לדיווח זה.')
+    output.append('📋 התוצאות בפועל')
+    meanings = set(_PUBLIC_MEANING.values())
+    for lines in facts:
+        kept = [line for line in lines if line not in meanings and
+                not (shared and line in periods[0])]
+        compact = re.sub(r'([-+]?\d[\d,]*(?:\.\d+)?) USD',
+            lambda match: _public_compact_usd(match[1].replace(',', '')), '\n'.join(kept))
+        compact = compact.replace('נוכחי:', 'בפועל:').replace('קודם:', 'בתקופה המקבילה:')
+        output.append(compact)
+    output.append('מה זה אומר: זו השוואה לתקופה המקבילה בשנה הקודמת, לא לתחזיות האנליסטים. '
+                  'הנתונים לבדם אינם מסבירים את הגורם לשינוי או את תגובת המניה.')
+    return '\n\n'.join(output)
 
 
 def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn) -> bool:
@@ -1050,9 +1121,10 @@ def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn
     the same transaction as the processed filing and uses the existing outbox.
     """
     from telegram_topics import thread_id_for_event
+    event_type = 'company_report' if evidence.get('kind') == 'financial' else 'sec_intelligence'
     if (mode() != "paper" or killed() or
             os.getenv("STOCK_SCANNER_TELEGRAM_ENABLED", "false").lower() != "true" or
-            thread_id_for_event("sec_intelligence") is None):
+            thread_id_for_event(event_type) is None):
         return False
     boundary = os.getenv("SEC_INTELLIGENCE_PUBLIC_NOT_BEFORE", "").strip()
     if not boundary:
@@ -1067,6 +1139,8 @@ def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn
     fact = _material_public_fact(job, evidence, conn)
     if not fact:
         return False
+    if event_type == 'company_report':
+        fact = _company_report_text(fact)
     from zoneinfo import ZoneInfo
     from scanner_engine import enqueue_telegram
     tickers = json.loads(job["tickers_json"])
@@ -1080,11 +1154,15 @@ def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn
     company = str(members[tickers[0]]["company"])[:180]
     local_time = accepted.astimezone(ZoneInfo("Asia/Jerusalem")).strftime("%d/%m/%Y %H:%M")
     correction = " — תיקון לדיווח קודם" if job["form"].endswith("/A") else ""
-    message = (f"📑 דיווח SEC מהותי{correction}\n\n"
+    heading = '📊 תוצאות פעילות החברה' if event_type == 'company_report' else '📑 דיווח SEC מהותי'
+    message = (f"{heading}{correction}\n\n"
                f"חברה: {company}\nסימול: {', '.join(tickers[:3])}\n\n{fact}\n\n"
-               f"דווח: {local_time} (שעון ישראל)")
+               f"נקלט ב־SEC: {local_time} (שעון ישראל)")
     return enqueue_telegram(conn.cursor(), f"sec-intelligence:{job['accession']}",
-                            "sec_intelligence", message, published_at=job["accepted_at"])
+                            # Keep the durable event contract readable by the
+                            # existing recovery/rollback binary. Dispatch derives
+                            # the dedicated destination from retained evidence.
+                            'sec_intelligence', message, published_at=job["accepted_at"])
 
 
 def process_jobs(now: datetime | None = None, limit: int = 2) -> dict:
@@ -1153,9 +1231,15 @@ def process_jobs(now: datetime | None = None, limit: int = 2) -> dict:
                                 tx["category"] = "purchase"
                                 conn.execute("UPDATE si_transactions SET category=?,body_json=? WHERE event_id=?",
                                              ("purchase", _json(tx), tx["event_id"]))
-                _update_snapshots(job["issuer_cik"], json.loads(job["tickers_json"]),
-                                  job["universe_snapshot_id"], processed_at, conn)
-                _enqueue_material_public_alert(job, evidence, processed_at, conn)
+                from sec_activity_topics import destination, enqueue
+                if job['form'] not in BENEFICIAL_FORMS:
+                    _update_snapshots(job["issuer_cik"], json.loads(job["tickers_json"]),
+                                      job["universe_snapshot_id"], processed_at, conn)
+                enqueue(job, evidence, transactions, processed_at, conn)
+                ownership_routed = evidence.get('kind') == 'ownership' and job['form'] == '4' and destination(
+                    'ownership_activity', job['accepted_at'], processed_at) is not None
+                if not ownership_routed and job['form'] not in BENEFICIAL_FORMS:
+                    _enqueue_material_public_alert(job, evidence, processed_at, conn)
                 _advance_processing_cursor(conn, job['issuer_cik'], now)
                 conn.commit()
             processed += 1

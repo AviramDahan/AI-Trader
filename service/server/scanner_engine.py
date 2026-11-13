@@ -1184,112 +1184,116 @@ def process_bar(ticker: str, bar: dict[str, Any]) -> None:
                 or not 240 <= local.hour * 60 + local.minute < 1200):
             return
     conn = get_db_connection()
-    cur = conn.cursor()
-    begin_write_transaction(cur)
-    cur.execute("SELECT last_bar_at FROM scanner_price_cursors WHERE ticker=?", (ticker,))
-    cursor_row = cur.fetchone()
-    if cursor_row and bar_at <= parse_time(cursor_row["last_bar_at"]):
-        conn.rollback(); conn.close()
-        return
-    cur.execute("""SELECT o.*,s.ticker,s.company,s.action,s.valid_until AS signal_valid_until
-                   FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
-                   WHERE s.ticker=? AND o.status='pending' ORDER BY o.id""",
-                (ticker,))
-    orders = [dict(row) for row in cur.fetchall()]
-    # V2 cannot consume an incomplete candle, including after restart. Do not
-    # advance the shared ticker cursor past data that must be reconsidered.
-    from single_target_policy import is_single
-    if bar_at + timedelta(minutes=5) > parse_time(now_z()):
-        has_v2 = any(is_single(_loads(o.get('plan_json'), {}).get('target_plan')) or short_policy.is_short(_loads(o.get('plan_json'), {}).get('target_plan')) or 'entry_strategy_execution' in _loads(o.get('plan_json'), {}) for o in orders)
-        cur.execute("SELECT settings_json FROM scanner_trades WHERE ticker=? AND status='open'", (ticker,))
-        has_v2 = has_v2 or any(is_single(_loads(r['settings_json'], {}).get('target_plan')) or short_policy.is_short(_loads(r['settings_json'], {}).get('target_plan')) for r in cur.fetchall())
-        if has_v2:
-            conn.rollback(); conn.close()
+    try:
+        cur = conn.cursor()
+        begin_write_transaction(cur)
+        cur.execute("SELECT last_bar_at FROM scanner_price_cursors WHERE ticker=?", (ticker,))
+        cursor_row = cur.fetchone()
+        if cursor_row and bar_at <= parse_time(cursor_row["last_bar_at"]):
+            conn.rollback()
             return
-    entered_ids: set[int] = set()
-    for order in orders:
-        if extended:
-            # Extended hours enable protective/target exits only, not new
-            # entries or discretionary SELL-order fills.
-            continue
-        order_id = int(order["id"])
-        linked_closes = _linked_close_trades(cur, order) if order['purpose'] == 'close_long' else None
-        if linked_closes == []:
-            _invalidate_close_order(cur, order)
-            continue
-        # Yahoo labels candles by their opening time. The entire candle must
-        # follow order creation; a low reached before creation cannot fill it.
-        try:
-            from entry_window import eligible_from
-            from entry_strategy_execution import validate_order as validate_strategy_order
-            validate_strategy_order(order)
-            eligible = eligible_from(order)
-        except (ValueError, KeyError, TypeError):
-            cur.execute("UPDATE scanner_orders SET status='recovery_uncertain',updated_at=? WHERE id=?", (now_z(), order_id))
-            cur.execute("UPDATE scanner_signals SET status='RECOVERY_UNCERTAIN',updated_at=? WHERE id=?", (now_z(), order['signal_id']))
-            _enqueue_order_execution_update(cur,order_id)
-            continue
-        if bar_at < eligible:
-            continue
-        if parse_time(order["valid_until"]) < parse_time(bar["at"]):
-            cur.execute("UPDATE scanner_orders SET status='expired',updated_at=? WHERE id=?", (now_z(), order_id))
-            cur.execute("UPDATE scanner_signals SET status='EXPIRED',updated_at=? WHERE id=?", (now_z(), order["signal_id"]))
-            _enqueue_order_execution_update(cur,order_id)
-            continue
-        if bar_at + timedelta(minutes=5) > parse_time(order["valid_until"]):
-            # OHLC cannot locate a touch relative to an intrabar expiry.
-            # Do not assume the favourable part occurred before expiration.
-            continue
-        if order['purpose'] == 'entry':
-            from entry_emergency import allows_entry
-            if not allows_entry(cur, bar_at=bar_at, observed_at=now_z()):
-                # Keep expiry/cursors and all open-position/close-long processing
-                # alive. No levels, hold, contract or pending status is rewritten.
+        cur.execute("""SELECT o.*,s.ticker,s.company,s.action,s.valid_until AS signal_valid_until
+                       FROM scanner_orders o JOIN scanner_signals s ON s.id=o.signal_id
+                       WHERE s.ticker=? AND o.status='pending' ORDER BY o.id""",
+                    (ticker,))
+        orders = [dict(row) for row in cur.fetchall()]
+        # V2 cannot consume an incomplete candle, including after restart. Do not
+        # advance the shared ticker cursor past data that must be reconsidered.
+        from single_target_policy import is_single
+        if bar_at + timedelta(minutes=5) > parse_time(now_z()):
+            has_v2 = any(is_single(_loads(o.get('plan_json'), {}).get('target_plan')) or short_policy.is_short(_loads(o.get('plan_json'), {}).get('target_plan')) or 'entry_strategy_execution' in _loads(o.get('plan_json'), {}) for o in orders)
+            cur.execute("SELECT settings_json FROM scanner_trades WHERE ticker=? AND status='open'", (ticker,))
+            has_v2 = has_v2 or any(is_single(_loads(r['settings_json'], {}).get('target_plan')) or short_policy.is_short(_loads(r['settings_json'], {}).get('target_plan')) for r in cur.fetchall())
+            if has_v2:
+                conn.rollback()
+                return
+        entered_ids: set[int] = set()
+        for order in orders:
+            if extended:
+                # Extended hours enable protective/target exits only, not new
+                # entries or discretionary SELL-order fills.
                 continue
-        execution = _loads(order.get('plan_json'), {}).get('execution_settings') or lifecycle_settings()
-        slip = execution["slippage_bps"] / 10000
-        if order['purpose'] == 'entry' and order['side'] == 'sell' and bar['high'] >= float(order['limit_price']):
-            fill = max(float(order['limit_price']), bar['open'] * (1 - slip))
-            _create_trade_rows(cur, order, fill, bar['at'])
-            entered_ids.add(int(order['signal_id']))
-        elif order["purpose"] == "entry" and order['side'] == 'buy' and bar["low"] <= float(order["limit_price"]):
-            raw = min(bar["open"], float(order["limit_price"]))
-            fill = min(float(order["limit_price"]), raw * (1 + slip))
-            _create_trade_rows(cur, order, fill, bar["at"])
-            entered_ids.add(int(order["signal_id"]))
-        elif order["purpose"] == "close_long" and bar["high"] >= float(order["limit_price"]):
-            fill = max(float(order["limit_price"]), bar["open"] * (1 - slip))
-            quantity = float(linked_closes[0]['remaining_quantity'])
-            for trade in linked_closes:
-                _close_quantity(cur, trade, float(trade["remaining_quantity"]), fill, "sell", None, bar["at"], _loads(trade["settings_json"], lifecycle_settings()))
-            cur.execute("UPDATE scanner_orders SET status='filled',filled_quantity=?,average_fill_price=?,updated_at=? WHERE id=?",
-                        (quantity, fill, now_z(), order_id))
-            cur.execute("UPDATE scanner_signals SET status='CLOSED',actual_entry=?,updated_at=? WHERE id=?", (fill, now_z(), order["signal_id"]))
-    cur.execute("SELECT * FROM scanner_trades WHERE ticker=? AND status='open' ORDER BY id", (ticker,))
-    for row in cur.fetchall():
-        trade = dict(row)
-        if int(trade["signal_id"]) in entered_ids:
-            # Intrabar order is unknown: permit adverse stop touch, never a
-            # same-candle profit assumption after a limit entry.
-            short = trade.get('side') == 'short'
-            stop_touched = bar['high'] >= float(trade['current_stop']) if short else bar['low'] <= float(trade['current_stop'])
-            if stop_touched:
-                cfg = _loads(trade["settings_json"], lifecycle_settings())
-                _close_quantity(cur, trade, float(trade["remaining_quantity"]),
-                                float(trade["current_stop"]) * (1 + (1 if short else -1) * cfg["slippage_bps"] / 10000),
-                                "stop", None, bar["at"], cfg)
-        elif parse_time(bar["at"]) > parse_time(trade.get("last_bar_at")):
-            _process_trade_bar(cur, trade, bar)
-    store_quote(cur, ticker, float(bar["close"]), (bar_at+timedelta(minutes=5)).isoformat(), "Yahoo completed 5m")
-    cur.execute("SELECT ticker FROM scanner_price_cursors WHERE ticker=?", (ticker,))
-    if cur.fetchone():
-        cur.execute("UPDATE scanner_price_cursors SET last_bar_at=?,status='ok',last_attempt_at=?,last_success_at=?,error=NULL WHERE ticker=?",
-                    (bar["at"], now_z(), now_z(), ticker))
-    else:
-        cur.execute("INSERT INTO scanner_price_cursors(ticker,last_bar_at,status,last_attempt_at,last_success_at) VALUES(?,?,'ok',?,?)",
-                    (ticker, bar["at"], now_z(), now_z()))
-    conn.commit()
-    conn.close()
+            order_id = int(order["id"])
+            linked_closes = _linked_close_trades(cur, order) if order['purpose'] == 'close_long' else None
+            if linked_closes == []:
+                _invalidate_close_order(cur, order)
+                continue
+            # Yahoo labels candles by their opening time. The entire candle must
+            # follow order creation; a low reached before creation cannot fill it.
+            try:
+                from entry_window import eligible_from
+                from entry_strategy_execution import validate_order as validate_strategy_order
+                validate_strategy_order(order)
+                eligible = eligible_from(order)
+            except (ValueError, KeyError, TypeError):
+                cur.execute("UPDATE scanner_orders SET status='recovery_uncertain',updated_at=? WHERE id=?", (now_z(), order_id))
+                cur.execute("UPDATE scanner_signals SET status='RECOVERY_UNCERTAIN',updated_at=? WHERE id=?", (now_z(), order['signal_id']))
+                _enqueue_order_execution_update(cur,order_id)
+                continue
+            if bar_at < eligible:
+                continue
+            if parse_time(order["valid_until"]) < parse_time(bar["at"]):
+                cur.execute("UPDATE scanner_orders SET status='expired',updated_at=? WHERE id=?", (now_z(), order_id))
+                cur.execute("UPDATE scanner_signals SET status='EXPIRED',updated_at=? WHERE id=?", (now_z(), order["signal_id"]))
+                _enqueue_order_execution_update(cur,order_id)
+                continue
+            if bar_at + timedelta(minutes=5) > parse_time(order["valid_until"]):
+                # OHLC cannot locate a touch relative to an intrabar expiry.
+                # Do not assume the favourable part occurred before expiration.
+                continue
+            if order['purpose'] == 'entry':
+                from entry_emergency import allows_entry
+                if not allows_entry(cur, bar_at=bar_at, observed_at=now_z()):
+                    # Keep expiry/cursors and all open-position/close-long processing
+                    # alive. No levels, hold, contract or pending status is rewritten.
+                    continue
+            execution = _loads(order.get('plan_json'), {}).get('execution_settings') or lifecycle_settings()
+            slip = execution["slippage_bps"] / 10000
+            if order['purpose'] == 'entry' and order['side'] == 'sell' and bar['high'] >= float(order['limit_price']):
+                fill = max(float(order['limit_price']), bar['open'] * (1 - slip))
+                _create_trade_rows(cur, order, fill, bar['at'])
+                entered_ids.add(int(order['signal_id']))
+            elif order["purpose"] == "entry" and order['side'] == 'buy' and bar["low"] <= float(order["limit_price"]):
+                raw = min(bar["open"], float(order["limit_price"]))
+                fill = min(float(order["limit_price"]), raw * (1 + slip))
+                _create_trade_rows(cur, order, fill, bar["at"])
+                entered_ids.add(int(order["signal_id"]))
+            elif order["purpose"] == "close_long" and bar["high"] >= float(order["limit_price"]):
+                fill = max(float(order["limit_price"]), bar["open"] * (1 - slip))
+                quantity = float(linked_closes[0]['remaining_quantity'])
+                for trade in linked_closes:
+                    _close_quantity(cur, trade, float(trade["remaining_quantity"]), fill, "sell", None, bar["at"], _loads(trade["settings_json"], lifecycle_settings()))
+                cur.execute("UPDATE scanner_orders SET status='filled',filled_quantity=?,average_fill_price=?,updated_at=? WHERE id=?",
+                            (quantity, fill, now_z(), order_id))
+                cur.execute("UPDATE scanner_signals SET status='CLOSED',actual_entry=?,updated_at=? WHERE id=?", (fill, now_z(), order["signal_id"]))
+        cur.execute("SELECT * FROM scanner_trades WHERE ticker=? AND status='open' ORDER BY id", (ticker,))
+        for row in cur.fetchall():
+            trade = dict(row)
+            if int(trade["signal_id"]) in entered_ids:
+                # Intrabar order is unknown: permit adverse stop touch, never a
+                # same-candle profit assumption after a limit entry.
+                short = trade.get('side') == 'short'
+                stop_touched = bar['high'] >= float(trade['current_stop']) if short else bar['low'] <= float(trade['current_stop'])
+                if stop_touched:
+                    cfg = _loads(trade["settings_json"], lifecycle_settings())
+                    _close_quantity(cur, trade, float(trade["remaining_quantity"]),
+                                    float(trade["current_stop"]) * (1 + (1 if short else -1) * cfg["slippage_bps"] / 10000),
+                                    "stop", None, bar["at"], cfg)
+            elif parse_time(bar["at"]) > parse_time(trade.get("last_bar_at")):
+                _process_trade_bar(cur, trade, bar)
+        store_quote(cur, ticker, float(bar["close"]), (bar_at+timedelta(minutes=5)).isoformat(), "Yahoo completed 5m")
+        cur.execute("SELECT ticker FROM scanner_price_cursors WHERE ticker=?", (ticker,))
+        if cur.fetchone():
+            cur.execute("UPDATE scanner_price_cursors SET last_bar_at=?,status='ok',last_attempt_at=?,last_success_at=?,error=NULL WHERE ticker=?",
+                        (bar["at"], now_z(), now_z(), ticker))
+        else:
+            cur.execute("INSERT INTO scanner_price_cursors(ticker,last_bar_at,status,last_attempt_at,last_success_at) VALUES(?,?,'ok',?,?)",
+                        (ticker, bar["at"], now_z(), now_z()))
+        conn.commit()
+    finally:
+        # Also close on SQL/validation failures: PostgreSQL discards an
+        # uncommitted transaction and releases its transaction-scoped lock.
+        conn.close()
 
 
 def _pending_recovery_check(ticker, bars, observed_at):
@@ -1653,36 +1657,43 @@ def _claim_telegram_outbox(limit: int = 20, lease_seconds: int = 300) -> list[di
     # acceptance is UNKNOWN, never an excuse to send the same post again.
     cur.execute("""UPDATE scanner_telegram_outbox SET status='failed',
         last_error='trump_truth_delivery_unknown_manual_review'
-        WHERE status IN ('sending','trump_sending','trump_hebrew_sending','trump_media_sending','trump_bilingual_sending') AND next_attempt_at<=? AND event_type='trump_truth_post'""", (stamp,))
+        WHERE status IN ('sending','trump_sending','trump_hebrew_sending','trump_media_sending','trump_bilingual_sending','trump_album_sending') AND next_attempt_at<=? AND event_type='trump_truth_post'""", (stamp,))
     cur.execute("""UPDATE scanner_telegram_outbox
         SET status='retry',next_attempt_at=?,last_error='stale_dispatch_lease_recovered'
         WHERE status='sending' AND next_attempt_at<=?""", (stamp, stamp))
+    cur.execute("""UPDATE scanner_telegram_outbox SET status='failed',
+        last_error='sec_activity_delivery_unknown_manual_review'
+        WHERE status='sec_topic_sending' AND next_attempt_at<=?""", (stamp,))
     if using_postgres():
         cur.execute("""WITH due AS (
             SELECT id FROM scanner_telegram_outbox
-            WHERE (status IN ('pending','retry','community_pending','trump_pending','trump_retry') OR (event_type='trump_truth_post' AND status IN ('trump_hebrew_ready','trump_hebrew_retry','trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry'))) AND next_attempt_at<=?
+            WHERE (status IN ('pending','retry','community_pending','trump_pending','trump_retry','sec_topic_pending') OR (event_type='trump_truth_post' AND status IN ('trump_hebrew_ready','trump_hebrew_retry','trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry','trump_album_ready','trump_album_retry'))) AND next_attempt_at<=?
             ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED)
-            UPDATE scanner_telegram_outbox o SET status=CASE WHEN o.status IN ('trump_bilingual_ready','trump_bilingual_retry') THEN 'trump_bilingual_sending' WHEN o.status IN ('trump_media_ready','trump_media_retry') THEN 'trump_media_sending' WHEN o.status IN ('trump_hebrew_ready','trump_hebrew_retry') THEN 'trump_hebrew_sending' WHEN o.event_type='community_discussion' THEN 'community_sending' WHEN o.event_type='trump_truth_post' THEN 'trump_sending' ELSE 'sending' END,next_attempt_at=?,last_error=NULL
+            UPDATE scanner_telegram_outbox o SET status=CASE WHEN o.status='sec_topic_pending' THEN 'sec_topic_sending' WHEN o.status IN ('trump_album_ready','trump_album_retry') THEN 'trump_album_sending' WHEN o.status IN ('trump_bilingual_ready','trump_bilingual_retry') THEN 'trump_bilingual_sending' WHEN o.status IN ('trump_media_ready','trump_media_retry') THEN 'trump_media_sending' WHEN o.status IN ('trump_hebrew_ready','trump_hebrew_retry') THEN 'trump_hebrew_sending' WHEN o.event_type='community_discussion' THEN 'community_sending' WHEN o.event_type='trump_truth_post' THEN 'trump_sending' ELSE 'sending' END,next_attempt_at=?,last_error=NULL
             FROM due WHERE o.id=due.id RETURNING o.*""", (stamp, limit, lease_until))
         rows = [dict(row) for row in cur.fetchall()]
         conn.commit(); conn.close()
         return rows
     cur.execute("""SELECT * FROM scanner_telegram_outbox
-        WHERE (status IN ('pending','retry','community_pending','trump_pending','trump_retry') OR (event_type='trump_truth_post' AND status IN ('trump_hebrew_ready','trump_hebrew_retry','trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry'))) AND next_attempt_at<=?
+        WHERE (status IN ('pending','retry','community_pending','trump_pending','trump_retry','sec_topic_pending') OR (event_type='trump_truth_post' AND status IN ('trump_hebrew_ready','trump_hebrew_retry','trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry','trump_album_ready','trump_album_retry'))) AND next_attempt_at<=?
         ORDER BY id LIMIT ?""", (stamp, limit))
     rows = [dict(row) for row in cur.fetchall()]
     if rows:
         placeholders = ",".join("?" for _ in rows)
         cur.execute(f"""UPDATE scanner_telegram_outbox
-            SET status=CASE WHEN status IN ('trump_bilingual_ready','trump_bilingual_retry') THEN 'trump_bilingual_sending' WHEN status IN ('trump_media_ready','trump_media_retry') THEN 'trump_media_sending' WHEN status IN ('trump_hebrew_ready','trump_hebrew_retry') THEN 'trump_hebrew_sending' WHEN event_type='community_discussion' THEN 'community_sending' WHEN event_type='trump_truth_post' THEN 'trump_sending' ELSE 'sending' END,next_attempt_at=?,last_error=NULL
-            WHERE id IN ({placeholders}) AND status IN ('pending','retry','community_pending','trump_pending','trump_retry','trump_hebrew_ready','trump_hebrew_retry','trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry')""",
+            SET status=CASE WHEN status='sec_topic_pending' THEN 'sec_topic_sending' WHEN status IN ('trump_album_ready','trump_album_retry') THEN 'trump_album_sending' WHEN status IN ('trump_bilingual_ready','trump_bilingual_retry') THEN 'trump_bilingual_sending' WHEN status IN ('trump_media_ready','trump_media_retry') THEN 'trump_media_sending' WHEN status IN ('trump_hebrew_ready','trump_hebrew_retry') THEN 'trump_hebrew_sending' WHEN event_type='community_discussion' THEN 'community_sending' WHEN event_type='trump_truth_post' THEN 'trump_sending' ELSE 'sending' END,next_attempt_at=?,last_error=NULL
+            WHERE id IN ({placeholders}) AND status IN ('pending','retry','community_pending','trump_pending','trump_retry','trump_hebrew_ready','trump_hebrew_retry','trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry','trump_album_ready','trump_album_retry','sec_topic_pending')""",
                     (lease_until, *(row["id"] for row in rows)))
         # RETURNING on PostgreSQL already returns the durable claimed state.
         # Keep the new media contract identical on SQLite without changing the
         # historical caller-visible states for unrelated notification types.
         for row in rows:
-            if row['status'] in ('trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry'):
-                row['status'] = 'trump_bilingual_sending' if row['status'].startswith('trump_bilingual_') else 'trump_media_sending'
+            if row['status'] == 'sec_topic_pending':
+                row['status'] = 'sec_topic_sending'
+                row['next_attempt_at'] = lease_until
+            elif row['status'] in ('trump_media_ready','trump_media_retry','trump_bilingual_ready','trump_bilingual_retry','trump_album_ready','trump_album_retry'):
+                row['status'] = ('trump_album_sending' if row['status'].startswith('trump_album_') else
+                    'trump_bilingual_sending' if row['status'].startswith('trump_bilingual_') else 'trump_media_sending')
                 row['next_attempt_at'] = lease_until
     conn.commit(); conn.close()
     return rows
@@ -1693,11 +1704,36 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
     rows = _claim_telegram_outbox(limit)
     sent = failed = 0
     portfolio_changed = False
-    for row in rows:
+    for row in sorted(rows, key=lambda item: item['id']):
         cfg = settings()
+        if row['status'] == 'sec_topic_sending':
+            from sec_activity_topics import deliver
+            result = deliver(row, cfg, datetime.now(UTC), send_telegram)
+            delivered = result == 'sent'
+            with get_db_connection() as activity_conn:
+                activity_conn.execute("""UPDATE scanner_telegram_outbox
+                    SET status=?,attempts=attempts+1,sent_at=?,last_error=?
+                    WHERE id=? AND status='sec_topic_sending' AND next_attempt_at=?""",
+                    ('sent' if delivered else 'failed', now_z() if delivered else None,
+                     None if delivered else 'sec_activity_delivery_failed_or_unverified',
+                     row['id'], row['next_attempt_at']))
+                activity_conn.commit()
+            sent += int(delivered)
+            failed += int(not delivered)
+            continue
+        if row['event_type'] == 'sec_intelligence' and row['dedupe_key'].startswith('sec-intelligence:'):
+            # Old unsent financial notices retain their durable key/receipt but
+            # use the new destination. Never guess the category from body text.
+            with get_db_connection() as lookup:
+                filing = lookup.execute('SELECT evidence_json FROM si_filing_jobs WHERE accession=?',
+                    (row['dedupe_key'][len('sec-intelligence:'):],)).fetchone()
+            if filing and _loads(filing['evidence_json'], {}).get('kind') == 'financial':
+                row['event_type'] = 'company_report'
+                row['message'] = row['message'].replace('📑 דיווח SEC מהותי', '📊 תוצאות פעילות החברה', 1)
+        album_dispatch = row['event_type'] == 'trump_truth_post' and row.get('status') == 'trump_album_sending'
         media_dispatch = row['event_type'] == 'trump_truth_post' and row.get('status') == 'trump_media_sending'
         bilingual_dispatch = row['event_type'] == 'trump_truth_post' and row.get('status') == 'trump_bilingual_sending'
-        if row['event_type'] == 'trump_truth_post' and not (media_dispatch or bilingual_dispatch):
+        if row['event_type'] == 'trump_truth_post' and not (album_dispatch or media_dispatch or bilingual_dispatch):
             from trump_truth_posts import delivery_message as trump_delivery
             message = trump_delivery(row)
             if message is None:
@@ -1708,10 +1744,11 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             # Keep the durable provenance envelope unchanged for retry/audit;
             # render only this claimed in-memory row, never the stored JSON.
             row['message'] = message
-        if row['event_type'] == 'sec_intelligence':
+        if row['event_type'] == 'sec_intelligence' or (row['event_type'] == 'company_report' and
+                row['dedupe_key'].startswith('sec-intelligence:')):
             from sec_intelligence import killed, mode
             from telegram_topics import thread_id_for_event
-            if mode() != 'paper' or killed() or thread_id_for_event('sec_intelligence') is None:
+            if mode() != 'paper' or killed() or thread_id_for_event(row['event_type']) is None:
                 conn = get_db_connection()
                 conn.execute("""UPDATE scanner_telegram_outbox SET status='cancelled',
                     last_error='sec_publication_disabled' WHERE id=? AND status='sending'""", (row['id'],))
@@ -1725,7 +1762,7 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             enabled = enabled and bool(cfg.get("telegram_level_alerts"))
         if not enabled:
             conn = get_db_connection(); cur = conn.cursor()
-            cur.execute("UPDATE scanner_telegram_outbox SET status='disabled',last_error='disabled_by_configuration' WHERE id=? AND status IN ('sending','community_sending','trump_sending','trump_hebrew_sending','trump_media_sending','trump_bilingual_sending')", (row["id"],))
+            cur.execute("UPDATE scanner_telegram_outbox SET status='disabled',last_error='disabled_by_configuration' WHERE id=? AND status IN ('sending','community_sending','trump_sending','trump_hebrew_sending','trump_media_sending','trump_bilingual_sending','trump_album_sending')", (row["id"],))
             conn.commit(); conn.close()
             continue
         from news_events.control import active, NEWS_TYPES
@@ -1754,7 +1791,38 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             conn.execute("UPDATE scanner_telegram_outbox SET message=? WHERE id=? AND status='sending'",
                          (message, row['id']))
             conn.commit(); conn.close()
-        if bilingual_dispatch:
+        from news_report_routing import delivery_type, prior_report_delivery, report_for_outbox, results_only_enabled
+        report_hint=report_for_outbox(row)
+        if row['event_type'] in NEWS_TYPES and delivery_type(row['event_type'],row['message'],company_report=report_hint) == 'company_report':
+            with get_db_connection() as report_conn:
+                duplicate = prior_report_delivery(report_conn,row)
+                if duplicate:
+                    report_conn.execute("UPDATE scanner_telegram_outbox SET status='cancelled',last_error=? WHERE id=? AND status='sending'",
+                                        (duplicate,row['id']))
+                    report_conn.commit()
+                    continue
+        from news_public_importance import outbox_publication_check
+        allowed, publication_reason = outbox_publication_check(row)
+        if not allowed:
+            with get_db_connection() as importance_conn:
+                importance_conn.execute("UPDATE scanner_telegram_outbox SET status='cancelled',last_error=? WHERE id=? AND status='sending'",
+                                        (publication_reason,row['id']))
+                importance_conn.commit()
+            continue
+        from news_analyst_routing import enabled as analyst_enabled, analyst_for_outbox, prior_analyst_delivery, BROAD_TYPES
+        analyst_hint = analyst_for_outbox(row) if analyst_enabled() and row['event_type'] in BROAD_TYPES else False
+        if analyst_hint and delivery_type(row['event_type'],row['message'],analyst_update=analyst_hint,company_report=report_hint)=='analyst_update':
+            with get_db_connection() as analyst_conn:
+                duplicate=prior_analyst_delivery(analyst_conn,row)
+                if duplicate:
+                    analyst_conn.execute("UPDATE scanner_telegram_outbox SET status='cancelled',last_error=? WHERE id=? AND status='sending'",
+                                         (duplicate,row['id']))
+                    analyst_conn.commit()
+                    continue
+        if album_dispatch:
+            from trump_telegram_album_delivery import dispatch as dispatch_trump_album
+            result = dispatch_trump_album(row,cfg)
+        elif bilingual_dispatch:
             from trump_truth_bilingual import dispatch as dispatch_trump_bilingual
             result = dispatch_trump_bilingual(row, cfg)
         elif media_dispatch:
@@ -1770,10 +1838,22 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             from community_discussions import dispatch
             result = dispatch(row)
         else:
-            result = send_telegram(row["message"], cfg, row["event_type"])
+            from news_direction_routing import enabled as directional_enabled, direction_for_outbox
+            if results_only_enabled() and row['event_type'] in NEWS_TYPES:
+                result=send_telegram(row['message'],cfg,row['event_type'],company_report=report_hint,
+                    analyst_update=analyst_hint if analyst_enabled() else None,
+                    stock_direction=direction_for_outbox(row) if row['event_type']=='stock_news' and directional_enabled() else None)
+            elif analyst_enabled() and row['event_type'] in BROAD_TYPES:
+                result = send_telegram(row['message'], cfg, row['event_type'],analyst_update=analyst_hint,
+                                       stock_direction=direction_for_outbox(row) if row['event_type']=='stock_news' and directional_enabled() else None)
+            elif row['event_type'] == 'stock_news' and directional_enabled():
+                result = send_telegram(row['message'], cfg, row['event_type'],
+                                       stock_direction=direction_for_outbox(row))
+            else:
+                result = send_telegram(row["message"], cfg, row["event_type"])
         conn = get_db_connection(); cur = conn.cursor()
         if result == "sent":
-            cur.execute("UPDATE scanner_telegram_outbox SET status='sent',attempts=attempts+1,sent_at=?,last_error=NULL WHERE id=? AND status IN ('sending','community_sending','trump_sending','trump_hebrew_sending','trump_media_sending','trump_bilingual_sending')",
+            cur.execute("UPDATE scanner_telegram_outbox SET status='sent',attempts=attempts+1,sent_at=?,last_error=NULL WHERE id=? AND status IN ('sending','community_sending','trump_sending','trump_hebrew_sending','trump_media_sending','trump_bilingual_sending','trump_album_sending')",
                         (now_z(), row["id"])); sent += 1
             portfolio_changed = portfolio_changed or row["event_type"] in {"entry", "tp", "stop", "sell", "stop_change"}
             if row["event_type"] == "entry":
@@ -1783,7 +1863,7 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
                 if primary:
                     enqueue_telegram(cur, f"entry-chart:{primary['id']}", "entry_chart", _json({"trade_id": primary["id"]}))
         elif result == "missing_credentials":
-            cur.execute("UPDATE scanner_telegram_outbox SET status='disabled',attempts=attempts+1,last_error='missing_credentials' WHERE id=? AND status IN ('sending','community_sending','trump_sending','trump_hebrew_sending','trump_media_sending','trump_bilingual_sending')", (row["id"],))
+            cur.execute("UPDATE scanner_telegram_outbox SET status='disabled',attempts=attempts+1,last_error='missing_credentials' WHERE id=? AND status IN ('sending','community_sending','trump_sending','trump_hebrew_sending','trump_media_sending','trump_bilingual_sending','trump_album_sending')", (row["id"],))
         elif row["event_type"] == "entry_chart" and (int(row["attempts"]) >= 4 or result == "chart_unavailable"):
             cur.execute("UPDATE scanner_telegram_outbox SET status='failed',attempts=attempts+1,last_error='entry_chart_unavailable' WHERE id=? AND status='sending'", (row["id"],))
             failed += 1
@@ -1797,8 +1877,8 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             # row.message is already rendered in memory; retain policy from
             # the versioned claimed state instead of reparsing display text.
             hebrew = row.get('status') in ('trump_hebrew_ready','trump_hebrew_retry','trump_hebrew_sending')
-            retry_state = 'trump_bilingual_retry' if bilingual_dispatch else 'trump_media_retry' if media_dispatch else 'trump_hebrew_retry' if hebrew else 'trump_retry' if row['event_type'] == 'trump_truth_post' else 'retry'
-            cur.execute("UPDATE scanner_telegram_outbox SET status=?,attempts=?,next_attempt_at=?,last_error=? WHERE id=? AND status IN ('sending','community_sending','trump_sending','trump_hebrew_sending','trump_media_sending','trump_bilingual_sending')",
+            retry_state = 'trump_album_retry' if album_dispatch else 'trump_bilingual_retry' if bilingual_dispatch else 'trump_media_retry' if media_dispatch else 'trump_hebrew_retry' if hebrew else 'trump_retry' if row['event_type'] == 'trump_truth_post' else 'retry'
+            cur.execute("UPDATE scanner_telegram_outbox SET status=?,attempts=?,next_attempt_at=?,last_error=? WHERE id=? AND status IN ('sending','community_sending','trump_sending','trump_hebrew_sending','trump_media_sending','trump_bilingual_sending','trump_album_sending')",
                         ('failed' if terminal else retry_state,attempts, due, result, row["id"])); failed += 1
         conn.commit(); conn.close()
     _service("telegram", "error" if failed else "ok", f"sent={sent} retry={failed}", success=not failed)

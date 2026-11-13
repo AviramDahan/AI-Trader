@@ -1,7 +1,7 @@
-"""Public source presentation, never evidence, identity or publication eligibility.
+"""News source validation and Telegram presentation helpers.
 
-No URL is fetched here. Only retained source metadata may supply the canonical
-footer; an AI draft cannot nominate its own source.
+No URL is fetched here. Source metadata remains in the news event, while
+Telegram messages omit ordinary source links and retain required license text.
 """
 import ipaddress
 import re
@@ -75,11 +75,10 @@ def clean_draft(value):
 
 
 def append_source(body, sources, *, required_footer=''):
-    link = source_url(sources)
-    tails = ([required_footer] if required_footer else []) + (['מקור: ' + link] if link else [])
+    tails = [required_footer] if required_footer else []
     suffix = '\n\n' + '\n\n'.join(tails) if tails else ''
-    # Leave room for the existing community CTA (bounded to512 URL characters)
-    # and its Hebrew label; clipping never cuts the authoritative source URL.
+    # Leave room for the existing community CTA (bounded to 512 URL characters)
+    # and its Hebrew label; required license credits remain in the footer.
     from telegram_presentation import telegram_text, utf16_length
     budget = 3500 - utf16_length(telegram_text(suffix, limit=100_000))
     if budget < 1:

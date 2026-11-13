@@ -20,6 +20,7 @@ def test_pg_capacity_fallback_provenance_no_cooldown_or_duplicate_job(pg,monkeyp
     from test_ai_routing import cloud,DECISION
     from test_ollama_final_capacity import guarded_health
     monkeypatch.setenv('AI_TRADER_CLOUD','true');monkeypatch.setenv('AI_INFERENCE_MODE','ollama_first')
+    monkeypatch.setenv('AI_OPENROUTER_FALLBACK_ENABLED','true')
     monkeypatch.setenv('OPENROUTER_API_KEY','synthetic');monkeypatch.setenv('STOCK_SCANNER_FINAL_AI_PROVIDER','openrouter')
     monkeypatch.setenv('STOCK_SCANNER_FINAL_AI_MODEL','synthetic')
     monkeypatch.setattr(ai_routing,'_until',0)

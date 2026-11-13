@@ -77,7 +77,7 @@ def safe_json_diagnostic(value):
     return result
 
 
-def validation_detail(exc, body=None):
+def validation_detail(exc, body=None, *, schema=None):
     """Never serialize model content, validation instances, paths or error text."""
     import jsonschema
     reason='invalid_response_structure'
@@ -98,6 +98,17 @@ def validation_detail(exc, body=None):
     if isinstance(exc,jsonschema.ValidationError):
         allowed={'type','required','additionalProperties','enum','minimum','maximum','minLength','maxLength','pattern','items','anyOf','oneOf','allOf','const'}
         result['validator']=exc.validator if exc.validator in allowed else 'other'
+        # Static schema field names only, never an instance/value/free-form path.
+        path=list(exc.absolute_schema_path)
+        trusted={'relevance','confidence','news_relevance','news_sentiment'}
+        fields=[path[i+1] for i in range(len(path)-1) if path[i]=='properties'
+                and isinstance(path[i+1],str) and path[i+1] in trusted]
+        if fields:result['schema_field']='.'.join(fields)
+        import hashlib
+        contract=schema if isinstance(schema,(dict,bool)) else exc.schema
+        if isinstance(contract,(dict,bool)):
+            result['schema_sha256' if schema is not None else 'schema_fragment_sha256']=hashlib.sha256(json.dumps(contract,sort_keys=True,
+                ensure_ascii=True,allow_nan=False).encode()).hexdigest()
     return json.dumps(result)
 
 

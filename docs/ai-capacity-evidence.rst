@@ -44,7 +44,8 @@ The optional version-1 object has exact allowlisted keys:
   transport-size observation, not native context usage.
 
 Each shape also has ``version=1`` and its literal ``source``. An optional
-``requested_output_tokens`` is a true integer1..2048 from the actual request,
+``requested_output_tokens`` is a true integer from the actual request,
+bounded by the current protocol-2 ceiling of 2400.
 not output generated or a new limit. Diagnostic counters are true integers
 bounded at ten million; booleans, extra keys and inconsistent units are rejected.
 The HTTP header is at most512 printable ASCII characters. No prompt, response,

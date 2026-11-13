@@ -215,14 +215,14 @@ async def capture(client,message,item,at,*,session_path=None):
     references are serialized. Capture errors are fixed codes, never exceptions.
     """
     if not enabled() or 'media' not in item:return item
-    from trump_truth_posts import valid_item,CHANNEL_ID,extract
+    from trump_truth_posts import valid_item,source_channel_id,extract
     result=dict(item);d=dict(item['media']);result['media']=d
     candidate=asset_candidate(message)
     if not candidate or d['status']=='marker_only':return result
     literal,reason=extract(message,at)
     if (reason or not literal or any(item.get(k)!=v for k,v in literal.items() if k not in {'observed_at','media'})
         or not valid_item(item,at) or message.id!=item['relay_message_id']
-        or getattr(getattr(message,'peer_id',None),'channel_id',None)!=CHANNEL_ID
+        or getattr(getattr(message,'peer_id',None),'channel_id',None)!=source_channel_id()
         or _instant(message.date)!=_instant(item['relay_published_at'])
         or candidate['asset_identity']!=d['asset_identity']):
         d.update(status='unavailable',reason='unsupported');return result
@@ -262,7 +262,11 @@ def delivery_plan(text,item):
     full=telegram_text(text,limit=16384)
     if utf16_length(full)>4096:raise ValueError('media_text_bound')
     if utf16_length(full)<=1024:return {'caption':full,'text':None}
-    caption=telegram_text('📣 טראמפ · מדיה מצורפת מהדיווח בערוץ המעקב.\nאין תמלול או אימות תוכן.\n'+item['truth_url'],limit=16384)
+    from trump_telegram_channel import is_item
+    caption_text=('📣 עדכון המיוחס לטראמפ · מדיה מצורפת.\nתוכן ההודעה מופיע בנפרד; השיוך לחשבון רשמי לא אומת.'
+                  if is_item(item) else
+                  '📣 טראמפ · מדיה מצורפת מהדיווח בערוץ המעקב.\nאין תמלול או אימות תוכן.\n'+item['truth_url'])
+    caption=telegram_text(caption_text,limit=16384)
     if utf16_length(caption)>1024:raise ValueError('media_caption_bound')
     return {'caption':caption,'text':text}
 

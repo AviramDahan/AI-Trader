@@ -452,10 +452,12 @@ def review(row, analyzer):
         return error
     # A date/format change never starts a new analysis. Model/prompt/thesis and
     # routing context changes may require a fresh assessment, not fresh facts.
-    key = digest('|'.join((VERSION, str(row['id']), version, str(row.get('thesis') or ''),
+    from news_quality import public_translation_only
+    cache_version = VERSION + ':public-translation-v1' if public_translation_only(row) else VERSION
+    key = digest('|'.join((cache_version, str(row['id']), version, str(row.get('thesis') or ''),
                          str(row.get('scope') or ''), str(row.get('verified_tickers_json') or ''),
                          os.getenv('OPENROUTER_NEWS_MODEL', os.getenv('OPENROUTER_MODEL', '')))))
-    terminal_key = digest('|'.join((VERSION, 'terminal-quality', version,
+    terminal_key = digest('|'.join((cache_version, 'terminal-quality', version,
                          os.getenv('OPENROUTER_NEWS_MODEL', os.getenv('OPENROUTER_MODEL', '')))))
     with get_db_connection() as c:
         terminal = c.execute('SELECT terminal_error FROM news_review_cache WHERE cache_key=?', (terminal_key,)).fetchone()

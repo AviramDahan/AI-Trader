@@ -21,6 +21,8 @@ PROTOCOL = 1
 MAX_BYTES = 131072
 CONTEXT = 8192
 CONTEXT_POLICY = 'no_truncate_no_shift_v1'
+COMPLETION_POLICY = 'bounded_cold_start_v2'
+NEGOTIATED_REQUEST_SECONDS = 125
 CAPACITY_HEADER = 'X-AI-Local-Capacity'
 LOCAL_TRANSPORT_REASONS = frozenset({
     'relay_http_error', 'relay_response_too_large', 'relay_invalid_json',
@@ -32,6 +34,17 @@ _until = 0.0
 
 class LocalCapacity(requests.ConnectionError):
     """Capacity rejection: fail over without poisoning healthy smaller jobs."""
+
+
+class LocalUnavailable(requests.ConnectionError):
+    """Local inference is required while paid failover is disabled."""
+    def __init__(self, message, *, reason=None):
+        super().__init__(message)
+        self.local_failure_reason=reason if reason in {'local_transport_failed','local_context_capacity'} else None
+
+
+def openrouter_fallback_enabled():
+    return os.getenv('AI_OPENROUTER_FALLBACK_ENABLED', 'false').strip().lower() == 'true'
 
 
 def safe_local_capacity(value):
@@ -68,7 +81,7 @@ def safe_local_capacity(value):
             return {}
     if 'requested_output_tokens' in value:
         predict = value['requested_output_tokens']
-        if type(predict) is not int or not 1 <= predict <= 2048:
+        if type(predict) is not int or not 1 <= predict <= 2400:
             return {}
     return dict(value)
 
@@ -215,6 +228,8 @@ def failed():
 def check_available():
     """Pre-job spend check. Every paid HTTP attempt still checks the hard cap."""
     if not ready():
+        if enabled() and not openrouter_fallback_enabled():
+            raise LocalUnavailable('ollama_unavailable_openrouter_fallback_disabled')
         from ai_budget import check
         check()
 
@@ -227,7 +242,11 @@ class Route:
         # must not depend on an unrelated process-wide outage cooldown.
         stage = (CURRENT.get() or {}).get('stage', '')
         canonical_fallback = isinstance(stage, str) and stage.startswith('local_fallback:')
-        self.provider = 'ollama_relay' if requested and not canonical_fallback and ready() else provider
+        canonical_fallback = canonical_fallback and openrouter_fallback_enabled()
+        local_ready = requested and not canonical_fallback and ready()
+        if requested and not local_ready and provider == 'openrouter' and not openrouter_fallback_enabled():
+            raise LocalUnavailable('ollama_unavailable_openrouter_fallback_disabled')
+        self.provider = 'ollama_relay' if local_ready else provider
         self.model = MODEL if self.provider == 'ollama_relay' else model
         self.cloud_provider, self.cloud_model = provider, model
         self.fallback_reason = ('canonical_local_fallback' if requested and canonical_fallback else
@@ -235,6 +254,12 @@ class Route:
 
     def fallback(self, reason):
         if self.provider == 'ollama_relay':
+            if self.cloud_provider == 'openrouter' and not openrouter_fallback_enabled():
+                if reason == 'local_schema_failed':
+                    return  # Existing bounded repair may still use Ollama.
+                if reason != 'local_context_capacity':
+                    failed()
+                raise LocalUnavailable('ollama_failed_openrouter_fallback_disabled',reason=reason)
             if reason != 'local_context_capacity':
                 failed()
             self.provider, self.model = self.cloud_provider, self.cloud_model
@@ -247,10 +272,23 @@ class Route:
 
 
 def local_completion(messages, schema, predict, *, validate_response=True):
-    deadline = time.monotonic() + 50
+    started = time.monotonic()
     # Rolling update: the old gateway remains safe for its conservative bound,
     # but must NEVER receive an oversized request on the new token-aware path.
     state = relay('GET', '/health')
+    negotiated = (isinstance(state, dict)
+        and type(state.get('protocol')) is int and state['protocol'] == PROTOCOL
+        and state.get('model') == MODEL and state.get('digest') == DIGEST
+        and type(state.get('capacity')) is int and state['capacity'] == 1
+        and state.get('context_policy') == CONTEXT_POLICY
+        and type(state.get('context_length')) is int and state['context_length'] == CONTEXT
+        and state.get('completion_policy') == COMPLETION_POLICY
+        and state.get('supported_completion_protocols') == [1, 2]
+        and all(type(x) is int for x in state['supported_completion_protocols'])
+        and type(state.get('completion_timeout_seconds')) is int
+        and state['completion_timeout_seconds'] == 120)
+    protocol = 2 if negotiated else PROTOCOL
+    deadline = started + (NEGOTIATED_REQUEST_SECONDS if negotiated else 50)
     guarded = (isinstance(state, dict) and state.get('context_policy') == CONTEXT_POLICY
                and type(state.get('context_length')) is int and state['context_length'] == CONTEXT)
     if not guarded:
@@ -260,9 +298,12 @@ def local_completion(messages, schema, predict, *, validate_response=True):
             error.local_capacity = safe_local_capacity(dict(version=1, source='legacy_guard_upper_bound',
                 context_tokens=CONTEXT, legacy_guard_units=legacy_units, requested_output_tokens=predict))
             raise error
+    remaining = deadline-time.monotonic()
+    if remaining <= 0:
+        raise requests.Timeout('local_deadline_exceeded')
     try:
-        body = relay('POST', '/completion', dict(protocol=PROTOCOL, model=MODEL, digest=DIGEST,
-            messages=messages, schema=schema, predict=predict, request_id=uuid.uuid4().hex), timeout=50)
+        body = relay('POST', '/completion', dict(protocol=protocol, model=MODEL, digest=DIGEST,
+            messages=messages, schema=schema, predict=predict, request_id=uuid.uuid4().hex), timeout=remaining)
     except LocalCapacity as exc:
         evidence = safe_local_capacity(getattr(exc, 'local_capacity', None))
         if evidence:
@@ -270,6 +311,13 @@ def local_completion(messages, schema, predict, *, validate_response=True):
             exc.local_capacity = safe_local_capacity(evidence)
         raise
     if time.monotonic() > deadline:
+        raise requests.Timeout('local_deadline_exceeded')
+    if negotiated and (not isinstance(body, dict)
+            or type(body.get('gateway_protocol')) is not int or body['gateway_protocol'] != 2
+            or type(body.get('gateway_request_budget_seconds')) is not int
+            or body['gateway_request_budget_seconds'] not in (45, 120)):
+        raise ValueError('invalid_response_structure')
+    if negotiated and time.monotonic()-started > body['gateway_request_budget_seconds']+5:
         raise requests.Timeout('local_deadline_exceeded')
     if isinstance(body, dict) and body.get('done_reason') == 'length':
         error = ValueError('ai_output_truncated')

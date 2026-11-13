@@ -4,6 +4,7 @@ import pytest
 
 from test_news_events import env, NOW, RESULT, source
 from news_events.engine import route, Policy, Analysis
+from dataclasses import replace
 
 
 def bulletin(**kw):
@@ -18,6 +19,42 @@ def test_market_publication_requires_impact_not_only_topicality():
     assert route(event, {**RESULT,'materiality':'medium'},set(),set(),{},Policy())[0] == [('market_news',[])]
     assert route(event, {**RESULT,'related':False},set(),set(),{},Policy()) == ([], 'irrelevant')
     assert route(event, {**RESULT,'relevance':.29},set(),set(),{},Policy()) == ([], 'below_market_threshold')
+
+
+@pytest.mark.parametrize('relevance,allowed',[(.899,False),(.90,True),(1.0,True)])
+def test_supplemental_market_updates_require_high_relevance(relevance,allowed):
+    policy=Policy(market_low_materiality_relevance=.90)
+    event={'tickers':[], 'event_type':'market'}
+    result={**RESULT,'materiality':'low','relevance':relevance}
+    assert bool(route(event,result,set(),set(),{},policy)[0]) is allowed
+    assert route(event,{**result,'related':False},set(),set(),{},policy)==([], 'irrelevant')
+    # Personal and company alerts retain their materiality gate.
+    company={'tickers':['AAPL'],'event_type':'earnings'}
+    assert route(company,result,{'AAPL'},set(),{'AAPL':{}},policy)==([], 'low_importance')
+
+
+def test_supplemental_market_reuses_quality_freshness_and_duplicate_pipeline(env):
+    p,s,_=env
+    p.policy=replace(p.policy,market_low_materiality_relevance=.90)
+    item=bulletin()
+    eid=p.ingest(item,NOW)
+    assert p.analyze(eid,lambda e:Analysis({**RESULT,'materiality':'low','relevance':.90}),NOW)=='done'
+    assert p.queue(eid,NOW)==[('market_news',[])]
+    assert p.deliver_preview(eid,NOW)[0]['topic']=='market_news'
+    assert p.deliver_preview(eid,NOW)==[]
+    old=p.ingest(bulletin(source_id='old',title='New Zealand CPI (Q/Q) Q2: 0.6%',
+                         published_at=(NOW-timedelta(days=8)).isoformat()),NOW)
+    assert s.event(old)['reason'] in {'backlog_blocked','stale_or_future'}
+    assert p.queue(old,NOW)==[]
+    assert s.event(eid)['body']['tickers']==[]
+
+
+def test_effective_policy_explicit_supplemental_threshold():
+    from news_events.bridge import effective_policy
+    policy=effective_policy({'alert_min_relevance':.55,'broad_alert_min_relevance':.70},.30,6,6,168,
+                            market_low_materiality_relevance=.90)
+    assert policy.market_low_materiality_relevance==.90
+    assert policy.personal_relevance==.55 and policy.stock_relevance==.70
 
 
 def test_same_release_annual_addition_retained_as_new_material_version(env):

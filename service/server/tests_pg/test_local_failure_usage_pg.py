@@ -76,7 +76,7 @@ def test_failed_native_usage_survives_persistence_and_restart_without_publicatio
     def relay(method, path, payload=None, **kwargs):
         if method == 'GET' and path == '/health':
             return dict(context_policy=ai_routing.CONTEXT_POLICY, context_length=8192)
-        assert method == 'POST' and path == '/completion' and kwargs['timeout'] == 50
+        assert method == 'POST' and path == '/completion' and 0 < kwargs['timeout'] <= 50
         assert payload['predict'] == 1000
         generated.append(payload)
         value = next(iterator)

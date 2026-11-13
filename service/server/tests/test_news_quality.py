@@ -44,6 +44,7 @@ def test_source_translation_cannot_see_thesis_or_previous_generated_text():
     for call in model.call_args_list[:2]:
         assert 'MACD' not in json.dumps(call.args[1])
         assert 'invented previous' not in json.dumps(call.args[1])
+    assert quality.TRADER_NEWS_CONTEXT in model.call_args_list[0].args[0]
     assert model.call_args_list[-1].args[1]['historical_thesis']==value['thesis']
 
 
@@ -62,6 +63,7 @@ def test_fast_market_uses_one_call_and_no_thesis(monkeypatch):
     assert 'MACD' not in json.dumps(model.call_args.args)
     assert model.call_args.args[1]['scope']=='market'
     assert 'related=true' in model.call_args.args[0]
+    assert quality.TRADER_NEWS_CONTEXT in model.call_args.args[0]
 
 
 @pytest.mark.parametrize('material_new_fact,expected',[(False,3),(True,0)])

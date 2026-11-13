@@ -47,7 +47,11 @@ def pipeline():
     cfg=feed_settings()
     policy=effective_policy(cfg,_float_env('STOCK_SCANNER_GENERAL_NEWS_MIN_RELEVANCE',.3,.3,1),
         _int_env('STOCK_SCANNER_GENERAL_NEWS_MAX_AGE_HOURS',6,1,24),
-        cfg['scan_bridge_max_age'],_int_env('STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS',168,24,720))
+        cfg['scan_bridge_max_age'],_int_env('STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS',168,24,720),
+        market_low_materiality_relevance=(
+            _float_env('STOCK_SCANNER_GENERAL_NEWS_LOW_MATERIALITY_MIN_RELEVANCE',.90,.80,1)
+            if os.getenv('STOCK_SCANNER_GENERAL_NEWS_LOW_MATERIALITY_ENABLED','true').lower()=='true'
+            else None))
     control=state()
     if control['mode']!='canonical' or not control['not_before']:raise RuntimeError('canonical_not_activated')
     return Pipeline(Store(connect,production=True),universe,membership,not_before=control['not_before'],policy=policy)
@@ -117,7 +121,7 @@ def project(p,eid,at):
             materiality=?,relevance=?,analysis_status=?,analysis_error=?,analyzed_at=?,alternate_sources_json=?,
             source_facts_json=?,content_hash=?,updated_at=? WHERE id=?''',
             (tickers[0] if tickers else None,json.dumps(tickers),category,scope,event['title'],r.get('title_he'),r.get('summary_he'),r.get('interpretation_he'),r.get('sentiment'),
-             r.get('materiality'),r.get('relevance'),'analyzed' if analysis else 'canonical_'+record['status'],record['reason'],
+             r.get('materiality'),r.get('relevance'),('public_translated' if r.get('_public_translation_only') is True else 'analyzed') if analysis else 'canonical_'+record['status'],record['reason'],
              stamp if analysis else None,json.dumps(event['provenance']),facts,record['evidence_version'],stamp,nid))
         # This is a CURRENT news projection, not the immutable canonical audit.
         # A corrected observation cannot retain an obsolete position link.
@@ -136,13 +140,17 @@ def project(p,eid,at):
 
 def completion(stage,system,payload,schema):
     from ai_provider import json_completion
+    from news_call_context import checkpoint_article, call as checkpointed_call
     from .call_context import CURRENT
     usage={'final_alert_owner':True}
     context=payload.get('source',payload)
     token=CURRENT.set(dict(event_id=context['canonical_event_id'],version=context['evidence_version'],stage=stage,final_alert_owner=True))
     try:
-        value=json_completion(system,payload,schema=schema,task='news',max_attempts=1,news_json_wrapping=True,structured_news=True,
-            usage_sink=usage,repair=stage in {'editorial_repair','repair_review'} or stage.startswith(('schema_repair:','local_fallback:')))
+        with checkpoint_article(context['canonical_event_id'],context['evidence_version'],
+                                json.dumps(context,sort_keys=True,ensure_ascii=True)):
+            value=checkpointed_call(stage,json_completion,system,payload,schema=schema,task='news',max_attempts=1,news_json_wrapping=True,structured_news=True,
+                usage_task='translation' if stage.rsplit(':',1)[-1] in {'public_translation','public_translation_review'} else None,
+                usage_sink=usage,repair=stage in {'editorial_repair','repair_review'} or stage.startswith(('schema_repair:','local_fallback:')))
     except Exception as exc:
         exc.canonical_usage=usage
         raise
@@ -176,7 +184,10 @@ def analyze_jobs(at=None):
         p.enrich(eid,[SECEvidence(os.getenv('NEWS_SEC_USER_AGENT',''))],current)
     check() # Do not claim/bill a job if the global budget/cooldown is blocked.
     from news_structured_envelope import output_instruction
-    outcome=p.analyze(eid,CanonicalAnalyzer(completion,contract=lambda schema: ' '+output_instruction()),current)
+    from .publication_review import candidates
+    previous=candidates(p.store,p.store.event(eid)['body'],current)
+    outcome=p.analyze(eid,CanonicalAnalyzer(completion,contract=lambda schema: ' '+output_instruction(),
+                                          previous_publications=previous),current)
     project(p,eid,current)
     alerts=queue_outbox(p,eid,current) if outcome=='done' else 0
     good=outcome=='done'
@@ -189,10 +200,22 @@ def message(event,result,topic,tickers):
     from news_pipeline import _publication_time_he
     from news_presentation import hide_relay_branding
     from news_source_links import clean_draft, append_source, safe_source_url
-    parts=['📰 '+hide_relay_branding(clean_draft(result['title_he']))]
+    from news_report_routing import report_for_presentation, REPORT_PREFIX
+    report=report_for_presentation(event,result)
+    from news_analyst_routing import enabled as analyst_enabled, analyst_event
+    compact_analyst = (not report and topic in ('market_news','important_stock_news')
+                      and analyst_enabled() and analyst_event(event))
+    parts=[(REPORT_PREFIX if report else '📰 ')+hide_relay_branding(clean_draft(result['title_he']))]
     if tickers:parts.append('מניות: '+', '.join(tickers))
     parts.append(hide_relay_branding(clean_draft(result['summary_he'])))
-    if topic!='market_news':parts.append('פרשנות AI: '+hide_relay_branding(clean_draft(result['interpretation_he'])))
+    if compact_analyst:
+        from news_analyst_presentation import compact_parts
+        parts = compact_parts(hide_relay_branding(clean_draft(result['title_he'])),
+                              hide_relay_branding(clean_draft(result['summary_he'])), ', '.join(tickers))
+    interpretation = hide_relay_branding(clean_draft(result.get('interpretation_he') or ''))
+    if topic == 'market_news' and os.getenv('STOCK_SCANNER_PUBLIC_TRANSLATION_ONLY_ENABLED','false').lower() == 'true':
+        interpretation = ''
+    if interpretation and not compact_analyst:parts.append('משמעות אפשרית לסוחר (AI): '+interpretation)
     # Ingestion provenance stays in storage. Retain required licensed credits.
     credits=[clean_draft(s['publisher']) for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')]
     footer=[]
@@ -204,11 +227,21 @@ def message(event,result,topic,tickers):
     return append_source('\n\n'.join(parts),event['sources'],required_footer='\n\n'.join(footer))
 
 
-def general_publication_keys(event, version, topic):
+def general_publication_keys(event, version, topic, result=None):
     from telegram_topics import thread_id_for_event
     from .general_news import publication_keys
     kind={'market_news':'market_news','portfolio_watchlist':'position_news','important_stock_news':'stock_news'}[topic]
-    destination=[os.getenv('TELEGRAM_CHAT_ID','').strip(),thread_id_for_event(kind)]
+    from news_direction_routing import enabled, direction_for_result
+    direction=direction_for_result(event,result) if enabled() and kind=='stock_news' else None
+    from news_analyst_routing import enabled as analyst_enabled, analyst_event
+    if result:
+        from news_report_routing import delivery_type, report_for_presentation, results_only_enabled
+        report=report_for_presentation(event,result)
+        kind=delivery_type(kind,(result.get('title_he') or '')+'\n'+(result.get('summary_he') or ''),
+                           analyst_update=analyst_event(event),company_report=report if results_only_enabled() else None)
+        if report:
+            kind='company_report'  # Same original-source report header as message().
+    destination=[os.getenv('TELEGRAM_CHAT_ID','').strip(),thread_id_for_event(kind,stock_direction=direction)]
     return publication_keys(event,version,destination)
 
 
@@ -230,7 +263,7 @@ def queue_outbox(p,eid,at):
                 c.execute("UPDATE ne_delivery SET status='legacy_receipt' WHERE event_id=? AND version=? AND topic=?",(eid,version,topic));continue
             key='canonical:'+eid+':'+version+':'+topic
             kind={'market_news':'market_news','portfolio_watchlist':'position_news','important_stock_news':'stock_news'}[topic]
-            keys=general_publication_keys(event,version,topic)
+            keys=general_publication_keys(event,version,topic,result)
             if keys:
                 # Unique durable outbox keys, serialized by Store's existing
                 # write transaction. Never retry an unknown/failed prior send
@@ -260,7 +293,7 @@ def delivery_message(outbox):
         if not result:return None
         result=json.loads(result['result_json']);held,watched=membership(c)
         if (outbox['dedupe_key'].startswith('canonical:general-v1:')
-                and outbox['dedupe_key'] not in general_publication_keys(event,link['version'],link['topic'])):
+                and outbox['dedupe_key'] not in general_publication_keys(event,link['version'],link['topic'],result)):
             return None  # Evidence/source/destination changed since preparation.
         routes,reason=route(event,result,held,watched,p.universe,p.policy)
         matching=[tickers for topic,tickers in routes if topic==link['topic']]

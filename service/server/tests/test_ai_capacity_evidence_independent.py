@@ -52,13 +52,11 @@ def wrapped(prompt=12001,context=8192,**extra):
 
 
 def fake_native(monkeypatch,g,payload):
-    response=Mock(status_code=400)
-    response.iter_content.return_value=[json.dumps(payload).encode()]
-    response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False)
-    session=Mock();session.request.return_value=response
-    session.__enter__=Mock(return_value=session);session.__exit__=Mock(return_value=False)
-    monkeypatch.setattr(g.requests,'Session',lambda:session)
-    return session
+    response=Mock(status=400,read=lambda limit:json.dumps(payload).encode()[:limit])
+    connection=Mock()
+    connection.getresponse.return_value=response
+    monkeypatch.setattr(g.http.client,'HTTPConnection',lambda *a,**k:connection)
+    return connection
 
 
 def relay_response(monkeypatch,r,header,*,status=413,body=None):
@@ -112,6 +110,7 @@ def configure_review(monkeypatch,r):
     import ai_budget,ai_operations
     for key,value in dict(AI_INFERENCE_MODE='ollama_first',AI_TRADER_CLOUD='true',
         STOCK_SCANNER_FINAL_AI_PROVIDER='openrouter',STOCK_SCANNER_FINAL_AI_MODEL='approved-fixture',
+        AI_OPENROUTER_FALLBACK_ENABLED='true',
         OPENROUTER_API_KEY='synthetic-only').items():monkeypatch.setenv(key,value)
     monkeypatch.setattr(r,'ready',lambda:True)
     budget=Mock();slot=Mock();ledger=Mock()
@@ -195,7 +194,7 @@ def test_handler_old_body_exact_optional_header_only_on_413(modules):
 
 def test_native_complete_adds_actual_output_request_without_changing_payload(modules,monkeypatch):
     r,f,g=modules
-    engine=g.Inference();engine.loaded=True;engine.at=time.monotonic()
+    engine=g.Inference();engine.loaded=True;engine.available=True;engine.at=time.monotonic()
     calls=[]
     def http(method,path,payload=None,**kw):
         if path=='/api/tags':return {'models':[dict(name=g.MODEL,digest=g.DIGEST)]}

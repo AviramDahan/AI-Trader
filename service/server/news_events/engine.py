@@ -16,6 +16,7 @@ class Policy:
     personal_relevance: float=.55
     stock_relevance: float=.70
     market_relevance: float=.30
+    market_low_materiality_relevance: float | None=None
     max_age_hours: int=168
     market_age_hours: int=6
     universe_age_hours: int=6
@@ -25,10 +26,25 @@ class Policy:
 class Analysis:
     result:dict
     calls:list=field(default_factory=list)
+    publication_duplicate:dict | None=None
+
+
+def public_translation_event(event):
+    import os
+    from .general_news import eligible_event
+    return (os.getenv('STOCK_SCANNER_PUBLIC_TRANSLATION_ONLY_ENABLED','false').lower()=='true'
+            and not event['tickers'] and (event['event_type']=='market' or eligible_event(event)))
 
 
 def route(event,result,positions,watchlist,universe,policy):
     """Provider/trust intentionally absent from all topic decisions."""
+    from news_public_importance import enabled, event_publication_check
+    public_allowed,public_reason=event_publication_check(event)
+    if result.get('_public_translation_only') is True:
+        if public_translation_event(event):
+            if not public_allowed:return [],public_reason
+            return [('market_news',[])],None
+        return [],'translation_scope_changed'
     if not result.get('related'):return [],'irrelevant'
     relevance=result['relevance'];materiality=result['materiality'];sentiment=result['sentiment']
     tickers=set(event['tickers'])
@@ -36,8 +52,13 @@ def route(event,result,positions,watchlist,universe,policy):
         from .general_news import eligible_event
         if event['event_type'] != 'market' and not eligible_event(event):
             return [],'identity_unverified'
-        if relevance<policy.market_relevance:return [],'below_market_threshold'
-        if materiality not in ('medium','high'):return [],'low_importance'
+        if not public_allowed:return [],public_reason
+        if relevance<max(policy.market_relevance,.55 if enabled() else 0):return [],'below_market_threshold'
+        supplemental_market = (event['event_type']=='market' and materiality=='low'
+            and not enabled()
+            and policy.market_low_materiality_relevance is not None
+            and relevance>=policy.market_low_materiality_relevance)
+        if materiality not in ('medium','high') and not supplemental_market:return [],'low_importance'
         return [('market_news',[])],None
     if relevance<policy.personal_relevance:return [],'below_relevance_threshold'
     if materiality not in ('medium','high'):return [],'low_importance'
@@ -45,9 +66,9 @@ def route(event,result,positions,watchlist,universe,policy):
     personal=tickers&(set(positions)|set(watchlist))
     routes=[('portfolio_watchlist',sorted(personal))] if personal else []
     broad=(tickers&set(universe))-personal
-    if broad and relevance>=policy.stock_relevance:
+    if public_allowed and broad and relevance>=max(policy.stock_relevance,.80 if enabled() else 0):
         routes.append(('important_stock_news',sorted(broad)))
-    return routes,None if routes else 'below_broad_threshold'
+    return routes,None if routes else public_reason or 'below_broad_threshold'
 
 
 class Pipeline:
@@ -222,10 +243,16 @@ class Pipeline:
         try:
             # Network/LLM is strictly outside every DB transaction.
             output=analyzer(event)
-            from news_quality import ANALYSIS_SCHEMA
+            from news_quality import ANALYSIS_SCHEMA,PUBLIC_TRANSLATION_SCHEMA
             import jsonschema
-            jsonschema.validate(output.result,ANALYSIS_SCHEMA)
-            if any(not __import__('re').search('[\u0590-\u05ff]',output.result[k]) for k in ('title_he','summary_he','interpretation_he')):
+            translation=output.result.get('_public_translation_only') is True
+            if translation:
+                if not public_translation_event(event):
+                    raise ValueError('translation_scope_changed')
+                jsonschema.validate({k:v for k,v in output.result.items() if k!='_public_translation_only'},PUBLIC_TRANSLATION_SCHEMA)
+            else:
+                jsonschema.validate(output.result,ANALYSIS_SCHEMA)
+            if any(not __import__('re').search('[\u0590-\u05ff]',output.result[k]) for k in (('title_he','summary_he') if translation else ('title_he','summary_he','interpretation_he'))):
                 raise ValueError('news_missing_hebrew')
             status='done';error=None
         except Exception as exc:
@@ -238,7 +265,11 @@ class Pipeline:
             # If new facts arrived during the call, old output cannot publish.
             current=c.execute('SELECT evidence_version,reason FROM ne_events WHERE event_id=?',(event_id,)).fetchone()
             if current['evidence_version']==version and current['reason']!='source_retracted':
-                c.execute('UPDATE ne_events SET status=?,reason=? WHERE event_id=?',('analyzed' if status=='done' else 'quality_failed',error,event_id))
+                publication_reason='duplicate_publication' if status=='done' and output.publication_duplicate else error
+                c.execute('UPDATE ne_events SET status=?,reason=? WHERE event_id=?',('analyzed' if status=='done' else 'quality_failed',publication_reason,event_id))
+                if output.publication_duplicate:
+                    self.store.metric(c,'publication_review','duplicate',timestamp(now),event_id,
+                                      version=version,prior=output.publication_duplicate)
             self.store.metric(c,'analysis',status,timestamp(now),event_id,providers=event['providers'],
                 latency=time.monotonic()-started,calls=output.calls,invocations=1)
             if self.store.production:
@@ -251,6 +282,7 @@ class Pipeline:
         with self.store.transaction(True) as c:
             r=c.execute('SELECT * FROM ne_events WHERE event_id=?',(event_id,)).fetchone()
             if r['status']!='analyzed':return []
+            if r['reason']=='duplicate_publication':return []
             event=json.loads(r['body_json']);version=r['evidence_version']
             analyzed=c.execute("SELECT result_json FROM ne_analysis WHERE event_id=? AND version=? AND status='done'",(event_id,version)).fetchone()
             if not analyzed:return []

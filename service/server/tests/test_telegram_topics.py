@@ -22,19 +22,34 @@ class TelegramTopicRoutingTests(unittest.TestCase):
             self.assertEqual(thread_id_for_event('portfolio_status'),903)
             self.assertEqual(thread_id_for_event('market_news'),904)
 
-    def test_labeled_public_source_kept_but_relay_removed_and_non_news_unchanged(self):
+    def test_news_sources_hidden_but_non_news_unchanged(self):
         body='כותרת\n\nTelegram @financialjuice: https://t.me/financialjuice/136481\nמקור: https://example.com/news?a=1\n\nפורסם: 28/09/2026 04:10'
         with patch.dict(os.environ, {'TELEGRAM_COMMUNITY_URL':'https://t.me/+testInvite'}):
             for event in ('market_news','position_news','watchlist_news','watchlist_news_correction','stock_news','correction','news_status','sec_intelligence'):
                 result=with_news_community_link(body,event)
                 self.assertNotIn('https://t.me/financialjuice/',result)
-                self.assertIn('מקור: https://example.com/news?a=1',result)
+                self.assertNotIn('מקור:',result)
+                self.assertNotIn('https://example.com/news?a=1',result)
                 self.assertIn('https://t.me/+testInvite',result)
                 self.assertNotIn('Telegram @financialjuice',result)
                 self.assertEqual(with_news_community_link(result,event),result)
             self.assertEqual(with_news_community_link(body,'new_signal'),body)
         with patch.dict(os.environ, {'TELEGRAM_COMMUNITY_URL':''}):
-            self.assertIn('https://example.com',with_news_community_link(body,'market_news'))
+            self.assertNotIn('https://example.com',with_news_community_link(body,'market_news'))
+
+    def test_legacy_source_metadata_removed_without_losing_facts_or_license(self):
+        body = ('כותרת: עלייה במכירות\nמפרסם מקורי: Example News\n'
+                'קישור ישיר: https://example.com/story\nקישור: https://example.com/other\n'
+                'מקור: SEC\nפורסם: 27/10/2026\n'
+                'Example Credit\nCC BY 3.0 https://creativecommons.org/licenses/by/3.0/')
+        for event in ('market_news', 'position_news', 'watchlist_news', 'stock_news', 'sec_intelligence'):
+            output = with_news_community_link(body, event)
+            self.assertIn('כותרת: עלייה במכירות', output)
+            self.assertIn('פורסם: 27/10/2026', output)
+            self.assertIn('Example Credit', output)
+            self.assertIn('creativecommons.org/licenses/by/3.0/', output)
+            for hidden in ('מפרסם מקורי:', 'קישור ישיר:', 'קישור:', 'מקור:', 'example.com'):
+                self.assertNotIn(hidden, output)
 
     def test_personal_news_split_keeps_market_signals_and_trades_separate(self):
         with patch.dict(os.environ, {'TELEGRAM_PERSONAL_NEWS_THREAD_ID':'114',
@@ -138,7 +153,7 @@ class TelegramTopicRoutingTests(unittest.TestCase):
         self.assertIn('sec_topic_not_configured', result)
         session.return_value.post.assert_not_called()
 
-    def test_sec_sender_uses_dedicated_thread_and_retains_safe_source_link(self):
+    def test_sec_sender_uses_dedicated_thread_without_source_link(self):
         import stock_scanner
         session = Mock()
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "test", "TELEGRAM_CHAT_ID": "-1001",
@@ -150,7 +165,7 @@ class TelegramTopicRoutingTests(unittest.TestCase):
         self.assertEqual(result, "sent")
         fields = session.post.call_args.kwargs["data"]
         self.assertEqual(fields["message_thread_id"], 303)
-        self.assertIn("https://www.sec.gov/example", fields["text"])
+        self.assertNotIn("https://www.sec.gov/example", fields["text"])
         self.assertIn("https://t.me/+testInvite", fields["text"])
 
 
