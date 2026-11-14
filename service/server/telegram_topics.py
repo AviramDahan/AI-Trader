@@ -23,11 +23,39 @@ STOCK_NEWS_EVENT_TYPES = {
 SIGNAL_EVENT_TYPES = {"new_signal", "signals_status"}
 TRADE_EVENT_TYPES = {"entry", "entry_chart", "tp", "stop", "sell", "stop_change"}
 PORTFOLIO_EVENT_TYPES = {"portfolio_status"}
+NEWS_DISPLAY_EVENT_TYPES = (MARKET_NEWS_EVENT_TYPES | STOCK_NEWS_EVENT_TYPES | SEC_INTELLIGENCE_EVENT_TYPES
+                            | COMPANY_REPORT_EVENT_TYPES | ANALYST_EVENT_TYPES | SEC_ACTIVITY_EVENT_TYPES)
+
+_EDITORIAL_NOTE = re.compile(r'^\s*(?:חשיבות (?:גבוהה|בינונית|נמוכה|לא נקבעה)|מידע למעקב)\s*·')
+_PUBLISHED_AT = re.compile(
+    r'^\s*(?:פורסם|נקלט ב־SEC|דווח(?: בערוץ)?)\s*:\s*\d{1,4}[./-]\d{1,2}[./-]\d{1,4}\b'
+    r'|^\s*פורסם:\s*זמן לא זמין\.?\s*$'
+    r'|^\s*דווח ל־SEC ב־\d{1,2}/\d{1,2}/\d{4}\b'
+    r'|^\s*זמן הפרסום המקורי: לא אומת\.?\s*$')
+_SIGNAL_NOTE = re.compile(r'\s*ידיעה ש?אינה סיגנל\.?\s*')
+_DISPLAY_CONTROLS = re.compile('[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]')
+
+
+def without_news_metadata(message: str) -> str:
+    """Hide generated metadata on delivery while retaining factual dates and text."""
+    lines = []
+    for index, line in enumerate(message.splitlines()):
+        plain = _DISPLAY_CONTROLS.sub('', line)
+        if _EDITORIAL_NOTE.match(plain) or _PUBLISHED_AT.match(plain) or _SIGNAL_NOTE.fullmatch(plain):
+            continue
+        if index == 0 and plain.startswith('סימול: '):
+            cleaned = re.sub(r' · ידיעה ש?אינה סיגנל(?= · |$)', '', plain)
+            if cleaned != plain:
+                line = cleaned
+        lines.append(line)
+    return '\n'.join(lines)
 
 
 def with_news_community_link(message: str, event_type: str | None) -> str:
     """Append the server-configured join link to all news, never trade alerts."""
-    if event_type not in MARKET_NEWS_EVENT_TYPES | STOCK_NEWS_EVENT_TYPES | SEC_INTELLIGENCE_EVENT_TYPES | COMPANY_REPORT_EVENT_TYPES | ANALYST_EVENT_TYPES | SEC_ACTIVITY_EVENT_TYPES:
+    if event_type == 'trump_truth_post':
+        return without_news_metadata(message)
+    if event_type not in NEWS_DISPLAY_EVENT_TYPES:
         return message
     link = os.getenv("TELEGRAM_COMMUNITY_URL", "").strip()
     # Presentation only: stored evidence/URLs and all eligibility stay intact.
@@ -39,7 +67,7 @@ def with_news_community_link(message: str, event_type: str | None) -> str:
             return url  # Community invitation and license notices are not news sources.
         return ''
     lines = []
-    for line in message.splitlines():
+    for line in without_news_metadata(message).splitlines():
         if source_metadata.match(line):
             continue
         cleaned = re.sub(r'https?://[^\s<>]+', public_link, line)

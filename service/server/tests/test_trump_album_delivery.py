@@ -249,7 +249,9 @@ def test_album_safe_transport_and_ack_identity(monkeypatch):
             for n,kind in [(123,'photo'),(124,'video')]]
     session=Mock();session.post.return_value=NS(status_code=200,json=lambda:{'ok':True,'result':result})
     monkeypatch.setattr(requests,'Session',lambda:session)
-    assert d._send_album({'chat_id':'-1001','message_thread_id':991,'caption':'עברית'},members)=={'message_ids':[123,124],'media_group_id':'group-1'}
+    assert d._send_album({'chat_id':'-1001','message_thread_id':991,
+        'caption':'עברית\nחשיבות לא נקבעה · הסבר\nדווח: 13.11.2026 20:00 UTC'},members)=={
+        'message_ids':[123,124],'media_group_id':'group-1'}
     kw=session.post.call_args.kwargs
     assert session.trust_env is False and kw['allow_redirects'] is False and kw['timeout']==30
     media=json.loads(kw['data']['media'])

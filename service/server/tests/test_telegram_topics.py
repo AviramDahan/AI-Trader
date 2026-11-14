@@ -45,7 +45,7 @@ class TelegramTopicRoutingTests(unittest.TestCase):
         for event in ('market_news', 'position_news', 'watchlist_news', 'stock_news', 'sec_intelligence'):
             output = with_news_community_link(body, event)
             self.assertIn('כותרת: עלייה במכירות', output)
-            self.assertIn('פורסם: 27/10/2026', output)
+            self.assertNotIn('פורסם: 27/10/2026', output)
             self.assertIn('Example Credit', output)
             self.assertIn('creativecommons.org/licenses/by/3.0/', output)
             for hidden in ('מפרסם מקורי:', 'קישור ישיר:', 'קישור:', 'מקור:', 'example.com'):
@@ -64,11 +64,20 @@ class TelegramTopicRoutingTests(unittest.TestCase):
     def test_news_sender_includes_footer_in_mocked_telegram_payload(self):
         import stock_scanner
         session = Mock()
+        message = ('סימול: SYN · ידיעה שאינה סיגנל · השפעה אפשרית חיובית\n'
+                   '\u200fחשיבות גבוהה · הסבר\n'
+                   'הדוח מתייחס לרבעון שהסתיים ב־30/09/2026.\n'
+                   'פורסם: 27/10/2026 15:30')
         with patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN':'test', 'TELEGRAM_CHAT_ID':'-123',
                                     'TELEGRAM_COMMUNITY_URL':'https://t.me/+testInvite'}), \
                 patch.object(stock_scanner.requests, 'Session', return_value=session):
-            self.assertEqual(stock_scanner.send_telegram('news', {'telegram_enabled':True}, 'market_news'), 'sent')
-        self.assertIn('https://t.me/+testInvite', session.post.call_args.kwargs['data']['text'])
+            self.assertEqual(stock_scanner.send_telegram(message, {'telegram_enabled':True}, 'stock_news'), 'sent')
+        sent = session.post.call_args.kwargs['data']['text']
+        for visible in ('SYN', 'השפעה אפשרית חיובית', '30/09/2026', 'https://t.me/+testInvite'):
+            self.assertIn(visible, sent)
+        for hidden in ('אינה סיגנל', 'חשיבות', 'פורסם:', '27/10/2026'):
+            self.assertNotIn(hidden, sent)
+        self.assertEqual(with_news_community_link(message, 'new_signal'), message)
 
     def test_community_footer_covers_every_news_route_only_once(self):
         with patch.dict(os.environ, {'TELEGRAM_COMMUNITY_URL':'https://t.me/+testInvite'}):

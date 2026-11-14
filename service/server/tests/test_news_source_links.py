@@ -63,7 +63,7 @@ def test_labeled_source_inline_and_telegram_relay_are_hidden():
     assert 'untrusted.example' not in output and 't.me/relay' not in output
 
 
-def test_long_mixed_body_keeps_required_license_credit_date_and_links():
+def test_long_mixed_body_keeps_required_license_credit_and_links():
     from telegram_presentation import telegram_text, utf16_length
     source = event()
     source['sources'][0].update(publisher='Synthetic Credit', raw_metadata={
@@ -75,6 +75,7 @@ def test_long_mixed_body_keeps_required_license_credit_date_and_links():
         output = telegram_text(with_news_community_link(message(source, result, 'market_news', []), 'market_news'))
     assert utf16_length(output) <= 4096
     for required in ('Synthetic Credit', 'CC BY 3.0', 'creativecommons.org/licenses/by/3.0/',
-                     'פורסם:', 'https://t.me/+'):
+                     'https://t.me/+'):
         assert required in output
+    assert 'פורסם:' not in output
     assert 'https://www.sec.gov/' not in output

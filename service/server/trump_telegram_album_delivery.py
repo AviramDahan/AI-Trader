@@ -81,6 +81,7 @@ def _save(row, value, expected, *, at=None):
 def _send_album(fields, members):
     """One call, no proxies/redirects/retry; only complete exact album ACKs count."""
     import requests
+    from telegram_topics import without_news_metadata
     token=os.getenv('TELEGRAM_BOT_TOKEN','').strip()
     if not token: raise ValueError('album_credentials_missing')
     session=requests.Session();session.trust_env=False
@@ -96,7 +97,7 @@ def _send_album(fields, members):
             data=m._read(d['sha256'],d['bytes'])
             files[name]=('relay'+str(index)+('.jpg' if kind=='photo' else '.mp4'),data,d['mime_type'])
             entry={'type':kind,'media':'attach://'+name}
-            if index==0:entry['caption']=fields.get('caption','')
+            if index==0:entry['caption']=without_news_metadata(fields.get('caption',''))
             media.append(entry)
         data={k:v for k,v in fields.items() if k!='caption'};data['media']=m.wire(media)
         response=session.post('https://api.telegram.org/bot'+token+'/sendMediaGroup',data=data,files=files,timeout=30,allow_redirects=False)

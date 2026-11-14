@@ -336,6 +336,9 @@ def _save(row,value,expected,*,at=None):
 def _send(method,fields,asset=None):
     """One Bot API call; no retry adapter, redirects, proxy or unknown-ACK retry."""
     import requests
+    from telegram_topics import without_news_metadata
+    fields = {key: without_news_metadata(value) if key in ('text', 'caption') else value
+              for key, value in fields.items()}
     token=os.getenv('TELEGRAM_BOT_TOKEN','').strip()
     if not token:raise ValueError('media_credentials_missing')
     session=requests.Session();session.trust_env=False
