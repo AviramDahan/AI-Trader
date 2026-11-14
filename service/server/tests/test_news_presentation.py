@@ -23,12 +23,12 @@ def test_exact_reported_headline_wrapper_is_readable():
 
 
 @pytest.mark.parametrize('event',['market_news','position_news','watchlist_news','stock_news'])
-def test_bidi_cleanup_at_send_time_preserves_community_and_dates(event):
+def test_bidi_cleanup_at_send_time_keeps_community_and_hides_publication_time(event):
     body='לפי כותרת שפרסם ערוץ Telegram \u200f@financialjuice, ייתכן שינוי.\nפורסם: 28/09/2026 14:07'
     with patch.dict('os.environ',{'TELEGRAM_COMMUNITY_URL':'https://t.me/+example'}):
         result=with_news_community_link(body,event)
         assert 'financialjuice' not in result and 'Telegram' not in result
-        assert 'ייתכן שינוי.' in result and '14:07' in result
+        assert 'ייתכן שינוי.' in result and '14:07' not in result
         assert result.count('https://t.me/+example')==1
 
 
@@ -38,7 +38,7 @@ def test_reported_ramsden_message_and_queued_sender_cleanup():
     with patch.dict('os.environ',{'TELEGRAM_COMMUNITY_URL':'https://t.me/+example'}):
         out=with_news_community_link(message,'market_news')
         assert 'financialjuice' not in out and 'Telegram' not in out
-        assert facts in out and 'פורסם:' in out and 'https://t.me/+example' in out
+        assert facts in out and 'פורסם:' not in out and 'https://t.me/+example' in out
         assert out==with_news_community_link(out,'market_news')
         assert with_news_community_link(message,'entry')==message
 

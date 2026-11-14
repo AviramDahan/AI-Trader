@@ -156,7 +156,7 @@ class TelegramStatusTests(unittest.TestCase):
 
     def test_market_news_card_explains_importance_briefly(self):
         message = telegram_status.market_news_status_message()
-        self.assertIn("חשיבות ונימוק", message)
+        self.assertNotIn("חשיבות ונימוק", message)
         self.assertIn("עודכן:", message)
         self.assertLess(len(message), 200)
 

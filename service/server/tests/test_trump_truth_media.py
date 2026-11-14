@@ -353,10 +353,13 @@ def test_media_bot_ack_identity_and_safe_transport(db,media,monkeypatch,damage):
     response=NS(status_code=status,json=lambda:body)
     session=Mock();session.post.return_value=response
     monkeypatch.setattr(requests,'Session',lambda:session)
-    value=m._send('sendPhoto',{'chat_id':'-1001','message_thread_id':991,'caption':'בדיקה'},('relay.jpg',b'\xff\xd8\xff\xd9','image/jpeg'))
+    value=m._send('sendPhoto',{'chat_id':'-1001','message_thread_id':991,
+        'caption':'בדיקה\n\u200fחשיבות לא נקבעה · הסבר\n\u200fדווח: \u206613.11.2026 20:00 UTC\u2069'},
+        ('relay.jpg',b'\xff\xd8\xff\xd9','image/jpeg'))
     assert value==({'message_id':123} if damage is None else {'retry':True,'reason':'rate_limited'} if damage=='rate_limit' else {'unknown':True})
     assert session.trust_env is False and session.post.call_args.kwargs['allow_redirects'] is False
     assert session.post.call_args.kwargs['timeout']==30
+    assert session.post.call_args.kwargs['data']['caption']=='בדיקה'
     session.close.assert_called_once()
 
 
