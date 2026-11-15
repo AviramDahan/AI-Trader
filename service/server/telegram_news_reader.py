@@ -8,6 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SESSION = Path(os.getenv('TELEGRAM_SESSION_PATH', str(ROOT / '.runtime/telegram-reader.session')))
+MAX_DEFERRED_MEDIA = 50
+MEDIA_RETRY_SECONDS = 300
 
 
 def streaming_enabled():
@@ -104,7 +106,8 @@ async def telegram_news_stream_loop():
                 conn.close()
                 current = datetime.now(timezone.utc)
                 result = await asyncio.wait_for(collect(client,state,current,names),timeout=60)
-                cycle = await asyncio.to_thread(run_feed_cycle, {'telegram_channels':lambda *_: result}, current, True)
+                cycle = await asyncio.to_thread(run_feed_cycle, {'telegram_channels':lambda *_: result}, current, True,
+                                                telegram_stream=True)
                 if isinstance(cycle, dict) and cycle.get('providers', {}).get('telegram_channels', {}).get('status') in {'ok', 'no_new', 'degraded'}:
                     from trump_truth_posts import source_channel, activation, enabled
                     CHANNEL=source_channel()
@@ -194,10 +197,47 @@ async def collect(client, state, current, names):
             # Existing cursor: oldest unread first so a busy source cannot lose gaps.
             messages = await client.get_messages(entity, limit=50 if cursor or special else 30,
                                                  min_id=cursor, reverse=bool(cursor or special))
+            from trump_telegram_channel import selected as channel_selected
+            separate_media = special and channel_selected()
+            deferred = {}
+            media_available_this_cycle = True
+            retry_id = None
+            if separate_media:
+                now = int(current.timestamp())
+                saved = prior.get('deferred_media', [])
+                deferred = {entry['id']: entry for entry in saved if entry['expires'] > now}
+                if len(deferred) < len(saved):
+                    errors.append(name + ':deferred_media_expired')
+                due = min(deferred.values(), key=lambda item: item['retry'], default=None)
+                if due and due['retry'] <= now:
+                    try:
+                        seed = await asyncio.wait_for(client.get_messages(entity, ids=due['id']), timeout=5)
+                    except Exception as exc:
+                        due['retry'] = now + max(MEDIA_RETRY_SECONDS, int(getattr(exc, 'seconds', 0) or 0))
+                        errors.append(name + ':deferred_media_source_unavailable')
+                    else:
+                        if seed is None:
+                            deferred.pop(due['id'])
+                            errors.append(name + ':deferred_media_source_missing')
+                        elif seed.id == due['id'] and getattr(seed, 'grouped_id', None) == due['group']:
+                            retry_id = seed.id
+                            messages = [seed, *messages]
+                        else:
+                            deferred.pop(due['id'])
+                            errors.append(name + ':deferred_media_source_changed')
             last_id = cursor
             rejected = {}
             for message in messages:
-                if special and message.id<=last_id:continue  # Album already assembled in this page.
+                retrying = message.id == retry_id
+                if retrying:
+                    retry_id = None  # The normal page may also contain this seed.
+                if special and message.id<=last_id and not retrying:continue
+                group = getattr(message, 'grouped_id', None)
+                if separate_media and not retrying and group is not None and any(
+                    entry['group'] == group for entry in deferred.values()
+                ):
+                    last_id = max(last_id, message.id)
+                    continue
                 if not special:last_id=max(last_id,int(message.id))
                 if not special and not cursor and message.date < current - timedelta(hours=1):
                     continue
@@ -211,18 +251,42 @@ async def collect(client, state, current, names):
                             known=lookup.execute('SELECT id FROM scanner_telegram_outbox WHERE dedupe_key=?',
                                 (PREFIX+'tg:1462338131:'+str(message.id),)).fetchone()
                     if known:
+                        deferred.pop(message.id, None)
                         last_id=max(last_id,int(message.id));continue
-                    from trump_telegram_channel import selected as channel_selected
-                    if channel_selected() and getattr(message,'grouped_id',None) is not None:
-                        from trump_telegram_album import collect_album
-                        item,reason,group_last=await collect_album(client,entity,message,current)
-                        if reason:
-                            rejected[reason]=rejected.get(reason,0)+1;errors.append(name+':'+reason)
-                            break  # Hold cursor BEFORE this incomplete group.
-                        output.append(item);last_id=group_last
-                        continue
                     item, reason = extract(message, current)
+                    if separate_media and item and item['has_media']:
+                        if current - message.date > timedelta(hours=24):
+                            errors.append(name + ':deferred_media_expired')
+                            deferred.pop(message.id, None)
+                            last_id = max(last_id, message.id)
+                            continue
+                        if not retrying and len(deferred) >= MAX_DEFERRED_MEDIA:
+                            errors.append(name + ':deferred_media_capacity')
+                            break  # No cursor movement over a post we cannot retain.
+                        if media_available_this_cycle:
+                            media_available_this_cycle = False
+                            try:
+                                item, reason, group_last = await asyncio.wait_for(
+                                    _acquire_media(client, entity, message, item, current), timeout=35)
+                            except TimeoutError:
+                                item, reason, group_last = None, 'media_deferred_timeout', message.id
+                        else:
+                            item, reason, group_last = None, 'media_deferred_cycle_budget', message.id
+                        if item:
+                            output.append(item)
+                            deferred.pop(message.id, None)
+                            last_id = max(last_id, group_last)
+                        else:
+                            errors.append(name + ':' + reason)
+                            retry_delay = 60 if reason in {'album_settling', 'album_media_budget_deferred',
+                                                          'media_deferred_cycle_budget'} else MEDIA_RETRY_SECONDS
+                            deferred[message.id] = dict(id=message.id, group=group,
+                                retry=now + retry_delay,
+                                expires=int(message.date.timestamp()) + 24 * 3600)
+                            last_id = max(last_id, message.id)
+                        continue
                     if reason:
+                        deferred.pop(message.id, None)
                         rejected[reason] = rejected.get(reason, 0) + 1
                         if reason not in {'other_author_or_header', 'outside_activation', 'non_original_or_unverifiable'}:
                             errors.append(name + ':' + reason)
@@ -243,15 +307,16 @@ async def collect(client, state, current, names):
                             last_id=max(last_id,int(message.id));continue
                         from trump_truth_media import capture
                         item=await capture(client,message,item,current)
-                        if (channel_selected() and item['has_media'] and
-                            item.get('media',{}).get('status')!='available'):
-                            errors.append(name+':media_deferred');break
                     output.append(item)
                 last_id=max(last_id,int(message.id))
             checkpoints[name] = {'last_id':last_id, 'last_success_at':current.isoformat()}
             if special:
                 checkpoints[name].update(trump_activation=activation(), rejected=rejected,
                     coverage='relay_only_oldest_unread_50_per_cycle_primary_coverage_unknown')
+                if separate_media:
+                    checkpoints[name]['deferred_media'] = list(deferred.values())
+                    if deferred and not any(error.startswith(name + ':') for error in errors):
+                        errors.append(name + ':deferred_media_waiting')
         except Exception as exc:
             seconds = int(getattr(exc, 'seconds', 0) or 0)
             checkpoints[name] = {**prior, 'retry_after':current.timestamp() + max(300, seconds),
@@ -261,6 +326,17 @@ async def collect(client, state, current, names):
             'status':'degraded' if errors else 'ok',
             'coverage':'Public broadcast allowlist: ' + ', '.join(names) +
                        '; ordinary bootstrap 30 (1h); Trump first-ID fence no history; up to 50 unread/channel/cycle; no private chats; primary coverage unknown'}
+
+
+async def _acquire_media(client, entity, message, item, current):
+    if getattr(message, 'grouped_id', None) is not None:
+        from trump_telegram_album import collect_album
+        return await collect_album(client, entity, message, current)
+    from trump_truth_media import capture
+    result = await capture(client, message, item, current)
+    if result.get('media', {}).get('status') == 'available':
+        return result, None, message.id
+    return None, 'media_deferred', message.id
 
 
 def fetch_telegram_news(state, at):

@@ -329,7 +329,7 @@ def test_old_empty_media_placeholder_cannot_fall_back_to_text(album_env, monkeyp
 
 
 
-def test_actual_reader_holds_album_cursor_across_budget_cycles_and_preserves_other_channels(album_env):
+def test_actual_reader_preserves_deferred_album_across_budget_cycles_and_reads_other_channels(album_env):
     import telegram_news_reader as reader, trump_truth_posts as posts
     env = album_env
     ordinary_entity = NS(id=222, username='financialjuice', broadcast=True)
@@ -338,16 +338,19 @@ def test_actual_reader_holds_album_cursor_across_budget_cycles_and_preserves_oth
     async def entity(name): return env.entity if name == 'real_donaldjtrump' else ordinary_entity
     async def messages(entity, **kwargs):
         if entity.id == 222: return [ordinary]
+        if isinstance(kwargs.get('ids'), int):
+            return next(m for m in env.messages if m.id == kwargs['ids'])
         if 'ids' in kwargs: return env.messages
         return [env.messages[0]]  # This normal page ends inside the source album.
     env.client.get_entity = AsyncMock(side_effect=entity)
     env.client.get_messages = AsyncMock(side_effect=messages)
     checkpoint = {'channels': {'real_donaldjtrump': {'last_id':99, 'trump_activation':posts.activation()}}}
-    for offset, expected_cursor in [(0,99),(61,99),(122,102)]:
+    for offset, expected_cursor in [(0,100),(61,100),(122,102)]:
         env.clock[0] = AT+timedelta(seconds=offset)
         result = asyncio.run(reader.collect(env.client, {'checkpoint_json':json.dumps(checkpoint)},
                                             env.clock[0], ['real_donaldjtrump','financialjuice']))
         assert result['checkpoint']['channels']['real_donaldjtrump']['last_id'] == expected_cursor
+        assert len(result['checkpoint']['channels']['real_donaldjtrump']['deferred_media']) == (0 if offset == 122 else 1)
         assert any(item.get('provider') == 'telegram_channels' and item.get('source_kind') == 'telegram_post'
                    for item in result['items']), 'one incomplete Trump group cannot block other channels'
         grouped = [item for item in result['items'] if item.get('telegram_grouped_id') == GROUP]

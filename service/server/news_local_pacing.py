@@ -1,5 +1,6 @@
 """Leave recovery time between local news generations in the scanner process."""
 from contextlib import contextmanager
+from functools import wraps
 import os
 import threading
 import time
@@ -36,3 +37,16 @@ def slot():
             yield
     else:
         yield
+
+
+def serialize_news_inference(completion):
+    @wraps(completion)
+    def paced(*args, **kwargs):
+        from ai_routing import enabled
+        from news_local_backoff import in_story
+        if (os.getenv('AI_TRADER_CLOUD') == 'true'
+                and (in_story() or kwargs.get('public_news')) and enabled()):
+            with slot():
+                return completion(*args, **kwargs)
+        return completion(*args, **kwargs)
+    return paced

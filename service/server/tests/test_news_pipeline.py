@@ -531,6 +531,16 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertFalse(recovered["errors"])
         self.assertEqual(self.rows("SELECT status FROM scanner_news_providers WHERE provider='federal_reserve'")[0]["status"], "no_new")
 
+    def test_stream_cycle_cannot_override_scheduled_feed_health(self):
+        from unittest.mock import patch
+        fetch = lambda *_: {'items': [], 'errors': ['media_deferred']}
+        with patch('scanner_engine.set_service_status') as health, patch('news_events.control.active', return_value=False) as active:
+            result = news_pipeline.run_feed_cycle({'telegram_channels': fetch}, self.clock,
+                                                  force=True, telegram_stream=True)
+        self.assertEqual(result['providers']['telegram_channels']['status'], 'degraded')
+        health.assert_not_called()
+        active.assert_called_once()  # Item ingestion only, no canonical provider collection.
+
     def test_headline_only_yahoo_feed_rejects_wrong_company_assignment(self):
         fetched = [
             {"title": "Fortinet benefits from expanding cybersecurity demand", "publisher": "Wire",
