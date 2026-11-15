@@ -1111,7 +1111,10 @@ def bridge_scanner_news(at: datetime | None = None) -> dict[str, int]:
 
 
 def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], datetime], dict[str, Any]]] | None = None,
-                   at: datetime | None = None, force: bool = False) -> dict[str, Any]:
+                   at: datetime | None = None, force: bool = False, *,
+                   telegram_stream: bool = False) -> dict[str, Any]:
+    if telegram_stream and set(provider_fetchers or ()) != {'telegram_channels'}:
+        raise ValueError('telegram_stream_requires_channel_result')
     current = _now(at)
     initialize_providers(current)
     fetchers = provider_fetchers or PROVIDERS
@@ -1183,6 +1186,10 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
             summary["providers"][name] = {"status": "error"}
             _update_provider(name, "error", current, cadence, state["coverage"], state,
                              error=str(exc)[:1500] if isinstance(exc, RuntimeError) else __import__('retry_policy').detail(exc), retry_seconds=retry)
+    if telegram_stream:
+        # The stream records news_stream; the scheduled feed owns news_feed and
+        # canonical provider polling at their configured cadence.
+        return summary
     from scanner_engine import set_service_status
     if summary["providers_checked"] == 0:
         service_status = "backoff"

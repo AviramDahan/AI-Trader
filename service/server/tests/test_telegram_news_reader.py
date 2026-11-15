@@ -55,6 +55,54 @@ def test_bootstrap_then_restart_uses_persisted_cursor():
     assert fake.get_messages.call_args.kwargs == {'limit': 50, 'min_id': 11, 'reverse': True}
 
 
+@pytest.mark.parametrize('group', [None, 123])
+def test_deferred_trump_media_does_not_block_new_posts_and_retries_after_restart(group):
+    import trump_telegram_channel as source
+    import trump_truth_posts
+
+    fake = client()
+    boundary = (NOW - timedelta(hours=1)).isoformat()
+    media = message(10)
+    media.peer_id = SimpleNamespace(channel_id=source.CHANNEL_ID)
+    media.document = object()
+    media.grouped_id = group
+    newer = message(12)
+    newer.peer_id = media.peer_id
+    page = [media]
+    if group is not None:
+        member = message(11)
+        member.peer_id = media.peer_id
+        member.document = object()
+        member.grouped_id = group
+        page.append(member)
+    page.append(newer)
+    fake.get_messages.side_effect = [page, [], media]
+    state = {'checkpoint_json': json.dumps({'channels': {
+        source.CHANNEL: {'last_id': 9, 'trump_activation': boundary}
+    }})}
+    with patch.dict(os.environ, TELEGRAM_TRUMP_SOURCE=source.SELECTOR), patch.multiple(
+        trump_truth_posts, enabled=lambda: True, activation=lambda: boundary,
+        valid_entity=lambda _: True,
+    ), patch('database.get_db_connection') as connect, patch.object(
+        reader, '_acquire_media', new_callable=AsyncMock,
+    ) as acquire:
+        connect.return_value.__enter__.return_value.execute.return_value.fetchone.return_value = None
+        acquire.side_effect = [(None, 'media_deferred', 10), ({'relay_message_id': 10}, None, 11)]
+        first = asyncio.run(reader.collect(fake, state, NOW, [source.CHANNEL]))
+        checkpoint = first['checkpoint']['channels'][source.CHANNEL]
+        assert [item['relay_message_id'] for item in first['items']] == [12]
+        assert checkpoint['last_id'] == 12
+        assert [item['id'] for item in checkpoint['deferred_media']] == [10]
+        assert first['status'] == 'degraded'
+        later = NOW + timedelta(minutes=5)
+        second = asyncio.run(reader.collect(fake, {'checkpoint_json': json.dumps(first['checkpoint'])},
+                                            later, [source.CHANNEL]))
+        assert [item['relay_message_id'] for item in second['items']] == [10]
+        assert second['checkpoint']['channels'][source.CHANNEL]['last_id'] == 12
+        assert second['checkpoint']['channels'][source.CHANNEL]['deferred_media'] == []
+        assert acquire.await_count == 2
+
+
 def test_failure_preserves_cursor_and_other_channel_continues():
     fake = client()
     class Flood(Exception):
@@ -140,5 +188,6 @@ def test_stream_ingests_live_event_catches_up_and_disconnects(monkeypatch, tmp_p
     assert len(handlers)==2
     assert ingest.call_args.args[0][0]['url']=='https://t.me/channel/10'
     assert cycle.call_count==1
+    assert cycle.call_args.kwargs == {'telegram_stream': True}
     fake.disconnect.assert_awaited_once()
     assert status.call_args.args[1]=='ok'

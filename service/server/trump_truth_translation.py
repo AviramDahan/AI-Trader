@@ -182,14 +182,15 @@ def local_json(system,payload,schema):
     """Reuse exact existing pinned relay/capacity and sole usage ledger; NO cloud."""
     from ai_routing import (enabled as local_enabled,ready,local_completion,local_usage,
                             MODEL,DIGEST,safe_local_failure_usage)
-    if not local_enabled() or not ready():raise ValueError('translation_local_unavailable')
+    if not local_enabled():raise ValueError('translation_local_unavailable')
     from ai_operations import record
     from news_local_pacing import slot
-    started=time.monotonic();body=None;success=False
+    started=None;body=None;success=False
     try:
         # Native JSON preserves the exact SOURCE/DRAFT without inflating every
         # Hebrew character into six ASCII escape characters in the editor input.
         with slot():
+            if not ready():raise ValueError('translation_local_unavailable')
             started=time.monotonic()
             value,body=local_completion([{'role':'system','content':system},
                 {'role':'user','content':json.dumps(payload,ensure_ascii=False)}],schema,1400)
@@ -199,8 +200,9 @@ def local_json(system,payload,schema):
         body=safe_local_failure_usage(getattr(exc,'local_failure_usage',None)) or body
         raise
     finally:
-        record('news_translation','ollama/'+MODEL+'@'+DIGEST,local_usage(body),started,success,
-               None if success else 'local_translation_unavailable',notify_failure=False)
+        if started is not None:
+            record('news_translation','ollama/'+MODEL+'@'+DIGEST,local_usage(body),started,success,
+                   None if success else 'local_translation_unavailable',notify_failure=False)
 
 
 def translate(item,completion=None):

@@ -1,11 +1,11 @@
 """Shared bounded inference transport; cloud-only remains the safe default."""
-from contextlib import nullcontext
 import json
 import os
 import time
 
 import jsonschema
 import requests
+from news_local_pacing import serialize_news_inference
 
 
 def request_options():
@@ -22,9 +22,10 @@ def request_options():
     return options
 
 
+@serialize_news_inference
 def json_completion(system, payload, *, predict=1000, schema=None, task="news",
                     max_attempts=2, usage_sink=None, repair=False, news_json_wrapping=False,
-                    structured_news=False, usage_task=None):
+                    structured_news=False, usage_task=None, public_news=False):
     if max_attempts not in (1, 2):
         raise ValueError('invalid_ai_attempt_limit')
     if usage_task not in (None,'translation') or (usage_task and task!='news'):
@@ -65,11 +66,7 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
         attempt_route = route.provenance()
         try:
             if route.provider == 'ollama_relay':
-                from news_local_backoff import in_story
-                from news_local_pacing import slot
-                with slot() if in_story() else nullcontext():
-                    started = time.monotonic()
-                    value, body = local_completion(native_messages(messages, structured_news), schema, predict)
+                value, body = local_completion(native_messages(messages, structured_news), schema, predict)
                 if usage_sink is not None:usage_sink['json_normalization']='ollama_strict_schema'
             else:
                 response = requests.post("https://openrouter.ai/api/v1/chat/completions",

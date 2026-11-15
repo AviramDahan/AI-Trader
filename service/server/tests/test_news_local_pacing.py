@@ -69,6 +69,29 @@ def test_news_scanner_and_trump_share_pacing_without_delaying_trade_translation(
         news_local_backoff.end_story(token)
     ai_provider.json_completion('fixture', {}, task='translation')
     trump_truth_translation.local_json('fixture', {}, {})
-    assert starts == [100, 108, 112, 116]
-    assert waits == [4]
-    assert ledger == [4, 4, 4, 4]
+    ai_provider.json_completion('fixture', {}, task='translation', public_news=True)
+    assert starts == [100, 108, 112, 116, 124]
+    assert waits == [4, 4]
+    assert ledger == [4, 4, 4, 4, 4]
+
+
+def test_public_news_checks_readiness_under_the_shared_lock(clock, monkeypatch):
+    import ai_operations
+    import ai_provider
+    import ai_routing
+    import trump_truth_translation
+
+    monkeypatch.setenv('AI_TRADER_CLOUD', 'true')
+    monkeypatch.setenv('AI_INFERENCE_MODE', 'ollama_first')
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'fixture')
+    monkeypatch.setenv('OPENROUTER_NEWS_MODEL', 'fixture')
+
+    def ready():
+        assert pacing._pacer._lock.locked()
+        return True
+
+    monkeypatch.setattr(ai_routing, 'ready', ready)
+    monkeypatch.setattr(ai_routing, 'local_completion', lambda *args: ({'ok': True}, {}))
+    monkeypatch.setattr(ai_operations, 'record', lambda *args, **kwargs: None)
+    ai_provider.json_completion('fixture', {}, task='translation', public_news=True)
+    trump_truth_translation.local_json('fixture', {}, {})

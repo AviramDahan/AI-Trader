@@ -12,6 +12,19 @@ import scanner_engine
 import telegram_status
 
 
+def test_idle_outbox_preserves_delivery_incident_until_real_success():
+    with patch.object(scanner_engine, 'get_db_connection') as connect, patch.object(
+        scanner_engine, '_service',
+    ) as status:
+        conn = connect.return_value.__enter__.return_value
+        conn.execute.return_value.fetchone.return_value = {'status': 'error', 'detail': 'sent=0 failed=1'}
+        scanner_engine._update_telegram_delivery_health(0, 0)
+        status.assert_called_once_with('telegram', 'error', 'sent=0 failed=1')
+        scanner_engine._update_telegram_delivery_health(1, 0)
+        assert status.call_args.args == ('telegram', 'ok', 'sent=1 failed=0')
+        assert status.call_args.kwargs == {'success': True}
+
+
 class TelegramStatusTests(unittest.TestCase):
     def test_create_and_edit_have_same_idempotent_bidi_presentation(self):
         from telegram_presentation import telegram_text
