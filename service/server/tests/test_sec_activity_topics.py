@@ -188,13 +188,9 @@ def seed_filing(monkeypatch, form):
     return observed
 
 
-@pytest.mark.parametrize(('form','thread'), [('SCHEDULE 13G',41), ('4',41), ('10-Q',42)])
+@pytest.mark.parametrize(('form','thread'), [('4',41), ('10-Q',42)])
 def test_filing_to_topic_ack_and_no_repeat(isolated, monkeypatch, form, thread):
-    calls = seed_filing(monkeypatch, form)
-    if form == 'SCHEDULE 13G':
-        assert calls[0].endswith('/primary_doc.xml') and '/xsl' not in calls[0]
-        with isolated() as conn:
-            assert conn.execute('SELECT COUNT(*) n FROM si_company_snapshots').fetchone()['n'] == 0
+    seed_filing(monkeypatch, form)
     response = Mock()
     response.json.return_value = {'ok': True, 'result': {
         'message_id': 100, 'chat': {'id': -100123}, 'message_thread_id': thread}}
@@ -212,9 +208,34 @@ def test_filing_to_topic_ack_and_no_repeat(isolated, monkeypatch, form, thread):
     session.post.assert_called_once()
 
 
+def test_reported_holding_is_retained_without_telegram_delivery(isolated, monkeypatch):
+    calls = seed_filing(monkeypatch, 'SCHEDULE 13G')
+    assert calls[0].endswith('/primary_doc.xml') and '/xsl' not in calls[0]
+    with isolated() as conn:
+        assert conn.execute('SELECT COUNT(*) n FROM si_company_snapshots').fetchone()['n'] == 0
+        assert conn.execute('SELECT COUNT(*) n FROM scanner_telegram_outbox').fetchone()['n'] == 0
+        job = conn.execute('SELECT accepted_at,evidence_json FROM si_filing_jobs WHERE accession=?',
+                           (ACCESSION,)).fetchone()
+        assert json.loads(job['evidence_json'])['kind'] == 'beneficial_ownership'
+        payload = json.dumps({'version': 1, 'thread': 41, 'accepted_at': job['accepted_at'],
+                              'text': '🏦 החזקה מדווחת · SCHEDULE 13G\nExample Fund · 6.25%'})
+        conn.execute("""INSERT INTO scanner_telegram_outbox
+            (dedupe_key,event_type,message,status,attempts,next_attempt_at,created_at)
+            VALUES(?,'ownership_activity',?,'sec_topic_pending',0,?,?)""",
+            ('legacy-holding', payload, job['accepted_at'], job['accepted_at']))
+        conn.commit()
+    session = Mock()
+    monkeypatch.setattr(stock_scanner.requests, 'Session', lambda: session)
+    assert scanner_engine.process_telegram_outbox() == {'sent': 0, 'failed': 0}
+    session.post.assert_not_called()
+    with isolated() as conn:
+        row = conn.execute("SELECT status,attempts FROM scanner_telegram_outbox").fetchone()
+        assert (row['status'], row['attempts']) == ('cancelled', 0)
+
+
 @pytest.mark.parametrize('fault', ['missing_topic', 'shared_topic', 'wrong_ack', 'expired_lease'])
 def test_queued_activity_cannot_spill_or_retry_unknown(isolated, monkeypatch, fault):
-    seed_filing(monkeypatch, 'SCHEDULE 13G')
+    seed_filing(monkeypatch, '4')
     session = Mock()
     response = Mock()
     response.json.return_value = {'ok': True, 'result': {

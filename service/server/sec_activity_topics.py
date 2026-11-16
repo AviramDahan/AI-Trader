@@ -254,15 +254,6 @@ def enqueue(job, evidence, transactions, now, conn):
     if kind == 'ownership' and job['form'] == '4':
         details = _insider_text(transactions, accepted.date())
         heading = '👤 עסקאות בעלי עניין · Form 4'
-    elif kind == 'beneficial_ownership':
-        holdings = evidence['holdings']
-        if date.fromisoformat(holdings['reported_date']) > accepted.date():
-            return False
-        heading = '🏦 החזקה מדווחת · ' + job['form']
-        details = f'תאריך האירוע המדווח {holdings["reported_date"]}\nסוג נייר {holdings["security"]}\n'
-        details += '\n'.join(f'• {p["name"]} · {p["percent"]}% מהסוג המדווח' for p in holdings['persons'])
-        if holdings['additional_person_count']:
-            details += f'\nועוד {holdings["additional_person_count"]} מדווחים'
     elif kind == 'financial' and evidence.get('buyback_cash'):
         from sec_intelligence import _public_compact_usd
         fact = evidence['buyback_cash']
@@ -302,6 +293,10 @@ def enqueue(job, evidence, transactions, now, conn):
 def deliver(row, cfg, now, send):
     try:
         payload = json.loads(row['message'])
+        # Older version-1 envelopes identify Schedule 13D/G notices by the heading.
+        if (row['event_type'] == 'ownership_activity' and isinstance(payload.get('text'), str)
+                and payload['text'].startswith('🏦 החזקה מדווחת · ')):
+            return 'sec_activity_suppressed'
         thread = destination(row['event_type'], payload['accepted_at'], now)
         if (type(payload.get('version')) is int and payload['version'] == 1 and thread and thread == payload['thread']
                 and isinstance(payload['text'], str) and payload['text']

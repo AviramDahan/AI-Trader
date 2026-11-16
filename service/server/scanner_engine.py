@@ -1754,16 +1754,19 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             from sec_activity_topics import deliver
             result = deliver(row, cfg, datetime.now(UTC), send_telegram)
             delivered = result == 'sent'
+            suppressed = result == 'sec_activity_suppressed'
+            status = 'cancelled' if suppressed else 'sent' if delivered else 'failed'
+            last_error = 'reported_holding_suppressed' if suppressed else (
+                None if delivered else 'sec_activity_delivery_failed_or_unverified')
             with get_db_connection() as activity_conn:
                 activity_conn.execute("""UPDATE scanner_telegram_outbox
-                    SET status=?,attempts=attempts+1,sent_at=?,last_error=?
+                    SET status=?,attempts=attempts+?,sent_at=?,last_error=?
                     WHERE id=? AND status='sec_topic_sending' AND next_attempt_at=?""",
-                    ('sent' if delivered else 'failed', now_z() if delivered else None,
-                     None if delivered else 'sec_activity_delivery_failed_or_unverified',
+                    (status, int(not suppressed), now_z() if delivered else None, last_error,
                      row['id'], row['next_attempt_at']))
                 activity_conn.commit()
             sent += int(delivered)
-            failed += int(not delivered)
+            failed += int(not delivered and not suppressed)
             continue
         if row['event_type'] == 'sec_intelligence' and row['dedupe_key'].startswith('sec-intelligence:'):
             # Old unsent financial notices retain their durable key/receipt but

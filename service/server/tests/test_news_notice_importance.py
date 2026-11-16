@@ -74,14 +74,8 @@ def test_activity_topics_keep_heading_and_queue_contract(monkeypatch):
            'issuer_cik': '1', 'tickers_json': '["SYN"]', 'universe_snapshot_id': 1}
     holdings = {'reported_date': '2026-11-13', 'security': 'Common stock',
                 'persons': [{'name': 'Synthetic Fund', 'percent': '6'}], 'additional_person_count': 0}
-    assert sec_activity_topics.enqueue(job, {'kind': 'beneficial_ownership', 'holdings': holdings}, [], now, conn)
-    key, kind, packed, *_ = conn.execute.call_args.args[1]
-    assert kind == 'ownership_activity' and key == 'sec-activity:v1:ownership_activity:synthetic'
-    envelope = json.loads(packed)
-    assert envelope['version'] == 1 and envelope['thread'] == 41
-    heading, priority, *_ = envelope['text'].splitlines()
-    assert '13G' in heading and priority.startswith('מידע למעקב')
-    assert 'רכישה' not in envelope['text']
+    assert not sec_activity_topics.enqueue(job, {'kind': 'beneficial_ownership', 'holdings': holdings}, [], now, conn)
+    conn.execute.assert_not_called()
     assert sec_activity_topics.enqueue({**job, 'form': '10-Q'},
         {'kind': 'financial', 'buyback_cash': {'usd_paid': '2000000', 'start': '2026-01-01', 'end': '2026-09-30'}},
         [], now, conn)
