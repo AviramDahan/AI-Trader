@@ -1,4 +1,5 @@
 import json
+import requests
 import os
 import sys
 import tempfile
@@ -1230,6 +1231,46 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(result["status"], "degraded")
         self.assertEqual(len(result["items"]), 1)
         self.assertEqual(len(result["errors"]), 1)
+
+    def test_failed_due_source_does_not_mark_other_fresh_sources_failed(self):
+        from scanner_engine import set_service_status
+
+        news_pipeline.initialize_providers(self.clock)
+        with database.get_db_connection() as conn:
+            conn.execute("UPDATE scanner_news_providers SET next_check_at=? WHERE provider='sec_edgar'",
+                         ((self.clock - timedelta(seconds=1)).isoformat(),))
+            conn.execute("""UPDATE scanner_news_providers SET status='not_modified',
+                last_success_at=?,next_check_at=? WHERE provider='federal_reserve'""",
+                (self.clock.isoformat(), (self.clock + timedelta(minutes=5)).isoformat()))
+
+        def sec_timeout(state, at):
+            raise requests.exceptions.Timeout('sec_response_deadline')
+
+        with patch('scanner_engine.set_service_status', wraps=set_service_status) as report:
+            news_pipeline.run_feed_cycle({
+                'sec_edgar': sec_timeout, 'federal_reserve': lambda state, at: self.fail('source checked before its cadence'),
+            }, self.clock)
+        self.assertEqual(report.call_args.args[:2], ('news_feed', 'degraded'))
+        self.assertFalse(report.call_args.kwargs['success'])
+
+    def test_sec_atom_deadline_keeps_independent_submissions(self):
+        cik = '0000320193'
+        recent = {'accessionNumber': ['0000320193-26-000001'],
+                  'acceptanceDateTime': ['2026-09-14T12:00:00Z'],
+                  'primaryDocument': ['report.htm'], 'form': ['8-K']}
+        with patch.dict(os.environ, {'NEWS_SEC_USER_AGENT': 'AI-Trader test test@example.com'}), \
+             patch.object(news_pipeline, '_sec_ticker_map', return_value={cik: ['AAPL']}), \
+             patch.object(news_pipeline, '_sec_priority_ciks', return_value=([cik], 1)), \
+             patch.object(news_pipeline, '_sec_request', side_effect=[
+                 requests.exceptions.Timeout('sec_response_deadline'),
+                 (json.dumps({'name': 'Apple Inc.', 'filings': {'recent': recent}}).encode(), {'etag': 'submission'}),
+             ]):
+            result = news_pipeline._fetch_sec({'etag': 'prior-atom'}, self.clock)
+        self.assertEqual(result['status'], 'degraded')
+        self.assertEqual(result['errors'], ['edgar_current:Timeout'])
+        self.assertEqual(len(result['items']), 1)
+        self.assertEqual(result['checkpoint']['submissions'][cik]['last_accession'], '0000320193-26-000001')
+        self.assertNotIn('etag', result)
 
     def test_sec_submissions_checkpoint_overlap_and_accession_dedupe_survive_cycles(self):
         cik = "0000320193"

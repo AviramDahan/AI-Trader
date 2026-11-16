@@ -3,10 +3,10 @@ import re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-REASONS = {'stale_or_missing_bars', 'TimeoutError', 'ReadTimeout', 'ConnectTimeout',
+REASONS = {'stale_or_missing_bars', 'Timeout', 'TimeoutError', 'ReadTimeout', 'ConnectTimeout',
            'ConnectionError', 'HTTPError', 'ValueError', 'RuntimeError',
            'OperationalError', 'invalid_json', 'budget_exhausted', 'news_quality_rejected'}
-STATUSES = {'ok','error','idle','market_closed','no_new','no_signals','waiting','degraded'}
+STATUSES = {'ok','error','idle','market_closed','no_new','no_signals','waiting','degraded','backoff','not_modified'}
 
 
 def component_failed(row, now):
@@ -21,7 +21,7 @@ def component_failed(row, now):
         return False
     age = ((now-datetime.fromisoformat(row['last_attempt_at'].replace('Z','+00:00'))).total_seconds()
            if row['last_attempt_at'] else 0)
-    return age > {'monitor':900,'quotes':900,'backup':7500,'scan':7200,'telegram':180}.get(row['component'],86400)
+    return age > {'monitor':900,'quotes':900,'backup':7500,'scan':7200,'telegram':180,'news_feed':900}.get(row['component'],86400)
 
 
 def snapshot(row, now):
@@ -40,6 +40,24 @@ def snapshot(row, now):
     return out
 
 
+def feed_recovery_confirmed(state, context, provider_rows, now):
+    """Wait for a real check of the failed sources when the worker resumes."""
+    good = {'ok', 'no_new', 'not_modified'}
+
+    def checked_after_failure(data, statuses):
+        try:
+            success = datetime.fromisoformat(data['last_success_at'].replace('Z', '+00:00'))
+            failure = datetime.fromisoformat(state['last_failure']['at'])
+            return data['status'] in statuses and failure <= success <= now
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return False
+
+    if not checked_after_failure(context, good | {'degraded'}):
+        return False
+    failed_sources = state['last_failure'].get('context', {}).get('news_feed', {}).get('failed_sources', [])
+    return all(checked_after_failure(provider_rows.get(name, {}), good) for name in failed_sources)
+
+
 def incident(previous, failed, context, now):
     state=dict(previous or {'active':False,'generation':0})
     change='failure' if failed and not state['active'] else 'recovery' if not failed and state['active'] else None
@@ -56,6 +74,7 @@ def summary(context):
     for component, data in context.items():
         parts.append(component+': '+data['status'])
         parts.append('last_success_age_seconds: '+str(data.get('last_success_at_age_seconds','unknown')))
+        if data.get('failed_sources'):parts.append('failed_sources: ' + ', '.join(data['failed_sources']))
         if data['reason_codes']:parts.append('reason: '+', '.join(data['reason_codes']))
         if data['stale_tickers']:parts.append('stale_tickers: '+', '.join(data['stale_tickers']))
     return '\n'.join(parts)

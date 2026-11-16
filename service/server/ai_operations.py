@@ -221,7 +221,7 @@ def send_one():
 
 def health():
     from database import get_db_connection
-    from admin_health_context import snapshot, incident, health_message, component_failed
+    from admin_health_context import snapshot, incident, health_message, component_failed, feed_recovery_confirmed
     now=datetime.now(timezone.utc)
     with get_db_connection() as conn:
         states=conn.execute('SELECT component,status,last_attempt_at,last_success_at,detail FROM scanner_service_status').fetchall()
@@ -235,6 +235,23 @@ def health():
             context={r['component']:contexts[r['component']]}
             if r['component']=='monitor' and 'prices' in contexts:
                 context['prices']=contexts['prices']
+            if r['component'] == 'news_feed':
+                if failed and not state['active']:
+                    from news_pipeline import PROVIDERS
+                    failures = str(r['detail'] or '').partition(' errors=')[2]
+                    context['news_feed']['failed_sources'] = sorted({
+                        failure.partition(':')[0] for failure in failures.split(',')
+                        if failure.partition(':')[0] in PROVIDERS
+                    })
+                elif state['active'] and not failed:
+                    names = state.get('last_failure', {}).get('context', {}).get('news_feed', {}).get('failed_sources', [])
+                    providers = {}
+                    if names:
+                        placeholders = ','.join('?' for _ in names)
+                        providers = {row['provider']: row for row in conn.execute(
+                            "SELECT provider,status,last_success_at FROM scanner_news_providers "
+                            f"WHERE provider IN ({placeholders})", tuple(names))}
+                    failed = not feed_recovery_confirmed(state, context['news_feed'], providers, now)
             state,change=incident(state,failed,context,now)
             conn.execute('''INSERT INTO scanner_settings(key,value_json,updated_at) VALUES(?,?,?)
               ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at''',
