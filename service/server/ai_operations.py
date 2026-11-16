@@ -221,7 +221,7 @@ def send_one():
 
 def health():
     from database import get_db_connection
-    from admin_health_context import snapshot, incident, health_message, component_failed, feed_recovery_confirmed
+    from admin_health_context import snapshot, incident, health_message, component_failed, news_recovery_confirmed
     now=datetime.now(timezone.utc)
     with get_db_connection() as conn:
         states=conn.execute('SELECT component,status,last_attempt_at,last_success_at,detail FROM scanner_service_status').fetchall()
@@ -251,7 +251,9 @@ def health():
                         providers = {row['provider']: row for row in conn.execute(
                             "SELECT provider,status,last_success_at FROM scanner_news_providers "
                             f"WHERE provider IN ({placeholders})", tuple(names))}
-                    failed = not feed_recovery_confirmed(state, context['news_feed'], providers, now)
+                    failed = not news_recovery_confirmed(state, context['news_feed'], providers, now)
+            if r['component'] == 'news_ai' and state['active'] and not failed:
+                failed = not news_recovery_confirmed(state, context['news_ai'], {}, now, 'news_ai')
             state,change=incident(state,failed,context,now)
             conn.execute('''INSERT INTO scanner_settings(key,value_json,updated_at) VALUES(?,?,?)
               ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at''',

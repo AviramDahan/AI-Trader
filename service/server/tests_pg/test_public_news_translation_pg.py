@@ -48,11 +48,42 @@ def test_legacy_translation_uses_null_scores_and_no_repeat_on_postgres(pg,monkey
     news_pipeline.ingest_items([item],at)
     analyzer=lambda rows:[dict(id=r['id'],title_he='פורסמה החלטת ריבית',summary_he='פורסמה החלטת הריבית.',
         _public_translation_only=True,duplicate_of=0) for r in rows]
-    assert news_pipeline.analyze_news_jobs(analyzer=analyzer,at=at)['alerts']==1
-    assert news_pipeline.analyze_news_jobs(analyzer=analyzer,at=at)['analyzed']==0
+    with get_db_connection() as holder:
+        holder.execute("SELECT pg_advisory_xact_lock(719321, 1)")
+        assert news_pipeline.analyze_news_jobs(analyzer=analyzer,at=at)['alerts']==1
+        assert news_pipeline.analyze_news_jobs(analyzer=analyzer,at=at)['analyzed']==0
     with get_db_connection() as c:
         row=c.execute('SELECT * FROM scanner_news').fetchone()
         assert row['analysis_status']=='public_translated'
         assert all(row[k] is None for k in ('relevance','sentiment','materiality','interpretation_he'))
         assert c.execute('SELECT count(*) n FROM scanner_telegram_outbox').fetchone()['n']==1
         assert c.execute('SELECT count(*) n FROM scanner_signals').fetchone()['n']==0
+
+
+def test_model_result_for_revised_source_does_not_publish(pg, monkeypatch):
+    from datetime import datetime, timezone
+
+    from database import get_db_connection
+    import news_pipeline
+
+    monkeypatch.setenv('NEWS_EVENTS_RUNTIME', 'false')
+    monkeypatch.setenv('NEWS_EVIDENCE_ENABLED', 'false')
+    monkeypatch.setenv('STOCK_SCANNER_PUBLIC_TRANSLATION_ONLY_ENABLED', 'true')
+    at = datetime.now(timezone.utc)
+    item = {'provider': 'federal_reserve', 'publisher': 'fixture',
+            'title': 'Federal Reserve announces rate decision',
+            'url': 'https://example.test/revised-decision', 'published_at': at.isoformat(),
+            'source_excerpt': 'The Federal Reserve announced an interest rate decision.',
+            'source_kind': 'headline_summary', 'headline_only': False}
+    news_pipeline.ingest_items([item], at)
+
+    def analyzer(rows):
+        revised = {**item, 'source_excerpt': 'The Federal Reserve corrected the published rate decision.'}
+        news_pipeline.ingest_items([revised], at)
+        return [dict(id=rows[0]['id'], title_he='פורסמה החלטת ריבית',
+                     summary_he='פורסמה החלטת הריבית.', _public_translation_only=True, duplicate_of=0)]
+
+    assert news_pipeline.analyze_news_jobs(analyzer=analyzer, at=at)['analyzed'] == 0
+    with get_db_connection() as c:
+        assert c.execute('SELECT status FROM scanner_news_jobs').fetchone()['status'] == 'pending'
+        assert c.execute('SELECT count(*) n FROM scanner_telegram_outbox').fetchone()['n'] == 0

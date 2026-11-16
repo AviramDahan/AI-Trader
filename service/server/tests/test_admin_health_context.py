@@ -1,4 +1,5 @@
 import json
+import pytest
 import sys
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -207,8 +208,9 @@ def test_periodic_monitor_staleness_detection_unchanged(monkeypatch):
     assert queue.call_args.args[0] == 'health:monitor:1'
 
 
-def test_news_feed_backoff_does_not_recover_an_active_incident(monkeypatch):
-    row = {'component': 'news_feed', 'status': 'error', 'last_attempt_at': NOW.isoformat(),
+@pytest.mark.parametrize('component', ['news_feed', 'news_ai'])
+def test_news_backoff_does_not_recover_an_active_incident(monkeypatch, component):
+    row = {'component': component, 'status': 'error', 'last_attempt_at': NOW.isoformat(),
            'last_success_at': (NOW - timedelta(minutes=5)).isoformat(), 'detail': ''}
     import ai_operations
     run, queue, _ = health_driver(monkeypatch, row)
@@ -229,12 +231,12 @@ def test_news_feed_backoff_does_not_recover_an_active_incident(monkeypatch):
     row.update(status='ok', last_attempt_at=now[0].isoformat(), last_success_at=now[0].isoformat())
     run()
     assert [call.args[0] for call in queue.call_args_list] == [
-        'health:news_feed:1', 'health_recovered:news_feed:1'
+        f'health:{component}:1', f'health_recovered:{component}:1'
     ]
 
 
 def test_feed_recovery_waits_for_the_source_that_failed():
-    from admin_health_context import feed_recovery_confirmed
+    from admin_health_context import news_recovery_confirmed
 
     now = NOW + timedelta(minutes=5)
     state = {'last_failure': {'at': NOW.isoformat(), 'context': {
@@ -243,8 +245,8 @@ def test_feed_recovery_waits_for_the_source_that_failed():
     aggregate = {'status': 'degraded', 'last_success_at': now.isoformat()}
     unavailable = {'status': 'error', 'last_success_at': (NOW - timedelta(minutes=1)).isoformat()}
     recovered = {'status': 'not_modified', 'last_success_at': now.isoformat()}
-    assert not feed_recovery_confirmed(state, aggregate, {'sec_edgar': unavailable}, now)
-    assert feed_recovery_confirmed(state, aggregate, {'sec_edgar': recovered}, now)
+    assert not news_recovery_confirmed(state, aggregate, {'sec_edgar': unavailable}, now)
+    assert news_recovery_confirmed(state, aggregate, {'sec_edgar': recovered}, now)
 
 
 def test_news_feed_dead_worker_still_alerts():
