@@ -135,6 +135,40 @@ def test_telegram_news_ingestion_recovers_without_accounting_lock(pg, monkeypatc
         assert conn.execute("SELECT count(*) n FROM scanner_news_sources").fetchone()['n'] == 1
 
 
+def test_news_batch_retry_preserves_committed_articles(pg, monkeypatch):
+    from datetime import datetime, timezone
+
+    import news_pipeline
+    import news_source_metadata
+
+    now = datetime.now(timezone.utc)
+    items = [{'title': f'Central bank policy notice {n}', 'publisher': 'Synthetic wire',
+              'provider': 'telegram_channels', 'url': f'https://example.test/news/{n}',
+              'published_at': now.isoformat()} for n in range(9)]
+    retain = news_source_metadata.retain
+    calls = 0
+
+    def interrupted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 9:
+            raise ValueError('interrupted second batch')
+        return retain(*args, **kwargs)
+
+    with monkeypatch.context() as attempt:
+        attempt.setattr(news_source_metadata, 'retain', interrupted)
+        with pytest.raises(ValueError, match='interrupted second batch'):
+            news_pipeline.ingest_items(items, now)
+
+    with database.get_db_connection() as conn:
+        assert conn.execute('SELECT count(*) n FROM scanner_news').fetchone()['n'] == 8
+    result = news_pipeline.ingest_items(items, now)
+    assert result['inserted'] == 1 and result['duplicates'] == 8
+    with database.get_db_connection() as conn:
+        assert conn.execute('SELECT count(*) n FROM scanner_news_sources').fetchone()['n'] == 9
+        assert conn.execute('SELECT count(*) n FROM scanner_news_jobs').fetchone()['n'] == 9
+
+
 def _sqlite_portfolio(tmp_path):
     # Reuse original engine and simulation rules, only isolated database/provider.
     path=tmp_path/'source.db'
