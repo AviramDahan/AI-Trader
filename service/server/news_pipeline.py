@@ -796,6 +796,9 @@ def _scope_context(tickers: list[str], published_at: str) -> tuple[str, int | No
 
 
 def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dict[str, int]:
+    if not items:
+        return dict(received=0, inserted=0, sources=0, linked=0, duplicates=0,
+                    rejected_invalid=0, rejected_date=0)
     # Human-requested all-topic Trump notifications are not financial news AI
     # jobs, scanner evidence or a relevance/materiality exception for other feeds.
     from trump_truth_posts import KIND, ingest as ingest_trump
@@ -1025,13 +1028,17 @@ def _reconcile_source_publication_times(provider: str, items: list[dict[str, Any
     assigned collection time. Preserve the rows but remove stale items from
     the fresh-analysis queue and verified sentiment display.
     """
-    changed = 0
-    conn = get_db_connection(); cur = conn.cursor(); begin_write_transaction(cur)
+    candidates = []
     for item in items:
         published = _published_time(item.get("published_at"))
         url = _canonical_url(item.get("url", ""))
-        if not published or not url:
-            continue
+        if published and url:
+            candidates.append((published, url))
+    if not candidates:
+        return 0
+    changed = 0
+    conn = get_db_connection(); cur = conn.cursor(); begin_write_transaction(cur)
+    for published, url in candidates:
         cur.execute("SELECT id,published_at,source_facts_json,content_hash,analysis_status FROM scanner_news WHERE provider=? AND url=?",
                     (provider, url))
         row = cur.fetchone()

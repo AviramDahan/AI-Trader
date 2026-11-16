@@ -282,10 +282,14 @@ def prepare(limit=1,at=None,completion=None):
     """One leased preparation per cycle. No transaction spans generation."""
     if limit!=1:raise ValueError('translation_limit')
     from database import get_db_connection,begin_write_transaction,using_postgres
+    postgres = using_postgres()
+    row_lock = ' FOR UPDATE' if postgres else ''
     stamp=(at or datetime.now(timezone.utc)).isoformat()
     lease=((at or datetime.now(timezone.utc))+timedelta(seconds=LEASE_SECONDS)).isoformat()
     with get_db_connection() as c:
-        cur=c.cursor();begin_write_transaction(cur)
+        cur=c.cursor()
+        if not postgres:
+            begin_write_transaction(cur)
         # Safe to retry preparation after a crash: these states NEVER sent.
         cur.execute('UPDATE scanner_telegram_outbox SET status=? WHERE status=? AND next_attempt_at<=?',(PENDING,WORKING,stamp))
         from trump_truth_media import PENDING as MEDIA_PENDING,WORKING as MEDIA_WORKING,READY as MEDIA_READY
@@ -296,7 +300,7 @@ def prepare(limit=1,at=None,completion=None):
         cur.execute('UPDATE scanner_telegram_outbox SET status=? WHERE status=? AND next_attempt_at<=?',(BPENDING,BWORKING,stamp))
         cur.execute('UPDATE scanner_telegram_outbox SET status=? WHERE status=? AND next_attempt_at<=?',(APENDING,AWORKING,stamp))
         query='SELECT * FROM scanner_telegram_outbox WHERE event_type=? AND status IN (?,?,?,?) AND next_attempt_at<=? ORDER BY id LIMIT 1'
-        if using_postgres():query+=' FOR UPDATE SKIP LOCKED'
+        if postgres:query+=' FOR UPDATE SKIP LOCKED'
         found=cur.execute(query,('trump_truth_post',PENDING,MEDIA_PENDING if enabled() else PENDING,BPENDING,APENDING,stamp)).fetchone()
         if not found:return {'prepared':0,'deferred':0}
         row=dict(found)
@@ -325,9 +329,12 @@ def prepare(limit=1,at=None,completion=None):
             return {'prepared':0,'deferred':1}
     key=cache_key(row)
     with get_db_connection() as c:
-        cur=c.cursor();begin_write_transaction(cur)
-        active=cur.execute('SELECT status,next_attempt_at FROM scanner_telegram_outbox WHERE id=?',(row['id'],)).fetchone()
-        if not active or active['status']!=working or active['next_attempt_at']!=lease:return {'prepared':0,'deferred':0}
+        cur=c.cursor()
+        if not postgres:
+            begin_write_transaction(cur)
+        active=cur.execute('SELECT status,next_attempt_at,message FROM scanner_telegram_outbox WHERE id=?'+row_lock,(row['id'],)).fetchone()
+        if (not active or active['status']!=working or active['next_attempt_at']!=lease
+                or active['message']!=row['message']):return {'prepared':0,'deferred':0}
         old=cur.execute('SELECT value_json FROM scanner_settings WHERE key=?',(key,)).fetchone()
         try:
             if old and len(old['value_json'].encode())>8192:raise ValueError('translation_cache_invalid')
@@ -366,8 +373,10 @@ def prepare(limit=1,at=None,completion=None):
     finish=at or datetime.now(timezone.utc)
     current=eligible(row,finish)
     with get_db_connection() as c:
-        cur=c.cursor();begin_write_transaction(cur)
-        active=cur.execute('SELECT status,next_attempt_at,message FROM scanner_telegram_outbox WHERE id=?',(row['id'],)).fetchone()
+        cur=c.cursor()
+        if not postgres:
+            begin_write_transaction(cur)
+        active=cur.execute('SELECT status,next_attempt_at,message FROM scanner_telegram_outbox WHERE id=?'+row_lock,(row['id'],)).fetchone()
         if (not active or active['status']!=working or active['next_attempt_at']!=lease
             or active['message']!=row['message'] or finish.isoformat()>=lease):return {'prepared':0,'deferred':0}
         if not current or binding(row,current)!=value['binding']:

@@ -212,9 +212,19 @@ def fence(cursor, item):
                 environment_not_before=environment_boundary)
 
 
+def begin_source_write(cursor):
+    from database import begin_write_transaction, using_postgres
+    if using_postgres():
+        # Serialize source revisions and album member claims independently of
+        # portfolio accounting. Mode changes still require stopped role leases.
+        cursor.execute('SELECT pg_advisory_xact_lock(719329, 3)')
+    else:
+        begin_write_transaction(cursor)
+
+
 def ingest(items, at=None):
     """Atomic outbox insert before reader checkpoint; repeated live/catch-up is safe."""
-    from database import get_db_connection, begin_write_transaction
+    from database import get_db_connection
     from scanner_engine import enqueue_telegram
     current = at or datetime.now(timezone.utc)
     result = dict(received=len(items), inserted=0, sources=0, linked=0, duplicates=0,
@@ -229,7 +239,7 @@ def ingest(items, at=None):
         return result  # Never silently fall back to a one-language contract.
     conn = get_db_connection()
     try:
-        cur = conn.cursor(); begin_write_transaction(cur)
+        cur = conn.cursor(); begin_source_write(cur)
         for item in items:
             if not valid_item(item, current):
                 result['rejected_invalid'] += 1

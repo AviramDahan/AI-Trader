@@ -132,11 +132,16 @@ def receipt(row,conn=None):
 
 
 def _save(row,value,expected,at=None):
-    from database import get_db_connection,begin_write_transaction
+    from database import get_db_connection,begin_write_transaction,using_postgres
     _checked(row,value)
     with get_db_connection() as c:
-        begin_write_transaction(c.cursor())
-        active=c.execute('SELECT status,message,next_attempt_at FROM scanner_telegram_outbox WHERE id=?',(row['id'],)).fetchone()
+        postgres = using_postgres()
+        if not postgres:
+            begin_write_transaction(c.cursor())
+        query = 'SELECT status,message,next_attempt_at FROM scanner_telegram_outbox WHERE id=?'
+        if postgres:
+            query += ' FOR UPDATE'
+        active = c.execute(query, (row['id'],)).fetchone()
         stamp=media._instant(at or _now())
         if (not active or active['status']!=SENDING or active['message']!=row['message']
             or active['next_attempt_at']!=row.get('next_attempt_at') or stamp>=media._instant(active['next_attempt_at'])):raise ValueError('bilingual_lease_revoked')

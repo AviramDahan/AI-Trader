@@ -56,6 +56,53 @@ def test_atomic_concurrent_outbox_claim(pg):
     assert engine._claim_telegram_outbox(20)==[]
 
 
+def test_trump_hebrew_delivery_while_accounting_lock_is_held(pg, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import stock_scanner
+    from trump_telegram_channel import CHANNEL_ID, extract
+    from trump_truth_posts import ingest
+    from trump_truth_translation import prepare
+
+    now = datetime.now(timezone.utc)
+    for key, value in {
+        'TELEGRAM_TRUMP_SOURCE': 'telegram_channel_v1',
+        'TELEGRAM_TRUMP_CHANNEL_ENABLED': 'true',
+        'TELEGRAM_TRUMP_TRUTH_ENABLED': 'false',
+        'TELEGRAM_TRUMP_TRUTH_HEBREW_ENABLED': 'true',
+        'TELEGRAM_TRUMP_TRUTH_BILINGUAL_ENABLED': 'false',
+        'TELEGRAM_TRUMP_TRUTH_MEDIA_ENABLED': 'false',
+        'TELEGRAM_MARKET_NEWS_THREAD_ID': '991',
+        'TELEGRAM_TRUMP_TRUTH_NOT_BEFORE': (now - timedelta(minutes=1)).isoformat(),
+    }.items():
+        monkeypatch.setenv(key, value)
+    post = SimpleNamespace(id=123, date=now, message='The price is 100 dollars.',
+                           peer_id=SimpleNamespace(channel_id=CHANNEL_ID))
+    item, error = extract(post, now)
+    assert error is None
+    sender = Mock(return_value='sent')
+    monkeypatch.setattr(stock_scanner, 'send_telegram', sender)
+    monkeypatch.setattr(stock_scanner, 'settings', lambda: {'telegram_enabled': True})
+    completion = Mock(side_effect=[
+        {'text_he': 'המחיר הוא 100 דולר.'},
+        {'faithful': True, 'fluent_hebrew': True, 'complete': True, 'unsupported_claims': False},
+    ])
+    with database.get_db_connection() as holder:
+        holder.execute("SELECT pg_advisory_xact_lock(719321, 1)")
+        assert ingest([item], now)['inserted'] == 1
+        assert ingest([item], now)['duplicates'] == 1
+        assert prepare(completion=completion)['prepared'] == 1
+        assert engine.process_telegram_outbox() == {'sent': 1, 'failed': 0}
+        assert engine.process_telegram_outbox() == {'sent': 0, 'failed': 0}
+    sender.assert_called_once()
+    assert 'המחיר הוא 100 דולר.' in sender.call_args.args[0]
+    assert 'The price' not in sender.call_args.args[0]
+    with database.get_db_connection() as conn:
+        row = conn.execute("SELECT status,sent_at FROM scanner_telegram_outbox").fetchone()
+        assert row['status'] == 'sent' and row['sent_at']
+
+
 def _sqlite_portfolio(tmp_path):
     # Reuse original engine and simulation rules, only isolated database/provider.
     path=tmp_path/'source.db'
