@@ -15,6 +15,7 @@ import re
 import threading
 import time
 import xml.etree.ElementTree as ET
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -36,6 +37,7 @@ TRACKING_PARAMS = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "source"}
 OFFICIAL_USER_AGENT = "AI-Trader/1.0 AviramDahan/AI-Trader"
 SEC_REQUEST_LOCK = threading.Lock()
 NEWS_ANALYSIS_LOCK = threading.Lock()
+NEWS_WRITE_BATCH_SIZE = 8
 SEC_LAST_REQUEST_AT = 0.0
 
 # Yahoo's ``relatedTickers`` is useful for discovery but is not authoritative
@@ -794,10 +796,9 @@ def initialize_providers(at: datetime | None = None) -> None:
     conn.commit(); conn.close()
 
 
-def _scope_context(tickers: list[str], published_at: str) -> tuple[str, int | None, list[int]]:
+def _scope_context(cur, tickers: list[str], published_at: str) -> tuple[str, int | None, list[int]]:
     if not tickers:
         return "market", None, []
-    conn = get_db_connection(); cur = conn.cursor()
     placeholders = ",".join("?" for _ in tickers)
     cur.execute(f"SELECT id,ticker,opened_at FROM scanner_trades WHERE status='open' AND is_shadow=0 AND ticker IN ({placeholders})", tuple(tickers))
     # Entry review may reuse recent pre-entry information, but an old feed
@@ -808,7 +809,7 @@ def _scope_context(tickers: list[str], published_at: str) -> tuple[str, int | No
     cur.execute(f"SELECT id FROM scanner_signals WHERE status IN ('ACTIVE','PENDING_ENTRY','ENTERED') AND ticker IN ({placeholders}) ORDER BY id DESC LIMIT 1", tuple(tickers))
     signal = cur.fetchone()
     cur.execute(f"SELECT ticker FROM scanner_news_watchlist WHERE enabled=1 AND ticker IN ({placeholders}) LIMIT 1", tuple(tickers))
-    watched = cur.fetchone(); conn.close()
+    watched = cur.fetchone()
     if trades:
         return "open_position", int(signal["id"]) if signal else None, [int(row["id"]) for row in trades]
     if signal:
@@ -825,6 +826,40 @@ def _begin_news_ingestion(cursor) -> None:
         cursor.execute("SELECT pg_advisory_xact_lock(719329, 4)")
     else:
         begin_write_transaction(cursor)
+
+
+def _news_write_batches(items):
+    # Commit each small PostgreSQL batch so the next source or analysis writer
+    # can acquire the shared lock. SQLite retains its original transaction.
+    size = NEWS_WRITE_BATCH_SIZE if using_postgres() else max(1, len(items))
+    for offset in range(0, len(items), size):
+        yield items[offset:offset + size]
+
+
+def _prepare_telegram_items(items):
+    if not any(item.get('provider') == 'telegram_channels' for item in items):
+        return items
+    from telegram_stock_mapping import match_stocks
+
+    companies = {}
+    try:
+        members = json.loads((ROOT / '.runtime/stock-universe.json').read_text(encoding='utf-8'))['members']
+        companies.update({symbol: value.get('company', '') for symbol, value in members.items()})
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    with get_db_connection() as conn:
+        for table in ('scanner_trades', 'scanner_signals', 'scanner_news_watchlist'):
+            for row in conn.execute(f'SELECT ticker,company FROM {table}'):
+                companies[row['ticker']] = row['company'] or companies.get(row['ticker'], '')
+
+    prepared = []
+    for item in items:
+        if item.get('provider') == 'telegram_channels':
+            headline = _strip_markup(item.get('title', ''))[:500]
+            evidence = match_stocks(headline + '\n' + str(item.get('source_excerpt') or ''), companies)
+            item = {**item, 'tickers': list(evidence), 'ticker_evidence': evidence}
+        prepared.append(item)
+    return prepared
 
 
 def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dict[str, int]:
@@ -856,35 +891,22 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
         from news_events.runtime import ingest_items as canonical_ingest
         return canonical_ingest(items, at)
     current = _now(at)
-    with get_db_connection() as conn:
-        cur = conn.cursor()
-        _begin_news_ingestion(cur)
-        return _ingest_regular_items(cur, items, current)
+    counts = Counter()
+    for batch in _news_write_batches(_prepare_telegram_items(items)):
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            _begin_news_ingestion(cur)
+            counts.update(_ingest_regular_items(cur, batch, current))
+    return dict(counts)
 
 
 def _ingest_regular_items(cur, items: list[dict[str, Any]], current: datetime) -> dict[str, int]:
     stamp = _z(current)
     inserted = sources = linked = duplicates = rejected_invalid = rejected_date = 0
-    companies = {}
-    if any(x.get('provider') == 'telegram_channels' for x in items):
-        # Local cached universe only: ingestion never waits on market data/LLM.
-        try:
-            members = json.loads((ROOT / '.runtime/stock-universe.json').read_text(encoding='utf-8'))['members']
-            companies.update({k:v.get('company','') for k,v in members.items()})
-        except (OSError,ValueError,KeyError,TypeError):
-            pass
-        for table in ('scanner_trades','scanner_signals','scanner_news_watchlist'):
-            for row in cur.execute(f'SELECT ticker,company FROM {table}').fetchall():
-                companies[row['ticker']] = row['company'] or companies.get(row['ticker'],'')
     for raw in items:
         item = dict(raw)
         item["title"] = _strip_markup(item.get("title", ""))[:500]
         item["url"] = _canonical_url(item.get("url", ""))
-        if item.get('provider') == 'telegram_channels':
-            from telegram_stock_mapping import match_stocks
-            evidence = match_stocks(item['title']+'\n'+str(item.get('source_excerpt') or ''), companies)
-            item['tickers'] = list(evidence)
-            item['ticker_evidence'] = evidence
         item["tickers"] = sorted({str(value).upper().replace(".", "-") for value in item.get("tickers") or []
                                     if re.fullmatch(r"[A-Za-z][A-Za-z0-9.-]{0,9}", str(value))})
         if not item["title"] or not item["url"] or not item.get("provider") or not item.get("publisher"):
@@ -900,7 +922,7 @@ def _ingest_regular_items(cur, items: list[dict[str, Any]], current: datetime) -
             rejected_date += 1
             continue
         canonical, source_key, version = _canonical_key(item), _source_key(item), _event_version(item)
-        scope, signal_id, trade_ids = _scope_context(item["tickers"], item["published_at"])
+        scope, signal_id, trade_ids = _scope_context(cur, item["tickers"], item["published_at"])
         # A syndicated source URL can belong to a canonical article whose
         # primary URL differs. Look in the source ledger as well, otherwise a
         # provider changing its headline creates a second visible article.
@@ -1075,29 +1097,30 @@ def _reconcile_source_publication_times(provider: str, items: list[dict[str, Any
     if not candidates:
         return 0
     changed = 0
-    with get_db_connection() as conn:
-        cur = conn.cursor()
-        _begin_news_ingestion(cur)
-        for published, url in candidates:
-            cur.execute("SELECT id,published_at,source_facts_json,content_hash,analysis_status FROM scanner_news WHERE provider=? AND url=?",
-                        (provider, url))
-            row = cur.fetchone()
-            if not row:
-                continue
-            date_changed = abs((published - _parse_time(row["published_at"])).total_seconds()) >= 60
-            facts = _loads(row["source_facts_json"], {})
-            facts["published_at"] = _z(published)
-            stale = published < at - timedelta(hours=_int_env("STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS", 168, 24, 720))
-            if not date_changed and (not stale or row["analysis_status"] == "stale_skipped"):
-                continue
-            cur.execute("""UPDATE scanner_news SET published_at=?,source_facts_json=?,analysis_status=CASE WHEN ? THEN 'stale_skipped' ELSE analysis_status END,
-                           updated_at=? WHERE id=?""", (_z(published), _json(facts), stale, _z(at), row["id"]))
-            cur.execute("UPDATE scanner_news_sources SET published_at=? WHERE news_id=? AND provider=? AND url=?",
-                        (_z(published), row["id"], provider, url))
-            if stale:
-                cur.execute("UPDATE scanner_news_jobs SET status='stale_skipped',updated_at=? WHERE news_id=?",
-                            (_z(at), row["id"]))
-            changed += int(date_changed or stale)
+    for batch in _news_write_batches(candidates):
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            _begin_news_ingestion(cur)
+            for published, url in batch:
+                cur.execute("SELECT id,published_at,source_facts_json,content_hash,analysis_status FROM scanner_news WHERE provider=? AND url=?",
+                            (provider, url))
+                row = cur.fetchone()
+                if not row:
+                    continue
+                date_changed = abs((published - _parse_time(row["published_at"])).total_seconds()) >= 60
+                facts = _loads(row["source_facts_json"], {})
+                facts["published_at"] = _z(published)
+                stale = published < at - timedelta(hours=_int_env("STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS", 168, 24, 720))
+                if not date_changed and (not stale or row["analysis_status"] == "stale_skipped"):
+                    continue
+                cur.execute("""UPDATE scanner_news SET published_at=?,source_facts_json=?,analysis_status=CASE WHEN ? THEN 'stale_skipped' ELSE analysis_status END,
+                               updated_at=? WHERE id=?""", (_z(published), _json(facts), stale, _z(at), row["id"]))
+                cur.execute("UPDATE scanner_news_sources SET published_at=? WHERE news_id=? AND provider=? AND url=?",
+                            (_z(published), row["id"], provider, url))
+                if stale:
+                    cur.execute("UPDATE scanner_news_jobs SET status='stale_skipped',updated_at=? WHERE news_id=?",
+                                (_z(at), row["id"]))
+                changed += int(date_changed or stale)
     return changed
 
 
