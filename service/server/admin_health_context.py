@@ -40,8 +40,8 @@ def snapshot(row, now):
     return out
 
 
-def feed_recovery_confirmed(state, context, provider_rows, now):
-    """Wait for a real check of the failed sources when the worker resumes."""
+def news_recovery_confirmed(state, context, provider_rows, now, component="news_feed"):
+    """Wait for new successful work and any named sources to recover."""
     good = {'ok', 'no_new', 'not_modified'}
 
     def checked_after_failure(data, statuses):
@@ -54,7 +54,7 @@ def feed_recovery_confirmed(state, context, provider_rows, now):
 
     if not checked_after_failure(context, good | {'degraded'}):
         return False
-    failed_sources = state['last_failure'].get('context', {}).get('news_feed', {}).get('failed_sources', [])
+    failed_sources = state['last_failure'].get('context', {}).get(component, {}).get('failed_sources', [])
     return all(checked_after_failure(provider_rows.get(name, {}), good) for name in failed_sources)
 
 

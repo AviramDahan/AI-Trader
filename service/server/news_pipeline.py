@@ -1679,13 +1679,33 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
         from scanner_engine import set_service_status
         set_service_status("news_ai", "error", type(exc).__name__)
         return {"analyzed": 0, "alerts": 0, "errors": [type(exc).__name__]}
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        _begin_news_ingestion(cur)
+        analyzed, alerts, errors = _persist_news_analysis(cur, rows, results, current, stamp, at)
+    from scanner_engine import set_service_status
+    conn = get_db_connection()
+    unresolved = conn.execute("SELECT COUNT(*) n FROM scanner_news_jobs WHERE status='retry'").fetchone()['n']
+    conn.close()
+    set_service_status("news_ai", ("degraded" if analyzed else "error") if unresolved else "ok",
+                       f"analyzed={analyzed} alerts_queued={alerts} unresolved={unresolved}", success=analyzed > 0)
+    return {"analyzed": analyzed, "alerts": alerts, "errors": errors}
+
+
+def _persist_news_analysis(cur, rows, results, current, stamp, at):
+    """Commit only the article version the analyzer actually reviewed."""
     by_id = {int(item.get("id")): item for item in results if isinstance(item, dict) and str(item.get("id", "")).isdigit()}
     analyzed = alerts = 0
     errors = []
-    conn = get_db_connection(); cur = conn.cursor(); begin_write_transaction(cur)
     from scanner_engine import enqueue_telegram
     from news_evidence import audit, needs_personal_route, publication_outcome, publication_allowed
     for row in rows:
+        current_job = cur.execute("""SELECT n.content_hash,n.published_at,j.status,j.attempts
+            FROM scanner_news n JOIN scanner_news_jobs j ON j.news_id=n.id
+            WHERE n.id=? AND j.id=?""", (row['id'], row['job_id'])).fetchone()
+        if (not current_job or current_job['status'] not in {'pending', 'retry'}
+                or any(current_job[key] != row[key] for key in ('content_hash', 'published_at', 'attempts'))):
+            continue
         alerts_before = alerts
         result = by_id.get(int(row["id"]))
         if result and result.get('_news_version'):
@@ -1902,14 +1922,7 @@ def _analyze_news_jobs(limit=None, analyzer=None, at=None):
             if public_reason:audit(cur,row,result,reason=public_reason,at=stamp)
         publication_outcome(cur, row, result, alerts - alerts_before, stamp)
 
-    conn.commit(); conn.close()
-    from scanner_engine import set_service_status
-    conn = get_db_connection()
-    unresolved = conn.execute("SELECT COUNT(*) n FROM scanner_news_jobs WHERE status='retry'").fetchone()['n']
-    conn.close()
-    set_service_status("news_ai", ("degraded" if analyzed else "error") if unresolved else "ok",
-                       f"analyzed={analyzed} alerts_queued={alerts} unresolved={unresolved}", success=analyzed > 0)
-    return {"analyzed": analyzed, "alerts": alerts, "errors": errors}
+    return analyzed, alerts, errors
 
 
 def provider_statuses() -> list[dict[str, Any]]:
