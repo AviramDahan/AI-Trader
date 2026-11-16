@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 import requests
 from telegram_news_reader import fetch_telegram_news
 
-from database import begin_write_transaction, get_db_connection
+from database import begin_write_transaction, get_db_connection, using_postgres
 
 
 UTC = timezone.utc
@@ -587,7 +587,22 @@ def _fetch_sec(state: dict[str, Any], at: datetime) -> dict[str, Any]:
         raise ValueError("NEWS_SEC_USER_AGENT must identify the operator and contact email")
     mapping = _sec_ticker_map(user_agent, at)
     url = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&output=atom&count=100"
-    content, meta = _sec_request(url, state, user_agent)
+    checkpoint = _loads(state.get("checkpoint_json"), {})
+    atom_error = None
+    partial_errors: list[str] = []
+    content, meta = None, {}
+    atom_retry_at = _published_time(checkpoint.get("edgar_current_retry_at"))
+    if atom_retry_at is not None and atom_retry_at > at:
+        partial_errors.append("edgar_current:Timeout")
+    else:
+        try:
+            content, meta = _sec_request(url, state, user_agent)
+        except requests.exceptions.Timeout as exc:
+            atom_error = exc
+            partial_errors.append("edgar_current:Timeout")
+            checkpoint["edgar_current_retry_at"] = _z(at + timedelta(minutes=10))
+        else:
+            checkpoint.pop("edgar_current_retry_at", None)
     raw = [] if content is None else _rss_items(content, "sec_edgar", "U.S. Securities and Exchange Commission (SEC)",
                                                  "universe", "filing_metadata", "company")
     output = []
@@ -601,12 +616,10 @@ def _fetch_sec(state: dict[str, Any], at: datetime) -> dict[str, Any]:
         if filer:
             item["publisher"] = filer.group(1).strip() + " (SEC EDGAR filer)"
         output.append(item)
-    checkpoint = _loads(state.get("checkpoint_json"), {})
     submissions = checkpoint.setdefault("submissions", {})
     request_limit = _int_env("STOCK_SCANNER_SEC_SUBMISSIONS_PER_CYCLE", 4, 1, 20)
     selected, next_offset = _sec_priority_ciks(mapping, checkpoint, request_limit)
-    partial_errors: list[str] = []
-    submission_304 = 0
+    submission_304 = submissions_succeeded = retry_seconds = 0
     for cik in selected:
         cik_state = dict(submissions.get(cik) or {})
         try:
@@ -617,6 +630,7 @@ def _fetch_sec(state: dict[str, Any], at: datetime) -> dict[str, Any]:
                                 "last_accession": cik_state.get("last_accession")}
             if body is None:
                 submission_304 += 1
+                submissions_succeeded += 1
                 continue
             payload = json.loads(body)
             items = _sec_submission_items(payload, cik, mapping.get(cik, []), at)
@@ -624,17 +638,26 @@ def _fetch_sec(state: dict[str, Any], at: datetime) -> dict[str, Any]:
             recent_accessions = ((payload.get("filings") or {}).get("recent") or {}).get("accessionNumber") or []
             if recent_accessions:
                 submissions[cik]["last_accession"] = recent_accessions[0]
-        except ProviderRateLimited:
-            raise
+            submissions_succeeded += 1
+        except ProviderRateLimited as exc:
+            if not output and not submissions_succeeded:
+                raise
+            retry_seconds = exc.retry_after
+            partial_errors.append("edgar_submissions:rate_limited")
+            break
         except Exception as exc:
             submissions[cik] = {**cik_state, "last_checked_at": _z(at), "error": type(exc).__name__}
             partial_errors.append(f"CIK{cik}:{type(exc).__name__}")
-    checkpoint["cik_offset"] = next_offset
+    if not retry_seconds:
+        checkpoint["cik_offset"] = next_offset
+    if atom_error is not None and not submissions_succeeded:
+        raise atom_error
     coverage = (f"Latest 100 EDGAR feed plus {len(selected)} bounded company Submissions API checks; "
                 "open positions/watchlist prioritized; verified CIK/ticker mapping")
     status = "degraded" if partial_errors else ("not_modified" if content is None and submission_304 == len(selected) else "ok")
     return {"items": output, **meta, "checkpoint": checkpoint, "coverage": coverage,
-            "errors": partial_errors, "not_modified_count": submission_304 + int(content is None), "status": status}
+            "errors": partial_errors, "not_modified_count": submission_304 + int(meta.get("not_modified", False)),
+            "retry_seconds": retry_seconds, "status": status}
 
 
 def _priority_tickers(limit: int, checkpoint: dict[str, Any]) -> tuple[list[tuple[str, str]], dict[str, Any], str]:
@@ -795,6 +818,15 @@ def _scope_context(tickers: list[str], published_at: str) -> tuple[str, int | No
     return "universe", None, []
 
 
+def _begin_news_ingestion(cursor) -> None:
+    if using_postgres():
+        # Serialize shared article/source/job writes without queuing behind
+        # unrelated portfolio accounting transactions.
+        cursor.execute("SELECT pg_advisory_xact_lock(719329, 4)")
+    else:
+        begin_write_transaction(cursor)
+
+
 def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dict[str, int]:
     if not items:
         return dict(received=0, inserted=0, sources=0, linked=0, duplicates=0,
@@ -823,9 +855,16 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
     if active():
         from news_events.runtime import ingest_items as canonical_ingest
         return canonical_ingest(items, at)
-    current, stamp = _now(at), _z(at)
+    current = _now(at)
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        _begin_news_ingestion(cur)
+        return _ingest_regular_items(cur, items, current)
+
+
+def _ingest_regular_items(cur, items: list[dict[str, Any]], current: datetime) -> dict[str, int]:
+    stamp = _z(current)
     inserted = sources = linked = duplicates = rejected_invalid = rejected_date = 0
-    conn = get_db_connection(); cur = conn.cursor(); begin_write_transaction(cur)
     companies = {}
     if any(x.get('provider') == 'telegram_channels' for x in items):
         # Local cached universe only: ingestion never waits on market data/LLM.
@@ -953,9 +992,9 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
                            WHERE id=?""", (item["published_at"], stamp,
                                            _json(source_metadata), existing_source["id"]))
         for trade_id in trade_ids:
-            cur.execute("SELECT id FROM scanner_trade_news WHERE trade_id=? AND news_id=?", (trade_id, news_id))
-            if not cur.fetchone():
-                cur.execute("INSERT INTO scanner_trade_news(trade_id,news_id,linked_at) VALUES(?,?,?)", (trade_id, news_id, stamp)); linked += 1
+            cur.execute("""INSERT INTO scanner_trade_news(trade_id,news_id,linked_at)
+                VALUES(?,?,?) ON CONFLICT(trade_id,news_id) DO NOTHING""", (trade_id, news_id, stamp))
+            linked += cur.rowcount
         cur.execute("SELECT provider,publisher,url,published_at FROM scanner_news_sources WHERE news_id=? ORDER BY id", (news_id,))
         alternates = [dict(row) for row in cur.fetchall()]
         precedence = {"market": 0, "universe": 1, "active_signal": 2, "watchlist": 3, "open_position": 4}
@@ -982,7 +1021,6 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
             cur.execute('SELECT verified_tickers_json FROM scanner_news WHERE id=?', (news_id,))
             verified = set(_loads(cur.fetchone()['verified_tickers_json'], [])) | set(item['tickers'])
             cur.execute('UPDATE scanner_news SET verified_tickers_json=? WHERE id=?', (_json(sorted(verified)), news_id))
-    conn.commit(); conn.close()
     return {"received": len(items), "inserted": inserted, "sources": sources, "linked": linked,
             "duplicates": duplicates, "rejected_invalid": rejected_invalid, "rejected_date": rejected_date}
 
@@ -1037,28 +1075,29 @@ def _reconcile_source_publication_times(provider: str, items: list[dict[str, Any
     if not candidates:
         return 0
     changed = 0
-    conn = get_db_connection(); cur = conn.cursor(); begin_write_transaction(cur)
-    for published, url in candidates:
-        cur.execute("SELECT id,published_at,source_facts_json,content_hash,analysis_status FROM scanner_news WHERE provider=? AND url=?",
-                    (provider, url))
-        row = cur.fetchone()
-        if not row:
-            continue
-        date_changed = abs((published - _parse_time(row["published_at"])).total_seconds()) >= 60
-        facts = _loads(row["source_facts_json"], {})
-        facts["published_at"] = _z(published)
-        stale = published < at - timedelta(hours=_int_env("STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS", 168, 24, 720))
-        if not date_changed and (not stale or row["analysis_status"] == "stale_skipped"):
-            continue
-        cur.execute("""UPDATE scanner_news SET published_at=?,source_facts_json=?,analysis_status=CASE WHEN ? THEN 'stale_skipped' ELSE analysis_status END,
-                       updated_at=? WHERE id=?""", (_z(published), _json(facts), stale, _z(at), row["id"]))
-        cur.execute("UPDATE scanner_news_sources SET published_at=? WHERE news_id=? AND provider=? AND url=?",
-                    (_z(published), row["id"], provider, url))
-        if stale:
-            cur.execute("UPDATE scanner_news_jobs SET status='stale_skipped',updated_at=? WHERE news_id=?",
-                        (_z(at), row["id"]))
-        changed += int(date_changed or stale)
-    conn.commit(); conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        _begin_news_ingestion(cur)
+        for published, url in candidates:
+            cur.execute("SELECT id,published_at,source_facts_json,content_hash,analysis_status FROM scanner_news WHERE provider=? AND url=?",
+                        (provider, url))
+            row = cur.fetchone()
+            if not row:
+                continue
+            date_changed = abs((published - _parse_time(row["published_at"])).total_seconds()) >= 60
+            facts = _loads(row["source_facts_json"], {})
+            facts["published_at"] = _z(published)
+            stale = published < at - timedelta(hours=_int_env("STOCK_SCANNER_NEWS_FEED_MAX_AGE_HOURS", 168, 24, 720))
+            if not date_changed and (not stale or row["analysis_status"] == "stale_skipped"):
+                continue
+            cur.execute("""UPDATE scanner_news SET published_at=?,source_facts_json=?,analysis_status=CASE WHEN ? THEN 'stale_skipped' ELSE analysis_status END,
+                           updated_at=? WHERE id=?""", (_z(published), _json(facts), stale, _z(at), row["id"]))
+            cur.execute("UPDATE scanner_news_sources SET published_at=? WHERE news_id=? AND provider=? AND url=?",
+                        (_z(published), row["id"], provider, url))
+            if stale:
+                cur.execute("UPDATE scanner_news_jobs SET status='stale_skipped',updated_at=? WHERE news_id=?",
+                            (_z(at), row["id"]))
+            changed += int(date_changed or stale)
     return changed
 
 
@@ -1134,6 +1173,7 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
             summary['scanner_bridge'] = bridge_scanner_news(current)
         except Exception as exc:
             summary['errors'].append('scanner_bridge:' + type(exc).__name__)
+    healthy_waiting = False
     for name, fetcher in fetchers.items():
         if provider_fetchers is None and name == 'telegram_channels':
             from telegram_news_reader import streaming_enabled
@@ -1145,6 +1185,10 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
             continue
         state = dict(row); cadence = _provider_cadence(name)
         if not force and _parse_time(state["next_check_at"]) > current:
+            if (state["status"] in {"ok", "no_new", "not_modified"}
+                    and _parse_time(state["last_success_at"], datetime.min.replace(tzinfo=UTC))
+                    >= current - timedelta(seconds=2 * cadence)):
+                healthy_waiting = True
             summary["providers_skipped_backoff"] += 1
             summary["providers"][name] = {"status": "backoff_not_checked"}
             continue
@@ -1198,10 +1242,12 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
         # canonical provider polling at their configured cadence.
         return summary
     from scanner_engine import set_service_status
-    if summary["providers_checked"] == 0:
+    source_succeeded = any(item.get("status") in {"ok", "no_new", "not_modified"}
+                           for item in summary["providers"].values())
+    if summary["providers_checked"] == 0 and not summary["errors"]:
         service_status = "backoff"
-    elif summary["errors"] and all(item.get("status") in {"error", "rate_limited", "config_required"}
-                                   for item in summary["providers"].values() if item.get("status") != "backoff_not_checked"):
+    elif summary["errors"] and not source_succeeded and not healthy_waiting and not any(
+            item.get("status") == "degraded" for item in summary["providers"].values()):
         service_status = "error"
     elif summary["errors"]:
         service_status = "degraded"
@@ -1213,7 +1259,7 @@ def run_feed_cycle(provider_fetchers: dict[str, Callable[[dict[str, Any], dateti
         service_status = "ok"
     set_service_status("news_feed", service_status,
                        f"checked={summary['providers_checked']} inserted={summary['items_inserted']} errors={','.join(summary['errors'])}",
-                       success=service_status in {"ok", "no_new", "not_modified", "degraded"})
+                       success=source_succeeded)
     from news_events.control import active
     if active():
         from news_events.runtime import pipeline

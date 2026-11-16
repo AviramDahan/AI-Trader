@@ -103,6 +103,38 @@ def test_trump_hebrew_delivery_while_accounting_lock_is_held(pg, monkeypatch):
         assert row['status'] == 'sent' and row['sent_at']
 
 
+def test_telegram_news_ingestion_recovers_without_accounting_lock(pg, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from news_pipeline import ingest_items, _reconcile_source_publication_times
+    import news_source_metadata
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    item = {'title': 'Central bank releases a new policy statement',
+            'publisher': 'Synthetic wire', 'provider': 'telegram_channels',
+            'url': 'https://example.test/news/test-feed', 'published_at': now.isoformat()}
+    corrected = {**item, 'published_at': (now - timedelta(minutes=2)).isoformat()}
+
+    with database.get_db_connection() as holder:
+        holder.execute("SELECT pg_advisory_xact_lock(719321, 1)")
+        with monkeypatch.context() as failed_attempt:
+            def fail_retention(*args, **kwargs):
+                raise ValueError('source ledger write interrupted')
+
+            failed_attempt.setattr(news_source_metadata, 'retain', fail_retention)
+            with pytest.raises(ValueError, match='source ledger write interrupted'):
+                ingest_items([item], now)
+        with ThreadPoolExecutor(2) as pool:
+            retried = list(pool.map(lambda _: ingest_items([item], now), range(2)))
+        assert sum(result['inserted'] for result in retried) == 1
+        assert sum(result['sources'] for result in retried) == 1
+        assert _reconcile_source_publication_times('telegram_channels', [corrected], now) == 1
+    with database.get_db_connection() as conn:
+        assert conn.execute("SELECT count(*) n FROM scanner_news").fetchone()['n'] == 1
+        assert conn.execute("SELECT count(*) n FROM scanner_news_jobs").fetchone()['n'] == 1
+        assert conn.execute("SELECT count(*) n FROM scanner_news_sources").fetchone()['n'] == 1
+
+
 def _sqlite_portfolio(tmp_path):
     # Reuse original engine and simulation rules, only isolated database/provider.
     path=tmp_path/'source.db'
