@@ -1272,6 +1272,30 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(result['checkpoint']['submissions'][cik]['last_accession'], '0000320193-26-000001')
         self.assertNotIn('etag', result)
 
+    def test_sec_cooldown_does_not_block_submissions_or_discard_collected_rows(self):
+        first, second = '0000320193', '0000789019'
+        state = {'checkpoint_json': json.dumps({
+            'edgar_current_retry_at': (self.clock + timedelta(minutes=5)).isoformat(),
+            'cik_offset': 4,
+        })}
+        filing = {'accessionNumber': ['0000320193-26-000001'],
+                  'acceptanceDateTime': ['2026-09-14T12:00:00Z'],
+                  'primaryDocument': ['report.htm'], 'form': ['8-K']}
+        with patch.dict(os.environ, {'NEWS_SEC_USER_AGENT': 'AI-Trader test test@example.com'}), \
+             patch.object(news_pipeline, '_sec_ticker_map', return_value={first: ['AAPL'], second: ['MSFT']}), \
+             patch.object(news_pipeline, '_sec_priority_ciks', return_value=([first, second], 6)), \
+             patch.object(news_pipeline, '_sec_request', side_effect=[
+                 (json.dumps({'name': 'Apple Inc.', 'filings': {'recent': filing}}).encode(), {}),
+                 news_pipeline.ProviderRateLimited('SEC temporarily unavailable', 900),
+             ]) as fetch:
+            result = news_pipeline._fetch_sec(state, self.clock)
+        self.assertEqual(fetch.call_count, 2)
+        self.assertTrue(all('data.sec.gov/submissions/' in call.args[0] for call in fetch.call_args_list))
+        self.assertEqual(result['retry_seconds'], 900)
+        self.assertEqual(result['checkpoint']['cik_offset'], 4)
+        self.assertEqual(len(result['items']), 1)
+        self.assertEqual(result['status'], 'degraded')
+
     def test_sec_submissions_checkpoint_overlap_and_accession_dedupe_survive_cycles(self):
         cik = "0000320193"
         filings = [{"accession": "0000320193-26-000001", "minute": "00"}]
