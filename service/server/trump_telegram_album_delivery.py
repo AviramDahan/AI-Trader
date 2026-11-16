@@ -63,9 +63,11 @@ def _save(row, value, expected, *, at=None):
     from database import get_db_connection, begin_write_transaction, using_postgres
     _checked(row,value)
     with get_db_connection() as c:
-        begin_write_transaction(c.cursor())
+        postgres = using_postgres()
+        if not postgres:
+            begin_write_transaction(c.cursor())
         query='SELECT status,message,next_attempt_at,event_type,dedupe_key FROM scanner_telegram_outbox WHERE id=?'
-        if using_postgres():query+=' FOR UPDATE'
+        if postgres:query+=' FOR UPDATE'
         active=c.execute(query,(row['id'],)).fetchone()
         stamp=m._instant(at or _now())
         if (row.get('status')!=SENDING or not active or active['status']!=SENDING

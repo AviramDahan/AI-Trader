@@ -103,10 +103,11 @@ def invalidate_group(message,current):
     """Observed edit revokes the frozen group; never re-publish its old members."""
     from trump_telegram_channel import CHANNEL_ID
     if getattr(getattr(message,'peer_id',None),'channel_id',None)!=CHANNEL_ID:return
-    from database import get_db_connection,begin_write_transaction
+    from database import get_db_connection
+    from trump_truth_posts import begin_source_write
     key=_key(getattr(message,'grouped_id',None))
     with get_db_connection() as c:
-        begin_write_transaction(c.cursor())
+        begin_source_write(c.cursor())
         value=_load(c,key,lock=True)
         if value:
             value.update(phase='revoked',lease=None,lease_until=None)
@@ -138,7 +139,8 @@ async def collect_album(client,entity,seed,current):
     bounded observations >=60s apart. Telegram has no album-complete marker;
     noncontiguous/large/multi-caption groups stay explicitly unverified.
     """
-    from database import get_db_connection,begin_write_transaction
+    from database import get_db_connection
+    from trump_truth_posts import begin_source_write
     from trump_truth_posts import instant
     from trump_truth_media import capture,_verify
     if not enabled():return None,'album_disabled',seed.id
@@ -151,7 +153,7 @@ async def collect_album(client,entity,seed,current):
     members=[p[1] for p in pairs];ref=fingerprint(members);last=pairs[-1][0].id
     token=uuid.uuid4().hex
     with get_db_connection() as c:
-        begin_write_transaction(c.cursor())
+        begin_source_write(c.cursor())
         initial=dict(version=VERSION,fingerprint=ref,first_seen=current.isoformat(),phase='settling',
             members=[],lease=None,lease_until=None)
         _put_if_missing(c,key,initial,current)
@@ -178,7 +180,7 @@ async def collect_album(client,entity,seed,current):
                 continue
             at=_now() if current is None else instant(current)
             with get_db_connection() as c:
-                begin_write_transaction(c.cursor())
+                begin_source_write(c.cursor())
                 owned=_load(c,key,lock=True)
                 if owned.get('lease')!=token or owned.get('phase')=='revoked':return None,'album_lease_revoked',last
                 if not _reserve_budget(c,at,candidate['declared_bytes']):return None,'album_media_budget_deferred',last
@@ -186,13 +188,13 @@ async def collect_album(client,entity,seed,current):
             if got.get('media',{}).get('status')!='available':return None,'album_media_deferred',last
             acquired[message.id]=got
             with get_db_connection() as c:
-                begin_write_transaction(c.cursor())
+                begin_source_write(c.cursor())
                 owned=_load(c,key,lock=True)
                 if owned.get('lease')!=token or owned.get('phase')=='revoked':return None,'album_lease_revoked',last
                 owned['members']=[acquired[i] for i in sorted(acquired)]
                 _put(c,key,owned,instant(got['observed_at']))
         with get_db_connection() as c:
-            begin_write_transaction(c.cursor())
+            begin_source_write(c.cursor())
             value=_load(c,key,lock=True)
             if value.get('lease')!=token or value.get('phase')=='revoked':return None,'album_lease_revoked',last
             value.update(phase='ready',lease=None,lease_until=None)
@@ -201,7 +203,7 @@ async def collect_album(client,entity,seed,current):
         return dict(representative,album_ref=ref),None,last
     finally:
         with get_db_connection() as c:
-            begin_write_transaction(c.cursor())
+            begin_source_write(c.cursor())
             value=_load(c,key,lock=True)
             if value and value.get('lease')==token:
                 value.update(lease=None,lease_until=None);_put(c,key,value,current)

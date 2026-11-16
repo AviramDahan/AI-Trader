@@ -314,11 +314,16 @@ def _checked_receipt(row,value):
 
 
 def _save(row,value,expected,*,at=None):
-    from database import get_db_connection,begin_write_transaction
+    from database import get_db_connection,begin_write_transaction,using_postgres
     _checked_receipt(row,value)
     with get_db_connection() as c:
-        begin_write_transaction(c.cursor())
-        active=c.execute('SELECT status,message,next_attempt_at FROM scanner_telegram_outbox WHERE id=?',(row['id'],)).fetchone()
+        postgres = using_postgres()
+        if not postgres:
+            begin_write_transaction(c.cursor())
+        query = 'SELECT status,message,next_attempt_at FROM scanner_telegram_outbox WHERE id=?'
+        if postgres:
+            query += ' FOR UPDATE'
+        active = c.execute(query, (row['id'],)).fetchone()
         stamp=_instant(at or _now())
         if (not active or active['status']!=SENDING or active['message']!=row['message']
             or active['next_attempt_at']!=row.get('next_attempt_at')
@@ -437,9 +442,11 @@ def prepare(limit=1,at=None):
     from trump_truth_posts import checked_envelope
     stamp=(at or datetime.now(timezone.utc)).isoformat()
     with get_db_connection() as c:
-        begin_write_transaction(c.cursor())
+        postgres = using_postgres()
+        if not postgres:
+            begin_write_transaction(c.cursor())
         query='SELECT * FROM scanner_telegram_outbox WHERE event_type=? AND status=? AND next_attempt_at<=? ORDER BY id LIMIT 1'
-        if using_postgres():query+=' FOR UPDATE SKIP LOCKED'
+        if postgres:query+=' FOR UPDATE SKIP LOCKED'
         found=c.execute(query,('trump_truth_post',PENDING,stamp)).fetchone()
         if not found:return {'prepared':0}
         row=dict(found);envelope=checked_envelope(row,at)

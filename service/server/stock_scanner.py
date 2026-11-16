@@ -1812,7 +1812,7 @@ async def stock_news_ai_loop() -> None:
 async def stock_news_translation_loop() -> None:
     if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
         return
-    from scanner_engine import ingest_market_news, translate_pending_news
+    from scanner_engine import ingest_market_news, set_service_status, translate_pending_news
     from trump_truth_translation import prepare,enabled as hebrew_enabled
     from trump_truth_media import prepare as prepare_media, enabled as media_enabled
     await asyncio.sleep(90)
@@ -1824,15 +1824,21 @@ async def stock_news_translation_loop() -> None:
                 await asyncio.to_thread(ingest_market_news)
                 await asyncio.to_thread(translate_pending_news)
             except Exception as exc:
-                from scanner_engine import set_service_status
-                set_service_status("news", "error", type(exc).__name__)
+                reason = ('legacy_translation_no_hebrew' if isinstance(exc, ValueError)
+                          and str(exc) == 'legacy_translation_no_hebrew' else type(exc).__name__)
+                set_service_status("news", "error", reason)
             next_legacy=loop.time()+600
         try:
-            await asyncio.to_thread(prepare)
-            await asyncio.to_thread(prepare_media)
-        except Exception:
-            from scanner_engine import set_service_status
-            set_service_status('trump_truth_translation','error','Translation preparation unavailable')
+            translation = await asyncio.to_thread(prepare)
+            media = await asyncio.to_thread(prepare_media)
+            if hebrew_enabled() or media_enabled():
+                prepared = translation['prepared'] + media['prepared']
+                deferred = translation['deferred']
+                status = 'ok' if prepared else 'degraded' if deferred else 'idle'
+                set_service_status('trump_truth_translation', status,
+                                   f'prepared={prepared} deferred={deferred}', success=bool(prepared))
+        except Exception as exc:
+            set_service_status('trump_truth_translation', 'error', type(exc).__name__)
         await asyncio.sleep(15 if hebrew_enabled() or media_enabled() else 600)
 
 

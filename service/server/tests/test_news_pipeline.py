@@ -539,7 +539,7 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
                                                   force=True, telegram_stream=True)
         self.assertEqual(result['providers']['telegram_channels']['status'], 'degraded')
         health.assert_not_called()
-        active.assert_called_once()  # Item ingestion only, no canonical provider collection.
+        active.assert_not_called()  # An empty stream poll needs no ingestion transaction.
 
     def test_headline_only_yahoo_feed_rejects_wrong_company_assignment(self):
         fetched = [
@@ -1317,10 +1317,11 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         conn.commit(); conn.close()
         batch_sizes = []
 
-        def translate(_system, rows, _predict, **_options):
-            batch_sizes.append(len(rows))
-            self.assertEqual(_options["schema"]["properties"]["items"]["maxItems"], len(rows))
-            return {"items": [{"id": row["id"], "summary_he": "כותרת בעברית"} for row in rows]}
+        def translate(_system, headlines, _predict, **options):
+            batch_sizes.append(len(headlines))
+            self.assertEqual(set(options["schema"]["properties"]), set(headlines))
+            self.assertEqual(set(headlines), {str(i) for i in range(1, len(headlines) + 1)})
+            return {slot: "כותרת בעברית" for slot in headlines}
 
         with patch.object(scanner_engine, "_ollama_json", side_effect=translate):
             self.assertEqual(scanner_engine.translate_pending_news(), 5)
@@ -1328,22 +1329,22 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(batch_sizes, [5, 2])
         self.assertEqual(len(self.rows("SELECT id FROM scanner_news WHERE analysis_status='translated'")), 7)
 
-    def test_legacy_translation_rejects_wrong_ids_and_preserves_a_concurrent_title_edit(self):
+    def test_legacy_translation_rejects_unknown_slots_and_preserves_a_concurrent_title_edit(self):
+        from jsonschema import ValidationError
         with database.get_db_connection() as conn:
             conn.execute("""INSERT INTO scanner_news(fingerprint,scope,title,publisher,url,published_at,
                             analysis_status,fetched_at) VALUES (?,?,?,?,?,?,?,?)""",
                          ("legacy", "market", "Old title", "Market feed", "https://example.test/original",
                           self.clock.isoformat(), "pending_translation", self.clock.isoformat()))
         row = self.rows("SELECT id FROM scanner_news")[0]
-        with patch.object(scanner_engine, "_ollama_json", return_value={
-            "items": [{"id": row["id"] + 1, "summary_he": "כותרת בעברית"}],
-        }), self.assertRaisesRegex(ValueError, "legacy_translation_id_mismatch"):
+        with patch.object(scanner_engine, "_ollama_json", return_value={"2": "כותרת בעברית"}), self.assertRaises(ValidationError):
             scanner_engine.translate_pending_news()
 
-        def translate(_system, rows, _predict, **_options):
+        def translate(_system, headlines, _predict, **_options):
+            self.assertEqual(headlines, {"1": "Old title"})
             with database.get_db_connection() as conn:
-                conn.execute("UPDATE scanner_news SET title=? WHERE id=?", ("Corrected title", rows[0]["id"]))
-            return {"items": [{"id": rows[0]["id"], "summary_he": "כותרת בעברית"}]}
+                conn.execute("UPDATE scanner_news SET title=? WHERE id=?", ("Corrected title", row["id"]))
+            return {"1": "כותרת בעברית"}
 
         with patch.object(scanner_engine, "_ollama_json", side_effect=translate):
             self.assertEqual(scanner_engine.translate_pending_news(), 0)

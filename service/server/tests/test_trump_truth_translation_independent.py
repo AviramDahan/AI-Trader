@@ -466,11 +466,13 @@ def test_existing_loop_preserves_legacy_600s_and_hebrew_only_15s_poll(monkeypatc
     def prepare():
         prepared.append(clock[0])
         clock[0] += work_seconds
+        return {'prepared': 0, 'deferred': 0}
     monkeypatch.setattr(asyncio, 'sleep', sleep)
     monkeypatch.setattr(asyncio, 'to_thread', to_thread)
     monkeypatch.setattr(asyncio, 'get_running_loop', lambda: SimpleNamespace(time=lambda: clock[0]))
     monkeypatch.setattr(scanner_engine, 'ingest_market_news', lambda: market.append(clock[0]))
     monkeypatch.setattr(scanner_engine, 'translate_pending_news', lambda: legacy.append(clock[0]))
+    monkeypatch.setattr(scanner_engine, 'set_service_status', Mock())
     monkeypatch.setattr(translation, 'prepare', prepare)
     with pytest.raises(Finished):
         original.run_stub(stock_scanner.stock_news_translation_loop())
