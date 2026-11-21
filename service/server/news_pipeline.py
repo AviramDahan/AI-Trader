@@ -900,9 +900,34 @@ def ingest_items(items: list[dict[str, Any]], at: datetime | None = None) -> dic
     return dict(counts)
 
 
+def _existing_news_ids(cur, items):
+    """Scan legacy URL columns once per batch, then reuse indexed article IDs."""
+    urls = sorted({_canonical_url(item.get("url", "")) for item in items})
+    keys = set()
+    for item in items:
+        tickers = sorted({str(value).upper().replace(".", "-") for value in item.get("tickers") or []
+                          if re.fullmatch(r"[A-Za-z][A-Za-z0-9.-]{0,9}", str(value))})
+        keys.add(_canonical_key({**item, "title": _strip_markup(item.get("title", ""))[:500],
+                                 "url": _canonical_url(item.get("url", "")), "tickers": tickers}))
+    keys = sorted(keys)
+    url_slots = ",".join("?" for _ in urls)
+    key_slots = ",".join("?" for _ in keys)
+    by_url, by_key = {}, {}
+    for row in cur.execute(f"SELECT id,url,canonical_key FROM scanner_news "
+                           f"WHERE url IN ({url_slots}) OR canonical_key IN ({key_slots}) ORDER BY id",
+                           (*urls, *keys)):
+        by_url.setdefault(row["url"], row["id"])
+        by_key.setdefault(row["canonical_key"], row["id"])
+    for row in cur.execute(f"SELECT news_id,url FROM scanner_news_sources WHERE url IN ({url_slots})",
+                           tuple(urls)):
+        by_url[row["url"]] = min(by_url.get(row["url"], row["news_id"]), row["news_id"])
+    return by_url, by_key
+
+
 def _ingest_regular_items(cur, items: list[dict[str, Any]], current: datetime) -> dict[str, int]:
     stamp = _z(current)
     inserted = sources = linked = duplicates = rejected_invalid = rejected_date = 0
+    by_url, by_key = _existing_news_ids(cur, items)
     for raw in items:
         item = dict(raw)
         item["title"] = _strip_markup(item.get("title", ""))[:500]
@@ -926,10 +951,9 @@ def _ingest_regular_items(cur, items: list[dict[str, Any]], current: datetime) -
         # A syndicated source URL can belong to a canonical article whose
         # primary URL differs. Look in the source ledger as well, otherwise a
         # provider changing its headline creates a second visible article.
-        cur.execute("""SELECT * FROM scanner_news WHERE canonical_key=? OR url=?
-            OR id IN (SELECT news_id FROM scanner_news_sources WHERE url=?)
-            ORDER BY id LIMIT 1""", (canonical, item["url"], item["url"]))
-        existing = cur.fetchone()
+        matches = [value for value in (by_key.get(canonical), by_url.get(item["url"])) if value is not None]
+        existing = (cur.execute("SELECT * FROM scanner_news WHERE id=?", (min(matches),)).fetchone()
+                    if matches else None)
         if existing:
             duplicates += 1
             news_id = int(existing["id"])
@@ -997,6 +1021,8 @@ def _ingest_regular_items(cur, items: list[dict[str, Any]], current: datetime) -
             priority = 100 if scope == "open_position" else 80 if scope == "watchlist" else 70 if scope == "active_signal" else 20 if scope == "market" else 40
             cur.execute("""INSERT INTO scanner_news_jobs(news_id,priority,status,next_attempt_at,created_at,updated_at)
                            VALUES(?,?,'pending',?,?,?)""", (news_id, priority, stamp, stamp, stamp))
+        by_key.setdefault(canonical, news_id)
+        by_url.setdefault(item["url"], news_id)
         cur.execute("SELECT id,raw_metadata_json FROM scanner_news_sources WHERE provider=? AND url=?", (item["provider"], item["url"]))
         existing_source = cur.fetchone()
         from news_source_metadata import retain
@@ -1101,10 +1127,13 @@ def _reconcile_source_publication_times(provider: str, items: list[dict[str, Any
         with get_db_connection() as conn:
             cur = conn.cursor()
             _begin_news_ingestion(cur)
+            urls = [url for _, url in batch]
+            slots = ",".join("?" for _ in urls)
+            known = {row["url"]: row for row in cur.execute(
+                "SELECT id,url,published_at,source_facts_json,content_hash,analysis_status "
+                f"FROM scanner_news WHERE provider=? AND url IN ({slots})", (provider, *urls))}
             for published, url in batch:
-                cur.execute("SELECT id,published_at,source_facts_json,content_hash,analysis_status FROM scanner_news WHERE provider=? AND url=?",
-                            (provider, url))
-                row = cur.fetchone()
+                row = known.get(url)
                 if not row:
                     continue
                 date_changed = abs((published - _parse_time(row["published_at"])).total_seconds()) >= 60
