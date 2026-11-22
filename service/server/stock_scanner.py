@@ -1310,6 +1310,9 @@ def monitor_tracked_signals() -> dict[str, Any]:
 
 @_scan_synchronized
 def run_scan() -> dict[str, Any]:
+    from operation_mode import news_only
+    if news_only():
+        return {'status': 'news_only', 'signals_published': 0, 'ai_reviewed': 0}
     from scanner_engine import (initialize_runtime, record_candidates, record_scan_news,
                                 record_signal, set_service_status)
     initialize_runtime()
@@ -1686,6 +1689,17 @@ async def stock_scanner_loop() -> None:
     await asyncio.sleep(20)
     while True:
         cfg = settings()
+        from operation_mode import news_only
+        if news_only():
+            # Do not disable STOCK_SCANNER_ENABLED: it also owns news, SEC and
+            # Telegram producers. Keep this task alive for the role supervisor.
+            from scanner_engine import set_service_status
+            set_service_status('scan', 'disabled', 'News-only mode; trading discovery disabled', success=True)
+            state = read_state()
+            state.update(mode='news_only', status='disabled', next_scan_at=time.time() + cfg['interval'])
+            save_state(state)
+            await asyncio.sleep(cfg['interval'])
+            continue
         state = read_state()
         delay = max(0, float(state.get("next_scan_at") or 0) - time.time())
         if delay:
@@ -1885,7 +1899,12 @@ def public_status() -> dict[str, Any]:
               "last_signal", "ai_reviews", "rejected", "events", "filters", "history_cache",
               "tracked_signals", "last_level_monitor_at", "level_monitor_checked", "recent_level_hits")
     result = {key: state.get(key) for key in fields}
-    result["enabled"] = os.getenv("STOCK_SCANNER_ENABLED", "false").lower() == "true"
+    from operation_mode import news_only
+    news_mode = news_only()
+    result["enabled"] = os.getenv("STOCK_SCANNER_ENABLED", "false").lower() == "true" and not news_mode
+    result["operation_mode"] = 'news_only' if news_mode else 'paper'
+    if news_mode:
+        result.update(mode='news_only', status='disabled', model=None, next_scan_at=None)
     result["stale"] = time.time() > float(state.get("next_scan_at") or 0) + 300
     result["paper_only"] = True
     return result

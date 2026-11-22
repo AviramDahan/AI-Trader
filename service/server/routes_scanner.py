@@ -102,7 +102,7 @@ def register_scanner_routes(app: FastAPI) -> None:
             result = set_paused(data.paused, data.expected_revision)
         except ValueError as exc:
             code = str(exc)
-            if code in {'entry_emergency_revision_conflict', 'entry_emergency_history_capacity'}:
+            if code in {'entry_emergency_revision_conflict', 'entry_emergency_history_capacity', 'news_only_mode'}:
                 raise HTTPException(409, code) from None
             if code == 'entry_emergency_invalid_request':
                 raise HTTPException(400, code) from None

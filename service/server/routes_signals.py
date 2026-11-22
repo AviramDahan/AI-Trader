@@ -110,6 +110,9 @@ def register_signal_routes(app: FastAPI, ctx: RouteContext) -> None:
         if not agent:
             raise HTTPException(status_code=401, detail='Invalid token')
 
+        from operation_mode import news_only
+        if data.action.strip().lower() in {'buy', 'short'} and news_only():
+            raise HTTPException(status_code=403, detail='news_only_mode')
         agent_id = agent['id']
         experiment_contexts = _agent_experiment_context(agent_id)
         now = utc_now_iso_z()
