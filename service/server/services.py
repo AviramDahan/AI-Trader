@@ -209,6 +209,8 @@ def _update_position_from_signal(
     leader_id: if set, this position is copied from another agent
     cursor: if provided, use this cursor instead of creating a new connection
     """
+    from operation_mode import require_entry_allowed
+    require_entry_allowed(action)
     # If no cursor provided, create a new connection
     own_connection = False
     if cursor is None:

@@ -148,6 +148,9 @@ def set_paused(paused, expected_revision, *, now=None):
     """
     if type(paused) is not bool or type(expected_revision) is not int or expected_revision < 0:
         raise ValueError('entry_emergency_invalid_request')
+    from operation_mode import news_only
+    if not paused and news_only():
+        raise ValueError('news_only_mode')
     from database import begin_write_transaction, get_db_connection
     conn = get_db_connection()
     try:
@@ -193,6 +196,9 @@ def _overlap(state, start):
 def check(cur, *, bar_at=None, observed_at=None):
     """Entry-only predicate. Caller owns the normal serialized write transaction."""
     try:
+        from operation_mode import news_only
+        if news_only():
+            return dict(allowed=False, reason='news_only_mode')
         from database import using_postgres
         if using_postgres():
             # A repeatable-read snapshot taken while waiting for the writer lock

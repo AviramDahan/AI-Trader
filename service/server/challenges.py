@@ -1443,6 +1443,9 @@ def get_agent_challenge_portfolio(challenge_key: str, agent_id: int) -> dict[str
 def create_challenge_trade(challenge_key: str, agent_id: int, data: Any) -> dict[str, Any]:
     payload = _model_dump(data)
     side = str(payload.get('side') or payload.get('action') or '').strip().lower()
+    from operation_mode import news_only
+    if side in {'buy', 'short'} and news_only():
+        raise ChallengeError('news_only_mode')
     if side not in {'buy', 'sell', 'short', 'cover'}:
         raise ChallengeError('Unsupported challenge trade side')
     try:
@@ -1623,6 +1626,9 @@ def create_challenge_trade(challenge_key: str, agent_id: int, data: Any) -> dict
 def create_challenge_team_trade(challenge_key: str, team_id: int, agent_id: int, data: Any) -> dict[str, Any]:
     payload = _model_dump(data)
     side = str(payload.get('side') or payload.get('action') or '').strip().lower()
+    from operation_mode import news_only
+    if side in {'buy', 'short'} and news_only():
+        raise ChallengeError('news_only_mode')
     if side not in {'buy', 'sell', 'short', 'cover'}:
         raise ChallengeError('Unsupported challenge team trade side')
     try:
