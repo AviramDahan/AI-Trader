@@ -30,6 +30,10 @@ PROTOCOL2_MAX_PREDICT = 2400
 CAPACITY_HEADER = 'X-AI-Local-Capacity'
 
 
+class AdmissionBusy(ValueError):
+    """No native request started: the existing single slot is occupied."""
+
+
 class ContextCapacity(ValueError):
     """A bounded request does not fit; not an unavailable GPU/tunnel."""
 
@@ -145,6 +149,7 @@ class Inference:
         self.at = 0.0
         self.version = None
         self.last_request = None
+        self.request_active = False
 
     def http(self, method, path, payload=None, timeout=2):
         until = time.monotonic() + timeout
@@ -239,8 +244,11 @@ class Inference:
         return self.available and 0 <= time.monotonic()-self.at < 65
 
     def health(self):
+        busy = self.slot.locked()
+        available = self._metadata_ready() or (self.request_active and self.available)
         return dict(protocol=1, model=MODEL, digest=DIGEST, ollama_version=self.version,
-            ready=self._metadata_ready() and not self.slot.locked(), capacity=1,
+            ready=self._metadata_ready() and not busy, capacity=1,
+            admission=dict(version=1, available=bool(available), busy=busy),
             context_policy=CONTEXT_POLICY, context_length=CONTEXT,
             model_loaded=self.loaded if self._metadata_ready() else None,
             load_policy='on_demand', keep_alive_seconds=KEEP_ALIVE_SECONDS,
@@ -274,7 +282,7 @@ class Inference:
             import jsonschema
             jsonschema.Draft202012Validator.check_schema(payload['schema'])
         if not self.slot.acquire(blocking=False):
-            raise ValueError('local_not_ready')
+            raise AdmissionBusy('local_not_ready')
         started = time.monotonic()
         budget = COLD_REQUEST_SECONDS if payload['protocol'] == 2 else WARM_REQUEST_SECONDS
         phase, outcome, cold = 'metadata', 'failed', None
@@ -289,6 +297,7 @@ class Inference:
                 self._refresh_locked(deadline)
             if not self._metadata_ready():
                 raise ValueError('local_not_ready')
+            self.request_active = True
             cold = not self.loaded
             if not cold:
                 budget = WARM_REQUEST_SECONDS
@@ -339,6 +348,7 @@ class Inference:
             self.last_request = dict(protocol=payload['protocol'], cold=cold,
                 phase=phase, outcome=outcome, budget_seconds=budget,
                 elapsed_ms=round((time.monotonic()-started)*1000))
+            self.request_active = False
             self.slot.release()
 
 
@@ -372,6 +382,11 @@ def handler(engine):
                 self.connection.settimeout(3)
                 payload = json.loads(self.rfile.read(length))
                 self.respond(200, engine.complete(payload))
+            except AdmissionBusy:
+                try:
+                    self.respond(429, {'reason': 'local_inference_busy'})
+                except OSError:
+                    pass
             except ContextCapacity as exc:
                 try:
                     self.respond(413, {'reason': 'local_context_capacity'},

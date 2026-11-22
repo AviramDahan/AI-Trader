@@ -47,7 +47,7 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
         from news_structured_envelope import request_contract
         contract = request_contract(schema)
     from ai_routing import (Route, local_completion, local_usage, native_messages,
-                            fallback_reason, safe_local_failure_usage, safe_local_transport_failure)
+                            fallback_reason, safe_local_failure_usage, safe_local_transport_failure, LocalBusy)
     route = Route('openrouter', model)
     from ai_schema_guidance import numeric_guidance, repair_guidance
     if route.provider == 'ollama_relay' and task in {'news','translation'}:
@@ -63,6 +63,7 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
         success=False
         failure='request_or_validation_failed'
         notify_failure=True
+        admission_deferred=False
         attempt_route = route.provenance()
         try:
             if route.provider == 'ollama_relay':
@@ -101,6 +102,9 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
                 from news_local_backoff import validated_stage
                 validated_stage()
             return value
+        except LocalBusy:
+            admission_deferred=True
+            raise
         except requests.RequestException as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             from retry_policy import detail, defer_openrouter
@@ -168,10 +172,12 @@ def json_completion(system, payload, *, predict=1000, schema=None, task="news",
             recorded_model = ('ollama/' + attempt_route['model'] + '@' + attempt_route['model_digest']
                               if local_attempt else model)
             from ai_operations import record
-            record('news_translation' if (usage_task or task) in {'translation','news_translation','summary'} else 'news_analysis',
-                   recorded_model,billing_body,started,success,None if success else failure,retry=repair or attempt>0,
-                   notify_failure=notify_failure)
-            if usage_sink is not None:
+            # A refused slot ran no model and consumed no inference attempt.
+            if not admission_deferred:
+                record('news_translation' if (usage_task or task) in {'translation','news_translation','summary'} else 'news_analysis',
+                       recorded_model,billing_body,started,success,None if success else failure,retry=repair or attempt>0,
+                       notify_failure=notify_failure)
+            if usage_sink is not None and not admission_deferred:
                 usage_sink.pop('local_finish_reason',None)
                 usage=(billing_body or {}).get('usage') or {}
                 usage_sink.update(**attempt_route,latency=time.monotonic()-started,input_tokens=usage.get('prompt_tokens'),
