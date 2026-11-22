@@ -43,6 +43,10 @@ class LocalUnavailable(requests.ConnectionError):
         self.local_failure_reason=reason if reason in {'local_transport_failed','local_context_capacity'} else None
 
 
+class LocalBusy(RuntimeError):
+    """Admission deferred before inference; not an outage or a paid fallback."""
+
+
 def openrouter_fallback_enabled():
     return os.getenv('AI_OPENROUTER_FALLBACK_ENABLED', 'false').strip().lower() == 'true'
 
@@ -170,6 +174,12 @@ def relay(method, path, payload=None, timeout=2):
         raw = response.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES:
             raise _local_transport_error('relay_response_too_large', response.status)
+        if response.status == 429:
+            decoding = True
+            busy = _strict(raw) == {'reason': 'local_inference_busy'}
+            decoding = False
+            if busy:
+                raise LocalBusy('local_inference_busy')
         if response.status == 413:
             decoding = True
             capacity = _strict(raw) == {'reason': 'local_context_capacity'}
@@ -203,6 +213,67 @@ def relay(method, path, payload=None, timeout=2):
         conn.close()
 
 
+def _admission_state(state):
+    """New busy proof is strict; legacy false-ready remains unavailable."""
+    if (not isinstance(state, dict) or type(state.get('protocol')) is not int
+            or state['protocol'] != PROTOCOL or state.get('model') != MODEL
+            or state.get('digest') != DIGEST or type(state.get('capacity')) is not int
+            or state['capacity'] != 1 or type(state.get('ready')) is not bool):
+        return 'unavailable'
+    if 'admission' in state:
+        admission = state['admission']
+        if (type(admission) is not dict or set(admission) != {'version', 'available', 'busy'}
+                or type(admission['version']) is not int or admission['version'] != 1
+                or type(admission['available']) is not bool or type(admission['busy']) is not bool
+                or not admission['available']):
+            return 'unavailable'
+        if admission['busy']:
+            return 'busy' if not state['ready'] else 'unavailable'
+        if not state['ready']:
+            return 'unavailable'
+    return 'ready' if state['ready'] else 'unavailable'
+
+
+def wait_for_admission(*, deadline, permitted):
+    """Bounded metadata-only wait, before the caller obtains fresh trade inputs.
+
+    No queue/reservation or model call. The server still owns the single slot;
+    a later admission race is a typed deferral, never another model attempt.
+    """
+    if not enabled():
+        return False
+    waited = False
+    while True:
+        if not permitted() or time.monotonic() >= deadline:
+            raise LocalBusy('local_inference_busy')
+        with _lock:
+            if time.monotonic() < _until:
+                if openrouter_fallback_enabled():
+                    return waited
+                raise LocalUnavailable('local_inference_unavailable')
+        remaining = deadline - time.monotonic()
+        try:
+            state = _admission_state(relay('GET', '/health', timeout=min(2, remaining)))
+        except requests.RequestException:
+            failed()
+            if openrouter_fallback_enabled():
+                return waited
+            raise LocalUnavailable('local_inference_unavailable') from None
+        if state == 'ready':
+            if not permitted() or time.monotonic() >= deadline:
+                raise LocalBusy('local_inference_busy')
+            return waited
+        if state != 'busy':
+            if openrouter_fallback_enabled():
+                return waited
+            raise LocalUnavailable('local_inference_unavailable')
+        waited = True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise LocalBusy('local_inference_busy')
+        time.sleep(min(.5, remaining))
+
+
 def ready():
     if not enabled():
         return False
@@ -210,10 +281,10 @@ def ready():
         if time.monotonic() < _until:
             return False
     try:
-        state = relay('GET', '/health')
-        return (isinstance(state, dict) and type(state.get('protocol')) is int and state.get('protocol') == PROTOCOL
-                and state.get('ready') is True and state.get('model') == MODEL
-                and state.get('digest') == DIGEST and type(state.get('capacity')) is int and state.get('capacity') == 1)
+        state = _admission_state(relay('GET', '/health'))
+        if state == 'busy':
+            raise LocalBusy('local_inference_busy')
+        return state == 'ready'
     except requests.RequestException:
         failed()
         return False

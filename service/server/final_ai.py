@@ -142,7 +142,7 @@ def review(messages, validator):
     trace = TRACE.get()
     schema=getattr(validator,'response_schema',SCHEMA)
     from ai_routing import (Route, local_completion, local_usage, fallback_reason,
-                            _strict, safe_local_transport_failure, safe_local_capacity, LocalCapacity, LocalUnavailable)
+                            _strict, safe_local_transport_failure, safe_local_capacity, LocalCapacity, LocalUnavailable, LocalBusy)
     route = Route(provider, model)
     for attempt in range(2):  # One shared budget: retry OR repair, never both.
         provider, model = route.provider, route.model
@@ -157,6 +157,7 @@ def review(messages, validator):
         body=None
         value=None
         sent=False
+        admission_deferred=False
         try:
             if provider == 'openrouter':
                 from ai_budget import check, acquire_request_slot
@@ -234,6 +235,13 @@ def review(messages, validator):
                 instruction=validator.schema_repair_instruction(value)
             messages = messages + [{"role":"user","content":instruction or
                 "The previous response was not valid for the required JSON schema. Return the complete schema object only. Do not change the decision to obtain acceptance; HOLD remains valid."}]
+        except LocalBusy:
+            # A refused slot is not an inference attempt or an invalid decision.
+            admission_deferred=True
+            sent=False
+            if trace is not None:
+                trace['ai_started']=bool(trace['attempts'])
+            raise
         except requests.RequestException as exc:
             status = getattr(getattr(exc,"response",None),"status_code",None)
             if provider == 'ollama_relay':
@@ -273,7 +281,7 @@ def review(messages, validator):
                                 if isinstance(body, dict) else None)
                 record('final_stock_review',recorded_model,billing_body,start,metrics['result']=='validated',
                        metrics['reject_reason'],retry=attempt>0,notify_failure=not retry)
-            if trace is not None:
+            if trace is not None and not admission_deferred:
                 trace["attempts"].append(metrics)
                 trace["result"] = "reviewing" if retry else metrics["result"]
                 persist(trace)

@@ -21,7 +21,7 @@ MAX_ATTEMPTS = 2
 LEASE_SECONDS = 300  # At most two existing 50-second local requests + margin.
 DIAGNOSTIC_VERSION = 'trump_translation_diagnostic_v1'
 DIAGNOSTIC_FAILURES = frozenset({'unknown','local_unavailable','context_capacity',
-    'transport_failure','schema_invalid','not_grounded','editor_rejected','preparation_revoked'})
+    'transport_failure','schema_invalid','not_grounded','editor_rejected','preparation_revoked','admission_busy'})
 SCHEMA = {'type':'object','properties':{'text_he':{'type':'string','minLength':1,'maxLength':2400}},
           'required':['text_he'],'additionalProperties':False}
 REVIEW = {'type':'object','properties':{k:{'type':'boolean'} for k in
@@ -181,7 +181,7 @@ def validate_text(value,source):
 def local_json(system,payload,schema):
     """Reuse exact existing pinned relay/capacity and sole usage ledger; NO cloud."""
     from ai_routing import (enabled as local_enabled,ready,local_completion,local_usage,
-                            MODEL,DIGEST,safe_local_failure_usage)
+                            MODEL,DIGEST,safe_local_failure_usage,LocalBusy)
     if not local_enabled():raise ValueError('translation_local_unavailable')
     from ai_operations import record
     from news_local_pacing import slot
@@ -196,6 +196,9 @@ def local_json(system,payload,schema):
                 {'role':'user','content':json.dumps(payload,ensure_ascii=False)}],schema,1400)
         success=True
         return value
+    except LocalBusy:
+        started=None  # The gateway admitted no native generation.
+        raise
     except Exception as exc:
         body=safe_local_failure_usage(getattr(exc,'local_failure_usage',None)) or body
         raise
@@ -282,6 +285,7 @@ def prepare(limit=1,at=None,completion=None):
     """One leased preparation per cycle. No transaction spans generation."""
     if limit!=1:raise ValueError('translation_limit')
     from database import get_db_connection,begin_write_transaction,using_postgres
+    from ai_routing import LocalBusy
     postgres = using_postgres()
     row_lock = ' FOR UPDATE' if postgres else ''
     stamp=(at or datetime.now(timezone.utc)).isoformat()
@@ -317,7 +321,7 @@ def prepare(limit=1,at=None,completion=None):
     channel=is_item(envelope['item'])
     if channel and source_text(envelope['item']) and completion is None:
         # Busy/cold-admissibility health does not spend a generation attempt.
-        # A race after this check still uses the existing bounded attempt rules.
+        # A later no-generation race restores only its own unspent attempt.
         from ai_routing import enabled as local_enabled,ready as local_ready
         try:available=local_enabled() and local_ready()
         except Exception:available=False
@@ -335,7 +339,9 @@ def prepare(limit=1,at=None,completion=None):
         active=cur.execute('SELECT status,next_attempt_at,message FROM scanner_telegram_outbox WHERE id=?'+row_lock,(row['id'],)).fetchone()
         if (not active or active['status']!=working or active['next_attempt_at']!=lease
                 or active['message']!=row['message']):return {'prepared':0,'deferred':0}
-        old=cur.execute('SELECT value_json FROM scanner_settings WHERE key=?',(key,)).fetchone()
+        old=cur.execute('SELECT value_json,updated_at FROM scanner_settings WHERE key=?',(key,)).fetchone()
+        old_diagnostic=cur.execute('SELECT value_json,updated_at FROM scanner_settings WHERE key=?',
+                                   (diagnostic_key(row),)).fetchone()
         try:
             if old and len(old['value_json'].encode())>8192:raise ValueError('translation_cache_invalid')
             cached=checked_cache(row,envelope,json.loads(old['value_json'])) if old else None
@@ -353,9 +359,12 @@ def prepare(limit=1,at=None,completion=None):
         value={'version':envelope['presentation'],'binding':binding(row,envelope),'attempts':attempts,'status':'working','text_he':''}
         cur.execute('INSERT INTO scanner_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at',(key,wire(value),stamp))
         _save_diagnostic(cur,row,envelope,value,'unknown',at or datetime.now(timezone.utc))
+        working_diagnostic=cur.execute('SELECT value_json FROM scanner_settings WHERE key=?',
+                                       (diagnostic_key(row),)).fetchone()['value_json']
         c.commit()
-    result=None;failure_category='unknown'
+    result=None;failure_category='unknown';completed_stages=0;unspent_busy=False
     def guarded_completion(system,payload,schema):
+        nonlocal completed_stages
         check_at=at or datetime.now(timezone.utc)
         current=eligible(row,check_at)
         if not current or binding(row,current)!=value['binding'] or check_at.isoformat()>=lease:
@@ -366,9 +375,14 @@ def prepare(limit=1,at=None,completion=None):
                 or owned['message']!=row['message']):raise ValueError('translation_preparation_revoked')
         # Both local requests recheck permission/ownership; no DB connection is
         # held across the callback. An already in-flight request cannot be undone.
-        return (completion or local_json)(system,payload,schema)
+        completed=(completion or local_json)(system,payload,schema)
+        completed_stages+=1
+        return completed
     if not cached or cached['attempts']<MAX_ATTEMPTS:
         try:result=translate(envelope['item'],guarded_completion)
+        except LocalBusy:
+            unspent_busy=completed_stages==0
+            failure_category='admission_busy'
         except Exception as exc:failure_category=_failure_category(exc)
     finish=at or datetime.now(timezone.utc)
     current=eligible(row,finish)
@@ -382,6 +396,27 @@ def prepare(limit=1,at=None,completion=None):
         if not current or binding(row,current)!=value['binding']:
             cur.execute("UPDATE scanner_telegram_outbox SET status='cancelled',last_error='trump_hebrew_fenced' WHERE id=?",(row['id'],))
             return {'prepared':0,'deferred':0}
+        if unspent_busy:
+            # Undo only this preparation's exact cache bytes. An earlier
+            # successful stage/attempt and any concurrent owner stay preserved.
+            current_cache=cur.execute('SELECT value_json FROM scanner_settings WHERE key=?',(key,)).fetchone()
+            if not current_cache or current_cache['value_json']!=wire(value):
+                return {'prepared':0,'deferred':0}
+            if old:
+                cur.execute('UPDATE scanner_settings SET value_json=?,updated_at=? WHERE key=? AND value_json=?',
+                    (old['value_json'],old['updated_at'],key,wire(value)))
+            else:
+                cur.execute('DELETE FROM scanner_settings WHERE key=? AND value_json=?',(key,wire(value)))
+            if old_diagnostic:
+                cur.execute('UPDATE scanner_settings SET value_json=?,updated_at=? WHERE key=? AND value_json=?',
+                    (old_diagnostic['value_json'],old_diagnostic['updated_at'],diagnostic_key(row),working_diagnostic))
+            else:
+                cur.execute('DELETE FROM scanner_settings WHERE key=? AND value_json=?',
+                    (diagnostic_key(row),working_diagnostic))
+            due=(finish+timedelta(seconds=60)).isoformat()
+            cur.execute('UPDATE scanner_telegram_outbox SET status=?,next_attempt_at=?,last_error=? WHERE id=?',
+                (pending,due,'trump_hebrew_capacity_deferred',row['id']))
+            return {'prepared':0,'deferred':1}
         if result is None and attempts<MAX_ATTEMPTS:
             due=(finish+timedelta(seconds=60)).isoformat()
             _save_diagnostic(cur,row,envelope,value,failure_category,finish)
