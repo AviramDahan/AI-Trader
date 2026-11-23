@@ -48,6 +48,7 @@ def is_analyst_update(title, excerpt=''):
         return True
     # Explicit equity rating targets prevent software/operational upgrades.
     if re.search(r'\b(?:upgrad(?:es?|ed)|downgrad(?:es?|ed))\b.{0,120}\b(?:to|from)\s+[\"\x27]?'+RATING+r'\b',headline,re.I):return True
+    if re.search(r'\b(?:raises?|raised|lowers?|lowered)\b.{1,90}\bto\s+'+RATING+r'\s+from\s+'+RATING+r'\b', headline, re.I):return True
     if re.search(r'\binitiat(?:es?|ed)\s+(?:research\s+)?coverage\b.{0,120}\b(?:at|with)\s+(?:an?\s+)?[\"\x27]?'+RATING,headline,re.I):return True
     if re.search(r'(?:העלה|העלתה|הוריד|הורידה|שדרג|שדרגה|הפחית|מעלה|מוריד).{0,35}המלצ.{0,90}'+RATING,headline,re.I):return True
     if re.search(r'(?:החל|החלה).{0,15}לסקר.{0,90}המלצ.{0,20}'+RATING,headline,re.I):return True

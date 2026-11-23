@@ -15,6 +15,7 @@ def personal_delivery_message(event):
     """
     from news_pipeline import _news_alert_message, _notification_subject, _watchlist_alert_message
     from news_public_importance import enabled as strict_news_quality
+    from news_watchlist_editorial import already_covered, decision, enabled as watchlist_editorial_enabled
     parts = event['dedupe_key'].split(':')
     conn = get_db_connection()
     try:
@@ -45,6 +46,17 @@ def personal_delivery_message(event):
         if strict_news_quality():
             watched = {ticker: company for ticker, company in watched.items()
                        if _notification_subject(dict(news), ticker, company or "", watchlist=parts[0]=='watchlist-news')}
+        if parts[0] == 'watchlist-news' and watchlist_editorial_enabled():
+            from datetime import datetime, timezone
+            from news_pipeline import watchlist_issuer_tickers
+
+            row = dict(news)
+            now = datetime.now(timezone.utc)
+            for ticker, company in list(watched.items()):
+                reason, fact = decision(row, ticker, company)
+                if reason or (fact and event.get('id') and already_covered(
+                        conn, watchlist_issuer_tickers(ticker), fact, row, now, company=company, delivery_id=event['id'])):
+                    del watched[ticker]
         active = {**watched, **held}
         if not active:
             return None
