@@ -7,6 +7,9 @@ REASONS = {'stale_or_missing_bars', 'Timeout', 'TimeoutError', 'ReadTimeout', 'C
            'ConnectionError', 'HTTPError', 'ValueError', 'RuntimeError',
            'OperationalError', 'invalid_json', 'budget_exhausted', 'news_quality_rejected'}
 STATUSES = {'ok','error','idle','market_closed','no_new','no_signals','waiting','degraded','backoff','not_modified'}
+NEWS_COMPONENTS = frozenset({'news_ai', 'news_feed', 'news_stream', 'news'})
+NEWS_FAILURE_SECONDS = 600
+NEWS_RECOVERY_SECONDS = 300
 
 
 def component_failed(row, now):
@@ -58,8 +61,24 @@ def news_recovery_confirmed(state, context, provider_rows, now, component="news_
     return all(checked_after_failure(provider_rows.get(name, {}), good) for name in failed_sources)
 
 
-def incident(previous, failed, context, now):
+def incident(previous, failed, context, now, *, component=None):
     state=dict(previous or {'active':False,'generation':0})
+    if component in NEWS_COMPONENTS:
+        # Keep transient failures in telemetry. Confirmation survives an
+        # operations-worker restart through the existing incident state.
+        if failed == state['active']:
+            state.pop('candidate_since', None)
+            return state, None
+        try:
+            elapsed = (now - datetime.fromisoformat(state['candidate_since'])).total_seconds()
+        except (KeyError, TypeError, ValueError):
+            elapsed = -1
+        if elapsed < 0:
+            state['candidate_since'] = now.isoformat()
+            return state, None
+        if elapsed < (NEWS_FAILURE_SECONDS if failed else NEWS_RECOVERY_SECONDS):
+            return state, None
+        state.pop('candidate_since', None)
     change='failure' if failed and not state['active'] else 'recovery' if not failed and state['active'] else None
     if change=='failure':
         state['generation']+=1

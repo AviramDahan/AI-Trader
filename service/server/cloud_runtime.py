@@ -1,6 +1,7 @@
 """Cloud role entrypoint: explicit tasks, database singleton, fail-stop readiness."""
 import asyncio
 import json
+import logging
 import os
 import signal
 import sys
@@ -117,12 +118,6 @@ async def run_role(role):
     global ACTIVE_LEASE
     assert_schema()
     ACTIVE_LEASE = RoleLease(role)
-    # Notification failure must never prevent a critical role from starting.
-    try:
-        from ai_operations import enqueue
-        enqueue('restart:'+role+':'+str(time.time_ns()),'AI-Trader Admin\nשירות הופעל מחדש: '+role)
-    except Exception:
-        pass
     if os.getenv("STOCK_SCANNER_ENABLED", "false").lower() != "true":
         raise RuntimeError("workers_disabled_enable_only_after_snapshot_validation")
     if role == 'scanner' and not all(os.getenv(key) for key in (
@@ -134,6 +129,7 @@ async def run_role(role):
         if not streaming_enabled():
             names.remove("telegram_news_stream")
     os.environ["AI_TRADER_BACKGROUND_TASKS"] = ','.join(names)
+    logging.getLogger(__name__).info("Cloud role started: %s", role)
     from tasks import start_background_tasks
     tasks = start_background_tasks()
     if role == 'telegram':

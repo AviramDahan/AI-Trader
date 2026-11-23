@@ -15,6 +15,8 @@ import requests
 from admin_messages import timestamped
 from telegram_presentation import telegram_text
 
+NEWS_CALL_TASKS = frozenset({'news_analysis', 'news_translation'})
+
 
 def number(v):
     return v if isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) and v>=0 else None
@@ -50,7 +52,9 @@ def record(task, model, body, started, success, failure=None, retry=False, notif
     # Canonical jobs persist a single final private outcome atomically with the
     # analysis. Keep every attempt/cost, but do not alert before repair finishes.
     final_owned=bool(event and event.get('final_alert_owner'))
-    if not success and notify_failure and not final_owned and failure not in {'ValueError'}:
+    # News workers report sustained incidents through health(), while every
+    # failed call (including attempted repairs) remains in retained telemetry.
+    if not success and notify_failure and not final_owned and task not in NEWS_CALL_TASKS and failure not in {'ValueError'}:
         stamp=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')
         # Only allowlisted operational metadata can enter a private notification.
         from retry_policy import alert_failure_detail
@@ -126,12 +130,15 @@ def calculate(rows, provider, now=None, samples=None, credit_data=None):
                 forecast_basis='observed_provider_delta_minimum_7_days' if burn is not None else 'insufficient_data')
 
 
+def _enqueue(conn, key, message, created_at):
+    conn.execute('''INSERT INTO admin_alerts(dedupe_key,message,created_at) VALUES(?,?,?)
+        ON CONFLICT(dedupe_key) DO NOTHING''', (key, timestamped(message, created_at), created_at))
+
+
 def enqueue(key,message):
     from database import get_db_connection
-    created_at=datetime.now(timezone.utc).isoformat()
     with get_db_connection() as conn:
-        conn.execute('''INSERT INTO admin_alerts(dedupe_key,message,created_at) VALUES(?,?,?)
-            ON CONFLICT(dedupe_key) DO NOTHING''',(key,timestamped(message,created_at),created_at))
+        _enqueue(conn, key, message, datetime.now(timezone.utc).isoformat())
 
 
 def notification(s):
@@ -219,10 +226,12 @@ def send_one():
                           now+max(delay,min(3600,30*2**min(row['attempts'],6))),row['dedupe_key']))
 
 
-def health():
-    from database import get_db_connection
-    from admin_health_context import snapshot, incident, health_message, component_failed, news_recovery_confirmed
-    now=datetime.now(timezone.utc)
+def health(now=None):
+    from database import get_db_connection, using_postgres
+    from admin_health_context import (
+        NEWS_COMPONENTS, component_failed, health_message, incident, news_recovery_confirmed, snapshot,
+    )
+    now=now or datetime.now(timezone.utc)
     with get_db_connection() as conn:
         states=conn.execute('SELECT component,status,last_attempt_at,last_success_at,detail FROM scanner_service_status').fetchall()
     contexts={r['component']:snapshot(r,now) for r in states}
@@ -230,8 +239,11 @@ def health():
         failed=component_failed(r,now)
         key='admin_incident:'+r['component']
         with get_db_connection() as conn:
-            old=conn.execute('SELECT value_json FROM scanner_settings WHERE key=?',(key,)).fetchone()
-            state=json.loads(old['value_json']) if old else {'active':False,'generation':0}
+            conn.execute('''INSERT INTO scanner_settings(key,value_json,updated_at) VALUES(?,?,?)
+                ON CONFLICT(key) DO NOTHING''', (key, '{}', now.isoformat()))
+            old=conn.execute('SELECT value_json FROM scanner_settings WHERE key=?' +
+                             (' FOR UPDATE' if using_postgres() else ''), (key,)).fetchone()
+            state=json.loads(old['value_json']) or {'active':False,'generation':0}
             context={r['component']:contexts[r['component']]}
             if r['component']=='monitor' and 'prices' in contexts:
                 context['prices']=contexts['prices']
@@ -252,15 +264,18 @@ def health():
                             "SELECT provider,status,last_success_at FROM scanner_news_providers "
                             f"WHERE provider IN ({placeholders})", tuple(names))}
                     failed = not news_recovery_confirmed(state, context['news_feed'], providers, now)
-            if r['component'] == 'news_ai' and state['active'] and not failed:
-                failed = not news_recovery_confirmed(state, context['news_ai'], {}, now, 'news_ai')
-            state,change=incident(state,failed,context,now)
-            conn.execute('''INSERT INTO scanner_settings(key,value_json,updated_at) VALUES(?,?,?)
-              ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at''',
-              (key,json.dumps(state),now.isoformat()))
-        if change:
-            enqueue(('health:' if change=='failure' else 'health_recovered:')+r['component']+':'+str(state['generation']),
-                    health_message(r['component'], change, context, state))
+            if r['component'] in NEWS_COMPONENTS and r['component'] != 'news_feed' and state['active'] and not failed:
+                failed = not news_recovery_confirmed(state, context[r['component']], {}, now, r['component'])
+            if (r['component'] in NEWS_COMPONENTS and not state['active']
+                    and state.get('candidate_since') and not failed):
+                candidate = {'last_failure': {'at': state['candidate_since']}}
+                failed = not news_recovery_confirmed(candidate, context[r['component']], {}, now, r['component'])
+            state,change=incident(state,failed,context,now,component=r['component'])
+            conn.execute('UPDATE scanner_settings SET value_json=?,updated_at=? WHERE key=?',
+                         (json.dumps(state),now.isoformat(),key))
+            if change:
+                _enqueue(conn, ('health:' if change=='failure' else 'health_recovered:')+r['component']+':'+str(state['generation']),
+                         health_message(r['component'], change, context, state), now.isoformat())
 
 
 async def operations_loop():
