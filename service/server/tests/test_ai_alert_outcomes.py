@@ -38,21 +38,25 @@ def test_repaired_json_records_both_attempts_without_failure_alert(provider,monk
     assert 'invalid_json' in calls[0].args[1][11]
     assert 'SECRET' not in calls[0].args[1][11]
 
-def test_terminal_schema_failure_alert_once(provider,monkeypatch):
+def test_terminal_news_schema_failure_is_retained_without_article_alert(provider,monkeypatch):
     alert,db=provider
     monkeypatch.setattr(ai_provider.requests,'post',Mock(return_value=response('bad SECRET')))
     with pytest.raises(ValueError,match='invalid_json'):ai_provider.json_completion('test',{})
-    alert.assert_called_once()
-    assert 'invalid_json' in alert.call_args.args[1]
-    assert 'SECRET' not in alert.call_args.args[1]
+    alert.assert_not_called()
+    calls = db.__enter__.return_value.execute.call_args_list
+    assert len(calls) == 2
+    assert all('invalid_json' in call.args[1][11] and 'SECRET' not in call.args[1][11] for call in calls)
 
-def test_truncation_reason_and_single_retry(provider,monkeypatch):
+def test_truncation_reason_and_single_retry_are_retained(provider,monkeypatch):
     alert,db=provider
     post=Mock(return_value=response('{}','length'))
     monkeypatch.setattr(ai_provider.requests,'post',post)
     with pytest.raises(ValueError,match='ai_output_truncated'):ai_provider.json_completion('test',{})
     assert post.call_count==2
-    alert.assert_called_once()
+    alert.assert_not_called()
+    calls = db.__enter__.return_value.execute.call_args_list
+    assert [call.args[1][1] for call in calls] == ['news_analysis', 'retry_repair']
+    assert all('ai_output_truncated' in call.args[1][11] for call in calls)
 
 def test_timeout_recovery_no_active_error(provider,monkeypatch):
     alert,_=provider
