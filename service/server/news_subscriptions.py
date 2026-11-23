@@ -44,7 +44,7 @@ def personal_delivery_message(event):
             WHERE enabled=1 AND ticker IN ({placeholders})""", params)}
         if strict_news_quality():
             watched = {ticker: company for ticker, company in watched.items()
-                       if _notification_subject(dict(news), ticker, company or "")}
+                       if _notification_subject(dict(news), ticker, company or "", watchlist=parts[0]=='watchlist-news')}
         active = {**watched, **held}
         if not active:
             return None

@@ -556,15 +556,20 @@ def needs_personal_route(cur, row, duplicate_id):
     """A broad-topic duplicate does not prove delivery to a personal recipient."""
     if not enabled():
         return False
+    from news_pipeline import watchlist_issuer_tickers
+
     for ticker in json.loads(row.get('verified_tickers_json') or '[]'):
         held = cur.execute("SELECT id FROM scanner_trades WHERE ticker=? AND status='open' AND remaining_quantity>0 AND is_shadow=0", (ticker,)).fetchall()
-        watched = cur.execute('SELECT 1 FROM scanner_news_watchlist WHERE ticker=? AND enabled=1', (ticker,)).fetchone()
+        issuer_tickers = watchlist_issuer_tickers(ticker)
+        slots = ','.join('?' for _ in issuer_tickers)
+        watched = cur.execute(f'SELECT 1 FROM scanner_news_watchlist WHERE ticker IN ({slots}) AND enabled=1 LIMIT 1', issuer_tickers).fetchone()
         for trade in held:
             seen = cur.execute('SELECT 1 FROM scanner_news_alerts WHERE news_id=? AND trade_id=?', (duplicate_id, trade['id'])).fetchone()
             if not seen:
                 return True
         if watched and not held:
-            seen = cur.execute('SELECT 1 FROM scanner_news_watchlist_alerts WHERE news_id=? AND ticker=?', (duplicate_id, ticker)).fetchone()
+            seen = cur.execute(f'SELECT 1 FROM scanner_news_watchlist_alerts WHERE news_id=? AND ticker IN ({slots}) LIMIT 1',
+                               (duplicate_id, *issuer_tickers)).fetchone()
             if not seen:
                 return True
     return False

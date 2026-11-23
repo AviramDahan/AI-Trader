@@ -689,6 +689,69 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         self.assertIn("ללא עסקה", alerts[0]["message"])
 
+    def test_alphabet_sibling_routes_to_enabled_class_without_rewriting_source(self):
+        from news_subscriptions import personal_delivery_message
+
+        scanner_engine.set_news_watchlist('GOOGL', 'Alphabet Inc.')
+        article = {**self.item('yahoo_priority', 'https://example.test/alphabet', 'GOOG'),
+                   'title': 'Google signs a multiyear data-center supply contract'}
+        with patch.dict(os.environ, {'STOCK_SCANNER_PUBLIC_NEWS_STRICT_QUALITY_ENABLED': 'true'}):
+            news_pipeline.ingest_items([article], self.clock)
+            row = self.rows('SELECT scope,verified_tickers_json FROM scanner_news')[0]
+            self.assertEqual(row['scope'], 'watchlist')
+            self.assertEqual(json.loads(row['verified_tickers_json']), ['GOOG'])
+            news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer, at=self.clock)
+            notices = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='watchlist_news'")
+            self.assertEqual(len(notices), 1)
+            self.assertTrue(notices[0]['dedupe_key'].endswith(':GOOGL'))
+            self.assertIn('GOOGL', personal_delivery_message(notices[0]))
+            self.assertFalse(self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='stock_news'"))
+            scanner_engine.set_news_watchlist('GOOGL', enabled=False)
+            self.assertIsNone(personal_delivery_message(notices[0]))
+
+    def test_micron_watchlist_uses_brand_at_ingestion_and_delivery(self):
+        from news_subscriptions import personal_delivery_message
+
+        scanner_engine.set_news_watchlist('MU', 'Micron Technology, Inc.')
+        issuer = {**self.item('yahoo_priority', 'https://example.test/micron', 'MU'),
+                  'title': 'Micron opens a new semiconductor factory'}
+        comparison = {**self.item('yahoo_priority', 'https://example.test/other', 'MU'),
+                      'title': 'NVIDIA raises guidance; unlike Micron it expects growth'}
+        with patch.dict(os.environ, {'STOCK_SCANNER_PUBLIC_NEWS_STRICT_QUALITY_ENABLED': 'true'}), \
+             patch('news_events.yahoo_metadata.fetch_news', return_value=[issuer, comparison]):
+            result = news_pipeline._fetch_yahoo_priority({}, self.clock)
+            self.assertEqual([row['title'] for row in result['items']], [issuer['title']])
+            news_pipeline.ingest_items(result['items'], self.clock)
+            news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer, at=self.clock)
+            notices = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='watchlist_news'")
+            self.assertEqual(len(notices), 1)
+            self.assertIn('MU', personal_delivery_message(notices[0]))
+
+    def test_alphabet_share_classes_share_one_watchlist_alert_across_sources(self):
+        scanner_engine.set_news_watchlist('GOOG', 'Alphabet Inc.')
+        scanner_engine.set_news_watchlist('GOOGL', 'Alphabet Inc.')
+        title = 'Google signs a multiyear data-center supply contract'
+        with patch.dict(os.environ, {'STOCK_SCANNER_PUBLIC_NEWS_STRICT_QUALITY_ENABLED': 'true'}):
+            for ticker in ('GOOG', 'GOOGL'):
+                row = {**self.item('yahoo_priority', f'https://example.test/{ticker}', ticker), 'title': title}
+                news_pipeline.ingest_items([row], self.clock)
+                news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer, at=self.clock)
+            self.assertEqual(len(self.rows('SELECT id FROM scanner_news')), 2)
+            notices = self.rows("SELECT dedupe_key FROM scanner_telegram_outbox WHERE event_type='watchlist_news'")
+            self.assertEqual(len(notices), 1)
+            self.assertTrue(notices[0]['dedupe_key'].endswith(':GOOG'))
+
+    def test_yahoo_preserves_original_share_class_for_watchlist_alias(self):
+        from news_events.yahoo_metadata import normalize_news
+
+        at = self.clock.timestamp()
+        source = {'news': [{'title': 'Google signs a contract', 'link': 'https://example.test/google',
+                            'relatedTickers': ['GOOG'], 'providerPublishTime': int(at)}]}
+        self.assertEqual(normalize_news(source, 'GOOGL', 'Alphabet', 168, at), [])
+        items = normalize_news(source, 'GOOGL', 'Alphabet', 168, at,
+                               issuer_tickers=news_pipeline.watchlist_issuer_tickers('GOOGL'))
+        self.assertEqual(items[0]['provider_tickers'], ['GOOG'])
+
     def test_multi_ticker_news_alerts_position_and_other_watchlist_without_duplicates(self):
         self.open_trade()
         scanner_engine.set_news_watchlist("NVDA", "NVIDIA")

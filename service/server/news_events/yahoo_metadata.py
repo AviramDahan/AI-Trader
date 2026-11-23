@@ -5,24 +5,25 @@ from datetime import datetime, timezone
 import requests
 
 
-def fetch_news(ticker, company, max_age_hours):
+def fetch_news(ticker, company, max_age_hours, *, issuer_tickers=None):
     from stock_scanner import YAHOO_SEARCH_URL, USER_AGENT
     session=requests.Session();session.trust_env=False
     with session:
         response=session.get(YAHOO_SEARCH_URL,params={'q':ticker,'quotesCount':1,'newsCount':10},
                              headers={'User-Agent':USER_AGENT},timeout=20)
         response.raise_for_status()
-        return normalize_news(response.json(),ticker,company,max_age_hours,time.time())
+        return normalize_news(response.json(),ticker,company,max_age_hours,time.time(), issuer_tickers=issuer_tickers)
 
 
-def normalize_news(payload,ticker,company,max_age_hours,at):
+def normalize_news(payload,ticker,company,max_age_hours,at, *, issuer_tickers=None):
     items=[]
+    symbols=set(issuer_tickers or (ticker,))
     for row in payload.get('news') or []:
         try:published=int(row['providerPublishTime'])
         except (KeyError,TypeError,ValueError):continue
         related=[str(v).upper().replace('.','-') for v in row.get('relatedTickers') or []]
         link,title=str(row.get('link') or ''),str(row.get('title') or '').strip()
-        if not title or not link.startswith('https://') or ticker not in related:continue
+        if not title or not link.startswith('https://') or symbols.isdisjoint(related):continue
         age=(at-published)/3600
         if age<-.1 or age>max_age_hours:continue
         company_words={v.lower() for v in re.findall(r'[A-Za-z]{3,}',company)}
