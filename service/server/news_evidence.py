@@ -560,7 +560,7 @@ def needs_personal_route(cur, row, duplicate_id):
 
     for ticker in json.loads(row.get('verified_tickers_json') or '[]'):
         held = cur.execute("SELECT id FROM scanner_trades WHERE ticker=? AND status='open' AND remaining_quantity>0 AND is_shadow=0", (ticker,)).fetchall()
-        issuer_tickers = watchlist_issuer_tickers(ticker)
+        issuer_tickers = watchlist_issuer_tickers(ticker, title=row.get('title') or '')
         slots = ','.join('?' for _ in issuer_tickers)
         watched = cur.execute(f'SELECT 1 FROM scanner_news_watchlist WHERE ticker IN ({slots}) AND enabled=1 LIMIT 1', issuer_tickers).fetchone()
         for trade in held:

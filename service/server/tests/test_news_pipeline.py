@@ -727,6 +727,31 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
             self.assertEqual(len(notices), 1)
             self.assertIn('MU', personal_delivery_message(notices[0]))
 
+    def test_alphabet_preferred_tag_needs_company_subject_for_common_watchlist(self):
+        from news_subscriptions import personal_delivery_message
+
+        scanner_engine.set_news_watchlist('GOOGL', 'Alphabet Inc.')
+        fixtures = [
+            ('GOOGN', 'Google signs a multiyear data-center supply contract', 'watchlist'),
+            ('GOOGM', 'Alphabet acquires a cloud infrastructure company', 'watchlist'),
+            ('GOOGN', 'GOOGN price and yield change', 'universe'),
+            ('GOOGM', 'NVIDIA raises guidance; unlike Google it expects growth', 'universe'),
+        ]
+        with patch.dict(os.environ, {'STOCK_SCANNER_PUBLIC_NEWS_STRICT_QUALITY_ENABLED': 'true'}):
+            for i, (symbol, title, scope) in enumerate(fixtures):
+                article = {**self.item('yahoo_priority', f'https://example.test/issuer/{i}', symbol),
+                           'title': title}
+                news_pipeline.ingest_items([article], self.clock)
+                row = self.rows('SELECT scope,ticker,verified_tickers_json FROM scanner_news ORDER BY id DESC LIMIT 1')[0]
+                self.assertEqual((row['scope'], row['ticker'], json.loads(row['verified_tickers_json'])),
+                                 (scope, symbol, [symbol]))
+            news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer, limit=4, at=self.clock)
+            notices = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='watchlist_news'")
+            self.assertEqual(len(notices), 2)
+            for notice in notices:
+                self.assertTrue(notice['dedupe_key'].endswith(':GOOGL'))
+                self.assertIn('GOOGL', personal_delivery_message(notice))
+
     def test_alphabet_share_classes_share_one_watchlist_alert_across_sources(self):
         scanner_engine.set_news_watchlist('GOOG', 'Alphabet Inc.')
         scanner_engine.set_news_watchlist('GOOGL', 'Alphabet Inc.')
@@ -751,6 +776,29 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         items = normalize_news(source, 'GOOGL', 'Alphabet', 168, at,
                                issuer_tickers=news_pipeline.watchlist_issuer_tickers('GOOGL'))
         self.assertEqual(items[0]['provider_tickers'], ['GOOG'])
+
+    def test_watched_alphabet_yahoo_lookup_accepts_preferred_metadata_for_verified_subject(self):
+        from news_events.yahoo_metadata import normalize_news
+
+        scanner_engine.set_news_watchlist('GOOGL', 'Alphabet Inc.')
+        at = self.clock.timestamp()
+        payload = {'news': [
+            {'title': 'Google signs a multiyear data-center supply contract',
+             'link': 'https://example.test/google', 'relatedTickers': ['GOOGN'], 'providerPublishTime': int(at)},
+            {'title': 'GOOGM price and yield change',
+             'link': 'https://example.test/googm', 'relatedTickers': ['GOOGM'], 'providerPublishTime': int(at)},
+        ]}
+
+        def fetch(ticker, company, age, *, issuer_tickers=None):
+            self.assertEqual(ticker, 'GOOGL')
+            return normalize_news(payload, ticker, company, age, at, issuer_tickers=issuer_tickers)
+
+        with patch.object(news_pipeline, '_priority_tickers', return_value=([('GOOGL', 'Alphabet Inc.')], {}, 'test')), \
+             patch('news_events.yahoo_metadata.fetch_news', side_effect=fetch) as provider:
+            result = news_pipeline._fetch_yahoo_priority({}, self.clock)
+        provider.assert_called_once()
+        self.assertEqual([item['tickers'] for item in result['items']], [['GOOGN']])
+        self.assertEqual(result['metrics']['rejected_assignment'], 1)
 
     def test_multi_ticker_news_alerts_position_and_other_watchlist_without_duplicates(self):
         self.open_trade()

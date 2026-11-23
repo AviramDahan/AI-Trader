@@ -52,12 +52,19 @@ VERIFIED_COMPANY_ALIASES: dict[str, tuple[str, ...]] = {
 }
 AMBIGUOUS_TICKER_WORDS = {"A", "AI", "ALL", "ARE", "CAN", "FOR", "IT", "ON", "OR", "SO", "TO"}
 ALPHABET_SHARE_CLASSES = ("GOOG", "GOOGL")
+# Alphabet's SEC filing lists these depositary shares under the same issuer.
+ALPHABET_PREFERRED_TICKERS = ("GOOGM", "GOOGN")
 WATCHLIST_COMPANY_ALIASES = {"GOOG": ("google",), "GOOGL": ("google",), "MU": ("micron",)}
 
 
-def watchlist_issuer_tickers(ticker: str) -> tuple[str, ...]:
+def watchlist_issuer_tickers(ticker: str, *, title: str = "") -> tuple[str, ...]:
     """Use a reviewed issuer relationship only for news subscriptions."""
-    return ALPHABET_SHARE_CLASSES if ticker in ALPHABET_SHARE_CLASSES else (ticker,)
+    if ticker in ALPHABET_SHARE_CLASSES:
+        return ALPHABET_SHARE_CLASSES
+    if ticker in ALPHABET_PREFERRED_TICKERS and title and _notification_subject(
+            {"title": title}, "GOOGL", "Alphabet Inc.", watchlist=True):
+        return (*ALPHABET_SHARE_CLASSES, ticker)
+    return (ticker,)
 
 
 class ProviderRateLimited(RuntimeError):
@@ -724,9 +731,10 @@ def _fetch_yahoo_priority(state: dict[str, Any], at: datetime) -> dict[str, Any]
     for ticker, company in selected:
         try:
             attempted += 1
-            issuer_tickers = watchlist_issuer_tickers(ticker) if ticker in watched else (ticker,)
-            fetched = (fetch_recent_news(ticker, company, 168, issuer_tickers=issuer_tickers)
-                       if len(issuer_tickers) > 1 else fetch_recent_news(ticker, company, 168))
+            fetched = (fetch_recent_news(ticker, company, 168,
+                        issuer_tickers=(*ALPHABET_SHARE_CLASSES, *ALPHABET_PREFERRED_TICKERS))
+                       if ticker in watched and ticker in ALPHABET_SHARE_CLASSES
+                       else fetch_recent_news(ticker, company, 168))
             successful += 1
             for item in fetched:
                 received += 1
@@ -816,7 +824,7 @@ def initialize_providers(at: datetime | None = None) -> None:
     conn.commit(); conn.close()
 
 
-def _scope_context(cur, tickers: list[str], published_at: str) -> tuple[str, int | None, list[int]]:
+def _scope_context(cur, tickers: list[str], published_at: str, *, title: str) -> tuple[str, int | None, list[int]]:
     if not tickers:
         return "market", None, []
     placeholders = ",".join("?" for _ in tickers)
@@ -828,7 +836,7 @@ def _scope_context(cur, tickers: list[str], published_at: str) -> tuple[str, int
               if _parse_time(published_at) >= _parse_time(row["opened_at"]) - overlap]
     cur.execute(f"SELECT id FROM scanner_signals WHERE status IN ('ACTIVE','PENDING_ENTRY','ENTERED') AND ticker IN ({placeholders}) ORDER BY id DESC LIMIT 1", tuple(tickers))
     signal = cur.fetchone()
-    watch_tickers = sorted({member for ticker in tickers for member in watchlist_issuer_tickers(ticker)})
+    watch_tickers = sorted({member for ticker in tickers for member in watchlist_issuer_tickers(ticker, title=title)})
     watch_slots = ",".join("?" for _ in watch_tickers)
     cur.execute(f"SELECT ticker FROM scanner_news_watchlist WHERE enabled=1 AND ticker IN ({watch_slots}) LIMIT 1",
                 tuple(watch_tickers))
@@ -970,7 +978,7 @@ def _ingest_regular_items(cur, items: list[dict[str, Any]], current: datetime) -
             rejected_date += 1
             continue
         canonical, source_key, version = _canonical_key(item), _source_key(item), _event_version(item)
-        scope, signal_id, trade_ids = _scope_context(cur, item["tickers"], item["published_at"])
+        scope, signal_id, trade_ids = _scope_context(cur, item["tickers"], item["published_at"], title=item["title"])
         # A syndicated source URL can belong to a canonical article whose
         # primary URL differs. Look in the source ledger as well, otherwise a
         # provider changing its headline creates a second visible article.
@@ -1959,7 +1967,8 @@ def _persist_news_analysis(cur, rows, results, current, stamp, at):
             if not verified and row.get("ticker"):
                 verified.add(str(row["ticker"]).upper())
             position_tickers = {str(trade["ticker"]).upper() for trade in trade_rows}
-            watchlist_tickers = {member for ticker in verified for member in watchlist_issuer_tickers(ticker)}
+            watchlist_groups = {ticker: watchlist_issuer_tickers(ticker, title=row["title"]) for ticker in verified}
+            watchlist_tickers = {member for group in watchlist_groups.values() for member in group}
             watchlist_tickers.difference_update(member for ticker in position_tickers
                                                 for member in watchlist_issuer_tickers(ticker))
             watched_tickers: set[str] = set()
@@ -2006,7 +2015,8 @@ def _persist_news_analysis(cur, rows, results, current, stamp, at):
             broad_quality = (materiality in {"medium", "high"}
                 and relevance >= max(cfg["broad_alert_min_relevance"],.80 if strict_public_quality() else 0)
                 and row_publication_check(row)[0])
-            uncovered = sorted(strict_verified - position_tickers - watched_tickers)
+            covered = {ticker for ticker, group in watchlist_groups.items() if watched_tickers.intersection(group)}
+            uncovered = sorted(strict_verified - position_tickers - covered)
             if broad_quality and uncovered and not row.get('_personal_route_only'):
                 allowed: list[str] = []
                 for ticker in uncovered:
