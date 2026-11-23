@@ -51,6 +51,13 @@ VERIFIED_COMPANY_ALIASES: dict[str, tuple[str, ...]] = {
     "UAL": ("united airlines", "united airlines holdings"),
 }
 AMBIGUOUS_TICKER_WORDS = {"A", "AI", "ALL", "ARE", "CAN", "FOR", "IT", "ON", "OR", "SO", "TO"}
+ALPHABET_SHARE_CLASSES = ("GOOG", "GOOGL")
+WATCHLIST_COMPANY_ALIASES = {"GOOG": ("google",), "GOOGL": ("google",), "MU": ("micron",)}
+
+
+def watchlist_issuer_tickers(ticker: str) -> tuple[str, ...]:
+    """Use a reviewed issuer relationship only for news subscriptions."""
+    return ALPHABET_SHARE_CLASSES if ticker in ALPHABET_SHARE_CLASSES else (ticker,)
 
 
 class ProviderRateLimited(RuntimeError):
@@ -173,7 +180,7 @@ def _normal_title(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
-def _headline_verifies_ticker(ticker: str, company: str, title: str) -> bool:
+def _headline_verifies_ticker(ticker: str, company: str, title: str, *, watchlist=False) -> bool:
     """Verify a headline using an exact ticker or a controlled company alias.
 
     A short/common ticker is never accepted merely because its letters appear
@@ -183,21 +190,23 @@ def _headline_verifies_ticker(ticker: str, company: str, title: str) -> bool:
     title_normalized = _normal_title(title)
     words = set(title_normalized.split())
     symbol = ticker.upper().replace(".", "-")
-    normalized_ticker = symbol.lower().replace("-", " ")
-    if symbol not in AMBIGUOUS_TICKER_WORDS and normalized_ticker in words:
+    tickers = watchlist_issuer_tickers(symbol) if watchlist else (symbol,)
+    if any(t not in AMBIGUOUS_TICKER_WORDS and t.lower().replace("-", " ") in words for t in tickers):
         return True
     suffixes = {"inc", "incorporated", "corp", "corporation", "company", "co", "common", "stock", "class",
                 "holdings", "holding", "group", "plc", "ltd", "limited"}
     legal_name = _normal_title(company)
     identity_words = [word for word in legal_name.split() if word not in suffixes]
-    aliases = set(VERIFIED_COMPANY_ALIASES.get(symbol, ()))
+    reviewed = set(VERIFIED_COMPANY_ALIASES.get(symbol, ()))
+    if watchlist:
+        reviewed.update(WATCHLIST_COMPANY_ALIASES.get(symbol, ()))
+    aliases = set(reviewed)
     if legal_name:
         aliases.add(legal_name)
     if identity_words:
         aliases.add(" ".join(identity_words))
     # Single-word aliases are allowed only when explicitly reviewed or when the
     # legal identity itself has one distinctive word (e.g. Gartner, Microsoft).
-    reviewed = set(VERIFIED_COMPANY_ALIASES.get(symbol, ()))
     for alias in sorted(aliases, key=len, reverse=True):
         normalized = _normal_title(alias)
         if not normalized:
@@ -211,7 +220,7 @@ def _headline_verifies_ticker(ticker: str, company: str, title: str) -> bool:
     return False
 
 
-def _notification_subject(row, ticker, company):
+def _notification_subject(row, ticker, company, *, watchlist=False):
     """Require headline evidence for a displayed ticker on strict news routes."""
     from news_public_importance import source_importance
 
@@ -222,7 +231,7 @@ def _notification_subject(row, ticker, company):
     # An example or comparison following the actual event is not the subject.
     main = re.split(r';\s+|\b(?:unlike|versus|compared (?:with|to)|in contrast to|when)\b',
                     title, maxsplit=1, flags=re.I)[0]
-    return _headline_verifies_ticker(ticker, company, main)
+    return _headline_verifies_ticker(ticker, company, main, watchlist=watchlist)
 
 
 def _sha(value: str) -> str:
@@ -703,17 +712,28 @@ def _fetch_yahoo_priority(state: dict[str, Any], at: datetime) -> dict[str, Any]
     started=time.monotonic()
     selected, checkpoint, coverage = _priority_tickers(feed_settings()["yahoo_tickers"],
                                                        _loads(state.get("checkpoint_json"), {}))
+    watched = set()
+    if any(ticker in WATCHLIST_COMPANY_ALIASES for ticker, _ in selected):
+        with get_db_connection() as conn:
+            watched = {row["ticker"] for row in conn.execute(
+                "SELECT ticker FROM scanner_news_watchlist WHERE enabled=1 AND ticker IN ('GOOG','GOOGL','MU')"
+            )}
     output: list[dict[str, Any]] = []
     errors: list[str] = []
     received = rejected_assignment = attempted = successful = 0
     for ticker, company in selected:
         try:
             attempted += 1
-            fetched = fetch_recent_news(ticker, company, 168)
+            issuer_tickers = watchlist_issuer_tickers(ticker) if ticker in watched else (ticker,)
+            fetched = (fetch_recent_news(ticker, company, 168, issuer_tickers=issuer_tickers)
+                       if len(issuer_tickers) > 1 else fetch_recent_news(ticker, company, 168))
             successful += 1
             for item in fetched:
                 received += 1
-                if not _headline_verifies_ticker(ticker, company, str(item.get("title") or "")):
+                verified = _headline_verifies_ticker(ticker, company, str(item.get("title") or ""))
+                if not verified and ticker in watched:
+                    verified = _notification_subject(item, ticker, company, watchlist=True)
+                if not verified:
                     rejected_assignment += 1
                     continue
                 excerpt = _strip_markup(item.get('source_excerpt') or '')[:2000]
@@ -808,7 +828,10 @@ def _scope_context(cur, tickers: list[str], published_at: str) -> tuple[str, int
               if _parse_time(published_at) >= _parse_time(row["opened_at"]) - overlap]
     cur.execute(f"SELECT id FROM scanner_signals WHERE status IN ('ACTIVE','PENDING_ENTRY','ENTERED') AND ticker IN ({placeholders}) ORDER BY id DESC LIMIT 1", tuple(tickers))
     signal = cur.fetchone()
-    cur.execute(f"SELECT ticker FROM scanner_news_watchlist WHERE enabled=1 AND ticker IN ({placeholders}) LIMIT 1", tuple(tickers))
+    watch_tickers = sorted({member for ticker in tickers for member in watchlist_issuer_tickers(ticker)})
+    watch_slots = ",".join("?" for _ in watch_tickers)
+    cur.execute(f"SELECT ticker FROM scanner_news_watchlist WHERE enabled=1 AND ticker IN ({watch_slots}) LIMIT 1",
+                tuple(watch_tickers))
     watched = cur.fetchone()
     if trades:
         return "open_position", int(signal["id"]) if signal else None, [int(row["id"]) for row in trades]
@@ -1568,7 +1591,7 @@ def _company_for_ticker(cur, ticker: str) -> str:
     return ticker
 
 
-def _same_event_filter(alias: str, row: dict[str, Any]) -> tuple[str, list[Any]]:
+def _same_event_filter(alias: str, row: dict[str, Any], *, issuer_source_version=None) -> tuple[str, list[Any]]:
     """Match the same published event even when legacy ingestion made two rows."""
     clauses = [f"{alias}.id=?"]
     values: list[Any] = [row["id"]]
@@ -1578,6 +1601,11 @@ def _same_event_filter(alias: str, row: dict[str, Any]) -> tuple[str, list[Any]]
     if row.get("canonical_key"):
         clauses.append(f"{alias}.canonical_key=?")
         values.append(row["canonical_key"])
+    if issuer_source_version and row.get("published_at"):
+        # Share-class-specific canonical keys can represent identical facts
+        # from the same day. Require the exact source content, not a fuzzy title.
+        clauses.append(f"({alias}.content_hash=? AND SUBSTR({alias}.published_at,1,10)=?)")
+        values.extend((issuer_source_version, row["published_at"][:10]))
     expression = " OR ".join(clauses)
     if row.get('_news_version'):
         # The alert ledger, not the mutable source row, identifies the version
@@ -1786,6 +1814,7 @@ def _persist_news_analysis(cur, rows, results, current, stamp, at):
                 or any(current_job[key] != row[key] for key in ('content_hash', 'published_at', 'attempts'))):
             continue
         alerts_before = alerts
+        source_version = row.get("content_hash")
         result = by_id.get(int(row["id"]))
         if result and result.get('_news_version'):
             # Local overlay only: never modify final-review source tables.
@@ -1930,7 +1959,9 @@ def _persist_news_analysis(cur, rows, results, current, stamp, at):
             if not verified and row.get("ticker"):
                 verified.add(str(row["ticker"]).upper())
             position_tickers = {str(trade["ticker"]).upper() for trade in trade_rows}
-            watchlist_tickers = verified - position_tickers
+            watchlist_tickers = {member for ticker in verified for member in watchlist_issuer_tickers(ticker)}
+            watchlist_tickers.difference_update(member for ticker in position_tickers
+                                                for member in watchlist_issuer_tickers(ticker))
             watched_tickers: set[str] = set()
             if watchlist_tickers:
                 placeholders = ",".join("?" for _ in watchlist_tickers)
@@ -1939,15 +1970,22 @@ def _persist_news_analysis(cur, rows, results, current, stamp, at):
                 from news_public_importance import enabled as strict_watchlist_quality
                 if strict_watchlist_quality():
                     watched = [value for value in watched
-                               if _notification_subject(row, value["ticker"], value["company"] or "")]
-                watched_tickers = {str(value["ticker"]).upper() for value in watched}
-                for watched_row in watched:
+                               if _notification_subject(row, value["ticker"], value["company"] or "", watchlist=True)]
+                for watched_row in sorted(watched, key=lambda value: (value["ticker"] not in verified, value["ticker"])):
                     ticker = watched_row["ticker"]
+                    if ticker in watched_tickers:
+                        continue
+                    issuer_tickers = watchlist_issuer_tickers(ticker)
+                    watched_tickers.update(issuer_tickers)
+                    issuer_slots = ",".join("?" for _ in issuer_tickers)
                     version = row.get("content_hash") or "v1"
+                    watch_filter, watch_values = (event_filter, event_values)
+                    if len(issuer_tickers) > 1:
+                        watch_filter, watch_values = _same_event_filter("seen", row, issuer_source_version=source_version)
                     cur.execute(f"""SELECT 1 FROM scanner_news_watchlist_alerts a
                         JOIN scanner_news seen ON seen.id=a.news_id
-                        WHERE a.ticker=? AND ({event_filter}) LIMIT 1""",
-                                (ticker, *event_values))
+                        WHERE a.ticker IN ({issuer_slots}) AND ({watch_filter}) LIMIT 1""",
+                                (*issuer_tickers, *watch_values))
                     if cur.fetchone():
                         continue
                     cur.execute("INSERT INTO scanner_news_watchlist_alerts(news_id,ticker,event_version,created_at) VALUES(?,?,?,?)",
