@@ -1980,12 +1980,19 @@ def _persist_news_analysis(cur, rows, results, current, stamp, at):
                 if strict_watchlist_quality():
                     watched = [value for value in watched
                                if _notification_subject(row, value["ticker"], value["company"] or "", watchlist=True)]
+                from news_watchlist_editorial import already_covered, decision, enabled as watchlist_editorial_enabled
+                editorial = watchlist_editorial_enabled()
                 for watched_row in sorted(watched, key=lambda value: (value["ticker"] not in verified, value["ticker"])):
                     ticker = watched_row["ticker"]
                     if ticker in watched_tickers:
                         continue
                     issuer_tickers = watchlist_issuer_tickers(ticker)
+                    reason, fact = decision(row, ticker, watched_row["company"]) if editorial else (None, None)
+                    if reason:
+                        continue
                     watched_tickers.update(issuer_tickers)
+                    if fact and already_covered(cur, issuer_tickers, fact, row, current, company=watched_row["company"]):
+                        continue
                     issuer_slots = ",".join("?" for _ in issuer_tickers)
                     version = row.get("content_hash") or "v1"
                     watch_filter, watch_values = (event_filter, event_values)

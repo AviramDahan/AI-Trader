@@ -800,6 +800,48 @@ class NewsPipelineIntegrationTests(unittest.TestCase):
         self.assertEqual([item['tickers'] for item in result['items']], [['GOOGN']])
         self.assertEqual(result['metrics']['rejected_assignment'], 1)
 
+    def test_news_only_watchlist_keeps_one_leadership_notice_and_independent_update(self):
+        from news_subscriptions import personal_delivery_message
+
+        scanner_engine.set_news_watchlist('NVDA', 'NVIDIA Corporation')
+        cases = [
+            '$NVDA - NVIDIA Board reinstates Jensen Huang as CEO',
+            'Nvidia stock soars 31% as Jensen Huang returns as CEO',
+            'Qualcomm Jumps 9.8% as Chip Stocks Rally on Nvidia News',
+            'NVIDIA has formed a national security and export control committee',
+            'NVIDIA shares extend premarket gains, last up 27%',
+            "Nvidia's Jensen Huang net worth rises after the rally",
+        ]
+        with patch.dict(os.environ, {'AI_TRADER_OPERATION_MODE':'news_only',
+                                     'STOCK_SCANNER_PUBLIC_NEWS_STRICT_QUALITY_ENABLED':'true'}):
+            for index, title in enumerate(cases):
+                at = self.clock + timedelta(minutes=index)
+                row = {**self.item('yahoo_priority', f'https://example.test/event/{index}', 'NVDA'),
+                       'title': title, 'published_at': at.isoformat()}
+                news_pipeline.ingest_items([row], at)
+                news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer, at=at)
+            notices = self.rows("""SELECT o.*,n.title FROM scanner_telegram_outbox o JOIN scanner_news n
+                ON o.dedupe_key LIKE ('watchlist-news:' || n.id || ':%')
+                WHERE event_type='watchlist_news' ORDER BY o.id""")
+            self.assertEqual([notice['title'] for notice in notices], [cases[0], cases[3]])
+            self.assertTrue(all(personal_delivery_message(notice) for notice in notices))
+
+    def test_news_only_watchlist_sends_analyst_action_to_existing_specialist_route(self):
+        from news_analyst_routing import analyst_for_outbox
+
+        scanner_engine.set_news_watchlist('NVDA', 'NVIDIA Corporation')
+        env = {'AI_TRADER_OPERATION_MODE':'news_only', 'STOCK_SCANNER_PUBLIC_NEWS_STRICT_QUALITY_ENABLED':'true',
+               'TELEGRAM_ANALYST_UPDATES_TOPIC_ENABLED':'true', 'TELEGRAM_ANALYST_UPDATES_THREAD_ID':'17'}
+        row = {**self.item('yahoo_priority', 'https://example.test/rating', 'NVDA'),
+               'title': 'Bernstein raises Nvidia to Outperform from Market Perform'}
+        with patch.dict(os.environ, env):
+            news_pipeline.ingest_items([row], self.clock)
+            news_pipeline.analyze_news_jobs(analyzer=self.strong_analyzer, at=self.clock)
+            self.assertFalse(self.rows("SELECT id FROM scanner_telegram_outbox WHERE event_type='watchlist_news'"))
+            rows = self.rows("SELECT * FROM scanner_telegram_outbox WHERE event_type='stock_news'")
+            self.assertEqual(len(rows), 1)
+            self.assertTrue(analyst_for_outbox(rows[0]))
+
     def test_multi_ticker_news_alerts_position_and_other_watchlist_without_duplicates(self):
         self.open_trade()
         scanner_engine.set_news_watchlist("NVDA", "NVIDIA")
