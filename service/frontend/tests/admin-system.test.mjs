@@ -111,6 +111,25 @@ unknownFunnelNode.state='unknown';unknownFunnelNode.reason='news_funnel_unverifi
 unknownFunnelNode.metrics={news_events_6h:null,news_funnel_review_required:null}
 assert.ok(render(noFunnel).includes('אין תצפית משפך עדכנית ותקפה'))
 assert.ok(render(noFunnel).includes('אירועים חדשים בחלון (עד 6 שעות)</dt><dd><bdi>לא זמין</bdi>'))
+assert.ok(normal.includes('המדידה אינה זמינה כרגע'))
+const newsFixture = opsFixture()
+newsFixture.news_observability = {
+  status: 'observed', observed_at: newsFixture.observed_at, mode: 'phase1', news_hours: 6, report_days: 30,
+  sources: { partial: false, rows: [{ provider: 'wire', receipts: 2, items: 1, linked_acknowledged: 1,
+    stages: { analyzed: 1 }, reasons: {}, latest_check: null }] },
+  delivery: { partial: true, rows: [{ basis: 'message_type', route: 'market_news',
+    counts: { acknowledged: 2 }, reasons: {} }] },
+  earnings: { partial: false, mapping_at: null, rows: [
+    { ticker: 'KNOWN', discovery_checked_at: null, counts: {} },
+    { ticker: 'UNKNOWN', discovery_checked_at: null, counts: null },
+  ] },
+}
+const newsMarkup = render(newsFixture)
+for (const label of ['2 קליטות', '1 ידיעות עם אישור שליחה מקושר', 'חדשות שוק · סוג הודעה',
+  'שליחה אושרה 2', 'המדגם חלקי', 'אין דוח שנקלט אצלנו בחלון', 'מיפוי ל־SEC לא אומת']) {
+  assert.ok(newsMarkup.includes(label), label)
+}
+assert.ok(render({ ...newsFixture, observed_at: stalePartial.observed_at }).includes('נתונים שמורים'))
 for(const forbidden of ['localStorage','sessionStorage','initDataUnsafe','sendData','/completion','method:'])assert.equal(source.includes(forbidden),false)
 const poller=readFileSync('src/readPoller.ts','utf8');assert.ok(poller.includes('options.headers()'))
 const app=readFileSync('src/App.tsx','utf8');assert.ok(app.includes('isAdminSystemEntry(location.search, location.hash)'))

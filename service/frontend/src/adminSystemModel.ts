@@ -1,4 +1,14 @@
 import type { TeamReport } from './adminAgentOfficeModel'
+type NewsCounts = Record<string, number>
+type NewsSample<T> = { rows: T[]; partial: boolean }
+export type NewsObservation =
+  | { status: 'not_verified'; observed_at: string }
+  | { status: 'observed'; observed_at: string; mode: string; news_hours: number; report_days: number
+      sources: NewsSample<{ provider: string; receipts: number; items: number; linked_acknowledged: number; stages: NewsCounts; reasons: NewsCounts
+        latest_check: { at: string; counts: NewsCounts } | null }>
+      delivery: NewsSample<{ basis: string; route: string; counts: NewsCounts; reasons: NewsCounts }>
+      earnings: NewsSample<{ ticker: string; discovery_checked_at: string | null; counts: NewsCounts | null }> & { mapping_at: string | null }
+    }
 export type OpsState = 'healthy' | 'idle' | 'failed' | 'degraded' | 'stale' | 'unknown' | 'disabled'
 export type OpsNode = {
   id: string; state: OpsState; reason: string; observed_at: string | null
@@ -14,6 +24,7 @@ export type OpsSnapshot = {
   overall: 'failed' | 'attention' | 'observed_operational'
   market: { is_open: boolean; reason: string }; nodes: OpsNode[]
   agent_team?: TeamReport | null
+  news_observability?: NewsObservation
 }
 export const OPS_GROUPS = [
   { title: 'מקורות ומידע', ids: ['news_feed', 'sec_intelligence'] },
