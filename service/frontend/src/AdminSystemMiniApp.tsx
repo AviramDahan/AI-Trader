@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { API_ORIGIN } from './appShared'
 import { createReadPoller } from './readPoller'
 import { AdminAgentOffice } from './AdminAgentOffice'
+import { AdminNewsCoverage } from './AdminNewsCoverage'
 import { OPS_GROUPS, OPS_NODES, OPS_STATES, OPS_REASONS, OPS_METRICS, OPS_ERROR_CODES, OPS_ROLE_LEASE_NODES, secDiscoveryCoverage, marketDescription, providerExplanation, opsTime, snapshotFresh, telegramAdminData, type OpsNode, type OpsSnapshot } from './adminSystemModel'
 import './adminSystemMiniApp.css'
 
@@ -70,6 +71,7 @@ export function AdminSystemPanel({ data, error = '', now = Date.now(), onRefresh
     <div className="ops-flow" aria-label="זרימת המערכת"><p className="ops-map-note">הקווים מציגים קשרים בין רכיבים, לא הוכחה שעסקה עברה את כל השלבים. לחצו על רכיב לפירוט.</p>
       {OPS_GROUPS.map((group, i) => <section className="ops-stage" key={group.title}><div className="ops-stage-heading"><span>{i+1}</span><h2>{group.title}</h2></div><div className="ops-stage-cards">{group.ids.map(id => <OpsCard key={id} node={getNode(id)} retained={Boolean(data && !fresh)} />)}</div></section>)}
     </div>
+    {data && <AdminNewsCoverage data={data.news_observability} retained={!fresh} />}
     <section className="ops-infrastructure"><h2>תשתית שמחזיקה את המערכת</h2><p>מסד הנתונים והגיבוי תומכים בכל השלבים; הם אינם תחנות ביצוע עסקה.</p><div className="ops-stage-cards">{['api','database','backup'].map(id => <OpsCard key={id} node={getNode(id)} retained={Boolean(data && !fresh)} />)}</div></section>
     </div>
     <footer className="ops-footer"><details><summary>מה התצוגה מוכיחה, ומה לא?</summary><p>הנתונים נקראים מתמונת מצב עקבית בקריאה בלבד. סימון תקין מתייחס לבדיקה ולזמן שמוצגים, לא להבטחת זמינות רציפה.</p><p>אין כאן בדיקת Docker/OOM, קריאת AI יזומה, אימות קריאת הודעה בטלגרם, שחזור גיבוי או הוכחה לשרשרת מסחר טבעית מלאה. נתון חסר אינו אפס ואינו הצלחה.</p><p>התצוגה אינה משנה ספים, פקודות, פוזיציות או תקציב.</p></details><span>גרסת שרת <bdi>{data?.build_sha?.slice(0, 7) ?? 'לא אומתה'}</bdi> · תצוגה פרטית לקריאה בלבד</span></footer>

@@ -17,6 +17,8 @@ from admin_health_context import snapshot as service_context
 _cache_lock = threading.Lock()
 _cached = None
 _cached_at = 0
+_news_cached = None
+_news_cached_at = 0
 SERVICE_LIMITS = {'scan': 7200, 'monitor': 900, 'quotes': 900, 'telegram': 180,
                   'backup': 7500, 'news_feed': 900, 'news_ai': 900, 'sec_intelligence': 900}
 SAFE_STATUSES = {'ok', 'no_new', 'not_modified', 'idle', 'waiting', 'market_closed',
@@ -359,6 +361,30 @@ def build(conn, now):
                       'on_demand_ai_not_continuous_work','outbox_not_telegram_readback']}
 
 
+def _news_observation(now):
+    global _news_cached, _news_cached_at
+    if _news_cached is not None and time.monotonic() - _news_cached_at < 60:
+        return _news_cached
+    try:
+        from news_observability import build as build_news_observation
+        with get_db_connection() as conn:
+            if using_postgres():
+                conn.execute('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+                conn.execute("SET LOCAL statement_timeout='1500ms'")
+                conn.execute("SET LOCAL lock_timeout='500ms'")
+                if conn.execute('SHOW transaction_read_only').fetchone()[0] != 'on':
+                    raise RuntimeError('read_only_required')
+            else:
+                conn.execute('PRAGMA query_only=ON')
+                conn.execute('PRAGMA busy_timeout=500')
+                conn.execute('BEGIN')
+            _news_cached = build_news_observation(conn, now)
+    except Exception:
+        _news_cached = {'status': 'not_verified', 'observed_at': now.isoformat()}
+    _news_cached_at = time.monotonic()
+    return _news_cached
+
+
 def payload():
     global _cached, _cached_at
     with _cache_lock:
@@ -373,6 +399,8 @@ def payload():
             else:
                 conn.execute('PRAGMA query_only=ON')
                 conn.execute('BEGIN')
-            result = build(conn, datetime.now(timezone.utc))
+            now = datetime.now(timezone.utc)
+            result = build(conn, now)
+        result['news_observability'] = _news_observation(now)
         _cached, _cached_at = result, time.monotonic()
         return result
