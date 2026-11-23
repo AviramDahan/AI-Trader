@@ -35,6 +35,30 @@ def test_incident_failure_recovery_once_and_retained_context():
     assert change=='failure' and state['generation']==2
 
 
+def test_news_alert_waits_for_sustained_failure_and_stable_recovery():
+    def observe(previous, failed, minutes):
+        return incident(previous, failed, {}, NOW+timedelta(minutes=minutes), component='news_ai')
+
+    state, change = observe(None, True, 0)
+    assert change is None and not state['active']
+    state, change = observe(state, False, 3)
+    assert change is None and not state['active']
+    state, change = observe(state, True, 5)
+    assert change is None
+    state, change = observe(state, True, 14)
+    assert change is None
+    state, change = observe(state, True, 15)
+    assert change == 'failure' and state['active'] and state['generation'] == 1
+    state, change = observe(state, False, 16)
+    assert change is None and state['active']
+    state, change = observe(state, True, 18)
+    assert change is None and state['active']
+    state, change = observe(state, False, 19)
+    assert change is None
+    state, change = observe(state, False, 24)
+    assert change == 'recovery' and not state['active']
+
+
 def test_invalid_diagnostic_dates_not_forwarded():
     data=snapshot({'status':'SECRET','last_success_at':'SECRET','detail':'SECRET'},NOW)
     assert data=={'status':'unknown','reason_codes':[],'stale_tickers':[]}
@@ -98,7 +122,9 @@ def test_health_loop_enqueues_one_backup_recovery_to_private_queue(monkeypatch):
         elif sql.startswith('SELECT value_json'):
             result.fetchone.return_value = {'value_json': saved['value']} if saved else None
         elif sql.startswith('INSERT INTO scanner_settings'):
-            saved['value'] = params[1]
+            saved.setdefault('value', params[1])
+        elif sql.startswith('UPDATE scanner_settings'):
+            saved['value'] = params[0]
         else:
             raise AssertionError(sql)
         return result
@@ -107,7 +133,7 @@ def test_health_loop_enqueues_one_backup_recovery_to_private_queue(monkeypatch):
     monkeypatch.setattr('database.get_db_connection', lambda: db)
     monkeypatch.setattr(ops, 'datetime', Clock)
     queue = Mock()
-    monkeypatch.setattr(ops, 'enqueue', queue)
+    monkeypatch.setattr(ops, '_enqueue', lambda conn, key, msg, at: queue(key, msg))
     ops.health()
     ops.health()
     now[0] = NOW + timedelta(minutes=1)
@@ -136,7 +162,9 @@ def health_driver(monkeypatch, row, saved=None):
         elif sql.startswith('SELECT value_json'):
             result.fetchone.return_value = {'value_json': state['value']} if state else None
         elif sql.startswith('INSERT INTO scanner_settings'):
-            state['value'] = params[1]
+            state.setdefault('value', params[1])
+        elif sql.startswith('UPDATE scanner_settings'):
+            state['value'] = params[0]
         else:
             raise AssertionError(sql)
         return result
@@ -145,7 +173,7 @@ def health_driver(monkeypatch, row, saved=None):
     monkeypatch.setattr('database.get_db_connection', lambda: db)
     monkeypatch.setattr(ops, 'datetime', Clock)
     queue = Mock()
-    monkeypatch.setattr(ops, 'enqueue', queue)
+    monkeypatch.setattr(ops, '_enqueue', lambda conn, key, msg, at: queue(key, msg))
     return ops.health, queue, state
 
 
@@ -223,12 +251,20 @@ def test_news_backoff_does_not_recover_an_active_incident(monkeypatch, component
 
     monkeypatch.setattr(ai_operations, 'datetime', FeedClock)
     run()
+    assert queue.call_count == 0
     now[0] += timedelta(seconds=30)
     row.update(status='backoff', last_attempt_at=now[0].isoformat())
+    run()
+    assert queue.call_count == 0
+    now[0] = NOW + timedelta(minutes=10)
+    row.update(last_attempt_at=now[0].isoformat())
     run()
     assert queue.call_count == 1
     now[0] += timedelta(seconds=30)
     row.update(status='ok', last_attempt_at=now[0].isoformat(), last_success_at=now[0].isoformat())
+    run()
+    assert queue.call_count == 1
+    now[0] += timedelta(minutes=5)
     run()
     assert [call.args[0] for call in queue.call_args_list] == [
         f'health:{component}:1', f'health_recovered:{component}:1'

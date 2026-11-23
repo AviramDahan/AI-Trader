@@ -40,6 +40,22 @@ def test_private_alert_never_falls_back_to_public_chat():
         ops.send_one()
         post.assert_not_called()
 
+
+def test_news_call_failures_keep_retained_telemetry_without_individual_alerts():
+    import time
+
+    with patch.dict('os.environ', {'AI_TRADER_CLOUD': 'true'}), \
+         patch('database.get_db_connection') as database, patch.object(ops, 'enqueue') as alert:
+        connection = database.return_value.__enter__.return_value
+        ops.record('news_analysis', 'fixture', None, time.monotonic(), False, 'ReadTimeout')
+        ops.record('news_translation', 'fixture', None, time.monotonic(), False, 'ReadTimeout', retry=True)
+        alert.assert_not_called()
+        calls = connection.execute.call_args_list
+        assert len(calls) == 2
+        assert [call.args[1][1] for call in calls] == ['news_analysis', 'retry_repair']
+        ops.record('final_stock_review', 'fixture', None, time.monotonic(), False, 'ReadTimeout')
+        alert.assert_called_once()
+
 def test_reconciliation_failure_does_not_block_admin_delivery():
     import asyncio
     from unittest.mock import MagicMock,AsyncMock

@@ -42,6 +42,46 @@ def test_records_actual_cost_retry_and_unknown_cost_without_inventing(pg,monkeyp
     assert rows[0]['reasoning_tokens']==2
     assert rows[1]['actual_cost'] is None
 
+
+def test_news_flaps_are_silent_and_confirmed_outage_is_atomic(pg):
+    import psycopg
+    import pytest
+    from datetime import datetime, timedelta, timezone
+
+    start = datetime(2026, 11, 23, 9, tzinfo=timezone.utc)
+    key = 'admin_incident:news_ai'
+
+    def observe(minutes, status, success_at=None):
+        now = start + timedelta(minutes=minutes)
+        with database.get_db_connection() as c:
+            c.execute("""INSERT INTO scanner_service_status(component,status,last_attempt_at,last_success_at)
+              VALUES('news_ai',?,?,?) ON CONFLICT(component) DO UPDATE SET status=excluded.status,
+              last_attempt_at=excluded.last_attempt_at,last_success_at=excluded.last_success_at""",
+              (status, now.isoformat(), success_at.isoformat() if success_at else None))
+        ops.health(now)
+
+    observe(0, 'error')
+    observe(2, 'ok', start + timedelta(minutes=2))
+    observe(3, 'error')
+    with database.get_db_connection() as c:
+        assert c.execute('SELECT count(*) n FROM admin_alerts').fetchone()['n'] == 0
+        c.execute("""ALTER TABLE admin_alerts ADD CONSTRAINT reject_alert_test
+          CHECK (dedupe_key <> 'health:news_ai:1')""")
+    with pytest.raises(psycopg.errors.CheckViolation):
+        observe(13, 'backoff')
+    with database.get_db_connection() as c:
+        import json
+        assert not json.loads(c.execute('SELECT value_json FROM scanner_settings WHERE key=?', (key,)).fetchone()[0])['active']
+        c.execute('ALTER TABLE admin_alerts DROP CONSTRAINT reject_alert_test')
+    observe(14, 'error')
+    recovery = start + timedelta(minutes=15)
+    observe(15, 'ok', recovery)
+    observe(20, 'ok', recovery)
+    with database.get_db_connection() as c:
+        assert [r['dedupe_key'] for r in c.execute('SELECT dedupe_key FROM admin_alerts ORDER BY created_at')] == [
+            'health:news_ai:1', 'health_recovered:news_ai:1',
+        ]
+
 def test_admin_dedupe_and_destination_isolation(pg,monkeypatch):
     monkeypatch.setenv('TELEGRAM_ADMIN_CHAT_ID','private-test')
     monkeypatch.setenv('TELEGRAM_BOT_TOKEN','mock')
