@@ -1105,7 +1105,9 @@ def _company_report_text(text: str) -> str:
     output = ['\n'.join(periods[0])] if shared else []
     # This SEC comparison producer has no analyst-consensus input. Prior-year
     # values are actual results, never estimates. Do not invent EPS or surprise.
-    output.append('🔮 ציפיות האנליסטים\nלא זמין')
+    from operation_mode import news_only
+    if not news_only():
+        output.append('🔮 ציפיות האנליסטים\nלא זמין')
     output.append('📋 התוצאות בפועל')
     meanings = set(_PUBLIC_MEANING.values())
     for lines in facts:
@@ -1145,6 +1147,20 @@ def _enqueue_material_public_alert(job: dict, evidence: dict, at: datetime, conn
         return False
     if event_type == 'company_report':
         fact = _company_report_text(fact)
+        from operation_mode import news_only
+        if news_only() and not job["form"].endswith("/A"):
+            periods = set(re.findall(r'(?m)^תקופת הדיווח: (\d{4}-\d{2}-\d{2} עד \d{4}-\d{2}-\d{2})$', fact))
+            if periods:
+                peers = conn.execute("""SELECT o.message FROM si_filing_jobs j
+                    JOIN scanner_telegram_outbox o ON o.dedupe_key='sec-intelligence:' || j.accession
+                    WHERE j.issuer_cik=? AND j.form=? AND j.accession<>?
+                      AND j.accepted_at>=? AND o.status IN ('pending','sending','sent')
+                    ORDER BY j.accepted_at DESC LIMIT 12""",
+                    (job["issuer_cik"], job["form"], job["accession"], _z(accepted-timedelta(days=45))))
+                if any(periods <= set(re.findall(
+                        r'(?m)^תקופת הדיווח: (\d{4}-\d{2}-\d{2} עד \d{4}-\d{2}-\d{2})$', peer['message']))
+                       for peer in peers):
+                    return False
     from zoneinfo import ZoneInfo
     from scanner_engine import enqueue_telegram
     tickers = json.loads(job["tickers_json"])

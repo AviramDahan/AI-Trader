@@ -1362,6 +1362,10 @@ def _compact_stock_notice(row, *, heading, personal=False):
     report = is_company_report(facts['title'], facts['source_excerpt'])
     title = original if report and original else str(row.get('title_he') or original or 'עדכון').strip()
     summary = complementary_text(title, row.get('summary_he'))
+    from operation_mode import news_only
+    if news_only():
+        from news_only_editorial import qualified_copy
+        title, summary = qualified_copy(original, title, summary)
     if len(summary) > 550 and not report:
         summary = ''  # Keep the whole headline instead of clipping a qualifier.
     direction = {'positive': 'חיובית', 'negative': 'שלילית', 'mixed': 'מעורבת',
@@ -1387,6 +1391,14 @@ def _news_alert_message(row: dict[str, Any]) -> str:
 
 
 def _watchlist_alert_message(row: dict[str, Any]) -> str:
+    from operation_mode import news_only
+    if news_only():
+        from news_only_editorial import qualified_copy, watchlist_parts
+        original = str(row.get('title') or '')
+        title, summary = qualified_copy(original, str(row.get('title_he') or original),
+                                        row.get('summary_he'))
+        return '\n'.join(watchlist_parts(row['ticker'], title, summary,
+                                         headline_only=bool(row.get('headline_only'))))
     return _compact_stock_notice(row, heading='רשימת המעקב · ללא עסקה', personal=True)
 
 
@@ -1399,7 +1411,16 @@ def _stock_broadcast_alert_message(row: dict[str, Any]) -> str:
             and not is_company_report(row['title'], excerpt)
             and (row.get('title_he') or row.get('summary_he'))):
         from news_analyst_presentation import compact_parts
-        parts = compact_parts(row.get('title_he'), row.get('summary_he'), row['ticker'])
+        from operation_mode import news_only
+        ticker = row['ticker']
+        if news_only():
+            from news_only_editorial import analyst_subject_symbol, qualified_copy
+            ticker = analyst_subject_symbol(row['title'])
+            title, summary = qualified_copy(row['title'], row.get('title_he') or row['title'],
+                                            row.get('summary_he'))
+        else:
+            title, summary = row.get('title_he'), row.get('summary_he')
+        parts = compact_parts(title, summary, ticker)
         parts.append('פורסם: '+_publication_time_he(row['published_at']))
         return _notice_importance('\n'.join(parts), row, analyst=True)
     return _compact_stock_notice(row, heading='ידיעה שאינה סיגנל')
@@ -1496,6 +1517,11 @@ def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_onl
     source_report=is_company_report(row.get('title'),source_excerpt)
     shown_report=is_company_report(title,summary)
     report = source_report and shown_report if results_only_enabled() else source_report or shown_report
+    from operation_mode import news_only
+    if news_only():
+        from news_only_editorial import qualified_copy
+        title, summary = qualified_copy(row.get('title'), title, summary)
+        interpretation = ''
     from news_analyst_routing import enabled as analyst_enabled, is_analyst_update
     compact_analyst = not report and analyst_enabled() and is_analyst_update(row.get('title'),source_excerpt)
     parts = [(REPORT_PREFIX if report else "📰 ") + title[:350]]
@@ -1507,7 +1533,8 @@ def _queue_general_bulletin(cur, row, result, current, stamp, *, translation_onl
         parts.append(summary[:450])
     if compact_analyst:
         from news_analyst_presentation import compact_parts
-        parts = compact_parts(title,summary)
+        from news_only_editorial import analyst_subject_symbol
+        parts = compact_parts(title,summary, analyst_subject_symbol(row.get('title')) if news_only() else '')
     if interpretation and not compact_analyst and len(interpretation) <= 220:
         parts.append("משמעות אפשרית לסוחר (AI): " + interpretation)
     # General translation/source limitations live in the pinned topic notice.

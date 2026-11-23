@@ -1840,6 +1840,16 @@ def process_telegram_outbox(limit: int = 20) -> dict[str, int]:
             conn.commit(); conn.close()
         from news_report_routing import delivery_type, prior_report_delivery, report_for_outbox, results_only_enabled
         report_hint=report_for_outbox(row)
+        from operation_mode import news_only
+        if (news_only() and row['event_type'] in NEWS_TYPES
+                and delivery_type(row['event_type'],row['message'],company_report=report_hint) == 'company_report'):
+            # The reports topic has one structured SEC producer. Media copies
+            # cannot reliably establish the issuer's fiscal period or consensus.
+            with get_db_connection() as report_conn:
+                report_conn.execute("UPDATE scanner_telegram_outbox SET status='cancelled',last_error='company_report_requires_structured_filing' WHERE id=? AND status='sending'",
+                                    (row['id'],))
+                report_conn.commit()
+            continue
         if row['event_type'] in NEWS_TYPES and delivery_type(row['event_type'],row['message'],company_report=report_hint) == 'company_report':
             with get_db_connection() as report_conn:
                 duplicate = prior_report_delivery(report_conn,row)
