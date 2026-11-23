@@ -209,6 +209,10 @@ def message(event,result,topic,tickers,*,policy=None):
     from news_analyst_presentation import compact_parts, complementary_text
     title = hide_relay_branding(clean_draft(result['title_he']))
     summary = hide_relay_branding(clean_draft(result['summary_he']))
+    from operation_mode import news_only
+    if news_only():
+        from news_only_editorial import analyst_subject_symbol, qualified_copy, watchlist_parts
+        title, summary = qualified_copy(event.get('title'), title, summary)
     parts=[(REPORT_PREFIX if report else '📰 ')+title]
     from .engine import market_brief_event
     brief = topic == 'market_news' and policy is not None and market_brief_event(event,result,policy)
@@ -218,11 +222,15 @@ def message(event,result,topic,tickers,*,policy=None):
     if detail := complementary_text(title, summary):
         parts.append(detail)
     if compact_analyst:
-        parts = compact_parts(title, summary, ', '.join(tickers))
+        symbol = analyst_subject_symbol(event.get('title')) if news_only() else ', '.join(tickers)
+        parts = compact_parts(title, summary, symbol)
+    if topic == 'portfolio_watchlist' and news_only():
+        parts = watchlist_parts(', '.join(tickers), title, summary,
+                                headline_only=not event.get('source_excerpt'))
     interpretation = hide_relay_branding(clean_draft(result.get('interpretation_he') or ''))
     if topic == 'market_news' and os.getenv('STOCK_SCANNER_PUBLIC_TRANSLATION_ONLY_ENABLED','false').lower() == 'true':
         interpretation = ''
-    if 0 < len(interpretation) <= 220 and not compact_analyst and not brief:
+    if 0 < len(interpretation) <= 220 and not compact_analyst and not brief and not news_only():
         parts.append('משמעות אפשרית לסוחר (AI): '+interpretation)
     # Ingestion provenance stays in storage. Retain required licensed credits.
     credits=[clean_draft(s['publisher']) for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')]
@@ -231,13 +239,16 @@ def message(event,result,topic,tickers,*,policy=None):
     licenses={clean_draft(s.get('raw_metadata',{}).get('license_label',''))+' '+safe_source_url(s.get('raw_metadata',{}).get('license_url',''))
               for s in event['sources'] if s.get('raw_metadata',{}).get('license_url')}
     if licenses:footer.append('תרגום/תקציר AI · '+ '; '.join(sorted(licenses)))
-    footer.append('פורסם: '+_publication_time_he(event['published_at']))
+    if topic != 'portfolio_watchlist' or not news_only():
+        footer.append('פורסם: '+_publication_time_he(event['published_at']))
     from news_notice_importance import add_importance, news_importance
     from telegram_presentation import telegram_text, utf16_length
     priority = news_importance(event.get('title'), event.get('source_excerpt',''), report=report, analyst=compact_analyst)
     footer_text = '\n\n'.join(footer)
     budget = 3500 - utf16_length(telegram_text('\n\n' + footer_text, limit=100_000))
-    return append_source(add_importance('\n\n'.join(parts), priority, limit=budget),
+    body = ('\n'.join(parts) if topic == 'portfolio_watchlist' and news_only()
+            else add_importance('\n\n'.join(parts), priority, limit=budget))
+    return append_source(body,
                          event['sources'], required_footer=footer_text)
 
 
