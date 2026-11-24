@@ -52,7 +52,15 @@ def analyst_subject_symbol(original):
 
 def watchlist_parts(symbol, title, summary, *, headline_only):
     """Use one line for a headline and keep genuinely additional article detail."""
+    title = ' '.join(title.split())
     lines = [f'{symbol} · {title}' if symbol else title]
-    if not headline_only and (detail := complementary_text(title, summary)):
+    if headline_only:
+        return lines
+    # Keep the concise source-backed facts already produced by translation.
+    # Some outputs repeat the headline as a separate line without punctuation.
+    paragraphs = [' '.join(line.split()) for line in str(summary or '').splitlines() if line.strip()]
+    detail = complementary_text(title, ' '.join(
+        line for line in paragraphs if line.rstrip('.!?') != title.rstrip('.!?')))
+    if detail:
         lines.append(detail)
     return lines
